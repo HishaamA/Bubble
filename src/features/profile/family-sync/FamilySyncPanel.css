@@ -1,0 +1,682 @@
+.family-sync {
+  --family-sync-accent: #f5f5f7;
+  position: relative;
+  display: grid;
+  gap: 1rem;
+  width: 100%;
+  padding: 1rem 0;
+  overflow: hidden;
+  border: 0;
+  border-top: 1px solid rgba(255, 255, 255, 0.12);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 0;
+  color: rgba(255, 255, 255, 0.9);
+  background: #000;
+  box-shadow: none;
+  color-scheme: dark;
+}
+
+.family-sync *,
+.family-sync *::before,
+.family-sync *::after {
+  box-sizing: border-box;
+}
+
+.family-sync button,
+.family-sync input {
+  font: inherit;
+}
+
+.family-sync button {
+  -webkit-tap-highlight-color: transparent;
+}
+
+.family-sync__header,
+.family-sync__subheading,
+.family-sync__account-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.family-sync__header h2,
+.family-sync h3,
+.family-sync p {
+  margin: 0;
+}
+
+.family-sync__header h2 {
+  margin-top: 0.15rem;
+  color: #f5f5f7;
+  font-size: 1.25rem;
+  font-weight: 620;
+  letter-spacing: -0.035em;
+}
+
+.family-sync__eyebrow {
+  color: rgba(255, 255, 255, 0.45);
+  font-size: 0.63rem;
+  font-weight: 650;
+  letter-spacing: 0.075em;
+  text-transform: uppercase;
+}
+
+.family-sync__connected-badge {
+  display: inline-flex;
+  min-height: 1.75rem;
+  padding: 0.3rem 0.62rem;
+  align-items: center;
+  gap: 0.4rem;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 999px;
+  color: rgba(255, 255, 255, 0.68);
+  background: #0a0a0a;
+  font-size: 0.64rem;
+  font-weight: 620;
+  letter-spacing: 0.025em;
+}
+
+.family-sync__connected-badge > span {
+  width: 0.42rem;
+  height: 0.42rem;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.72);
+}
+
+.family-sync__notice {
+  padding: 0.72rem 0;
+  border: 0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 0;
+  color: rgba(255, 255, 255, 0.72);
+  background: transparent;
+  font-size: 0.75rem;
+  line-height: 1.45;
+}
+
+.family-sync__notice--error {
+  border-bottom-color: rgba(255, 255, 255, 0.45);
+  color: #f5f5f7;
+  font-weight: 600;
+}
+
+.family-sync__loading {
+  display: flex;
+  min-height: 8rem;
+  align-items: center;
+  justify-content: center;
+  gap: 0.65rem;
+  color: rgba(255, 255, 255, 0.52);
+  font-size: 0.75rem;
+}
+
+.family-sync__loading > span {
+  width: 0.85rem;
+  height: 0.85rem;
+  border: 1.5px solid rgba(255, 255, 255, 0.2);
+  border-top-color: rgba(255, 255, 255, 0.8);
+  border-radius: 50%;
+  animation: family-sync-spin 0.8s linear infinite;
+}
+
+.family-sync__state {
+  display: flex;
+  min-height: 8.5rem;
+  padding: 1rem 0;
+  align-items: flex-start;
+  gap: 0.9rem;
+  border: 0;
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 0;
+  background: transparent;
+}
+
+.family-sync__state-icon {
+  display: grid;
+  flex: 0 0 auto;
+  width: 2.6rem;
+  height: 2.6rem;
+  place-items: center;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 0.75rem;
+  color: rgba(255, 255, 255, 0.75);
+  background: #0a0a0a;
+  font-size: 1.25rem;
+}
+
+.family-sync__state h3,
+.family-sync__intro h3,
+.family-sync__option h3,
+.family-sync__pending-card h3,
+.family-sync__subheading h3 {
+  color: #f5f5f7;
+  font-size: 0.9rem;
+  font-weight: 610;
+  letter-spacing: -0.02em;
+}
+
+.family-sync__state h3 {
+  margin-top: 0.25rem;
+}
+
+.family-sync__state p:last-child,
+.family-sync__intro p,
+.family-sync__option p,
+.family-sync__pending-card p,
+.family-sync__subheading p,
+.family-sync__member-note,
+.family-sync__privacy-note {
+  color: rgba(255, 255, 255, 0.5);
+  font-size: 0.72rem;
+  line-height: 1.55;
+}
+
+.family-sync__state p:last-child {
+  margin-top: 0.42rem;
+}
+
+.family-sync__auth,
+.family-sync__unjoined,
+.family-sync__connected,
+.family-sync__owner-tools,
+.family-sync__requests {
+  display: grid;
+  gap: 0.9rem;
+}
+
+.family-sync__intro {
+  display: grid;
+  gap: 0.32rem;
+}
+
+.family-sync__segmented {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.2rem;
+  padding: 0.2rem;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 0.75rem;
+  background: #0a0a0a;
+}
+
+.family-sync__segmented button {
+  min-height: 2.65rem;
+  padding: 0.5rem 0.75rem;
+  border: 0;
+  border-radius: 0.55rem;
+  color: rgba(255, 255, 255, 0.48);
+  background: transparent;
+  font-size: 0.75rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.family-sync__segmented button[aria-pressed='true'] {
+  color: #000;
+  background: #f5f5f7;
+  box-shadow: none;
+}
+
+.family-sync__form,
+.family-sync__option {
+  display: grid;
+  gap: 0.78rem;
+}
+
+.family-sync label {
+  display: grid;
+  gap: 0.38rem;
+}
+
+.family-sync label > span,
+.family-sync__invite > span {
+  padding-left: 0.12rem;
+  color: rgba(255, 255, 255, 0.58);
+  font-size: 0.66rem;
+  font-weight: 600;
+}
+
+.family-sync input {
+  width: 100%;
+  min-height: 2.9rem;
+  padding: 0.68rem 0.82rem;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 0.72rem;
+  outline: 0;
+  color: rgba(255, 255, 255, 0.94);
+  background: #0a0a0a;
+  caret-color: #fff;
+  font-size: 0.8rem;
+  transition: border-color 160ms ease;
+}
+
+.family-sync input::placeholder {
+  color: rgba(255, 255, 255, 0.28);
+}
+
+.family-sync input:focus {
+  border-color: rgba(255, 255, 255, 0.62);
+  outline: 2px solid rgba(255, 255, 255, 0.28);
+  outline-offset: 1px;
+}
+
+.family-sync__code-input,
+.family-sync__invite output {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+}
+
+.family-sync__primary,
+.family-sync__secondary,
+.family-sync__approve,
+.family-sync__reject,
+.family-sync__text-button {
+  min-height: 2.75rem;
+  border-radius: 0.75rem;
+  font-size: 0.75rem;
+  font-weight: 620;
+  cursor: pointer;
+}
+
+.family-sync__primary {
+  padding: 0.65rem 1rem;
+  border: 1px solid #f5f5f7;
+  color: #000;
+  background: #f5f5f7;
+  box-shadow: none;
+}
+
+.family-sync__secondary {
+  padding: 0.58rem 0.85rem;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  color: rgba(255, 255, 255, 0.82);
+  background: #0a0a0a;
+}
+
+.family-sync__text-button {
+  justify-self: center;
+  padding: 0.6rem 0.75rem;
+  border: 0;
+  color: rgba(255, 255, 255, 0.5);
+  background: transparent;
+}
+
+.family-sync button:focus-visible {
+  outline: 2px solid #fff;
+  outline-offset: 3px;
+}
+
+.family-sync button:disabled,
+.family-sync input:disabled {
+  cursor: wait;
+  opacity: 0.46;
+}
+
+.family-sync__privacy-note {
+  text-align: center;
+}
+
+.family-sync__identity {
+  display: flex;
+  align-items: center;
+  gap: 0.72rem;
+}
+
+.family-sync__identity > span,
+.family-sync__mini-avatar {
+  display: grid;
+  flex: 0 0 auto;
+  width: 2.6rem;
+  height: 2.6rem;
+  place-items: center;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 50%;
+  color: #000;
+  background: #f5f5f7;
+  font-size: 0.8rem;
+  font-weight: 700;
+}
+
+.family-sync__identity > div,
+.family-sync__account-row > div {
+  display: grid;
+  gap: 0.16rem;
+  min-width: 0;
+}
+
+.family-sync__identity strong,
+.family-sync__account-row strong {
+  color: #f5f5f7;
+  font-size: 0.8rem;
+}
+
+.family-sync__identity small,
+.family-sync__account-row span {
+  overflow: hidden;
+  color: rgba(255, 255, 255, 0.44);
+  font-size: 0.67rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.family-sync__pending-card {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 0.5rem 0.75rem;
+  padding: 0.9rem 0;
+  border: 0;
+  border-top: 1px solid rgba(255, 255, 255, 0.12);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 0;
+  background: transparent;
+}
+
+.family-sync__pending-card p {
+  margin-top: 0.32rem;
+}
+
+.family-sync__pending-card .family-sync__secondary {
+  grid-column: 2;
+  justify-self: start;
+}
+
+.family-sync__pending-pulse {
+  width: 0.62rem;
+  height: 0.62rem;
+  margin-top: 0.22rem;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.7);
+}
+
+.family-sync__choice-grid {
+  display: grid;
+  gap: 0.7rem;
+}
+
+.family-sync__option {
+  position: relative;
+  padding: 1rem 0;
+  overflow: hidden;
+  border: 0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 0;
+  background: transparent;
+}
+
+.family-sync__option-number {
+  position: absolute;
+  top: 1rem;
+  right: 0;
+  color: rgba(255, 255, 255, 0.3);
+  font-size: 0.65rem;
+  font-weight: 650;
+  letter-spacing: 0.08em;
+}
+
+.family-sync__option p {
+  max-width: 90%;
+}
+
+.family-sync__or {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  align-items: center;
+  gap: 0.6rem;
+  color: rgba(255, 255, 255, 0.28);
+  font-size: 0.62rem;
+  text-transform: uppercase;
+}
+
+.family-sync__or::before,
+.family-sync__or::after {
+  height: 1px;
+  background: rgba(255, 255, 255, 0.1);
+  content: '';
+}
+
+.family-sync__circle-card {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  gap: 0.8rem;
+  padding: 0.95rem 0;
+  align-items: center;
+  border: 0;
+  border-top: 1px solid rgba(255, 255, 255, 0.12);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 0;
+  background: transparent;
+}
+
+.family-sync__circle-mark {
+  display: grid;
+  width: 2.5rem;
+  height: 2.5rem;
+  place-items: center;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 0.72rem;
+  color: rgba(255, 255, 255, 0.75);
+  background: #0a0a0a;
+  font-size: 1.3rem;
+}
+
+.family-sync__circle-copy {
+  min-width: 0;
+}
+
+.family-sync__circle-copy > span {
+  color: rgba(255, 255, 255, 0.43);
+  font-size: 0.62rem;
+  font-weight: 600;
+  text-transform: uppercase;
+}
+
+.family-sync__circle-copy h3 {
+  margin-top: 0.08rem;
+  overflow: hidden;
+  color: #f5f5f7;
+  font-size: 1rem;
+  font-weight: 620;
+  letter-spacing: -0.025em;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.family-sync__circle-copy p {
+  margin-top: 0.18rem;
+  color: rgba(255, 255, 255, 0.48);
+  font-size: 0.67rem;
+}
+
+.family-sync__mini-avatar {
+  width: 2.25rem;
+  height: 2.25rem;
+}
+
+.family-sync__owner-tools,
+.family-sync__requests,
+.family-sync__member-note {
+  padding: 0.95rem 0;
+  border: 0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 0;
+  background: transparent;
+}
+
+.family-sync__subheading {
+  align-items: flex-start;
+}
+
+.family-sync__subheading p {
+  margin-top: 0.25rem;
+}
+
+.family-sync__invite {
+  display: grid;
+  gap: 0.42rem;
+  padding: 0.82rem 0;
+  border: 0;
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 0;
+  background: transparent;
+}
+
+.family-sync__invite output {
+  display: block;
+  padding: 0.72rem;
+  overflow-wrap: anywhere;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 0.65rem;
+  color: rgba(255, 255, 255, 0.82);
+  background: #0a0a0a;
+  font-size: 0.72rem;
+  line-height: 1.5;
+  user-select: all;
+}
+
+.family-sync__invite small {
+  color: rgba(255, 255, 255, 0.42);
+  font-size: 0.62rem;
+  line-height: 1.45;
+}
+
+.family-sync__count {
+  display: grid;
+  min-width: 1.75rem;
+  height: 1.75rem;
+  padding: 0 0.4rem;
+  place-items: center;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 999px;
+  color: rgba(255, 255, 255, 0.72);
+  background: #0a0a0a;
+  font-size: 0.7rem;
+  font-weight: 650;
+}
+
+.family-sync__requests ul {
+  display: grid;
+  gap: 0;
+  padding: 0;
+  margin: 0;
+  list-style: none;
+}
+
+.family-sync__requests li {
+  display: grid;
+  gap: 0.68rem;
+  padding: 0.8rem 0;
+  border: 0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 0;
+  background: transparent;
+}
+
+.family-sync__requests li > div:first-child {
+  display: grid;
+  gap: 0.14rem;
+}
+
+.family-sync__requests li strong {
+  color: rgba(255, 255, 255, 0.9);
+  font-size: 0.76rem;
+}
+
+.family-sync__requests li span {
+  color: rgba(255, 255, 255, 0.42);
+  font-size: 0.62rem;
+}
+
+.family-sync__decision-buttons {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.5rem;
+}
+
+.family-sync__approve,
+.family-sync__reject {
+  padding: 0.58rem 0.75rem;
+}
+
+.family-sync__approve {
+  border: 1px solid #f5f5f7;
+  color: #000;
+  background: #f5f5f7;
+}
+
+.family-sync__reject {
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  color: rgba(255, 255, 255, 0.72);
+  background: #0a0a0a;
+}
+
+.family-sync__empty-requests {
+  display: flex;
+  min-height: 4.4rem;
+  align-items: center;
+  justify-content: center;
+  gap: 0.55rem;
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+  color: rgba(255, 255, 255, 0.43);
+}
+
+.family-sync__empty-requests > span {
+  color: rgba(255, 255, 255, 0.66);
+}
+
+.family-sync__empty-requests p {
+  font-size: 0.7rem;
+}
+
+.family-sync__account-row {
+  padding: 0.22rem 0.15rem 0;
+}
+
+.family-sync__account-row .family-sync__text-button {
+  flex: 0 0 auto;
+  justify-self: auto;
+}
+
+@keyframes family-sync-spin {
+  to { transform: rotate(360deg); }
+}
+
+@media (min-width: 36rem) {
+  .family-sync__choice-grid {
+    grid-template-columns: 1fr auto 1fr;
+    align-items: stretch;
+  }
+
+  .family-sync__or {
+    grid-template-columns: 1px;
+    grid-template-rows: 1fr auto 1fr;
+  }
+
+  .family-sync__or::before,
+  .family-sync__or::after {
+    width: 1px;
+    height: 100%;
+  }
+
+  .family-sync__requests li {
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+  }
+
+  .family-sync__decision-buttons {
+    grid-template-columns: auto auto;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .family-sync *,
+  .family-sync *::before,
+  .family-sync *::after {
+    scroll-behavior: auto !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
