@@ -1,0 +1,160 @@
+# KinSphere testing and release gates
+
+## Testing principle
+
+KinSphere handles private family data, time-gated content, resumable media, native sensors, and privileged background work. A UI-only happy path is insufficient. Tests must prove the permission boundary, recovery behavior, device behavior, and negative cases described below.
+
+## Baseline pull-request gate
+
+Every change must pass:
+
+```bash
+pnpm lint
+pnpm typecheck
+pnpm test
+pnpm build
+```
+
+Changes to database behavior must additionally rebuild a clean local Supabase instance and run the database/RLS suite. Native changes must build the affected platform. A failing required check blocks merge; do not waive it with manual database edits or an admin shortcut.
+
+## Automated test layers
+
+### Unit tests
+
+Cover deterministic client logic, including:
+
+- environment validation and error normalization
+- IANA time-zone and quiet-hour calculations
+- upload state transitions, retry classification, and reconciliation decisions
+- media dimension, pixel-count, byte-size, and ratio validation
+- deterministic daily 360 window states and exact 2:1 derivative crop sizing
+- cache bounds and protection of pending-upload files
+- hotspot coordinate bounds and scene mapping
+- reduced-motion and flat-viewer selection logic
+
+### Component and integration tests
+
+Cover behavior at module boundaries:
+
+- route guards, session restore, error boundary, and offline/error UI
+- viewer adapter mount/change/start/stop/resize/destroy lifecycle
+- no duplicated listeners or orientation subscriptions after remount
+- thumbnail-first feed behavior and authorized full-media loading
+- contribution, reaction, capsule, event, and Family Thread review flows
+- manual and scheduled 360 selection, preview, caption, local persistence, and
+  capture-to-Memories routing
+- accessible names, focus order, keyboard behavior, and external hotspot list
+
+### Database, RLS, and Storage tests
+
+Use distinct users and circles. Test both allowed and denied `select`, `insert`, `update`, and `delete` operations. At minimum prove:
+
+- unrelated circles cannot access one another's rows or Storage objects
+- pending, rejected, expired, revoked, and removed membership states grant no content access
+- removal revokes access immediately
+- reveal rules cannot be bypassed through a direct API request
+- server time controls invite expiry, round close, event reminders, and capsule opening
+- capsule recipients gain access only after opening and non-recipients never do
+- ownership transfer and last-owner constraints preserve a valid circle
+- uniqueness rules prevent duplicate membership, contribution, reaction, recipient, and idempotency records
+- scheduled 360 finalization uses server time, canonical uploader paths, and a
+  one-contribution-per-member/window constraint; manual uploads remain separate
+- a two-session invite rescan versus owner-approval race completes without a
+  deadlock and produces one valid final membership/request state
+
+### Edge Function and job tests
+
+Verify:
+
+- invite codes are hashed, expire, and can be revoked
+- scheduled dispatchers are safe to run more than once
+- upload reservation/finalization reconciles retries without duplicate media or contributions
+- deletion removes authorization first and cleanup jobs can retry safely
+- in-app notification records are written before generic push attempts
+- push payloads contain no captions, family text, media URLs, audio, or invite secrets
+- notification taps re-check the current user's authorization
+- Family Thread re-reads sources server-side, sends approved text only, returns source IDs, avoids private normal-log content, and supports manual fallback
+
+## Media privacy gate
+
+For representative images at minimum, verify that:
+
+1. The selected original path never appears in an upload request.
+2. Output dimensions are within limits and retain approximate 2:1 geometry.
+3. Viewer and thumbnail outputs are fresh encodes.
+4. EXIF and GPS metadata are absent from both outputs.
+5. Interrupted TUS uploads resume from the correct offset.
+6. A non-member cannot fetch the object even with a known path.
+7. Revocation clears or makes inaccessible any affected local cached copy.
+
+## Upload recovery scenarios
+
+Exercise every queue state and transition. Required interruption points include before upload, during upload, after object transfer but before finalization, and after finalization but before the local ready state is saved. Repeat after:
+
+- process restart
+- sign-out and sign-in
+- foreground/background transition
+- network loss and return
+- manual retry
+
+Each scenario must converge without a duplicate Storage object, media row, contribution, notification, or job side effect.
+
+## Panorama and native device matrix
+
+Run the current supported Android and iOS targets on physical devices. Verify:
+
+- touch drag and zoom
+- orientation permission accepted and denied
+- start/stop behavior when entering, leaving, backgrounding, and reopening the viewer
+- flat 2D fallback
+- bundled Pannellum operation with network access disabled
+- voice recording and playback in both device directions
+- stable chair hotspot pitch/yaw
+- doorway target scene and target yaw
+- Cardboard split view, synchronized eyes, fullscreen fallback, landscape rotation,
+  thermal stability, and clean exit on both supported phones
+- 360 photo-library/camera handoff, ordinary-photo rejection, derivative
+  encoding, and the new memory opening in both normal and Cardboard viewers
+- Low-Data Mode behavior and bounded preloading
+
+## Accessibility and resilience gate
+
+Test the complete core flow with:
+
+- VoiceOver and TalkBack
+- large text / dynamic type
+- reduced motion
+- motion permission denied
+- keyboard or switch-style focus navigation where supported
+- weak, intermittent, and absent connectivity
+- expired session, permission denial, and membership revocation while content is open
+
+Every panorama action must have an accessible non-motion route. Loading, empty, offline, retryable failure, permanent failure, permission-denied, and access-revoked states must be announced and visually distinct.
+
+## Phase evidence
+
+When closing a roadmap phase, record:
+
+- commit or build identifier
+- automated commands and results
+- Supabase migration/reset result when applicable
+- device models, OS versions, and app build
+- accounts/circles used as anonymized test roles
+- failed-path scenarios exercised
+- screenshots or logs that contain no private family content
+- remaining known issues and their scope decision
+
+## Final two-phone acceptance run
+
+Repeat the full flow enough times to reveal lifecycle and retry defects:
+
+1. Register, sign in, reset a password, create a circle, and approve a second user.
+2. Confirm invalid membership states and an unrelated account remain denied.
+3. Complete a Day Relay across two time zones and quiet-hour settings.
+4. Upload a sanitized panorama from Phone A and open it privately on Phone B.
+5. Use touch, optional motion, zoom, flat fallback, the chair voice message, and doorway scene.
+6. Interrupt an upload, restart, resume, and confirm there are no duplicates.
+7. Open a server-time Capsule and contribute to an Event Room.
+8. Create a text-only, source-linked Family Thread draft and explicitly approve or discard it.
+9. Verify generic push behavior, authorization re-check, membership removal, deletion, and cache cleanup.
+10. Complete the accessibility and weak-connectivity passes without a crash or manual backend repair.

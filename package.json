@@ -1,0 +1,52 @@
+{
+  "name": "kinsphere",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "packageManager": "pnpm@11.19.0",
+  "engines": {
+    "node": ">=22.12"
+  },
+  "scripts": {
+    "dev": "vite",
+    "build": "pnpm typecheck && vite build",
+    "typecheck": "tsc -b",
+    "lint": "oxlint --ignore-pattern 'public/vendor/**'",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "cap:sync": "pnpm build && cap sync",
+    "cap:android": "pnpm cap:sync && cap open android",
+    "cap:ios": "pnpm cap:sync && cap open ios",
+    "supabase:start": "supabase start",
+    "supabase:stop": "supabase stop",
+    "supabase:reset": "supabase db reset",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@capacitor/android": "8.5.0",
+    "@capacitor/core": "8.5.0",
+    "@capacitor/ios": "8.5.0",
+    "@supabase/supabase-js": "2.112.4",
+    "pannellum": "2.5.7",
+    "react": "19.2.8",
+    "react-dom": "19.2.8",
+    "react-router-dom": "7.18.2"
+  },
+  "devDependencies": {
+    "@capacitor/cli": "8.5.0",
+    "@testing-library/jest-dom": "7.0.1",
+    "@testing-library/react": "16.3.2",
+    "@testing-library/user-event": "14.6.6",
+    "@types/node": "24.13.3",
+    "@types/pannellum": "2.5.1",
+    "@types/react": "19.2.18",
+    "@types/react-dom": "19.2.5",
+    "@vitejs/plugin-react": "6.1.0",
+    "jsdom": "30.0.1",
+    "oxlint": "1.80.0",
+    "supabase": "2.115.0",
+    "typescript": "6.0.3",
+    "vite": "8.2.2",
+    "vitest": "4.1.11"
+  }
+}

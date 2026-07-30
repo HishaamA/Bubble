@@ -1,0 +1,59 @@
+# Dependencies and package-manager caches
+node_modules/
+.npm-cache/
+.pnpm-store/
+
+# Build, test, and tooling output
+dist/
+dist-ssr/
+coverage/
+.vite/
+*.tsbuildinfo
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Local environment and credentials
+.env
+.env.*
+!.env.example
+*.pem
+*.p8
+*.p12
+*.keystore
+*.jks
+
+# Supabase local state and private configuration
+supabase/.branches/
+supabase/.temp/
+supabase/.env
+
+# Capacitor / Android local output
+android/.gradle/
+android/build/
+android/app/build/
+android/local.properties
+android/captures/
+
+# Capacitor / iOS local output
+ios/App/Pods/
+ios/App/DerivedData/
+ios/App/App.xcworkspace/xcuserdata/
+ios/App/App.xcodeproj/xcuserdata/
+*.xcuserstate
+
+# IDE and operating-system files
+.DS_Store
+.idea/
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json
+
+# Private/generated family media and local scratch data
+private-media/
+downloads/
+recordings/
+*.sqlite
+*.sqlite3
