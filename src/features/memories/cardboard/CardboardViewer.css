@@ -1,0 +1,266 @@
+.ks-cardboard {
+  --cardboard-accent: #fff;
+  --cardboard-glass: rgb(0 0 0 / 72%);
+  --cardboard-border: rgb(255 255 255 / 15%);
+  position: fixed;
+  z-index: 1000;
+  inset: 0;
+  visibility: hidden;
+  overflow: hidden;
+  color: #f8f7f3;
+  background: #000;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.ks-cardboard--active {
+  visibility: visible;
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.ks-cardboard__eyes {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  inline-size: 100%;
+  block-size: 100%;
+}
+
+.ks-cardboard__eye {
+  position: relative;
+  min-inline-size: 0;
+  overflow: hidden;
+  background: #030303;
+}
+
+.ks-cardboard__eye--left {
+  border-inline-end: 1px solid rgb(255 255 255 / 13%);
+}
+
+.ks-cardboard__eye--right {
+  border-inline-start: 1px solid rgb(0 0 0 / 72%);
+}
+
+.ks-cardboard__eye .ks-panorama {
+  inline-size: 100%;
+  block-size: 100%;
+  min-block-size: 0;
+  border-radius: 0;
+}
+
+.ks-cardboard__eye .ks-panorama__instructions,
+.ks-cardboard__eye .pnlm-panorama-info {
+  display: none !important;
+}
+
+.ks-cardboard__reticle {
+  position: absolute;
+  z-index: 8;
+  inset-block-start: 50%;
+  inset-inline-start: 50%;
+  inline-size: 0.55rem;
+  block-size: 0.55rem;
+  border: 1px solid rgb(255 255 255 / 72%);
+  border-radius: 50%;
+  box-shadow:
+    0 0 0 0.22rem rgb(0 0 0 / 16%),
+    0 0 0.75rem rgb(0 0 0 / 48%);
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+}
+
+.ks-cardboard__brand,
+.ks-cardboard__exit,
+.ks-cardboard__status-panel {
+  position: absolute;
+  z-index: 20;
+  border: 1px solid var(--cardboard-border);
+  background: var(--cardboard-glass);
+  backdrop-filter: blur(22px);
+}
+
+.ks-cardboard__brand {
+  inset-block-start: max(0.75rem, env(safe-area-inset-top));
+  inset-inline-start: max(0.75rem, env(safe-area-inset-left));
+  display: flex;
+  min-block-size: 2.35rem;
+  padding: 0.4rem 0.72rem;
+  gap: 0.48rem;
+  align-items: center;
+  color: var(--cardboard-accent);
+  border-radius: 999px;
+  font-size: 0.67rem;
+  font-weight: 680;
+  letter-spacing: 0.075em;
+  text-transform: uppercase;
+}
+
+.ks-cardboard__brand svg {
+  inline-size: 1.45rem;
+  fill: none;
+  stroke: currentcolor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 1.35;
+}
+
+.ks-cardboard__exit {
+  inset-block-start: max(0.75rem, env(safe-area-inset-top));
+  inset-inline-end: max(0.75rem, env(safe-area-inset-right));
+  display: flex;
+  min-block-size: 44px;
+  padding: 0 0.78rem;
+  gap: 0.35rem;
+  align-items: center;
+  justify-content: center;
+  color: #fff;
+  border-radius: 999px;
+  font: 650 0.72rem/1 system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+  cursor: pointer;
+}
+
+.ks-cardboard__exit:hover,
+.ks-cardboard__exit:focus-visible {
+  color: #000;
+  background: var(--cardboard-accent);
+  border-color: var(--cardboard-accent);
+  outline: none;
+}
+
+.ks-cardboard__exit:active {
+  transform: scale(0.96);
+}
+
+.ks-cardboard__exit svg {
+  inline-size: 1.1rem;
+  fill: none;
+  stroke: currentcolor;
+  stroke-linecap: round;
+  stroke-width: 1.7;
+}
+
+.ks-cardboard__status-panel {
+  inset-inline-start: max(0.75rem, env(safe-area-inset-left));
+  inset-block-end: max(0.75rem, env(safe-area-inset-bottom));
+  display: flex;
+  max-inline-size: min(21rem, calc(50% - 1.5rem));
+  min-block-size: 2.45rem;
+  padding: 0.48rem 0.7rem;
+  gap: 0.55rem;
+  align-items: center;
+  border-radius: 0.95rem;
+}
+
+.ks-cardboard__status-panel p {
+  margin: 0;
+  color: rgb(255 255 255 / 76%);
+  font: 540 0.68rem/1.35 system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+}
+
+.ks-cardboard__status-panel button {
+  min-block-size: 44px;
+  padding: 0.4rem 0.66rem;
+  flex: 0 0 auto;
+  color: #000;
+  border: 0;
+  border-radius: 999px;
+  background: var(--cardboard-accent);
+  font: 700 0.65rem/1 system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+  cursor: pointer;
+}
+
+.ks-cardboard__status-panel small {
+  position: absolute;
+  inset-block-end: calc(100% + 0.4rem);
+  inset-inline-start: 0;
+  inline-size: max-content;
+  max-inline-size: 18rem;
+  padding: 0.35rem 0.55rem;
+  color: rgb(255 255 255 / 68%);
+  background: rgb(0 0 0 / 58%);
+  border-radius: 999px;
+  font: 520 0.6rem/1.25 system-ui, sans-serif;
+}
+
+.ks-cardboard__rotate-hint {
+  position: absolute;
+  z-index: 40;
+  inset: 0;
+  display: grid;
+  padding: 2rem;
+  place-content: center;
+  place-items: center;
+  gap: 0.55rem;
+  color: #fff;
+  text-align: center;
+  background: rgb(0 0 0 / 82%);
+  backdrop-filter: blur(20px);
+}
+
+.ks-cardboard__rotate-hint strong {
+  margin-block-start: 0.3rem;
+  font: 680 clamp(1.25rem, 5vw, 1.8rem)/1.1 system-ui, sans-serif;
+  letter-spacing: -0.035em;
+}
+
+.ks-cardboard__rotate-hint > span:last-child {
+  color: rgb(255 255 255 / 64%);
+  font: 520 0.8rem/1.4 system-ui, sans-serif;
+}
+
+.ks-cardboard__phone {
+  inline-size: 2.15rem;
+  block-size: 3.7rem;
+  border: 2px solid var(--cardboard-accent);
+  border-radius: 0.5rem;
+  box-shadow: 0 0 1.4rem rgb(255 255 255 / 18%);
+  animation: ks-cardboard-rotate-phone 1.8s ease-in-out infinite;
+}
+
+.ks-cardboard__accessible-instructions {
+  position: absolute;
+  inline-size: 1px;
+  block-size: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+@keyframes ks-cardboard-rotate-phone {
+  0%,
+  20% {
+    transform: rotate(0deg);
+  }
+  65%,
+  100% {
+    transform: rotate(90deg);
+  }
+}
+
+@media (orientation: landscape) {
+  .ks-cardboard__rotate-hint {
+    display: none;
+  }
+}
+
+@media (max-height: 28rem) and (orientation: landscape) {
+  .ks-cardboard__brand,
+  .ks-cardboard__status-panel {
+    transform: scale(0.88);
+    transform-origin: left center;
+  }
+
+  .ks-cardboard__exit {
+    transform-origin: right center;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ks-cardboard__phone {
+    animation: none;
+    transform: rotate(90deg);
+  }
+}

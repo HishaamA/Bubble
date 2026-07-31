@@ -1,0 +1,415 @@
+.ks-panorama {
+  --ks-glass: rgb(0 0 0 / 72%);
+  --ks-glass-border: rgb(255 255 255 / 16%);
+  --ks-accent: #fff;
+  position: relative;
+  min-block-size: 32rem;
+  inline-size: 100%;
+  overflow: hidden;
+  isolation: isolate;
+  color: #fff;
+  background: #030303;
+  border-radius: inherit;
+}
+
+.ks-panorama__canvas,
+.ks-panorama__fallback {
+  position: absolute;
+  inset: 0;
+}
+
+.ks-panorama__canvas {
+  touch-action: none;
+}
+
+.ks-panorama__canvas:focus-visible {
+  outline: 2px solid var(--ks-accent);
+  outline-offset: -3px;
+}
+
+.ks-panorama--flat .ks-panorama__canvas {
+  visibility: hidden;
+  pointer-events: none;
+}
+
+.ks-panorama__fallback {
+  z-index: 1;
+  display: grid;
+  margin: 0;
+  background: #080808;
+}
+
+.ks-panorama__fallback::after {
+  position: absolute;
+  inset-inline: 0;
+  inset-block-end: 0;
+  block-size: 6rem;
+  content: '';
+  pointer-events: none;
+  background: rgb(0 0 0 / 64%);
+}
+
+.ks-panorama__fallback img {
+  inline-size: 100%;
+  block-size: 100%;
+  object-fit: cover;
+}
+
+.ks-panorama__fallback figcaption {
+  position: absolute;
+  z-index: 2;
+  inset-inline: 1.25rem;
+  inset-block-end: 1.3rem;
+  display: grid;
+  max-inline-size: min(34rem, calc(100% - 7rem));
+  gap: 0.25rem;
+  text-shadow: 0 1px 12px rgb(0 0 0 / 80%);
+}
+
+.ks-panorama__fallback figcaption strong {
+  font-size: clamp(1.1rem, 3vw, 1.45rem);
+  letter-spacing: -0.025em;
+}
+
+.ks-panorama__fallback figcaption span {
+  color: rgb(255 255 255 / 76%);
+  font-size: 0.88rem;
+  line-height: 1.4;
+}
+
+.ks-panorama__scene-picker {
+  position: absolute;
+  z-index: 3;
+  inset-block-start: max(1rem, env(safe-area-inset-top));
+  inset-inline-start: 1rem;
+  display: grid;
+  gap: 0.25rem;
+  color: rgb(255 255 255 / 68%);
+  font-size: 0.68rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.ks-panorama__scene-picker select {
+  max-inline-size: 13rem;
+  padding: 0.55rem 2rem 0.55rem 0.75rem;
+  color: #fff;
+  font: inherit;
+  letter-spacing: normal;
+  text-transform: none;
+  background: var(--ks-glass);
+  border: 1px solid var(--ks-glass-border);
+  border-radius: 999px;
+  backdrop-filter: blur(18px);
+}
+
+.ks-panorama__hotspot-actions {
+  position: absolute;
+  z-index: 3;
+  inset-block-start: max(5rem, calc(env(safe-area-inset-top) + 4rem));
+  inset-inline-start: 1rem;
+  inline-size: min(19rem, calc(100% - 6rem));
+  max-block-size: min(50%, 22rem);
+  padding: 0.7rem;
+  overflow: auto;
+  background: var(--ks-glass);
+  border: 1px solid var(--ks-glass-border);
+  border-radius: 0.85rem;
+  backdrop-filter: blur(22px);
+}
+
+.ks-panorama__hotspot-actions h2 {
+  margin: 0 0 0.45rem;
+  color: rgb(255 255 255 / 62%);
+  font-size: 0.68rem;
+  font-weight: 650;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+}
+
+.ks-panorama__hotspot-actions ul {
+  display: grid;
+  gap: 0.35rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.ks-panorama__hotspot-actions button {
+  display: grid;
+  inline-size: 100%;
+  min-block-size: 44px;
+  padding: 0.52rem 0.65rem;
+  color: #fff;
+  font: inherit;
+  text-align: start;
+  background: rgb(255 255 255 / 8%);
+  border: 1px solid rgb(255 255 255 / 9%);
+  border-radius: 0.8rem;
+  cursor: pointer;
+}
+
+.ks-panorama__hotspot-actions button:hover:not(:disabled),
+.ks-panorama__hotspot-actions button:focus-visible {
+  background: rgb(255 255 255 / 14%);
+  border-color: rgb(255 255 255 / 36%);
+  outline: none;
+}
+
+.ks-panorama__hotspot-actions button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.ks-panorama__hotspot-actions button span {
+  font-size: 0.8rem;
+  font-weight: 600;
+  line-height: 1.3;
+}
+
+.ks-panorama__hotspot-actions button small {
+  color: rgb(255 255 255 / 56%);
+  font-size: 0.66rem;
+  line-height: 1.3;
+}
+
+.ks-panorama__controls {
+  position: absolute;
+  z-index: 5;
+  inset-block-start: 50%;
+  inset-inline-end: max(0.8rem, env(safe-area-inset-right));
+  display: flex;
+  flex-direction: column;
+  gap: 0.38rem;
+  padding: 0.38rem;
+  background: var(--ks-glass);
+  border: 1px solid var(--ks-glass-border);
+  border-radius: 999px;
+  transform: translateY(-50%);
+  backdrop-filter: blur(22px);
+}
+
+.ks-panorama__controls button {
+  display: grid;
+  inline-size: 44px;
+  block-size: 44px;
+  min-inline-size: 44px;
+  min-block-size: 44px;
+  padding: 0;
+  place-items: center;
+  color: #fff;
+  background: transparent;
+  border: 0;
+  border-radius: 50%;
+  cursor: pointer;
+  transition:
+    color 160ms ease,
+    background-color 160ms ease,
+    transform 160ms ease;
+}
+
+.ks-panorama__controls button:hover:not(:disabled),
+.ks-panorama__controls button:focus-visible,
+.ks-panorama__controls button.is-active {
+  color: #000;
+  background: var(--ks-accent);
+}
+
+.ks-panorama__controls button:active:not(:disabled) {
+  transform: scale(0.94);
+}
+
+.ks-panorama__controls button:disabled {
+  opacity: 0.34;
+  cursor: default;
+}
+
+.ks-panorama__controls svg {
+  inline-size: 1.2rem;
+  fill: none;
+  stroke: currentcolor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 1.55;
+}
+
+.ks-panorama__status,
+.ks-panorama__notice,
+.ks-panorama__instructions,
+.ks-panorama__motion-notice,
+.ks-panorama__empty {
+  position: absolute;
+  z-index: 4;
+  inset-inline-start: 50%;
+  color: rgb(255 255 255 / 82%);
+  background: var(--ks-glass);
+  border: 1px solid var(--ks-glass-border);
+  backdrop-filter: blur(18px);
+}
+
+.ks-panorama__status {
+  inset-block-start: 50%;
+  display: flex;
+  gap: 0.65rem;
+  align-items: center;
+  padding: 0.65rem 0.9rem;
+  font-size: 0.83rem;
+  border-radius: 999px;
+  transform: translate(-50%, -50%);
+}
+
+.ks-panorama__spinner {
+  inline-size: 0.9rem;
+  block-size: 0.9rem;
+  border: 1.5px solid rgb(255 255 255 / 28%);
+  border-block-start-color: #fff;
+  border-radius: 50%;
+  animation: ks-panorama-spin 700ms linear infinite;
+}
+
+.ks-panorama__notice,
+.ks-panorama__instructions {
+  inset-block-end: max(1rem, env(safe-area-inset-bottom));
+  max-inline-size: calc(100% - 8rem);
+  margin: 0;
+  padding: 0.55rem 0.8rem;
+  font-size: 0.73rem;
+  line-height: 1.35;
+  text-align: center;
+  border-radius: 999px;
+  transform: translateX(-50%);
+}
+
+.ks-panorama__instructions {
+  opacity: 0;
+  animation: ks-panorama-hint 4s ease both;
+  pointer-events: none;
+}
+
+.ks-panorama__notice {
+  z-index: 4;
+  inset-block-end: auto;
+  inset-block-start: max(1rem, env(safe-area-inset-top));
+}
+
+.ks-panorama__motion-notice {
+  inset-block-start: max(4.5rem, calc(env(safe-area-inset-top) + 3.5rem));
+  max-inline-size: calc(100% - 7rem);
+  margin: 0;
+  padding: 0.55rem 0.75rem;
+  color: rgb(255 255 255 / 88%);
+  font-size: 0.73rem;
+  line-height: 1.35;
+  text-align: center;
+  border-radius: 0.8rem;
+  transform: translateX(-50%);
+}
+
+.ks-panorama__empty {
+  inset-block-start: 50%;
+  margin: 0;
+  padding: 0.75rem 1rem;
+  border-radius: 999px;
+  transform: translate(-50%, -50%);
+}
+
+.ks-panorama-hotspot {
+  display: grid;
+  inline-size: 3rem;
+  block-size: 3rem;
+  place-items: center;
+  background: rgb(16 16 16 / 68%);
+  border: 1px solid rgb(255 255 255 / 72%);
+  border-radius: 50%;
+  box-shadow: 0 0 0 0.35rem rgb(255 255 255 / 10%);
+  transform: translate(-50%, -50%);
+  backdrop-filter: blur(14px);
+}
+
+.ks-panorama-hotspot::after {
+  inline-size: 0.65rem;
+  block-size: 0.65rem;
+  content: '';
+  background: #fff;
+  border-radius: 50%;
+}
+
+.ks-panorama-hotspot--audio::after {
+  inline-size: 0.18rem;
+  block-size: 0.9rem;
+  background: #fff;
+  border-radius: 999px;
+  box-shadow:
+    -0.36rem 0 0 -0.02rem #fff,
+    0.36rem 0 0 -0.02rem #fff;
+}
+
+.ks-panorama-hotspot__label {
+  position: absolute;
+  inset-block-start: calc(100% + 0.55rem);
+  inset-inline-start: 50%;
+  inline-size: max-content;
+  max-inline-size: 10rem;
+  padding: 0.35rem 0.55rem;
+  color: #fff;
+  font: 600 0.7rem/1.25 system-ui, sans-serif;
+  text-align: center;
+  background: rgb(0 0 0 / 68%);
+  border: 1px solid rgb(255 255 255 / 15%);
+  border-radius: 999px;
+  opacity: 0;
+  transform: translateX(-50%) translateY(-0.2rem);
+  transition:
+    opacity 160ms ease,
+    transform 160ms ease;
+  pointer-events: none;
+}
+
+.ks-panorama-hotspot:hover .ks-panorama-hotspot__label,
+.ks-panorama-hotspot:focus-visible .ks-panorama-hotspot__label {
+  opacity: 1;
+  transform: translateX(-50%) translateY(0);
+}
+
+@keyframes ks-panorama-spin {
+  to {
+    transform: rotate(1turn);
+  }
+}
+
+@keyframes ks-panorama-hint {
+  0%,
+  70% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ks-panorama__spinner,
+  .ks-panorama__instructions {
+    animation: none;
+  }
+
+  .ks-panorama__instructions {
+    opacity: 1;
+  }
+
+  .ks-panorama__controls button,
+  .ks-panorama-hotspot__label {
+    transition: none;
+  }
+}
+
+@media (max-width: 30rem) {
+  .ks-panorama {
+    min-block-size: 28rem;
+  }
+
+  .ks-panorama__hotspot-actions {
+    inline-size: min(17rem, calc(100% - 5.5rem));
+  }
+}
