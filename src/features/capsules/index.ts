@@ -1,0 +1,1 @@
+export { CapsulesPage } from './CapsulesPage'
