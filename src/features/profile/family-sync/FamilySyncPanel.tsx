@@ -6,6 +6,7 @@ import {
   useState,
   type FormEvent,
 } from 'react'
+import { Link } from 'react-router-dom'
 import {
   announceFamilySyncChange,
   familySyncAdapter,
@@ -16,10 +17,16 @@ import type {
   FamilySyncAdapter,
   FamilySyncSnapshot,
 } from './types'
+import {
+  shareFamilyInvite,
+  type ShareFamilyInvite,
+} from './shareFamilyInvite'
 import './FamilySyncPanel.css'
 
 type FamilySyncPanelProps = {
   adapter?: FamilySyncAdapter
+  onSnapshotChange?: (snapshot: FamilySyncSnapshot) => void
+  shareInvite?: ShareFamilyInvite
 }
 
 type ChangeResult<T> =
@@ -40,14 +47,16 @@ function formatDate(value: string) {
 function LocalOnlyState() {
   return (
     <div className="family-sync__state family-sync__state--local">
-      <span className="family-sync__state-icon" aria-hidden="true">∞</span>
       <div>
-        <p className="family-sync__eyebrow">Local-only mode</p>
-        <h3>Your moments stay on this device</h3>
-        <p>
-          Family Sync is not connected to a backend yet. Add the Supabase URL
-          and publishable key to enable accounts, invitations, and family delivery.
-        </p>
+        <h3>Family groups need a connection</h3>
+        <p>Connect KinSphere to securely create a group and share invite codes.</p>
+        <Link
+          className="family-sync__auth-link"
+          to="/login"
+          state={{ returnTo: '/profile' }}
+        >
+          Open secure sign-in
+        </Link>
       </div>
     </div>
   )
@@ -55,6 +64,8 @@ function LocalOnlyState() {
 
 export function FamilySyncPanel({
   adapter = familySyncAdapter,
+  onSnapshotChange,
+  shareInvite = shareFamilyInvite,
 }: FamilySyncPanelProps) {
   const headingId = useId()
   const messageId = useId()
@@ -62,12 +73,9 @@ export function FamilySyncPanel({
   const [snapshot, setSnapshot] = useState<FamilySyncSnapshot | null>(null)
   const [loading, setLoading] = useState(true)
   const [busy, setBusy] = useState(false)
+  const [sharing, setSharing] = useState(false)
   const [error, setError] = useState('')
   const [message, setMessage] = useState('')
-  const [authMode, setAuthMode] = useState<'sign-in' | 'sign-up'>('sign-in')
-  const [displayName, setDisplayName] = useState('')
-  const [email, setEmail] = useState('')
-  const [password, setPassword] = useState('')
   const [circleName, setCircleName] = useState('')
   const [inviteCode, setInviteCode] = useState('')
   const [generatedInvite, setGeneratedInvite] =
@@ -81,6 +89,7 @@ export function FamilySyncPanel({
         const nextSnapshot = await adapter.loadSnapshot()
         if (version !== loadVersion.current) return
         setSnapshot(nextSnapshot)
+        onSnapshotChange?.(nextSnapshot)
         setGeneratedInvite((current) =>
           nextSnapshot.kind === 'connected' &&
           current?.circleId === nextSnapshot.circle.id
@@ -95,7 +104,7 @@ export function FamilySyncPanel({
         if (version === loadVersion.current) setLoading(false)
       }
     },
-    [adapter],
+    [adapter, onSnapshotChange],
   )
 
   useEffect(() => {
@@ -135,57 +144,52 @@ export function FamilySyncPanel({
     }
   }
 
-  async function handleAuthSubmit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault()
-    const normalizedEmail = email.trim()
-    if (authMode === 'sign-up' && !displayName.trim()) {
-      setError('Add the name your family will recognize.')
-      return
-    }
-
-    const result =
-      authMode === 'sign-in'
-        ? await runChange(
-            () => adapter.signIn(normalizedEmail, password),
-            'You are signed in.',
-          )
-        : await runChange(
-            () => adapter.signUp(normalizedEmail, password, displayName),
-            ({ requiresEmailConfirmation }) =>
-              requiresEmailConfirmation
-                ? 'Check your email to confirm your account, then sign in.'
-                : 'Your account is ready.',
-          )
-
-    if (result.ok) setPassword('')
-  }
-
   async function handleCreateCircle(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     const name = circleName.trim()
     if (!name) {
-      setError('Give your family circle a name.')
+      setError('Give your family group a name.')
       return
     }
     const result = await runChange(
       () => adapter.createCircle(name),
-      `${name} is ready for family members.`,
+      `${name} is ready. Create a private code to invite someone.`,
     )
     if (result.ok) setCircleName('')
   }
 
   async function handleJoinCircle(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
-    const code = inviteCode.trim()
+    const code = inviteCode.trim().toLowerCase()
     if (!/^ks1_[0-9a-f]{64}$/.test(code)) {
-      setError('Enter the complete KinSphere invite code.')
+      setError('Enter the complete private family code.')
       return
     }
     const result = await runChange(
       () => adapter.requestCircleJoin(code),
-      'Your request was sent to the family circle owner.',
+      'Your request was sent to the family group owner.',
     )
     if (result.ok) setInviteCode('')
+  }
+
+  async function handleShareInvite(circleName: string) {
+    if (!generatedInvite) return
+
+    setSharing(true)
+    setError('')
+    setMessage('')
+    try {
+      const result = await shareInvite(generatedInvite, circleName)
+      if (result === 'shared') {
+        setMessage('The private family code is ready in your share sheet.')
+      } else if (result === 'copied') {
+        setMessage('The private family code was copied. Send it to someone you trust.')
+      }
+    } catch {
+      setError('Sharing is unavailable here. Select the code and copy it manually.')
+    } finally {
+      setSharing(false)
+    }
   }
 
   async function handleCreateInvite(circleId: string) {
@@ -226,15 +230,7 @@ export function FamilySyncPanel({
       aria-busy={busy || loading}
     >
       <header className="family-sync__header">
-        <div>
-          <p className="family-sync__eyebrow">Private family space</p>
-          <h2 id={headingId}>Family Sync</h2>
-        </div>
-        {snapshot?.kind === 'connected' ? (
-          <span className="family-sync__connected-badge">
-            <span aria-hidden="true" /> Connected
-          </span>
-        ) : null}
+        <h2 className="screen-reader-only" id={headingId}>Family Sync</h2>
       </header>
 
       {error || message ? (
@@ -258,88 +254,18 @@ export function FamilySyncPanel({
       {snapshot?.kind === 'signed-out' ? (
         <div className="family-sync__auth">
           <div className="family-sync__intro">
-            <h3>Connect your family</h3>
-            <p>
-              Sign in to receive private 360° moments from your approved family
-              circle.
-            </p>
+            <h3>Keep your family close</h3>
+            <p>Sign in with Google, Apple, or your phone to create or join a family.</p>
           </div>
-
-          <div className="family-sync__segmented" aria-label="Account action">
-            <button
-              type="button"
-              aria-pressed={authMode === 'sign-in'}
-              onClick={() => {
-                setAuthMode('sign-in')
-                setError('')
-              }}
-            >
-              Sign in
-            </button>
-            <button
-              type="button"
-              aria-pressed={authMode === 'sign-up'}
-              onClick={() => {
-                setAuthMode('sign-up')
-                setError('')
-              }}
-            >
-              Create account
-            </button>
-          </div>
-
-          <form className="family-sync__form" onSubmit={handleAuthSubmit}>
-            {authMode === 'sign-up' ? (
-              <label>
-                <span>Your name</span>
-                <input
-                  value={displayName}
-                  onChange={(event) => setDisplayName(event.target.value)}
-                  autoComplete="name"
-                  maxLength={80}
-                  required
-                  disabled={busy}
-                  placeholder="The name your family knows"
-                />
-              </label>
-            ) : null}
-            <label>
-              <span>Email</span>
-              <input
-                type="email"
-                value={email}
-                onChange={(event) => setEmail(event.target.value)}
-                autoComplete="email"
-                required
-                disabled={busy}
-                placeholder="you@example.com"
-              />
-            </label>
-            <label>
-              <span>Password</span>
-              <input
-                type="password"
-                value={password}
-                onChange={(event) => setPassword(event.target.value)}
-                autoComplete={
-                  authMode === 'sign-in' ? 'current-password' : 'new-password'
-                }
-                minLength={authMode === 'sign-up' ? 8 : undefined}
-                required
-                disabled={busy}
-                placeholder="At least 8 characters"
-              />
-            </label>
-            <button className="family-sync__primary" type="submit" disabled={busy}>
-              {busy
-                ? 'Connecting…'
-                : authMode === 'sign-in'
-                  ? 'Sign in securely'
-                  : 'Create account'}
-            </button>
-          </form>
+          <Link
+            className="family-sync__auth-link"
+            to="/login"
+            state={{ returnTo: '/profile' }}
+          >
+            Sign in or create an account
+          </Link>
           <p className="family-sync__privacy-note">
-            Membership is private. A circle owner must approve every new member.
+            Only people your family approves can join.
           </p>
         </div>
       ) : null}
@@ -360,10 +286,10 @@ export function FamilySyncPanel({
             <div className="family-sync__pending-card">
               <span className="family-sync__pending-pulse" aria-hidden="true" />
               <div>
-                <h3>Waiting for family approval</h3>
+                <h3>Waiting for your family</h3>
                 <p>
-                  Your request was sent {formatDate(snapshot.pendingRequest.createdAt)}.
-                  Moments will sync after the circle owner approves you.
+                  Sent {formatDate(snapshot.pendingRequest.createdAt)}. Moments will
+                  appear once the circle owner lets you in.
                 </p>
               </div>
               <button
@@ -378,33 +304,29 @@ export function FamilySyncPanel({
           ) : (
             <div className="family-sync__choice-grid">
               <form className="family-sync__option" onSubmit={handleCreateCircle}>
-                <span className="family-sync__option-number" aria-hidden="true">01</span>
-                <h3>Start a family circle</h3>
-                <p>You become the owner and approve each person who joins.</p>
+                <h3>Create a family group</h3>
+                <p>Make a private home for your moments. You decide who joins.</p>
                 <label>
-                  <span>Circle name</span>
+                  <span>Family group name</span>
                   <input
                     value={circleName}
                     onChange={(event) => setCircleName(event.target.value)}
                     maxLength={80}
                     required
                     disabled={busy}
-                    placeholder="Ahmed family"
+                    placeholder="The Ahmed family"
                   />
                 </label>
                 <button className="family-sync__primary" type="submit" disabled={busy}>
-                  Create circle
+                  Create family group
                 </button>
               </form>
 
-              <div className="family-sync__or" aria-hidden="true"><span>or</span></div>
-
               <form className="family-sync__option" onSubmit={handleJoinCircle}>
-                <span className="family-sync__option-number" aria-hidden="true">02</span>
-                <h3>Join your family</h3>
-                <p>Paste the private, one-use code sent by your circle owner.</p>
+                <h3>Join with a code</h3>
+                <p>Enter the private code your family group owner sent you.</p>
                 <label>
-                  <span>Invite code</span>
+                  <span>Family code</span>
                   <input
                     className="family-sync__code-input"
                     value={inviteCode}
@@ -418,20 +340,12 @@ export function FamilySyncPanel({
                   />
                 </label>
                 <button className="family-sync__primary" type="submit" disabled={busy}>
-                  Request to join
+                  Ask to join
                 </button>
               </form>
             </div>
           )}
 
-          <button
-            className="family-sync__text-button"
-            type="button"
-            disabled={busy}
-            onClick={() => void runChange(() => adapter.signOut(), 'Signed out.')}
-          >
-            Sign out of {snapshot.person.email}
-          </button>
         </div>
       ) : null}
 
@@ -440,7 +354,6 @@ export function FamilySyncPanel({
           <article className="family-sync__circle-card">
             <div className="family-sync__circle-mark" aria-hidden="true">∞</div>
             <div className="family-sync__circle-copy">
-              <span>{snapshot.circle.role === 'owner' ? 'Your circle' : 'Connected circle'}</span>
               <h3>{snapshot.circle.name}</h3>
               <p>
                 {snapshot.circle.memberCount}{' '}
@@ -457,8 +370,8 @@ export function FamilySyncPanel({
             <section className="family-sync__owner-tools" aria-labelledby={`${headingId}-invite`}>
               <div className="family-sync__subheading">
                 <div>
-                  <h3 id={`${headingId}-invite`}>Invite a family member</h3>
-                  <p>Each code works once and expires after 7 days.</p>
+                  <h3 id={`${headingId}-invite`}>Invite someone you love</h3>
+                  <p>Create a private code for one family member.</p>
                 </div>
                 <button
                   className="family-sync__secondary"
@@ -466,24 +379,36 @@ export function FamilySyncPanel({
                   disabled={busy}
                   onClick={() => void handleCreateInvite(snapshot.circle.id)}
                 >
-                  {busy ? 'Creating…' : 'Create invite'}
+                  {busy ? 'Creating…' : 'Create code'}
                 </button>
               </div>
 
               {generatedInvite ? (
-                <div className="family-sync__invite" role="status">
-                  <span>Private one-use code</span>
-                  <output>{generatedInvite.code}</output>
+                <div className="family-sync__invite">
+                  <span id={`${headingId}-invite-code`}>Private family code</span>
+                  <output aria-labelledby={`${headingId}-invite-code`}>
+                    {generatedInvite.code}
+                  </output>
+                  <button
+                    className="family-sync__share"
+                    type="button"
+                    disabled={busy || sharing}
+                    aria-label={`Share invite code for ${snapshot.circle.name}`}
+                    onClick={() => void handleShareInvite(snapshot.circle.name)}
+                  >
+                    <span aria-hidden="true">↗</span>
+                    {sharing ? 'Opening…' : 'Share code'}
+                  </button>
                   <small>
-                    Expires {formatDate(generatedInvite.expiresAt)}. Share it only
-                    with the person you want to admit.
+                    One person can use it before {formatDate(generatedInvite.expiresAt)}.
+                    You approve them before any moments are shared.
                   </small>
                 </div>
               ) : null}
             </section>
           ) : (
             <p className="family-sync__member-note">
-              Your circle owner manages invitations and new member approvals.
+              Your circle owner can invite and approve family members.
             </p>
           )}
 
@@ -492,7 +417,7 @@ export function FamilySyncPanel({
               <div className="family-sync__subheading">
                 <div>
                   <h3 id={`${headingId}-requests`}>Join requests</h3>
-                  <p>Approve only people you recognize.</p>
+                  <p>Only approve people you know.</p>
                 </div>
                 <span className="family-sync__count" aria-label={`${snapshot.pendingRequests.length} pending`}>
                   {snapshot.pendingRequests.length}
@@ -504,9 +429,9 @@ export function FamilySyncPanel({
                   {snapshot.pendingRequests.map((request) => (
                     <li key={request.id}>
                       <div>
-                        <strong>Family member</strong>
+                        <strong>Someone wants to join</strong>
                         <span>
-                          Requested {formatDate(request.createdAt)} · ID{' '}
+                          {formatDate(request.createdAt)} · Request{' '}
                           {request.requesterId.slice(0, 8)}
                         </span>
                       </div>
@@ -535,8 +460,7 @@ export function FamilySyncPanel({
                 </ul>
               ) : (
                 <div className="family-sync__empty-requests">
-                  <span aria-hidden="true">✓</span>
-                  <p>No one is waiting for approval.</p>
+                  <p>No one is waiting to join.</p>
                 </div>
               )}
             </section>
@@ -547,14 +471,6 @@ export function FamilySyncPanel({
               <strong>{snapshot.person.displayName}</strong>
               <span>{snapshot.person.email}</span>
             </div>
-            <button
-              className="family-sync__text-button"
-              type="button"
-              disabled={busy}
-              onClick={() => void runChange(() => adapter.signOut(), 'Signed out.')}
-            >
-              Sign out
-            </button>
           </div>
         </div>
       ) : null}

@@ -1,4 +1,14 @@
-import { supabase } from '../../../lib/supabase'
+import {
+  getClerkSupabaseIdentity,
+  getSupabaseClient,
+  signOutClerkSupabaseSession,
+  subscribeToSupabaseAuthChanges,
+} from '../../../lib/supabase'
+import {
+  bootstrapCurrentClerkProfile,
+  createFamily,
+  joinFamilyByCode,
+} from '../../../services/persistence'
 import type {
   CreatedCircleInvite,
   FamilySyncAdapter,
@@ -18,25 +28,6 @@ function requireString(record: UnknownRecord, key: string) {
     throw new Error('Family Sync returned an incomplete response.')
   }
   return value
-}
-
-function getDisplayName(
-  profileData: unknown,
-  email: string,
-  metadata: UnknownRecord,
-) {
-  const profile = asRecord(profileData)
-  const profileName = profile?.display_name
-  if (typeof profileName === 'string' && profileName.trim()) {
-    return profileName.trim()
-  }
-
-  const metadataName = metadata.display_name
-  if (typeof metadataName === 'string' && metadataName.trim()) {
-    return metadataName.trim()
-  }
-
-  return email.split('@')[0] || 'Family member'
 }
 
 export const FAMILY_SYNC_REFRESH_EVENT = 'kinsphere:family-sync-refresh'
@@ -94,44 +85,29 @@ async function getAuthenticatedPerson(): Promise<{
   person: FamilySyncPerson
   userId: string
 } | null> {
-  if (!supabase) return null
-
-  const { data: sessionData, error: sessionError } =
-    await supabase.auth.getSession()
-  if (sessionError) throw sessionError
-
-  const user = sessionData.session?.user
-  if (!user) return null
-
-  const email = user.email ?? ''
-  const { data: profileData, error: profileError } = await supabase
-    .from('profiles')
-    .select('display_name')
-    .eq('id', user.id)
-    .maybeSingle()
-  if (profileError) throw profileError
+  if (!getSupabaseClient()) return null
+  const identity = getClerkSupabaseIdentity()
+  if (!identity) return null
+  const profile = await bootstrapCurrentClerkProfile()
 
   return {
     person: {
-      id: user.id,
-      email,
-      displayName: getDisplayName(
-        profileData,
-        email,
-        asRecord(user.user_metadata) ?? {},
-      ),
+      id: profile.userId,
+      email: profile.email ?? identity.email ?? '',
+      displayName: profile.displayName,
     },
-    userId: user.id,
+    userId: profile.userId,
   }
 }
 
 async function loadSnapshot(): Promise<FamilySyncSnapshot> {
-  if (!supabase) return { kind: 'local-only' }
+  const client = getSupabaseClient()
+  if (!client) return { kind: 'local-only' }
 
   const authenticated = await getAuthenticatedPerson()
   if (!authenticated) return { kind: 'signed-out' }
 
-  const { data: membershipData, error: membershipError } = await supabase
+  const { data: membershipData, error: membershipError } = await client
     .from('circle_members')
     .select('circle_id,role')
     .eq('user_id', authenticated.userId)
@@ -143,7 +119,7 @@ async function loadSnapshot(): Promise<FamilySyncSnapshot> {
 
   const membership = asRecord(membershipData)
   if (!membership) {
-    const { data: pendingData, error: pendingError } = await supabase
+    const { data: pendingData, error: pendingError } = await client
       .from('join_requests')
       .select('id,created_at')
       .eq('requester_id', authenticated.userId)
@@ -169,8 +145,8 @@ async function loadSnapshot(): Promise<FamilySyncSnapshot> {
   const circleId = requireString(membership, 'circle_id')
   const role = membership.role === 'owner' ? 'owner' : 'member'
   const [circleResult, membersResult] = await Promise.all([
-    supabase.from('circles').select('id,name').eq('id', circleId).single(),
-    supabase
+    client.from('circles').select('id,name').eq('id', circleId).single(),
+    client
       .from('circle_members')
       .select('user_id', { count: 'exact', head: true })
       .eq('circle_id', circleId)
@@ -189,7 +165,7 @@ async function loadSnapshot(): Promise<FamilySyncSnapshot> {
   }> = []
 
   if (role === 'owner') {
-    const { data, error } = await supabase
+    const { data, error } = await client
       .from('join_requests')
       .select('id,requester_id,created_at')
       .eq('circle_id', circleId)
@@ -225,57 +201,33 @@ export const familySyncAdapter: FamilySyncAdapter = {
   loadSnapshot,
 
   subscribeToAuthChanges(onChange) {
-    if (!supabase) return () => undefined
-    const { data } = supabase.auth.onAuthStateChange(() => onChange())
-    return () => data.subscription.unsubscribe()
+    return subscribeToSupabaseAuthChanges(onChange)
   },
 
-  async signIn(email, password) {
-    if (!supabase) throw new Error('Family Sync is not configured.')
-    const { error } = await supabase.auth.signInWithPassword({ email, password })
-    if (error) throw error
+  async signIn() {
+    throw new Error('Use the main Clerk sign-in page.')
   },
 
-  async signUp(email, password, displayName) {
-    if (!supabase) throw new Error('Family Sync is not configured.')
-    const { data, error } = await supabase.auth.signUp({
-      email,
-      password,
-      options: { data: { display_name: displayName.trim() } },
-    })
-    if (error) throw error
-    return { requiresEmailConfirmation: !data.session }
+  async signUp() {
+    throw new Error('Use the main Clerk sign-up page.')
   },
 
   async signOut() {
-    if (!supabase) return
-    const { error } = await supabase.auth.signOut()
-    if (error) throw error
+    await signOutClerkSupabaseSession()
   },
 
   async createCircle(name) {
-    if (!supabase) throw new Error('Family Sync is not configured.')
-    const authenticated = await getAuthenticatedPerson()
-    if (!authenticated) throw new Error('Sign in before creating a circle.')
-
-    const { error } = await supabase.from('circles').insert({
-      name: name.trim(),
-      owner_id: authenticated.userId,
-    })
-    if (error) throw error
+    await createFamily(name)
   },
 
   async requestCircleJoin(inviteCode) {
-    if (!supabase) throw new Error('Family Sync is not configured.')
-    const { error } = await supabase.rpc('request_circle_join', {
-      p_invite_code: inviteCode.trim(),
-    })
-    if (error) throw error
+    await joinFamilyByCode(inviteCode)
   },
 
   async createCircleInvite(circleId): Promise<CreatedCircleInvite> {
-    if (!supabase) throw new Error('Family Sync is not configured.')
-    const { data, error } = await supabase.rpc('create_circle_invite', {
+    const client = getSupabaseClient()
+    if (!client) throw new Error('Family Sync is not configured.')
+    const { data, error } = await client.rpc('create_circle_invite', {
       p_circle_id: circleId,
       p_expires_in: '7 days',
       p_max_uses: 1,
@@ -295,8 +247,9 @@ export const familySyncAdapter: FamilySyncAdapter = {
   },
 
   async decideJoinRequest(requestId, decision) {
-    if (!supabase) throw new Error('Family Sync is not configured.')
-    const { error } = await supabase.rpc('decide_join_request', {
+    const client = getSupabaseClient()
+    if (!client) throw new Error('Family Sync is not configured.')
+    const { error } = await client.rpc('decide_join_request', {
       p_request_id: requestId,
       p_decision: decision,
     })

@@ -1,8 +1,8 @@
 import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
+import { MemoryRouter } from 'react-router-dom'
 import { describe, expect, it, vi } from 'vitest'
 import { FamilySyncPanel } from './FamilySyncPanel'
-import { FAMILY_SYNC_REFRESH_EVENT } from './familySyncAdapter'
 import type { FamilySyncAdapter, FamilySyncSnapshot } from './types'
 
 function createAdapter(initialSnapshot: FamilySyncSnapshot) {
@@ -30,6 +30,10 @@ function createAdapter(initialSnapshot: FamilySyncSnapshot) {
   }
 }
 
+function renderPanel(panel: React.ReactNode) {
+  return render(<MemoryRouter>{panel}</MemoryRouter>)
+}
+
 const person = {
   id: '10000000-0000-4000-8000-000000000001',
   displayName: 'Simreen',
@@ -39,39 +43,28 @@ const person = {
 describe('FamilySyncPanel', () => {
   it('honestly identifies an unconfigured backend as local-only', async () => {
     const { adapter } = createAdapter({ kind: 'local-only' })
-    render(<FamilySyncPanel adapter={adapter} />)
+    renderPanel(<FamilySyncPanel adapter={adapter} />)
 
     expect(
       await screen.findByRole('heading', {
-        name: 'Your moments stay on this device',
+        name: 'Family groups need a connection',
       }),
     ).toBeInTheDocument()
-    expect(screen.getByText(/not connected to a backend/i)).toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: /sign in/i })).not.toBeInTheDocument()
+    expect(screen.getByText(/share invite codes/i)).toBeInTheDocument()
+    expect(
+      screen.getByRole('link', { name: 'Open secure sign-in' }),
+    ).toHaveAttribute('href', '/login')
   })
 
-  it('signs in and announces that root sync should reconnect', async () => {
-    const user = userEvent.setup()
+  it('sends signed-out people to the dedicated secure login page', async () => {
     const setup = createAdapter({ kind: 'signed-out' })
-    const refreshListener = vi.fn()
-    window.addEventListener(FAMILY_SYNC_REFRESH_EVENT, refreshListener)
-    setup.adapter.signIn = vi.fn(async () => {
-      setup.setSnapshot({ kind: 'unjoined', person, pendingRequest: null })
-    })
 
-    render(<FamilySyncPanel adapter={setup.adapter} />)
-    await screen.findByRole('heading', { name: 'Connect your family' })
-    await user.type(screen.getByLabelText('Email'), person.email)
-    await user.type(screen.getByLabelText('Password'), 'safe-password')
-    await user.click(screen.getByRole('button', { name: 'Sign in securely' }))
-
-    expect(setup.adapter.signIn).toHaveBeenCalledWith(
-      person.email,
-      'safe-password',
-    )
-    expect(await screen.findByText(person.displayName)).toBeInTheDocument()
-    expect(refreshListener).toHaveBeenCalledTimes(1)
-    window.removeEventListener(FAMILY_SYNC_REFRESH_EVENT, refreshListener)
+    renderPanel(<FamilySyncPanel adapter={setup.adapter} />)
+    await screen.findByRole('heading', { name: 'Keep your family close' })
+    expect(
+      screen.getByRole('link', { name: 'Sign in or create an account' }),
+    ).toHaveAttribute('href', '/login')
+    expect(setup.adapter.signIn).not.toHaveBeenCalled()
   })
 
   it('creates a circle for an authenticated person', async () => {
@@ -95,9 +88,9 @@ describe('FamilySyncPanel', () => {
       })
     })
 
-    render(<FamilySyncPanel adapter={setup.adapter} />)
-    await user.type(await screen.findByLabelText('Circle name'), 'Ahmed family')
-    await user.click(screen.getByRole('button', { name: 'Create circle' }))
+    renderPanel(<FamilySyncPanel adapter={setup.adapter} />)
+    await user.type(await screen.findByLabelText('Family group name'), 'Ahmed family')
+    await user.click(screen.getByRole('button', { name: 'Create family group' }))
 
     expect(setup.adapter.createCircle).toHaveBeenCalledWith('Ahmed family')
     expect(
@@ -125,15 +118,15 @@ describe('FamilySyncPanel', () => {
       })
     })
 
-    render(<FamilySyncPanel adapter={setup.adapter} />)
-    await user.type(await screen.findByLabelText('Invite code'), code)
-    await user.click(screen.getByRole('button', { name: 'Request to join' }))
+    renderPanel(<FamilySyncPanel adapter={setup.adapter} />)
+    await user.type(await screen.findByLabelText('Family code'), code)
+    await user.click(screen.getByRole('button', { name: 'Ask to join' }))
 
     expect(setup.adapter.requestCircleJoin).toHaveBeenCalledWith(code)
     expect(
-      await screen.findByRole('heading', { name: 'Waiting for family approval' }),
+      await screen.findByRole('heading', { name: 'Waiting for your family' }),
     ).toBeInTheDocument()
-    expect(screen.getByText(/moments will sync after/i)).toBeInTheDocument()
+    expect(screen.getByText(/moments will appear once/i)).toBeInTheDocument()
   })
 
   it('keeps a generated invite visible and lets an owner approve a request', async () => {
@@ -155,18 +148,37 @@ describe('FamilySyncPanel', () => {
       pendingRequests: [pendingRequest],
     }
     const setup = createAdapter(connected)
+    const shareInvite = vi.fn(async () => 'shared' as const)
     setup.adapter.decideJoinRequest = vi.fn(async () => {
       setup.setSnapshot({ ...connected, pendingRequests: [] })
     })
 
-    render(<FamilySyncPanel adapter={setup.adapter} />)
+    renderPanel(
+      <FamilySyncPanel
+        adapter={setup.adapter}
+        shareInvite={shareInvite}
+      />,
+    )
     await user.click(
-      await screen.findByRole('button', { name: 'Create invite' }),
+      await screen.findByRole('button', { name: 'Create code' }),
     )
 
     const generatedCode = `ks1_${'a'.repeat(64)}`
     expect(screen.getByText(generatedCode)).toBeInTheDocument()
-    expect(screen.getByText(/share it only with the person/i)).toBeInTheDocument()
+    expect(screen.getByText(/one person can use it/i)).toBeInTheDocument()
+
+    await user.click(
+      screen.getByRole('button', {
+        name: 'Share invite code for Ahmed family',
+      }),
+    )
+    expect(shareInvite).toHaveBeenCalledWith(
+      expect.objectContaining({ code: generatedCode }),
+      'Ahmed family',
+    )
+    expect(
+      await screen.findByText(/ready in your share sheet/i),
+    ).toBeInTheDocument()
 
     await user.click(
       screen.getByRole('button', { name: /approve request from member 20000000/i }),
@@ -176,7 +188,7 @@ describe('FamilySyncPanel', () => {
       'approved',
     )
     await waitFor(() => {
-      expect(screen.getByText('No one is waiting for approval.')).toBeInTheDocument()
+      expect(screen.getByText('No one is waiting to join.')).toBeInTheDocument()
     })
   })
 })

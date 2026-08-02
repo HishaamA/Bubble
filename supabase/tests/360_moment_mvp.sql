@@ -246,7 +246,14 @@ select is(
 
 reset role;
 set local role authenticated;
-select set_config('request.jwt.claim.sub', '20000000-0000-4000-8000-000000000003', true);
+select set_config(
+  'request.jwt.claims',
+  json_build_object(
+    'sub', '20000000-0000-4000-8000-000000000003',
+    'role', 'authenticated'
+  )::text,
+  true
+);
 
 select ok(
   (
@@ -282,7 +289,14 @@ select is(
   'daily window creation is deterministic and idempotent for one circle/date'
 );
 
-select set_config('request.jwt.claim.sub', '20000000-0000-4000-8000-000000000001', true);
+select set_config(
+  'request.jwt.claims',
+  json_build_object(
+    'sub', '20000000-0000-4000-8000-000000000001',
+    'role', 'authenticated'
+  )::text,
+  true
+);
 
 select is(
   pg_temp.capture_window_result('dddddddd-dddd-4ddd-8ddd-dddddddddddd'),
@@ -362,7 +376,14 @@ select is(
   'non-2:1 reported panorama metadata is rejected'
 );
 
-select set_config('request.jwt.claim.sub', '20000000-0000-4000-8000-000000000003', true);
+select set_config(
+  'request.jwt.claims',
+  json_build_object(
+    'sub', '20000000-0000-4000-8000-000000000003',
+    'role', 'authenticated'
+  )::text,
+  true
+);
 
 select is(
   pg_temp.finalize_moment_result(
@@ -376,7 +397,14 @@ select is(
   'a user from another circle cannot finalize into the target circle'
 );
 
-select set_config('request.jwt.claim.sub', '20000000-0000-4000-8000-000000000004', true);
+select set_config(
+  'request.jwt.claims',
+  json_build_object(
+    'sub', '20000000-0000-4000-8000-000000000004',
+    'role', 'authenticated'
+  )::text,
+  true
+);
 
 select is(
   pg_temp.finalize_moment_result(
@@ -390,7 +418,14 @@ select is(
   'a removed member cannot finalize a moment'
 );
 
-select set_config('request.jwt.claim.sub', '20000000-0000-4000-8000-000000000002', true);
+select set_config(
+  'request.jwt.claims',
+  json_build_object(
+    'sub', '20000000-0000-4000-8000-000000000002',
+    'role', 'authenticated'
+  )::text,
+  true
+);
 
 select is(
   pg_temp.finalize_moment_result(
@@ -404,7 +439,14 @@ select is(
   'a regular approved family member can finalize their own scheduled moment'
 );
 
-select set_config('request.jwt.claim.sub', '20000000-0000-4000-8000-000000000001', true);
+select set_config(
+  'request.jwt.claims',
+  json_build_object(
+    'sub', '20000000-0000-4000-8000-000000000001',
+    'role', 'authenticated'
+  )::text,
+  true
+);
 
 select is(
   (
@@ -416,7 +458,14 @@ select is(
   'the circle owner receives and can read another member moment'
 );
 
-select set_config('request.jwt.claim.sub', '20000000-0000-4000-8000-000000000002', true);
+select set_config(
+  'request.jwt.claims',
+  json_build_object(
+    'sub', '20000000-0000-4000-8000-000000000002',
+    'role', 'authenticated'
+  )::text,
+  true
+);
 
 select is(
   (
@@ -428,7 +477,14 @@ select is(
   'an approved member receives and can read another same-circle moment'
 );
 
-select set_config('request.jwt.claim.sub', '20000000-0000-4000-8000-000000000003', true);
+select set_config(
+  'request.jwt.claims',
+  json_build_object(
+    'sub', '20000000-0000-4000-8000-000000000003',
+    'role', 'authenticated'
+  )::text,
+  true
+);
 
 select is(
   (
@@ -440,7 +496,14 @@ select is(
   'cross-circle users cannot read ready moments'
 );
 
-select set_config('request.jwt.claim.sub', '20000000-0000-4000-8000-000000000004', true);
+select set_config(
+  'request.jwt.claims',
+  json_build_object(
+    'sub', '20000000-0000-4000-8000-000000000004',
+    'role', 'authenticated'
+  )::text,
+  true
+);
 
 select is(
   (
@@ -460,7 +523,14 @@ set opens_at = now() - interval '20 minutes',
 where id = '30000000-0000-4000-8000-000000000001';
 
 set local role authenticated;
-select set_config('request.jwt.claim.sub', '20000000-0000-4000-8000-000000000001', true);
+select set_config(
+  'request.jwt.claims',
+  json_build_object(
+    'sub', '20000000-0000-4000-8000-000000000001',
+    'role', 'authenticated'
+  )::text,
+  true
+);
 
 select is(
   pg_temp.finalize_moment_result(

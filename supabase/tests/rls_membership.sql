@@ -361,7 +361,14 @@ select is(
 reset role;
 
 set local role authenticated;
-select set_config('request.jwt.claim.sub', '10000000-0000-4000-8000-000000000001', true);
+select set_config(
+  'request.jwt.claims',
+  json_build_object(
+    'sub', '10000000-0000-4000-8000-000000000001',
+    'role', 'authenticated'
+  )::text,
+  true
+);
 
 select is(
   (select count(*) from public.circles),
@@ -423,9 +430,23 @@ select is(
 );
 
 set local role authenticated;
-select set_config('request.jwt.claim.sub', '10000000-0000-4000-8000-000000000001', true);
+select set_config(
+  'request.jwt.claims',
+  json_build_object(
+    'sub', '10000000-0000-4000-8000-000000000001',
+    'role', 'authenticated'
+  )::text,
+  true
+);
 
-select set_config('request.jwt.claim.sub', '10000000-0000-4000-8000-000000000002', true);
+select set_config(
+  'request.jwt.claims',
+  json_build_object(
+    'sub', '10000000-0000-4000-8000-000000000002',
+    'role', 'authenticated'
+  )::text,
+  true
+);
 
 select is(
   (select count(*) from public.circles where id = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'),
@@ -494,7 +515,14 @@ select is(
   'a non-owner cannot transfer circle ownership'
 );
 
-select set_config('request.jwt.claim.sub', '10000000-0000-4000-8000-000000000004', true);
+select set_config(
+  'request.jwt.claims',
+  json_build_object(
+    'sub', '10000000-0000-4000-8000-000000000004',
+    'role', 'authenticated'
+  )::text,
+  true
+);
 
 select is(
   (select count(*) from public.circles where id = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'),
@@ -514,7 +542,14 @@ select is(
   'a pending request is not an approved membership'
 );
 
-select set_config('request.jwt.claim.sub', '10000000-0000-4000-8000-000000000005', true);
+select set_config(
+  'request.jwt.claims',
+  json_build_object(
+    'sub', '10000000-0000-4000-8000-000000000005',
+    'role', 'authenticated'
+  )::text,
+  true
+);
 
 select is(
   (select count(*) from public.circles where id = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'),
@@ -564,7 +599,14 @@ select is(
   'a valid invite request still grants no circle access before approval'
 );
 
-select set_config('request.jwt.claim.sub', '10000000-0000-4000-8000-000000000003', true);
+select set_config(
+  'request.jwt.claims',
+  json_build_object(
+    'sub', '10000000-0000-4000-8000-000000000003',
+    'role', 'authenticated'
+  )::text,
+  true
+);
 
 select is(
   (select count(*) from public.circles where id = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'),
@@ -611,13 +653,27 @@ select is(
 );
 
 set local role authenticated;
-select set_config('request.jwt.claim.sub', '10000000-0000-4000-8000-000000000001', true);
+select set_config(
+  'request.jwt.claims',
+  json_build_object(
+    'sub', '10000000-0000-4000-8000-000000000001',
+    'role', 'authenticated'
+  )::text,
+  true
+);
 select public.decide_join_request(
   'aaaaaaaa-0000-4000-8000-000000000002',
   'approved'
 );
 
-select set_config('request.jwt.claim.sub', '10000000-0000-4000-8000-000000000004', true);
+select set_config(
+  'request.jwt.claims',
+  json_build_object(
+    'sub', '10000000-0000-4000-8000-000000000004',
+    'role', 'authenticated'
+  )::text,
+  true
+);
 
 select is(
   (select count(*) from public.circles where id = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'),
@@ -634,13 +690,27 @@ select is(
 );
 
 set local role authenticated;
-select set_config('request.jwt.claim.sub', '10000000-0000-4000-8000-000000000001', true);
+select set_config(
+  'request.jwt.claims',
+  json_build_object(
+    'sub', '10000000-0000-4000-8000-000000000001',
+    'role', 'authenticated'
+  )::text,
+  true
+);
 select public.remove_circle_member(
   'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
   '10000000-0000-4000-8000-000000000004'
 );
 
-select set_config('request.jwt.claim.sub', '10000000-0000-4000-8000-000000000004', true);
+select set_config(
+  'request.jwt.claims',
+  json_build_object(
+    'sub', '10000000-0000-4000-8000-000000000004',
+    'role', 'authenticated'
+  )::text,
+  true
+);
 
 select is(
   (select count(*) from public.circles where id = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'),

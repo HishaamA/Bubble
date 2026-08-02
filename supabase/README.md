@@ -10,21 +10,32 @@ membership workflow functions, and the private `family-media` Storage bucket.
 Only this state grants access to circle rows and Storage objects:
 
 ```sql
-circle_members.user_id = auth.uid()
+circle_members.user_id = current_app_user_id()
 and circle_members.status = 'approved'
 ```
+
+`current_app_user_id()` resolves only the verified Clerk
+`auth.jwt()->>'sub'` through the private `app_identities` mapping. Clerk users
+are not inserted into the managed `auth.users` table. Run
+`bootstrap_current_user` after Clerk signs in and before loading family data.
 
 An invite or join request never grants access. Pending and removed users fail
 the same helper used by all circle policies. Membership decisions, removals,
 irreversible invite revocation, and ownership transfer use `security definer`
 functions with a fixed empty search path and explicit authorization checks.
+The MVP permits one approved family membership per user. A partial unique index
+and per-user transactional locks cover family creation and concurrent owner
+approvals. Pending requests may remain in other families, but they cannot be
+approved after the requester joins one family, and a joined user cannot submit
+or refresh another join request. An existing database with duplicate approved
+memberships must be reconciled explicitly before this migration can apply.
 
 ## Media paths
 
 Client uploads use one immutable path shape:
 
 ```text
-<circle-uuid>/<panoramas|thumbnails|voice>/<uploader-uuid>/<immutable-file>
+<circle-uuid>/<panoramas|thumbnails|voice>/<internal-user-uuid>/<immutable-file>
 ```
 
 The bucket is private. Approved members can read their circle's objects and can
@@ -51,11 +62,12 @@ Before calling `finalize_360_moment`, upload without upsert to these exact paths
 using one client-generated UUID for `<moment-id>`:
 
 ```text
-<circle-id>/panoramas/<auth-user-id>/<moment-id>.jpg
-<circle-id>/thumbnails/<auth-user-id>/<moment-id>.jpg
+<circle-id>/panoramas/<internal-user-id>/<moment-id>.jpg
+<circle-id>/thumbnails/<internal-user-id>/<moment-id>.jpg
 ```
 
-The security-definer finalizer derives the uploader from `auth.uid()`, rechecks
+The security-definer finalizer derives the uploader from
+`current_app_user_id()`, rechecks
 approved membership, requires those exact canonical paths to exist in the
 private `family-media` bucket, validates reported panorama and thumbnail sizes
 as 2:1, enforces the scheduled window, and inserts a `ready` row atomically.
@@ -75,6 +87,32 @@ submissions serialize per user/circle pair, and rescans and approvals lock an
 existing join request before its invite so the two RPCs use the same concurrency
 order.
 
+## Clerk authentication and event reminders
+
+The client uses Clerk sessions with Supabase's native third-party auth support.
+Activate Clerk's Supabase integration, then add the exact Clerk domain under
+Supabase Authentication → Sign In / Providers → Third-party Auth. Supabase JS
+receives `session.getToken()` through its `accessToken` callback; do not create
+the deprecated Clerk Supabase JWT template or share a Supabase JWT secret.
+
+Clerk third-party auth does not synchronize `auth.users`. The authenticated
+bootstrap RPC maps the trusted string subject to a stable internal UUID and
+creates the public profile, private email row, preferences, and durable tutorial
+state. Browser-supplied email is unverified display metadata only; it must never
+be used for authorization or outbound contact unless a trusted Clerk webhook or
+verified JWT claim has supplied it. Legacy Supabase Auth users keep insert/delete
+profile lifecycle triggers. See
+`docs/decisions/0004-clerk-supabase-third-party-auth.md`.
+
+`create_family_event` checks approved circle membership and uses the database
+clock to create the event and, when requested, its reminder preference and
+idempotent scheduled job in one transaction. Approved members load shared
+events through RLS and receive Realtime refreshes. `set_event_reminder` lets
+each approved family member opt in. A trusted scheduled Edge Function or
+Supabase Cron invocation calls
+`dispatch_due_event_reminders`; it writes the authorized in-app notification
+before any generic APNs/FCM nudge is attempted.
+
 ## Local commands
 
 With Docker and the Supabase CLI installed:
@@ -84,6 +122,8 @@ supabase start
 supabase db reset
 supabase test db supabase/tests/rls_membership.sql
 supabase test db supabase/tests/360_moment_mvp.sql
+supabase test db supabase/tests/events_notifications.sql
+supabase test db supabase/tests/clerk_third_party_auth.sql
 ```
 
 ## Assumptions and current limits
@@ -103,7 +143,11 @@ supabase test db supabase/tests/360_moment_mvp.sql
   trusted thumbnail before a production launch.
 - The current contract does not reserve uploads or clean up abandoned objects.
   Those require a trusted cleanup worker and quotas before production launch.
-- Capsules, events, notifications, and AI tables remain future phases and must
-  reuse the membership helper.
+- Capsules and AI tables remain future phases and must reuse the membership
+  helper. Events and notifications now use the same approved-membership
+  boundary and keep scheduled-job dispatch restricted to the service role.
 - The SQL suite is designed for `supabase test db`, but still requires a local
   Supabase stack to validate database-engine and Storage-version compatibility.
+- Clerk account deletion is not inferred from sign-out. A trusted webhook or
+  administrative retention workflow must delete the mapped profile when the
+  product's account-deletion policy requires it.

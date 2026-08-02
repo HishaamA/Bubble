@@ -5,6 +5,10 @@ export {
   familySyncAdapter,
   toFamilySyncErrorMessage,
 } from './familySyncAdapter'
+export {
+  getFamilyInviteMessage,
+  shareFamilyInvite,
+} from './shareFamilyInvite'
 export type {
   CreatedCircleInvite,
   FamilySyncAdapter,
@@ -13,3 +17,7 @@ export type {
   FamilySyncSnapshot,
   SignUpResult,
 } from './types'
+export type {
+  FamilyInviteShareResult,
+  ShareFamilyInvite,
+} from './shareFamilyInvite'

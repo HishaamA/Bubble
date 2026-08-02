@@ -1,6 +1,6 @@
 -- Intentionally empty.
 --
 -- KinSphere has no globally visible application data, and local development users
--- should be created through Supabase Auth so the auth trigger creates their profile
--- and preferences consistently. Database security fixtures live in tests/ and are
--- rolled back after every run.
+-- should be created through Clerk and `bootstrap_current_user` so the verified
+-- JWT subject creates its profile and preferences consistently. Database security
+-- fixtures live in tests/ and are rolled back after every run.

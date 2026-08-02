@@ -25,9 +25,17 @@ enabled = true
 site_url = "http://localhost:5173"
 additional_redirect_urls = [
   "http://localhost:5173/**",
+  "http://127.0.0.1:5173/**",
   "capacitor://localhost/**",
   "http://localhost/**",
 ]
+
+# Native Clerk third-party auth for local Supabase development. Copy the exact
+# domain shown by Clerk's Supabase integration setup; it is project-specific.
+# Do not enable this placeholder or use the deprecated Supabase JWT template.
+# [auth.third_party.clerk]
+# enabled = true
+# domain = "your-instance.clerk.accounts.dev"
 
 [storage]
 enabled = true
