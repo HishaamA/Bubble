@@ -24,6 +24,12 @@
 
         </activity>
 
+        <activity
+            android:name=".panorama.PanoramaCaptureActivity"
+            android:exported="false"
+            android:screenOrientation="portrait"
+            android:theme="@style/PanoramaCaptureTheme" />
+
         <provider
             android:name="androidx.core.content.FileProvider"
             android:authorities="${applicationId}.fileprovider"
@@ -37,8 +43,14 @@
 
     <!-- Permissions -->
 
+    <uses-permission android:name="android.permission.CAMERA" />
     <uses-permission android:name="android.permission.INTERNET" />
     <!-- Required on Android 12+ for an exact one-hour local reminder. When the
          user declines, KinSphere schedules an inexact fallback instead. -->
     <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
+
+    <!-- Panorama capture checks these capabilities at runtime so devices without
+         them can still install the app and receive a NOT_SUPPORTED result. -->
+    <uses-feature android:name="android.hardware.camera.any" android:required="false" />
+    <uses-feature android:name="android.hardware.sensor.gyroscope" android:required="false" />
 </manifest>

@@ -33,8 +33,12 @@ repositories {
 dependencies {
     implementation fileTree(include: ['*.jar'], dir: 'libs')
     implementation "androidx.appcompat:appcompat:$androidxAppCompatVersion"
+    implementation "androidx.camera:camera-camera2:1.6.2"
+    implementation "androidx.camera:camera-lifecycle:1.6.2"
+    implementation "androidx.camera:camera-view:1.6.2"
     implementation "androidx.coordinatorlayout:coordinatorlayout:$androidxCoordinatorLayoutVersion"
     implementation "androidx.core:core-splashscreen:$coreSplashScreenVersion"
+    implementation "androidx.exifinterface:exifinterface:1.4.2"
     implementation project(':capacitor-android')
     testImplementation "junit:junit:$junitVersion"
     androidTestImplementation "androidx.test.ext:junit:$androidxJunitVersion"
