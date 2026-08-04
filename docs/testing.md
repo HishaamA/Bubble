@@ -115,6 +115,9 @@ Run the current supported Android and iOS targets on physical devices. Verify:
   thermal stability, and clean exit on both supported phones
 - 360 photo-library/camera handoff, ordinary-photo rejection, derivative
   encoding, and the new memory opening in both normal and Cardboard viewers
+- event reminders while the installed app is backgrounded and normally
+  terminated, plus permission-denied, Android inexact-alarm, reboot, and cancel
+  cases; verify the browser copy never promises closed-tab delivery
 - Low-Data Mode behavior and bounded preloading
 
 ## Accessibility and resilience gate

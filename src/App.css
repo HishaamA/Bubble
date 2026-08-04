@@ -57,6 +57,15 @@
   letter-spacing: -0.045em;
 }
 
+.moments-date {
+  display: block;
+  margin-top: 0.32rem;
+  color: var(--text-secondary);
+  font-size: 0.73rem;
+  font-weight: 520;
+  letter-spacing: -0.01em;
+}
+
 .round-control {
   display: grid;
   width: 3.15rem;
@@ -87,21 +96,66 @@
 .memory-constellation {
   --thumb-x: 50%;
   --thumb-y: 50%;
+  --constellation-pan-x: 0px;
+  --constellation-pan-y: 0px;
   position: absolute;
   inset: 6.2rem 0 6.4rem;
-  touch-action: manipulation;
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
+  contain: layout paint;
+}
+
+.memory-constellation__space {
+  position: absolute;
+  z-index: 1;
+  top: 0;
+  left: 0;
+  width: 140%;
+  height: 140%;
+  transform: translate3d(
+    var(--constellation-pan-x),
+    var(--constellation-pan-y),
+    0
+  );
+  transform-origin: center;
+  transition: transform 360ms cubic-bezier(0.2, 0.8, 0.2, 1);
+  will-change: transform;
+}
+
+.memory-constellation[data-panning='true'] {
+  cursor: grabbing;
+}
+
+.memory-constellation[data-panning='true'] .memory-constellation__space {
+  transition: none;
+}
+
+.memory-constellation[data-panning='true'] .memory-bubble__drift {
+  animation-play-state: paused;
+}
+
+.memory-constellation[data-panning='true'] .memory-bubble {
+  cursor: grabbing;
 }
 
 .memory-constellation__glow {
   position: absolute;
-  top: 40%;
+  z-index: 0;
+  top: 50%;
   left: 50%;
-  width: 18rem;
-  height: 18rem;
+  width: min(78vw, 21rem);
+  height: min(78vw, 21rem);
   border-radius: 50%;
-  background: rgba(255, 255, 255, 0.025);
-  filter: blur(4rem);
+  background: radial-gradient(
+    circle,
+    rgba(228, 176, 78, 0.17) 0%,
+    rgba(190, 126, 27, 0.065) 42%,
+    rgba(115, 70, 8, 0) 72%
+  );
+  filter: blur(2.8rem);
   transform: translate(-50%, -50%);
+  pointer-events: none;
 }
 
 .memory-constellation__thumb-glow {
@@ -127,7 +181,7 @@
 .memory-bubble {
   --bubble-top: 0;
   --bubble-left: 0;
-  --bubble-size: 5rem;
+  --bubble-size: clamp(4.8rem, 18vw, 5.6rem);
   position: absolute;
   z-index: 2;
   top: var(--bubble-top);
@@ -139,6 +193,32 @@
   border-radius: 999px;
   background: transparent;
   cursor: pointer;
+  opacity: 0.68;
+  transition: opacity 320ms ease;
+}
+
+.memory-bubble[data-depth='near'] {
+  z-index: 9;
+  opacity: 1;
+}
+
+.memory-bubble[data-depth='middle'] {
+  z-index: 5;
+  opacity: 0.84;
+}
+
+.memory-bubble[data-depth='far'] {
+  z-index: 2;
+  opacity: 0.48;
+}
+
+.memory-bubble:focus-visible,
+.memory-bubble:hover {
+  opacity: 1;
+}
+
+.memory-bubble:focus-visible {
+  outline-color: rgba(255, 222, 161, 0.9);
 }
 
 .memory-bubble__drift {
@@ -160,14 +240,53 @@
   --bubble-shift-x: 0px;
   --bubble-shift-y: 0px;
   --bubble-motion-scale: 1;
+  --bubble-center-scale: 1;
   --bubble-focus-scale: 1;
   --bubble-energy: 0;
+  --bubble-depth: 0.35;
   position: absolute;
   inset: 0;
+  isolation: isolate;
   border-radius: inherit;
+  transform-origin: center;
   transform: translate3d(var(--bubble-shift-x), var(--bubble-shift-y), 0)
     scale(calc(var(--bubble-motion-scale) * var(--bubble-focus-scale)));
-  transition: transform 420ms cubic-bezier(0.18, 0.9, 0.22, 1.18);
+  transition: transform 480ms cubic-bezier(0.16, 0.86, 0.24, 1);
+}
+
+/* The chosen entry memory is already distinct in the first DOM paint. JS then
+   replaces these values with continuous center-depth scaling once measured. */
+.memory-constellation[data-layout-ready='false']
+  .memory-bubble:not([data-entry-focus='true'])
+  .memory-bubble__motion {
+  --bubble-motion-scale: 0.62;
+}
+
+.memory-constellation[data-layout-ready='false']
+  .memory-bubble[data-entry-focus='true']
+  .memory-bubble__motion {
+  --bubble-motion-scale: 2.6;
+}
+
+.memory-bubble__motion::before {
+  position: absolute;
+  z-index: 0;
+  inset: -24%;
+  border-radius: inherit;
+  background: radial-gradient(
+    circle,
+    rgba(255, 210, 127, 0.28) 0%,
+    rgba(211, 146, 42, 0.14) 38%,
+    rgba(135, 78, 11, 0) 72%
+  );
+  filter: blur(0.72rem);
+  opacity: 0;
+  transform: scale(0.82);
+  transition:
+    opacity 360ms ease,
+    transform 520ms cubic-bezier(0.16, 0.86, 0.24, 1);
+  content: '';
+  pointer-events: none;
 }
 
 .memory-constellation[data-interacting='true'] .memory-bubble__motion,
@@ -179,14 +298,32 @@
 
 .memory-bubble__image {
   position: absolute;
+  z-index: 1;
   inset: 0;
   overflow: hidden;
-  border: 1px solid rgba(255, 255, 255, 0.32);
+  border: 1px solid rgba(235, 188, 102, 0.38);
   border-radius: inherit;
   background: #1c1c1e;
   box-shadow:
-    0 0.75rem 2rem rgba(0, 0, 0, 0.55),
-    inset 0 0 0 1px rgba(255, 255, 255, 0.06);
+    0 0.65rem 1.9rem rgba(0, 0, 0, 0.58),
+    0 0 1.35rem rgba(211, 153, 52, 0.12),
+    inset 0 0 0 1px rgba(255, 224, 164, 0.07);
+  transition:
+    border-color 300ms ease,
+    box-shadow 300ms ease,
+    filter 300ms ease;
+}
+
+.memory-bubble[data-depth='far'] .memory-bubble__image {
+  filter: saturate(0.74) brightness(0.72);
+}
+
+.memory-bubble[data-depth='middle'] .memory-bubble__image {
+  filter: saturate(0.9) brightness(0.9);
+}
+
+.memory-bubble[data-depth='near'] .memory-bubble__image {
+  filter: saturate(1.06) brightness(1.03) contrast(1.02);
 }
 
 .memory-bubble__image::after {
@@ -194,14 +331,29 @@
   inset: 0;
   border-radius: inherit;
   background: radial-gradient(
-    circle at 36% 26%,
-    rgba(255, 255, 255, 0.14),
+    circle at 34% 24%,
+    rgba(255, 225, 162, 0.22),
     transparent 34%,
-    transparent 66%,
-    rgba(0, 0, 0, 0.3) 100%
+    transparent 64%,
+    rgba(52, 27, 2, 0.28) 100%
   );
   content: '';
   pointer-events: none;
+}
+
+.memory-bubble[data-center-focus='true'] .memory-bubble__image {
+  border-color: rgba(255, 225, 167, 0.68);
+  box-shadow:
+    0 0 0 1px rgba(255, 240, 209, 0.14),
+    0 1.4rem 3.8rem rgba(0, 0, 0, 0.78),
+    0 0 2.8rem rgba(218, 158, 54, 0.26),
+    inset 0 1px rgba(255, 248, 230, 0.2);
+  filter: saturate(1.08) brightness(1.05) contrast(1.03);
+}
+
+.memory-bubble[data-center-focus='true'] .memory-bubble__motion::before {
+  opacity: 1;
+  transform: scale(1);
 }
 
 .memory-bubble__image img {
@@ -209,6 +361,58 @@
   max-width: none;
   height: auto;
   user-select: none;
+}
+
+.memory-bubble__arc-labels {
+  position: absolute;
+  z-index: 3;
+  inset: -16%;
+  overflow: visible;
+  color: rgba(255, 250, 240, 0.82);
+  filter: drop-shadow(0 0.35px 0.6px rgba(0, 0, 0, 0.78));
+  pointer-events: none;
+}
+
+.memory-bubble__arc-labels svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+}
+
+.memory-bubble__arc-path {
+  fill: none;
+}
+
+.memory-bubble__arc-text {
+  fill: currentColor;
+  stroke: none;
+  font-family: Baskerville, "Iowan Old Style", "Palatino Linotype", Georgia,
+    serif;
+  font-size: 4.8px;
+  font-style: italic;
+  font-weight: 300;
+  letter-spacing: 0.012em;
+  text-transform: none;
+}
+
+.memory-bubble__arc-title {
+  fill: rgba(255, 252, 245, 0.86);
+}
+
+.memory-bubble__arc-sender {
+  fill: rgba(243, 193, 112, 0.82);
+  font-size: 4.45px;
+  font-weight: 300;
+  letter-spacing: 0.018em;
+}
+
+.memory-bubble[data-depth='far'] .memory-bubble__arc-labels {
+  opacity: 0.72;
+}
+
+.memory-bubble[data-center-focus='true'] .memory-bubble__arc-labels {
+  filter: drop-shadow(0 0.5px 0.9px rgba(0, 0, 0, 0.82));
 }
 
 .memory-bubble--shared .memory-bubble__image img {
@@ -219,82 +423,18 @@
   object-fit: cover;
 }
 
-.memory-bubble--shared .memory-bubble__image {
-  border-color: rgba(255, 255, 255, 0.68);
-  box-shadow:
-    0 0 0 0.18rem rgba(255, 255, 255, 0.07),
-    0 0.8rem 2rem rgba(0, 0, 0, 0.62);
-}
-
-.memory-bubble__new-badge {
-  position: absolute;
-  z-index: 3;
-  right: -0.15rem;
-  bottom: -0.15rem;
-  display: inline-flex;
-  min-height: 1.45rem;
-  padding: 0.25rem 0.48rem;
-  align-items: center;
-  border: 2px solid #000;
-  border-radius: 999px;
-  color: #000;
-  background: #fff;
-  box-shadow: 0 0.35rem 0.8rem rgba(0, 0, 0, 0.38);
-  font-size: 0.55rem;
-  font-weight: 760;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-}
-
-.memory-bubble--featured {
-  z-index: 5;
-}
-
-.memory-bubble--featured .memory-bubble__image {
-  border: 2px solid rgba(255, 255, 255, 0.82);
-  box-shadow:
-    0 0 0 0.24rem rgba(255, 255, 255, 0.07),
-    0 1rem 3rem rgba(0, 0, 0, 0.68);
-}
-
-.memory-bubble__hint {
-  position: absolute;
-  top: calc(100% + 0.6rem);
-  left: 50%;
-  width: max-content;
-  padding: 0.42rem 0.72rem;
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  border-radius: 999px;
-  color: rgba(255, 255, 255, 0.76);
-  background: rgba(13, 13, 13, 0.72);
-  font-size: 0.7rem;
-  font-weight: 600;
-  letter-spacing: 0.01em;
-  opacity: 0;
-  transform: translate(-50%, -0.25rem);
-  transition: opacity 180ms ease, transform 180ms ease;
-  backdrop-filter: blur(14px);
-  pointer-events: none;
-}
-
 .memory-bubble:hover,
 .memory-bubble:focus-visible {
   z-index: 10;
 }
 
-.memory-bubble:hover .memory-bubble__motion,
-.memory-bubble:focus-visible .memory-bubble__motion {
-  --bubble-focus-scale: 1.045;
+.memory-bubble[data-center-focus='true'] {
+  z-index: 12;
+  opacity: 1;
 }
 
 .memory-bubble:active .memory-bubble__motion {
   --bubble-focus-scale: 0.98;
-}
-
-.memory-bubble--featured .memory-bubble__hint,
-.memory-bubble:focus-visible .memory-bubble__hint {
-  opacity: 1;
-  transform: translate(-50%, 0);
 }
 
 .tab-bar {
@@ -304,7 +444,7 @@
   bottom: var(--safe-bottom);
   left: 0.9rem;
   display: grid;
-  grid-template-columns: repeat(5, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   min-height: 4.55rem;
   padding: 0.4rem 0.28rem 0.34rem;
   border: 1px solid rgba(255, 255, 255, 0.12);
@@ -644,6 +784,14 @@
   }
 }
 
+@media (max-width: 22rem) {
+  .top-bar {
+    right: 1rem;
+    left: 1rem;
+  }
+
+}
+
 @supports (view-transition-name: none) {
   ::view-transition-group(*) {
     animation-duration: 420ms;
@@ -656,18 +804,27 @@
     display: none;
   }
 
-  .memory-bubble__drift,
+  .memory-bubble__drift {
+    transform: none !important;
+    animation: none !important;
+  }
+
   .memory-bubble__motion,
   .memory-bubble:hover .memory-bubble__motion,
   .memory-bubble:focus-visible .memory-bubble__motion,
   .memory-bubble:active .memory-bubble__motion {
     --bubble-shift-x: 0px !important;
     --bubble-shift-y: 0px !important;
-    --bubble-motion-scale: 1 !important;
     --bubble-focus-scale: 1 !important;
-    transform: none !important;
-    animation: none !important;
     transition: none !important;
+  }
+
+  .memory-bubble__image {
+    transition: none;
+  }
+
+  .memory-constellation__space {
+    transition: none;
   }
 
   ::view-transition-group(*) {

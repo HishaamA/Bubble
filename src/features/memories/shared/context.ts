@@ -18,6 +18,7 @@ export type SharedMomentsContextValue = {
 
 export type SharedMomentsProviderProps = PropsWithChildren<{
   store?: MomentStore
+  cacheNamespace?: string
   objectUrls?: MomentObjectUrlManager
   notifierFactory?: () => MomentChangeNotifier
 }>

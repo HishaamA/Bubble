@@ -1,5 +1,5 @@
 .ks-cardboard {
-  --cardboard-accent: #fff;
+  --cardboard-accent: #e4b06f;
   --cardboard-glass: rgb(0 0 0 / 72%);
   --cardboard-border: rgb(255 255 255 / 15%);
   position: fixed;
@@ -60,11 +60,11 @@
   inset-inline-start: 50%;
   inline-size: 0.55rem;
   block-size: 0.55rem;
-  border: 1px solid rgb(255 255 255 / 72%);
+  border: 1px solid rgb(228 176 111 / 82%);
   border-radius: 50%;
   box-shadow:
     0 0 0 0.22rem rgb(0 0 0 / 16%),
-    0 0 0.75rem rgb(0 0 0 / 48%);
+    0 0 0.75rem rgb(228 176 111 / 24%);
   transform: translate(-50%, -50%);
   pointer-events: none;
 }
@@ -104,7 +104,47 @@
   stroke-width: 1.35;
 }
 
+.ks-cardboard__memory-label {
+  position: absolute;
+  z-index: 12;
+  inset-block-start: max(0.72rem, env(safe-area-inset-top));
+  inset-inline-start: 50%;
+  display: grid;
+  max-inline-size: min(64%, 13rem);
+  min-block-size: 2.3rem;
+  padding: 0.4rem 0.8rem;
+  align-content: center;
+  gap: 0.08rem;
+  overflow: hidden;
+  border: 1px solid var(--cardboard-border);
+  border-radius: 999px;
+  color: #fff;
+  text-align: center;
+  background: var(--cardboard-glass);
+  backdrop-filter: blur(22px);
+  transform: translateX(-50%);
+  pointer-events: none;
+}
+
+.ks-cardboard__memory-label strong,
+.ks-cardboard__memory-label span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ks-cardboard__memory-label strong {
+  font: 590 0.65rem/1.15 system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+  letter-spacing: -0.01em;
+}
+
+.ks-cardboard__memory-label span {
+  color: var(--cardboard-accent);
+  font: 540 0.54rem/1.15 system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+}
+
 .ks-cardboard__exit {
+  z-index: 50;
   inset-block-start: max(0.75rem, env(safe-area-inset-top));
   inset-inline-end: max(0.75rem, env(safe-area-inset-right));
   display: flex;
@@ -161,7 +201,7 @@
   min-block-size: 44px;
   padding: 0.4rem 0.66rem;
   flex: 0 0 auto;
-  color: #000;
+  color: #120d06;
   border: 0;
   border-radius: 999px;
   background: var(--cardboard-accent);
@@ -195,6 +235,7 @@
   text-align: center;
   background: rgb(0 0 0 / 82%);
   backdrop-filter: blur(20px);
+  pointer-events: none;
 }
 
 .ks-cardboard__rotate-hint strong {

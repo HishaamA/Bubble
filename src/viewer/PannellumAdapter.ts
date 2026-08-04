@@ -3,8 +3,10 @@ import type {
   PanoramaAdapter,
   PanoramaHotSpot,
   PanoramaMountOptions,
+  PanoramaOrientationStartOptions,
   PanoramaScene,
   PanoramaView,
+  PanoramaViewState,
   PannellumConfig,
   PannellumEventName,
   PannellumHotSpotConfig,
@@ -235,14 +237,18 @@ export function createPannellumAdapter(
     return true
   }
 
-  const startOrientation = async (): Promise<boolean> => {
+  const startOrientation = async (
+    options: PanoramaOrientationStartOptions = {},
+  ): Promise<boolean> => {
     const orientationViewer = viewer
     if (!orientationViewer?.isOrientationSupported()) return false
     const requestedOrientation = ++orientationRequestVersion
 
     let permissionGranted = false
     try {
-      permissionGranted = await requestOrientationPermission()
+      permissionGranted =
+        options.permissionAlreadyGranted ||
+        (await requestOrientationPermission())
     } catch {
       permissionGranted = false
     }
@@ -255,8 +261,10 @@ export function createPannellumAdapter(
     }
 
     try {
+      // KinSphere owns the standards-based permission request above. The
+      // bundled runtime only attaches its deviceorientation listener, avoiding
+      // a second, non-gesture iOS permission request.
       orientationViewer.startOrientation()
-      // Pannellum completes the iOS permission branch in a promise continuation.
       await Promise.resolve()
     } catch {
       return false
@@ -271,6 +279,31 @@ export function createPannellumAdapter(
   const stopOrientation = () => {
     orientationRequestVersion += 1
     viewer?.stopOrientation()
+  }
+
+  const getView = (): PanoramaViewState | null => {
+    if (!viewer) return null
+    const view = {
+      pitch: viewer.getPitch(),
+      yaw: viewer.getYaw(),
+      hfov: viewer.getHfov(),
+    }
+    return Object.values(view).every(Number.isFinite) ? view : null
+  }
+
+  const setView = (view: PanoramaViewState): boolean => {
+    if (!viewer || !Object.values(view).every(Number.isFinite)) return false
+
+    if (Math.abs(viewer.getPitch() - view.pitch) > 0.001) {
+      viewer.setPitch(view.pitch, false)
+    }
+    if (Math.abs(viewer.getYaw() - view.yaw) > 0.001) {
+      viewer.setYaw(view.yaw, false)
+    }
+    if (Math.abs(viewer.getHfov() - view.hfov) > 0.001) {
+      viewer.setHfov(view.hfov, false)
+    }
+    return true
   }
 
   const zoom = (delta: number) => {
@@ -292,6 +325,8 @@ export function createPannellumAdapter(
     stopOrientation,
     isOrientationSupported: () => viewer?.isOrientationSupported() ?? false,
     isOrientationActive: () => viewer?.isOrientationActive() ?? false,
+    getView,
+    setView,
     panBy,
     zoomIn: () => zoom(-ZOOM_STEP),
     zoomOut: () => zoom(ZOOM_STEP),

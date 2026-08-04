@@ -9,6 +9,13 @@ export type PanoramaCrop = {
   thumbnailHeight: number
 }
 
+export type PanoramaRenderPlan = PanoramaCrop & {
+  mode: 'equirectangular-crop' | 'wide-panorama-fit'
+  /** Destination values are expressed from 0–1 so one plan fits every derivative. */
+  contentTop: number
+  contentHeight: number
+}
+
 export type ProcessedPanorama = {
   viewer: Blob
   thumbnail: Blob
@@ -22,6 +29,7 @@ const MAX_INPUT_BYTES = 25 * 1024 * 1024
 const MAX_INPUT_PIXELS = 80_000_000
 const MAX_VIEWER_HEIGHT = 2048
 const THUMBNAIL_HEIGHT = 320
+const MAX_PANORAMA_RATIO = 12
 
 export function calculatePanoramaCrop(
   width: number,
@@ -58,6 +66,57 @@ export function calculatePanoramaCrop(
     viewerHeight,
     thumbnailWidth: thumbnailHeight * 2,
     thumbnailHeight,
+  }
+}
+
+/**
+ * Produces an exact 2:1 render plan while retaining the full horizontal sweep
+ * of a wide panorama captured in a phone's native Pano mode.
+ */
+export function calculatePanoramaRenderPlan(
+  width: number,
+  height: number,
+): PanoramaRenderPlan {
+  if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) {
+    throw new TypeError('Panorama dimensions must be positive numbers.')
+  }
+  if (width * height > MAX_INPUT_PIXELS) {
+    throw new TypeError('This panorama is too large to process safely on this device.')
+  }
+
+  const ratio = width / height
+  if (ratio < 1.85 || ratio > MAX_PANORAMA_RATIO) {
+    throw new TypeError('Use a wide photo captured with Pano or Panorama mode.')
+  }
+
+  if (ratio <= 2.15) {
+    return {
+      ...calculatePanoramaCrop(width, height),
+      mode: 'equirectangular-crop',
+      contentTop: 0,
+      contentHeight: 1,
+    }
+  }
+
+  const viewerHeight = Math.max(
+    1,
+    Math.min(MAX_VIEWER_HEIGHT, Math.floor(width / 2)),
+  )
+  const thumbnailHeight = Math.min(THUMBNAIL_HEIGHT, viewerHeight)
+  const contentHeight = 2 / ratio
+
+  return {
+    sourceX: 0,
+    sourceY: 0,
+    sourceWidth: width,
+    sourceHeight: height,
+    viewerWidth: viewerHeight * 2,
+    viewerHeight,
+    thumbnailWidth: thumbnailHeight * 2,
+    thumbnailHeight,
+    mode: 'wide-panorama-fit',
+    contentTop: (1 - contentHeight) / 2,
+    contentHeight,
   }
 }
 
@@ -105,7 +164,7 @@ async function decodeImage(file: Blob): Promise<DecodedImage> {
 
 function renderJpeg(
   image: CanvasImageSource,
-  crop: PanoramaCrop,
+  plan: PanoramaRenderPlan,
   outputWidth: number,
   outputHeight: number,
   quality: number,
@@ -116,17 +175,66 @@ function renderJpeg(
   const context = canvas.getContext('2d', { alpha: false })
   if (!context) throw new Error('This device cannot process the panorama.')
 
-  context.drawImage(
-    image,
-    crop.sourceX,
-    crop.sourceY,
-    crop.sourceWidth,
-    crop.sourceHeight,
-    0,
-    0,
-    outputWidth,
-    outputHeight,
-  )
+  if (plan.mode === 'wide-panorama-fit') {
+    const contentTop = Math.round(outputHeight * plan.contentTop)
+    const contentHeight = Math.max(
+      1,
+      Math.round(outputHeight * plan.contentHeight),
+    )
+    const bottomStart = Math.min(outputHeight, contentTop + contentHeight)
+
+    // Extend the panorama's own edge rows into the spherical poles. This keeps
+    // the whole horizontal sweep without inventing unrelated imagery or color.
+    if (contentTop > 0) {
+      context.drawImage(
+        image,
+        0,
+        0,
+        plan.sourceWidth,
+        1,
+        0,
+        0,
+        outputWidth,
+        contentTop,
+      )
+    }
+    if (bottomStart < outputHeight) {
+      context.drawImage(
+        image,
+        0,
+        Math.max(0, plan.sourceHeight - 1),
+        plan.sourceWidth,
+        1,
+        0,
+        bottomStart,
+        outputWidth,
+        outputHeight - bottomStart,
+      )
+    }
+    context.drawImage(
+      image,
+      0,
+      0,
+      plan.sourceWidth,
+      plan.sourceHeight,
+      0,
+      contentTop,
+      outputWidth,
+      contentHeight,
+    )
+  } else {
+    context.drawImage(
+      image,
+      plan.sourceX,
+      plan.sourceY,
+      plan.sourceWidth,
+      plan.sourceHeight,
+      0,
+      0,
+      outputWidth,
+      outputHeight,
+    )
+  }
 
   return new Promise((resolve, reject) => {
     canvas.toBlob(
@@ -159,20 +267,20 @@ export async function processPanoramaForSharing(
 
   const decoded = await decodeImage(file)
   try {
-    const crop = calculatePanoramaCrop(decoded.width, decoded.height)
+    const plan = calculatePanoramaRenderPlan(decoded.width, decoded.height)
     const [viewer, thumbnail] = await Promise.all([
       renderJpeg(
         decoded.source,
-        crop,
-        crop.viewerWidth,
-        crop.viewerHeight,
+        plan,
+        plan.viewerWidth,
+        plan.viewerHeight,
         0.88,
       ),
       renderJpeg(
         decoded.source,
-        crop,
-        crop.thumbnailWidth,
-        crop.thumbnailHeight,
+        plan,
+        plan.thumbnailWidth,
+        plan.thumbnailHeight,
         0.8,
       ),
     ])
@@ -180,10 +288,10 @@ export async function processPanoramaForSharing(
     return {
       viewer,
       thumbnail,
-      viewerWidth: crop.viewerWidth,
-      viewerHeight: crop.viewerHeight,
-      thumbnailWidth: crop.thumbnailWidth,
-      thumbnailHeight: crop.thumbnailHeight,
+      viewerWidth: plan.viewerWidth,
+      viewerHeight: plan.viewerHeight,
+      thumbnailWidth: plan.thumbnailWidth,
+      thumbnailHeight: plan.thumbnailHeight,
     }
   } finally {
     decoded.close()

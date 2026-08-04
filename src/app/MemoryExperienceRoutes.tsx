@@ -5,6 +5,7 @@ import {
   type Capture360Submission,
   type CaptureSource,
 } from '../features/capture'
+import { JournalPage } from '../features/journal'
 import { MemoryConstellation } from '../features/memories/MemoryConstellation'
 import { PanoramaMemoryScreen } from '../features/memories/PanoramaMemoryScreen'
 import {
@@ -25,6 +26,12 @@ export function MemoriesRoute() {
   const { moments } = useSharedMoments()
 
   return <MemoryConstellation sharedMoments={moments} />
+}
+
+export function JournalRoute({ now }: { now?: Date } = {}) {
+  const { moments } = useSharedMoments()
+
+  return <JournalPage now={now} sharedMoments={moments} />
 }
 
 export function PanoramaRoute() {

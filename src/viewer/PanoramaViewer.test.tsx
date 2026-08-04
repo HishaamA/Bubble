@@ -1,3 +1,4 @@
+import { createRef } from 'react'
 import {
   createEvent,
   fireEvent,
@@ -7,7 +8,7 @@ import {
 } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { PanoramaViewer } from './PanoramaViewer'
+import { PanoramaViewer, type PanoramaViewerHandle } from './PanoramaViewer'
 import type {
   PanoramaAdapter,
   PanoramaMountOptions,
@@ -25,6 +26,8 @@ const viewerMocks = vi.hoisted(() => ({
     PanoramaAdapter['isOrientationSupported']
   >(),
   isOrientationActive: vi.fn<PanoramaAdapter['isOrientationActive']>(),
+  getView: vi.fn<PanoramaAdapter['getView']>(),
+  setView: vi.fn<PanoramaAdapter['setView']>(),
   panBy: vi.fn<PanoramaAdapter['panBy']>(),
   zoomIn: vi.fn<PanoramaAdapter['zoomIn']>(),
   zoomOut: vi.fn<PanoramaAdapter['zoomOut']>(),
@@ -102,6 +105,19 @@ describe('PanoramaViewer accessibility controls', () => {
 
     expect(arrowEvent.defaultPrevented).toBe(true)
     expect(viewerMocks.panBy).toHaveBeenCalledWith(0, 8)
+  })
+
+  it('exposes an immediate camera snapshot bridge for Cardboard mirroring', async () => {
+    const ref = createRef<PanoramaViewerHandle>()
+    const view = { pitch: 14, yaw: -32, hfov: 96 }
+    viewerMocks.getView.mockReturnValue(view)
+    viewerMocks.setView.mockReturnValue(true)
+    render(<PanoramaViewer ref={ref} scenes={scenes} />)
+    await waitFor(() => expect(viewerMocks.mount).toHaveBeenCalled())
+
+    expect(ref.current?.getView()).toEqual(view)
+    expect(ref.current?.setView(view)).toBe(true)
+    expect(viewerMocks.setView).toHaveBeenCalledWith(view)
   })
 
   it('makes the canvas inert in flat mode and does not intercept ArrowDown on its scene select', async () => {

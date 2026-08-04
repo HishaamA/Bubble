@@ -9,6 +9,8 @@ export {
 export {
   readImageDimensions,
   validateEquirectangularDimensions,
+  validatePanoramaCaptureDimensions,
   type EquirectangularValidation,
   type ImageDimensions,
+  type PanoramaCaptureValidation,
 } from './equirectangular'

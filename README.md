@@ -27,17 +27,18 @@ capture-to-viewer interaction works without backend credentials. Cross-device
 delivery requires configured Supabase credentials, signed-in approved circle
 members, and the included `360_moment_mvp` migration.
 
-Profile includes the MVP Family Sync setup: email sign-in/sign-up, circle
-creation, private one-use invite codes, join requests, owner approval, and
-sign-out. With no client-safe Supabase credentials it clearly stays in
-local-only mode.
+Profile includes persistent Family Sync backed by Clerk identity and Supabase:
+circle creation, private one-use invite codes, join requests, owner approval,
+and sign-out. With no client-safe Supabase credentials, development can use an
+explicit account-scoped local preview; production does not treat that preview
+as cross-device delivery.
 
 ## Locked stack
 
 - React, TypeScript, and Vite
 - Capacitor for Android and iOS
 - A pinned Pannellum build bundled with the app; no runtime CDN
-- Supabase Auth, Postgres, Row Level Security, private Storage, Realtime, Edge Functions, and Cron
+- Clerk sessions with Supabase native third-party auth, Postgres, Row Level Security, private Storage, Realtime, Edge Functions, and Cron
 - TUS resumable uploads
 - FCM and APNs as generic push transports; in-app notifications remain authoritative
 
@@ -111,6 +112,10 @@ push-provider, and cron secrets in the Supabase development environment; never
 prefix them with `VITE_`.
 
 The expected client variables are documented in [`.env.example`](./.env.example). Native platform setup and Supabase initialization are added in their corresponding roadmap phases.
+
+Clerk must be enabled as a native third-party auth provider in Supabase. Follow
+[`docs/decisions/0004-clerk-supabase-third-party-auth.md`](./docs/decisions/0004-clerk-supabase-third-party-auth.md); do not use Clerk's deprecated Supabase
+JWT template.
 
 The 360 Moment button imports an existing 2:1 equirectangular image. Ordinary
 phone cameras do not produce a complete stitched 360 image; use a 360 camera or

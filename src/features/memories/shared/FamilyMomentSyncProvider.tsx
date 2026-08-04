@@ -7,7 +7,7 @@ import {
   type PropsWithChildren,
 } from 'react'
 import type { Capture360Submission } from '../../capture'
-import { supabase } from '../../../lib/supabase'
+import { subscribeToSupabaseAuthChanges } from '../../../lib/supabase'
 import {
   fetchFamilyMoments,
   getFamilyDailyCaptureWindow,
@@ -113,7 +113,7 @@ export function FamilyMomentSyncProvider({ children }: PropsWithChildren) {
     }
 
     void connect()
-    const authSubscription = supabase?.auth.onAuthStateChange(reconnect)
+    const unsubscribeFromAuth = subscribeToSupabaseAuthChanges(reconnect)
     window.addEventListener('kinsphere:family-sync-refresh', reconnect)
     window.addEventListener('focus', reconnect)
     document.addEventListener('visibilitychange', reconnectWhenVisible)
@@ -122,7 +122,7 @@ export function FamilyMomentSyncProvider({ children }: PropsWithChildren) {
       active = false
       connectionVersion += 1
       unsubscribeFromMoments()
-      authSubscription?.data.subscription.unsubscribe()
+      unsubscribeFromAuth()
       window.removeEventListener('kinsphere:family-sync-refresh', reconnect)
       window.removeEventListener('focus', reconnect)
       document.removeEventListener('visibilitychange', reconnectWhenVisible)

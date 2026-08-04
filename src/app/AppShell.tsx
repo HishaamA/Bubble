@@ -1,14 +1,18 @@
 import type { PropsWithChildren } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
+import { useAuth } from '../features/auth/authContext'
 import { Capture360Shortcut } from '../features/capture'
 import { AppTabBar } from './AppTabBar'
 
 export function AppShell({ children }: PropsWithChildren) {
+  const { status: authStatus } = useAuth()
   const location = useLocation()
   const navigate = useNavigate()
-  const showCaptureShortcut =
-    !location.pathname.startsWith('/capture') &&
-    !location.pathname.startsWith('/memory/')
+  const showPrimaryChrome =
+    location.pathname !== '/login' &&
+    location.pathname !== '/onboarding' &&
+    authStatus === 'signed-in'
+  const showCaptureShortcut = showPrimaryChrome && location.pathname === '/'
 
   return (
     <div className="app-viewport">
@@ -20,7 +24,7 @@ export function AppShell({ children }: PropsWithChildren) {
           }
         />
       ) : null}
-      <AppTabBar />
+      {showPrimaryChrome ? <AppTabBar /> : null}
     </div>
   )
 }

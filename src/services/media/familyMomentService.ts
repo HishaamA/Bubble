@@ -1,6 +1,10 @@
 import type { Capture360Submission } from '../../features/capture'
 import type { SavePanoramaMomentInput } from '../../features/memories/shared'
-import { supabase } from '../../lib/supabase'
+import {
+  getClerkSupabaseIdentity,
+  getSupabaseClient,
+} from '../../lib/supabase'
+import { bootstrapCurrentClerkProfile } from '../persistence'
 import { processPanoramaForSharing } from './processPanorama'
 
 const FAMILY_MEDIA_BUCKET = 'family-media'
@@ -29,15 +33,11 @@ type FamilyMomentRow = {
 export async function getFamilyMomentConnection(): Promise<
   FamilyMomentConnection | null
 > {
-  if (!supabase) return null
+  const client = getSupabaseClient()
+  if (!client || !getClerkSupabaseIdentity()) return null
+  const { userId } = await bootstrapCurrentClerkProfile()
 
-  const { data: sessionData, error: sessionError } =
-    await supabase.auth.getSession()
-  if (sessionError) throw sessionError
-  const userId = sessionData.session?.user.id
-  if (!userId) return null
-
-  const { data, error } = await supabase
+  const { data, error } = await client
     .from('circle_members')
     .select('circle_id')
     .eq('user_id', userId)
@@ -55,21 +55,22 @@ export async function publishFamilyMoment(
   connection: FamilyMomentConnection,
   submission: Capture360Submission,
 ) {
-  if (!supabase) throw new Error('Family sync is not configured.')
+  const client = getSupabaseClient()
+  if (!client) throw new Error('Family sync is not configured.')
 
   const processed = await processPanoramaForSharing(submission.file)
   const panoramaPath = `${connection.circleId}/panoramas/${connection.userId}/${submission.id}.jpg`
   const thumbnailPath = `${connection.circleId}/thumbnails/${connection.userId}/${submission.id}.jpg`
 
   const [panoramaUpload, thumbnailUpload] = await Promise.all([
-    supabase.storage
+    client.storage
       .from(FAMILY_MEDIA_BUCKET)
       .upload(panoramaPath, processed.viewer, {
         cacheControl: '31536000',
         contentType: 'image/jpeg',
         upsert: false,
       }),
-    supabase.storage
+    client.storage
       .from(FAMILY_MEDIA_BUCKET)
       .upload(thumbnailPath, processed.thumbnail, {
         cacheControl: '31536000',
@@ -81,7 +82,7 @@ export async function publishFamilyMoment(
   if (panoramaUpload.error) throw panoramaUpload.error
   if (thumbnailUpload.error) throw thumbnailUpload.error
 
-  const { error } = await supabase.rpc('finalize_360_moment', {
+  const { error } = await client.rpc('finalize_360_moment', {
     p_circle_id: connection.circleId,
     p_moment_id: submission.id,
     p_capture_kind: submission.source === 'daily' ? 'scheduled' : 'manual',
@@ -101,9 +102,10 @@ export async function publishFamilyMoment(
 export async function getFamilyDailyCaptureWindow(
   connection: FamilyMomentConnection,
 ): Promise<FamilyDailyCaptureWindow | null> {
-  if (!supabase) return null
+  const client = getSupabaseClient()
+  if (!client) return null
 
-  const { data, error } = await supabase.rpc(
+  const { data, error } = await client.rpc(
     'get_or_create_daily_capture_window',
     { p_circle_id: connection.circleId },
   )
@@ -130,8 +132,8 @@ export async function getFamilyDailyCaptureWindow(
 export async function fetchFamilyMoments(
   connection: FamilyMomentConnection,
 ): Promise<SavePanoramaMomentInput[]> {
-  if (!supabase) return []
-  const client = supabase
+  const client = getSupabaseClient()
+  if (!client) return []
 
   const { data, error } = await client
     .from('family_moments')
@@ -192,8 +194,8 @@ export function subscribeToFamilyMoments(
   circleId: string,
   onChange: () => void,
 ) {
-  if (!supabase) return () => undefined
-  const client = supabase
+  const client = getSupabaseClient()
+  if (!client) return () => undefined
 
   const channel = client
     .channel(`family-moments:${circleId}`)

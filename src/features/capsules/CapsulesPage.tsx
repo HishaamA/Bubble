@@ -1,7 +1,5 @@
-import { useMemo, useState, type FormEvent } from 'react'
+import { useState, type FormEvent } from 'react'
 import '../FeaturePages.css'
-
-type CapsuleFilter = 'all' | 'mine' | 'locked'
 
 type Capsule = {
   id: string
@@ -10,7 +8,6 @@ type Capsule = {
   owner: 'You' | 'Mum' | 'Hishaam'
   opens: string
   locked: boolean
-  contents: string
 }
 
 const starterCapsules: Capsule[] = [
@@ -21,25 +18,22 @@ const starterCapsules: Capsule[] = [
     owner: 'You',
     opens: '12 Mar 2027',
     locked: true,
-    contents: '4 memories · 1 voice note',
   },
   {
     id: 'summer-letters',
     title: 'Letters from this summer',
-    recipient: 'The family',
+    recipient: 'the family',
     owner: 'Mum',
     opens: '1 Sep 2026',
     locked: true,
-    contents: '7 notes · 12 photos',
   },
   {
     id: 'grandad-recipes',
     title: 'Grandad’s recipe box',
-    recipient: 'Everyone',
+    recipient: 'everyone',
     owner: 'Hishaam',
     opens: 'Opened 14 Aug',
     locked: false,
-    contents: '9 recipes · 3 stories',
   },
 ]
 
@@ -53,19 +47,12 @@ function CapsuleLock({ locked }: { locked: boolean }) {
 }
 
 export function CapsulesPage() {
-  const [filter, setFilter] = useState<CapsuleFilter>('all')
   const [capsules, setCapsules] = useState(starterCapsules)
   const [creating, setCreating] = useState(false)
   const [title, setTitle] = useState('')
   const [recipient, setRecipient] = useState('Sara')
   const [openDate, setOpenDate] = useState('2027-01-01')
   const [announcement, setAnnouncement] = useState('')
-
-  const visibleCapsules = useMemo(() => capsules.filter((capsule) => {
-    if (filter === 'mine') return capsule.owner === 'You'
-    if (filter === 'locked') return capsule.locked
-    return true
-  }), [capsules, filter])
 
   function createCapsule(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
@@ -86,19 +73,16 @@ export function CapsulesPage() {
       owner: 'You',
       opens: friendlyDate,
       locked: true,
-      contents: 'Empty draft',
     }, ...current])
-    setFilter('all')
     setCreating(false)
     setTitle('')
-    setAnnouncement(`Created a local preview of ${cleanTitle}.`)
+    setAnnouncement(`${cleanTitle} was added to your capsules.`)
   }
 
   return (
     <section className="ks-feature capsules-page" aria-labelledby="capsules-title">
       <header className="ks-feature__header">
         <div className="ks-feature__header-copy">
-          <p className="eyebrow">Keep for later</p>
           <h1 id="capsules-title">Capsules</h1>
         </div>
         <button
@@ -120,7 +104,7 @@ export function CapsulesPage() {
         <form className="ks-card ks-card--accent capsule-create" onSubmit={createCapsule}>
           <div className="capsule-create__heading">
             <h2>New capsule</h2>
-            <button type="button" onClick={() => setCreating(false)}>Cancel</button>
+            <button type="button" onClick={() => setCreating(false)}>Done</button>
           </div>
           <label className="ks-field">
             <span>Capsule name</span>
@@ -138,7 +122,7 @@ export function CapsulesPage() {
               <select value={recipient} onChange={(event) => setRecipient(event.target.value)}>
                 <option>Sara</option>
                 <option>Hishaam</option>
-                <option>The family</option>
+                <option value="the family">The family</option>
               </select>
             </label>
             <label className="ks-field">
@@ -146,60 +130,31 @@ export function CapsulesPage() {
               <input type="date" value={openDate} onChange={(event) => setOpenDate(event.target.value)} />
             </label>
           </div>
-          <div className="capsule-create__preview" aria-label="Capsule preview">
-            <span aria-hidden="true"><CapsuleLock locked /></span>
-            <span>
-              <strong>{title || 'Untitled capsule'}</strong>
-              <small>For {recipient} · opens {openDate || 'later'}</small>
-            </span>
-          </div>
           <button className="ks-primary-button" type="submit" disabled={!title.trim()}>
-            Save local preview
+            Create capsule
           </button>
-          <p className="ks-inline-note">This prototype saves the card only until the page reloads.</p>
         </form>
-      ) : (
-        <div className="ks-filter-row" aria-label="Filter capsules">
-          {(['all', 'mine', 'locked'] as const).map((value) => (
-            <button
-              key={value}
-              className="ks-filter"
-              type="button"
-              aria-pressed={filter === value}
-              onClick={() => setFilter(value)}
-            >
-              {value === 'all' ? 'All capsules' : value === 'mine' ? 'Created by me' : 'Still locked'}
-            </button>
-          ))}
-        </div>
-      )}
+      ) : null}
 
       <section className="ks-section" aria-labelledby="capsule-list-title">
         <div className="ks-section__heading">
-          <h2 id="capsule-list-title">{filter === 'all' ? 'Your time vault' : filter === 'mine' ? 'Created by you' : 'Waiting to open'}</h2>
-          <span>{visibleCapsules.length} {visibleCapsules.length === 1 ? 'capsule' : 'capsules'}</span>
+          <h2 id="capsule-list-title">Saved for later</h2>
         </div>
 
         <div className="ks-stack">
-          {visibleCapsules.length ? visibleCapsules.map((capsule) => (
+          {capsules.map((capsule) => (
             <article
               key={capsule.id}
               className="ks-card capsule-card"
             >
-              <div className="capsule-card__top">
-                <span className="capsule-card__lock"><CapsuleLock locked={capsule.locked} /></span>
-                <span className="capsule-card__date">{capsule.locked ? `Opens ${capsule.opens}` : capsule.opens}</span>
-              </div>
-              <div>
+              <span className="capsule-card__lock"><CapsuleLock locked={capsule.locked} /></span>
+              <div className="capsule-card__copy">
                 <h3>{capsule.title}</h3>
-                <p>For {capsule.recipient} · by {capsule.owner}</p>
+                <p>For {capsule.recipient} · from {capsule.owner === 'You' ? 'you' : capsule.owner}</p>
               </div>
-              <div className="capsule-card__bottom">
-                <span>{capsule.contents}</span>
-                <strong>{capsule.locked ? 'Sealed' : 'Ready to revisit'}</strong>
-              </div>
+              <span className="capsule-card__date">{capsule.locked ? `Opens ${capsule.opens}` : capsule.opens}</span>
             </article>
-          )) : <div className="ks-card capsule-empty">No capsules match this filter yet.</div>}
+          ))}
         </div>
       </section>
     </section>

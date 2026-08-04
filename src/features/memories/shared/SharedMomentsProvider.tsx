@@ -50,10 +50,14 @@ function createBrowserObjectUrlManager(): MomentObjectUrlManager {
 export function SharedMomentsProvider({
   children,
   store,
+  cacheNamespace = 'local-preview',
   objectUrls,
   notifierFactory = createMomentChangeNotifier,
 }: SharedMomentsProviderProps) {
-  const [defaultStore] = useState(createDefaultMomentStore)
+  const defaultStore = useMemo(
+    () => createDefaultMomentStore(cacheNamespace),
+    [cacheNamespace],
+  )
   const [defaultObjectUrls] = useState(createBrowserObjectUrlManager)
   const [createNotifier] = useState(() => notifierFactory)
   const activeStore = store ?? defaultStore

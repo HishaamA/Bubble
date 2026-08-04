@@ -35,6 +35,20 @@ export interface PanoramaView {
   hfov?: number
 }
 
+export interface PanoramaViewState {
+  pitch: number
+  yaw: number
+  hfov: number
+}
+
+export interface PanoramaOrientationStartOptions {
+  /**
+   * Cardboard requests iOS motion access once for both eyes. Passing this flag
+   * prevents each synchronized viewer from opening its own permission prompt.
+   */
+  permissionAlreadyGranted?: boolean
+}
+
 export interface PanoramaMountOptions {
   scenes: readonly PanoramaScene[]
   initialSceneId?: string
@@ -50,10 +64,14 @@ export interface PanoramaAdapter {
     options: PanoramaMountOptions,
   ) => Promise<void>
   changeScene: (sceneId: string, view?: PanoramaView) => boolean
-  startOrientation: () => Promise<boolean>
+  startOrientation: (
+    options?: PanoramaOrientationStartOptions,
+  ) => Promise<boolean>
   stopOrientation: () => void
   isOrientationSupported: () => boolean
   isOrientationActive: () => boolean
+  getView: () => PanoramaViewState | null
+  setView: (view: PanoramaViewState) => boolean
   panBy: (pitchDelta: number, yawDelta: number) => void
   zoomIn: () => void
   zoomOut: () => void

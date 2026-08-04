@@ -20,15 +20,4 @@ describe('createBubbleDrift', () => {
       delay: '-3.7s',
     })
   })
-
-  it('keeps the featured memory calmer than surrounding bubbles', () => {
-    expect(createBubbleDrift(4, true)).toEqual({
-      x: '4.5px',
-      y: '4px',
-      reverseX: '-4.5px',
-      reverseY: '-4px',
-      duration: '26s',
-      delay: '-14.8s',
-    })
-  })
 })

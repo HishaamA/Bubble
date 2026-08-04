@@ -7,6 +7,7 @@ import {
 import {
   createMemoryMomentStore,
   createResilientMomentStore,
+  momentDatabaseNameForSubject,
 } from './store'
 import type {
   MomentChangeNotifier,
@@ -72,6 +73,13 @@ function MomentHarness() {
 }
 
 describe('SharedMomentsProvider', () => {
+  it('uses a separate IndexedDB namespace for each authenticated subject', () => {
+    expect(momentDatabaseNameForSubject('user_alice')).not.toBe(
+      momentDatabaseNameForSubject('user_bob'),
+    )
+    expect(momentDatabaseNameForSubject('user/alice')).toContain('user%2Falice')
+  })
+
   it('loads stored panoramas and exposes local object URLs', async () => {
     const objectUrls: MomentObjectUrlManager = {
       create: vi.fn(() => 'blob:local-preview'),

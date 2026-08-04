@@ -10,6 +10,8 @@ export type {
   PanoramaHotSpot,
   PanoramaHotSpotKind,
   PanoramaMountOptions,
+  PanoramaOrientationStartOptions,
   PanoramaScene,
   PanoramaView,
+  PanoramaViewState,
 } from './types'

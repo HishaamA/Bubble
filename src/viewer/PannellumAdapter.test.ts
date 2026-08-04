@@ -182,6 +182,13 @@ describe('createPannellumAdapter', () => {
     expect(fakeViewer.instance.setPitch).toHaveBeenCalledWith(8, 180)
     expect(fakeViewer.instance.setYaw).toHaveBeenCalledWith(-8, 180)
 
+    expect(adapter.getView()).toEqual({ pitch: 8, yaw: -8, hfov: 100 })
+    expect(adapter.setView({ pitch: -12, yaw: 42, hfov: 88 })).toBe(true)
+    expect(fakeViewer.instance.setPitch).toHaveBeenLastCalledWith(-12, false)
+    expect(fakeViewer.instance.setYaw).toHaveBeenLastCalledWith(42, false)
+    expect(fakeViewer.instance.setHfov).toHaveBeenLastCalledWith(88, false)
+    expect(adapter.getView()).toEqual({ pitch: -12, yaw: 42, hfov: 88 })
+
     expect(await adapter.startOrientation()).toBe(true)
     expect(adapter.isOrientationActive()).toBe(true)
     adapter.stopOrientation()
@@ -220,6 +227,23 @@ describe('createPannellumAdapter', () => {
 
     expect(await starting).toBe(false)
     expect(pendingViewer.instance.startOrientation).not.toHaveBeenCalled()
+  })
+
+  it('uses a permission already granted for a synchronized Cardboard view', async () => {
+    const fakeViewer = createFakeViewer({ orientationSupported: true })
+    const runtime = createFakeRuntime(fakeViewer).runtime
+    const requestOrientationPermission = vi.fn(async () => false)
+    const adapter = createPannellumAdapter({
+      loadRuntime: async () => runtime,
+      requestOrientationPermission,
+    })
+    await adapter.mount(document.createElement('div'), { scenes })
+
+    expect(
+      await adapter.startOrientation({ permissionAlreadyGranted: true }),
+    ).toBe(true)
+    expect(requestOrientationPermission).not.toHaveBeenCalled()
+    expect(fakeViewer.instance.startOrientation).toHaveBeenCalledOnce()
   })
 
   it('forwards load, scene, and normalized error events once', async () => {

@@ -14,14 +14,20 @@ import { createPannellumAdapter } from './PannellumAdapter'
 import type {
   PanoramaAdapter,
   PanoramaHotSpot,
+  PanoramaOrientationStartOptions,
   PanoramaScene,
   PanoramaView,
+  PanoramaViewState,
 } from './types'
 import './PanoramaViewer.css'
 
 export interface PanoramaViewerHandle {
   changeScene: (sceneId: string, view?: PanoramaView) => boolean
-  startOrientation: () => Promise<boolean>
+  getView: () => PanoramaViewState | null
+  setView: (view: PanoramaViewState) => boolean
+  startOrientation: (
+    options?: PanoramaOrientationStartOptions,
+  ) => Promise<boolean>
   stopOrientation: () => void
   resize: () => void
   destroy: () => void
@@ -146,7 +152,9 @@ export const PanoramaViewer = forwardRef<
     setMotionPending(false)
   }, [])
 
-  const startMotion = useCallback(async (): Promise<boolean> => {
+  const startMotion = useCallback(async (
+    options?: PanoramaOrientationStartOptions,
+  ): Promise<boolean> => {
     const adapter = adapterRef.current
     if (!adapter || !adapter.isOrientationSupported()) return false
     const requestedMotion = ++motionRequestVersionRef.current
@@ -156,7 +164,7 @@ export const PanoramaViewer = forwardRef<
 
     let started = false
     try {
-      started = await adapter.startOrientation()
+      started = await adapter.startOrientation(options)
     } catch {
       started = false
     }
@@ -185,6 +193,8 @@ export const PanoramaViewer = forwardRef<
     () => ({
       changeScene: (nextSceneId, view) =>
         adapterRef.current?.changeScene(nextSceneId, view) ?? false,
+      getView: () => adapterRef.current?.getView() ?? null,
+      setView: (view) => adapterRef.current?.setView(view) ?? false,
       startOrientation: startMotion,
       stopOrientation: stopMotion,
       resize: () => adapterRef.current?.resize(),

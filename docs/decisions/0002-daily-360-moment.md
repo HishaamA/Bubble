@@ -12,17 +12,26 @@ needs a lightweight shared ritual: once per day, the family receives one short,
 unexpected window in which each member may share one 360 panorama. A manual
 upload shortcut must remain available outside that window.
 
-An ordinary phone camera does not create a complete stitched equirectangular
-360 image. Pretending otherwise would produce content the panorama viewer cannot
-render correctly.
+An ordinary single phone-camera frame does not create a complete stitched
+spherical image. Many phones can, however, stitch a wide horizontal sweep in
+their native Pano or Panorama mode. That capture can become a useful MVP 360°
+scene if the entire sweep is retained and normalized to the viewer's 2:1 input
+contract, while the product stays clear that uncaptured sky and ground were not
+invented.
 
 ## Decision
 
 - Put 360 capture/import on Memories as a right-edge action, not under Capsules.
-- Accept existing image files and request the environment camera/library picker,
-  then validate an approximately 2:1 equirectangular shape.
-- Explain that true content comes from a 360 camera or an already exported
-  panorama; custom capture/stitching remains out of scope.
+- Offer separate phone-camera and photo-library affordances. Guide phone users
+  to landscape orientation and the native Pano or Panorama mode before making a
+  slow horizontal sweep.
+- Accept either an approximately 2:1 equirectangular image or a sufficiently
+  wide native phone panorama. Reject ordinary single frames rather than
+  presenting them as 360° captures.
+- Normalize a wide phone panorama to an exact 2:1 derivative. Preserve the full
+  horizontal sweep and extend only its own top and bottom edge pixels into the
+  uncaptured spherical poles. AI completion, multi-frame web stitching, and
+  claims of a fully captured sphere remain out of scope.
 - Keep the daily mode and manual mode distinct. PostgreSQL creates the daily
   15-minute circle window and enforces it with server time. Manual contributions
   do not consume the daily allowance.

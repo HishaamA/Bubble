@@ -301,6 +301,11 @@
   transform: translateX(1.25rem);
 }
 
+.ks-toggle:disabled {
+  opacity: 0.56;
+  cursor: wait;
+}
+
 .ks-avatar-stack {
   display: flex;
   align-items: center;
@@ -429,16 +434,19 @@
 .relay-composer__modes {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  padding: 0.2rem;
-  border-radius: 0.78rem;
-  border: 1px solid rgba(255, 255, 255, 0.09);
-  background: #050505;
+  padding: 0;
+  gap: 0.3rem;
+  border: 0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 0;
+  background: transparent;
 }
 
 .relay-composer__modes button {
   min-height: 2.75rem;
   border: 0;
-  border-radius: 0.64rem;
+  border-bottom: 1px solid transparent;
+  border-radius: 0;
   color: rgba(255, 255, 255, 0.45);
   background: transparent;
   font: inherit;
@@ -449,26 +457,29 @@
 
 .relay-composer__modes button[aria-pressed='true'] {
   color: #fff;
-  background: #1c1c1e;
+  border-bottom-color: rgba(255, 255, 255, 0.72);
+  background: transparent;
 }
 
 .relay-composer__photo {
-  display: grid;
-  min-height: 7.4rem;
-  padding: 1rem;
-  place-items: center;
-  border: 1px dashed rgba(255, 255, 255, 0.16);
-  border-radius: 1rem;
+  display: flex;
+  min-height: 4.35rem;
+  padding: 0.7rem 0.15rem;
+  align-items: center;
+  gap: 0.75rem;
+  border: 0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 0;
   color: rgba(255, 255, 255, 0.5);
-  background: #050505;
-  text-align: center;
+  background: transparent;
+  text-align: left;
 }
 
 .relay-composer__photo span:first-child {
   display: grid;
   width: 2.5rem;
   height: 2.5rem;
-  margin-bottom: 0.38rem;
+  margin-bottom: 0;
   place-items: center;
   border-radius: 50%;
   color: #000;
@@ -578,9 +589,11 @@
 .capsule-card {
   position: relative;
   display: grid;
-  min-height: 9.4rem;
-  padding: 1rem 0;
-  align-content: space-between;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  min-height: 4.9rem;
+  padding: 0.8rem 0;
+  align-items: center;
+  gap: 0.75rem;
   border: 0;
   border-bottom: 1px solid rgba(255, 255, 255, 0.11);
   border-radius: 0;
@@ -596,16 +609,6 @@
   content: none;
 }
 
-.capsule-card__top,
-.capsule-card__bottom {
-  position: relative;
-  z-index: 1;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 0.7rem;
-}
-
 .capsule-card__lock {
   display: grid;
   width: 2rem;
@@ -617,15 +620,18 @@
 }
 
 .capsule-card__date {
+  max-width: 5.5rem;
   color: rgba(255, 255, 255, 0.42);
   font-size: 0.64rem;
+  line-height: 1.35;
+  text-align: right;
 }
 
 .capsule-card h3 {
   position: relative;
   z-index: 1;
   max-width: 14rem;
-  margin: 1rem 0 0.3rem;
+  margin: 0 0 0.3rem;
   color: #fff;
   font-size: 1.05rem;
   font-weight: 630;
@@ -638,21 +644,6 @@
   margin: 0;
   color: rgba(255, 255, 255, 0.48);
   font-size: 0.68rem;
-}
-
-.capsule-card__bottom {
-  margin-top: 1rem;
-}
-
-.capsule-card__bottom span {
-  color: rgba(255, 255, 255, 0.48);
-  font-size: 0.65rem;
-}
-
-.capsule-card__bottom strong {
-  color: rgba(255, 255, 255, 0.72);
-  font-size: 0.67rem;
-  font-weight: 670;
 }
 
 .capsule-empty {
@@ -737,15 +728,14 @@
 }
 
 /* Events */
-.events-page {
-  --feature-accent: #f5f5f7;
-  --feature-accent-rgb: 245, 245, 247;
-}
-
 .event-hero {
   position: relative;
-  min-height: 14.5rem;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  min-height: 7.25rem;
   padding: 1rem 0;
+  align-items: center;
+  gap: 0.9rem;
   border: 0;
   border-top: 1px solid rgba(255, 255, 255, 0.12);
   border-bottom: 1px solid rgba(255, 255, 255, 0.12);
@@ -758,7 +748,7 @@
   z-index: 1;
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  justify-content: flex-start;
 }
 
 .event-hero__date {
@@ -794,7 +784,7 @@
 }
 
 .event-hero__body {
-  position: absolute;
+  position: static;
   z-index: 1;
   right: 0;
   bottom: 1rem;
@@ -809,13 +799,14 @@
 }
 
 .event-hero__body > p {
-  margin: 0.3rem 0 0.8rem;
+  margin: 0.3rem 0 0;
   color: rgba(255, 255, 255, 0.55);
   font-size: 0.72rem;
 }
 
 .event-hero__footer {
   display: flex;
+  margin-top: 0.8rem;
   align-items: center;
   justify-content: space-between;
   gap: 0.8rem;
@@ -894,6 +885,62 @@
   margin-top: 0.2rem;
   color: rgba(255, 255, 255, 0.4);
   font-size: 0.63rem;
+}
+
+.together-capsules__heading > div > p {
+  margin: 0.22rem 0 0;
+  color: rgba(255, 255, 255, 0.42);
+  font-size: 0.65rem;
+  line-height: 1.4;
+}
+
+.together-capsules__link {
+  display: inline-flex;
+  min-height: 2.75rem;
+  padding-left: 0.7rem;
+  align-items: center;
+  color: rgba(255, 255, 255, 0.62);
+  font-size: 0.68rem;
+  font-weight: 620;
+  text-decoration: none;
+}
+
+.together-capsules__list {
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.together-capsules__item {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  min-height: 4rem;
+  padding: 0.72rem 0.12rem;
+  align-items: center;
+  gap: 0.75rem;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.together-capsules__item h3,
+.together-capsules__item p {
+  margin: 0;
+}
+
+.together-capsules__item h3 {
+  color: rgba(255, 255, 255, 0.86);
+  font-size: 0.77rem;
+}
+
+.together-capsules__item p {
+  margin-top: 0.2rem;
+  color: rgba(255, 255, 255, 0.42);
+  font-size: 0.63rem;
+}
+
+.together-capsules__item time {
+  max-width: 5rem;
+  color: rgba(255, 255, 255, 0.42);
+  font-size: 0.62rem;
+  line-height: 1.35;
+  text-align: right;
 }
 
 .event-list-item__arrow {
@@ -1006,6 +1053,7 @@
   display: grid;
   width: 4.2rem;
   height: 4.2rem;
+  overflow: hidden;
   place-items: center;
   border: 1px solid rgba(255, 255, 255, 0.18);
   border-radius: 50%;
@@ -1013,6 +1061,48 @@
   background: #d8d8dc;
   font-size: 1.2rem;
   font-weight: 760;
+}
+
+.profile-card__avatar img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.profile-page__identity {
+  margin: 0.22rem 0 0;
+  color: rgba(255, 255, 255, 0.5);
+  font-size: 0.72rem;
+  font-weight: 430;
+  letter-spacing: 0;
+}
+
+.profile-page__preference-error {
+  margin: 0.55rem 0 0;
+  color: rgba(220, 174, 124, 0.78);
+  font-size: 0.64rem;
+  line-height: 1.4;
+}
+
+.profile-page__sign-out {
+  width: 100%;
+  min-height: 3.2rem;
+  margin-top: 0.35rem;
+  border: 0;
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
+  color: #dcae7c;
+  background: transparent;
+  font: inherit;
+  font-size: 0.74rem;
+  font-weight: 560;
+  letter-spacing: 0.01em;
+  cursor: pointer;
+}
+
+.profile-page__sign-out:focus-visible {
+  outline: 2px solid rgba(220, 174, 124, 0.72);
+  outline-offset: 3px;
 }
 
 .profile-card h2,
@@ -1114,13 +1204,18 @@
 }
 
 .settings-card {
-  padding: 0.18rem 0.9rem;
+  padding: 0;
+  border: 0;
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 0;
+  background: transparent;
 }
 
 .settings-row {
   display: flex;
   min-height: 4rem;
-  padding: 0.7rem 0;
+  padding: 0.7rem 0.12rem;
   align-items: center;
   justify-content: space-between;
   gap: 0.85rem;
@@ -1153,12 +1248,14 @@
 }
 
 .profile-action-row {
-  display: flex;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
   width: 100%;
   min-height: 3.65rem;
   padding: 0;
   align-items: center;
   justify-content: space-between;
+  gap: 0.72rem;
   border: 0;
   border-bottom: 1px solid rgba(255, 255, 255, 0.1);
   border-radius: 0;
@@ -1170,8 +1267,41 @@
   cursor: pointer;
 }
 
-.profile-action-row span:last-child {
+.profile-action-row > span:last-child {
   color: rgba(255, 255, 255, 0.3);
+}
+
+.profile-action-row:focus-visible {
+  outline: 1px solid rgba(255, 255, 255, 0.45);
+  outline-offset: -1px;
+}
+
+.profile-family-mark {
+  display: grid;
+  width: 2.35rem;
+  height: 2.35rem;
+  place-items: center;
+  border: 1px solid rgba(240, 190, 137, 0.34);
+  border-radius: 50%;
+  color: #f0be89;
+  background: rgba(240, 190, 137, 0.09);
+  font-size: 0.82rem;
+}
+
+.profile-family-copy strong,
+.profile-family-copy small {
+  display: block;
+}
+
+.profile-family-copy strong {
+  color: rgba(255, 255, 255, 0.86);
+  font-size: 0.76rem;
+}
+
+.profile-family-copy small {
+  margin-top: 0.16rem;
+  color: rgba(255, 255, 255, 0.42);
+  font-size: 0.62rem;
 }
 
 .profile-toast {

@@ -1,5 +1,6 @@
 import type { CSSProperties, MouseEvent } from 'react'
 import { createBubbleDrift } from './bubbleDrift'
+import { MemoryArcLabels } from './MemoryArcLabels'
 import type { Memory } from './memories'
 
 const SPRITE_WIDTH = 1536
@@ -7,10 +8,16 @@ const SPRITE_WIDTH = 1536
 type MemoryBubbleProps = {
   memory: Memory
   order: number
+  entryFocused?: boolean
   onOpen: (memory: Memory, event: MouseEvent<HTMLButtonElement>) => void
 }
 
-export function MemoryBubble({ memory, order, onOpen }: MemoryBubbleProps) {
+export function MemoryBubble({
+  memory,
+  order,
+  entryFocused = false,
+  onOpen,
+}: MemoryBubbleProps) {
   const spriteScale = SPRITE_WIDTH / memory.crop.diameter
   const spriteStyle: CSSProperties = {
     width: `${spriteScale * 100}%`,
@@ -20,13 +27,12 @@ export function MemoryBubble({ memory, order, onOpen }: MemoryBubbleProps) {
   const bubbleStyle = {
     '--bubble-top': memory.position.top,
     '--bubble-left': memory.position.left,
-    '--bubble-size': memory.position.size,
     '--bubble-order': order,
   } as CSSProperties
   const motionStyle = {
     viewTransitionName: `memory-${memory.id}`,
   } as CSSProperties
-  const drift = createBubbleDrift(order, memory.featured)
+  const drift = createBubbleDrift(order)
   const driftStyle = {
     '--bubble-drift-x': drift.x,
     '--bubble-drift-y': drift.y,
@@ -41,9 +47,10 @@ export function MemoryBubble({ memory, order, onOpen }: MemoryBubbleProps) {
       type="button"
       id={`memory-${memory.id}`}
       data-memory-id={memory.id}
-      className={`memory-bubble${memory.featured ? ' memory-bubble--featured' : ''}`}
+      data-entry-focus={entryFocused ? 'true' : 'false'}
+      className="memory-bubble"
       style={bubbleStyle}
-      aria-label={`Open ${memory.label} memory from ${memory.date}`}
+      aria-label={`Open ${memory.label} memory from ${memory.sender}, ${memory.date}`}
       onClick={(event) => onOpen(memory, event)}
     >
       <span className="memory-bubble__drift" style={driftStyle}>
@@ -56,7 +63,7 @@ export function MemoryBubble({ memory, order, onOpen }: MemoryBubbleProps) {
               style={spriteStyle}
             />
           </span>
-          {memory.featured ? <span className="memory-bubble__hint">Open memory</span> : null}
+          <MemoryArcLabels title={memory.label} sender={memory.sender} />
         </span>
       </span>
     </button>

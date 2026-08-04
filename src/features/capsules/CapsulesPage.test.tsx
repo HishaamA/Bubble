@@ -4,15 +4,15 @@ import { describe, expect, it } from 'vitest'
 import { CapsulesPage } from './CapsulesPage'
 
 describe('CapsulesPage', () => {
-  it('adds a capsule to the local preview', async () => {
+  it('adds a capsule for a family member', async () => {
     const user = userEvent.setup()
     render(<CapsulesPage />)
 
     await user.click(screen.getByRole('button', { name: 'Create a capsule' }))
     await user.type(screen.getByRole('textbox', { name: 'Capsule name' }), 'For the next adventure')
-    await user.click(screen.getByRole('button', { name: 'Save local preview' }))
+    await user.click(screen.getByRole('button', { name: 'Create capsule' }))
 
-    expect(screen.getByRole('heading', { name: 'For the next adventure' })).toBeInTheDocument()
-    expect(screen.getByText('4 capsules')).toBeInTheDocument()
+    const capsule = screen.getByRole('heading', { name: 'For the next adventure' }).closest('article')
+    expect(capsule).toHaveTextContent('For Sara · from you')
   })
 })

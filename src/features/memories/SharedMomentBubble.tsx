@@ -1,24 +1,26 @@
 import type { CSSProperties, MouseEvent } from 'react'
 import { createBubbleDrift } from './bubbleDrift'
+import { MemoryArcLabels } from './MemoryArcLabels'
 import type { PanoramaMoment } from './shared'
 
 type SharedMomentBubbleProps = {
   moment: PanoramaMoment
   order: number
+  entryFocused?: boolean
   onOpen: (moment: PanoramaMoment, event: MouseEvent<HTMLButtonElement>) => void
 }
 
 export function SharedMomentBubble({
   moment,
   order,
+  entryFocused = false,
   onOpen,
 }: SharedMomentBubbleProps) {
   if (!moment.objectUrl) return null
 
   const bubbleStyle = {
-    '--bubble-top': '42%',
-    '--bubble-left': '80%',
-    '--bubble-size': 'clamp(5.1rem, 19vw, 6.5rem)',
+    '--bubble-top': '32%',
+    '--bubble-left': '83%',
     '--bubble-order': order,
   } as CSSProperties
   const motionStyle = {
@@ -43,6 +45,7 @@ export function SharedMomentBubble({
       type="button"
       id={`memory-shared-${moment.id}`}
       data-memory-id={`shared-${moment.id}`}
+      data-entry-focus={entryFocused ? 'true' : 'false'}
       className="memory-bubble memory-bubble--shared"
       style={bubbleStyle}
       aria-label={`Open ${moment.label} shared by ${moment.uploaderDisplayName} on ${date}`}
@@ -53,9 +56,10 @@ export function SharedMomentBubble({
           <span className="memory-bubble__image" aria-hidden="true">
             <img src={moment.objectUrl} alt="" draggable="false" />
           </span>
-          <span className="memory-bubble__new-badge" aria-hidden="true">
-            New
-          </span>
+          <MemoryArcLabels
+            title={moment.label}
+            sender={moment.uploaderDisplayName}
+          />
         </span>
       </span>
     </button>

@@ -7,6 +7,13 @@ const config: CapacitorConfig = {
   server: {
     androidScheme: 'https',
   },
+  plugins: {
+    LocalNotifications: {
+      smallIcon: 'ic_stat_kinsphere',
+      iconColor: '#DCAE7C',
+      presentationOptions: ['badge', 'sound', 'banner', 'list'],
+    },
+  },
 }
 
 export default config

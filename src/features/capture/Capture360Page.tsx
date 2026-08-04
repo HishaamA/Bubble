@@ -16,9 +16,13 @@ import {
 } from './captureWindow'
 import {
   readImageDimensions,
-  validateEquirectangularDimensions,
+  validatePanoramaCaptureDimensions,
   type ImageDimensions,
 } from './equirectangular'
+import {
+  processPanoramaForSharing,
+  type ProcessedPanorama,
+} from '../../services/media/processPanorama'
 
 export type CaptureSource = 'daily' | 'manual'
 
@@ -43,6 +47,7 @@ type Capture360PageProps = {
   onViewMemories?: () => void
   onShare?: (submission: Capture360Submission) => void | Promise<void>
   readDimensions?: (file: File) => Promise<ImageDimensions>
+  processPanorama?: (file: File) => Promise<ProcessedPanorama>
   successMessage?: string
 }
 
@@ -82,32 +87,28 @@ function CaptureIcon({ name }: { name: 'close' | 'lock' | 'camera' | 'check' | '
 function getPhaseCopy(phase: DailyCapturePhase) {
   if (phase === 'open') {
     return {
-      eyebrow: 'The family window is open',
-      title: 'Capture this moment',
-      body: 'You have one shared window and one panorama. Choose a ready 360° photo before time runs out.',
+      title: 'The family window is open',
+      body: 'Share one 360 photo with everyone before it closes.',
     }
   }
 
   if (phase === 'closed') {
     return {
-      eyebrow: 'Today’s window has closed',
-      title: 'One moment tomorrow',
-      body: 'The daily family prompt is finished for today. A new surprise window will be scheduled tomorrow.',
+      title: 'That’s today’s moment',
+      body: 'Tomorrow brings another little window for the family.',
     }
   }
 
   if (phase === 'complete') {
     return {
-      eyebrow: 'Shared today',
-      title: 'Your moment is in',
-      body: 'You used today’s one-photo family window. Everyone gets another surprise moment tomorrow.',
+      title: 'Shared for today',
+      body: 'Your family’s next moment arrives tomorrow.',
     }
   }
 
   return {
-    eyebrow: 'Today’s moment is locked',
-    title: 'It could happen anytime',
-    body: 'Once today, everyone gets the same short window to share one panorama with the family.',
+    title: 'A little moment, sometime today',
+    body: 'Everyone gets the same 15-minute window to share one 360 photo.',
   }
 }
 
@@ -133,6 +134,7 @@ export function Capture360Page({
   onViewMemories,
   onShare,
   readDimensions = readImageDimensions,
+  processPanorama = processPanoramaForSharing,
   successMessage,
 }: Capture360PageProps) {
   const [clock, setClock] = useState(() => new Date())
@@ -145,7 +147,8 @@ export function Capture360Page({
   const [shared, setShared] = useState(false)
   const [completedDaily, setCompletedDaily] = useState(false)
   const [announcement, setAnnouncement] = useState('')
-  const fileInputRef = useRef<HTMLInputElement>(null)
+  const cameraInputRef = useRef<HTMLInputElement>(null)
+  const libraryInputRef = useRef<HTMLInputElement>(null)
   const sourceRef = useRef<CaptureSource>(initialMode)
   const previewUrlRef = useRef<string | null>(null)
 
@@ -179,16 +182,21 @@ export function Capture360Page({
     setDraft(null)
     setCaption('')
     setError('')
-    if (fileInputRef.current) fileInputRef.current.value = ''
+    if (cameraInputRef.current) cameraInputRef.current.value = ''
+    if (libraryInputRef.current) libraryInputRef.current.value = ''
   }
 
-  function openPicker(nextSource: CaptureSource) {
+  function openPicker(
+    nextSource: CaptureSource,
+    picker: 'camera' | 'library' = 'library',
+  ) {
     if (nextSource === 'daily' && !canUseDailyWindow) return
     sourceRef.current = nextSource
     setSource(nextSource)
     setShared(false)
     setError('')
-    fileInputRef.current?.click()
+    const input = picker === 'camera' ? cameraInputRef : libraryInputRef
+    input.current?.click()
   }
 
   async function selectFile(event: ChangeEvent<HTMLInputElement>) {
@@ -214,7 +222,7 @@ export function Capture360Page({
     setChecking(true)
     try {
       const dimensions = await readDimensions(file)
-      const validation = validateEquirectangularDimensions(dimensions)
+      const validation = validatePanoramaCaptureDimensions(dimensions)
 
       if (!validation.valid) {
         setError(validation.message)
@@ -222,24 +230,44 @@ export function Capture360Page({
         return
       }
 
-      const previewUrl = URL.createObjectURL(file)
+      let preparedFile = file
+      let preparedDimensions = dimensions
+      if (validation.needsNormalization) {
+        const processed = await processPanorama(file)
+        const filename = file.name.replace(/\.[^.]+$/, '') || 'family-panorama'
+        preparedFile = new File(
+          [processed.viewer],
+          `${filename}-360.jpg`,
+          { type: 'image/jpeg', lastModified: file.lastModified },
+        )
+        preparedDimensions = {
+          width: processed.viewerWidth,
+          height: processed.viewerHeight,
+        }
+      }
+
+      const previewUrl = URL.createObjectURL(preparedFile)
       previewUrlRef.current = previewUrl
       setSource(selectedSource)
       setDraft({
-        file,
-        dimensions,
+        file: preparedFile,
+        dimensions: preparedDimensions,
         previewUrl,
         source: selectedSource,
         warning: validation.warning,
       })
-      setAnnouncement(`${file.name} is ready to preview and share.`)
+      setAnnouncement(
+        validation.needsNormalization
+          ? `${file.name} was fitted to a 360-degree frame and is ready to share.`
+          : `${file.name} is ready to preview and share.`,
+      )
     } catch {
       const message = 'We could not open this image. Try another 360° panorama.'
       setError(message)
       setAnnouncement(message)
     } finally {
       setChecking(false)
-      if (fileInputRef.current) fileInputRef.current.value = ''
+      event.target.value = ''
     }
   }
 
@@ -277,14 +305,13 @@ export function Capture360Page({
     <section className="ks-feature capture-page" aria-labelledby="capture-title">
       <header className="ks-feature__header capture-page__header">
         <div className="ks-feature__header-copy">
-          <p className="eyebrow">One shared point in time</p>
           <h1 id="capture-title">360 Moment</h1>
         </div>
         {onClose ? (
           <button className="ks-feature__header-action" type="button" aria-label="Close 360 capture" onClick={onClose}>
             <CaptureIcon name="close" />
           </button>
-        ) : <span className="capture-page__daily-badge">Daily</span>}
+        ) : null}
       </header>
 
       <p className="screen-reader-only" aria-live="polite">{announcement}</p>
@@ -292,11 +319,10 @@ export function Capture360Page({
       {isSuccess ? (
         <section className="ks-card capture-success" aria-labelledby="capture-success-title">
           <span className="capture-success__icon"><CaptureIcon name="check" /></span>
-          <p className="eyebrow">Moment ready</p>
-          <h2 id="capture-success-title">{onShare ? 'Sent to Memories' : 'Local preview saved'}</h2>
+          <h2 id="capture-success-title">{onShare ? 'Shared with family' : 'Saved to Memories'}</h2>
           <p>{successMessage ?? (onShare
-            ? 'Your family can open this panorama from their Memories view.'
-            : 'This MVP keeps the share only for this session until a family backend is connected.')}</p>
+            ? 'Everyone in your circle can find it in Memories.'
+            : 'It’s in Memories on this device.')}</p>
           {draft ? <img src={draft.previewUrl} alt="Shared 360 panorama preview" /> : null}
           <div className="capture-success__actions">
             {onViewMemories ? (
@@ -314,7 +340,7 @@ export function Capture360Page({
               sourceRef.current = 'manual'
               setSource('manual')
             }}>
-              Upload another 360
+              Share another
             </button>
           </div>
         </section>
@@ -322,25 +348,19 @@ export function Capture360Page({
         <form className="capture-editor" onSubmit={shareCapture}>
           <div className="capture-preview">
             <img src={draft.previewUrl} alt="Preview of selected 360 panorama" />
-            <span className="capture-preview__badge">2:1 panorama</span>
             <button type="button" aria-label="Remove selected panorama" onClick={clearDraft}>
               <CaptureIcon name="close" />
             </button>
           </div>
 
-          <div className="capture-editor__meta">
-            <span>{draft.dimensions.width} × {draft.dimensions.height}</span>
-            <span>{draft.source === 'daily' ? 'Daily moment' : 'Upload now'}</span>
-          </div>
-
           {draft.warning ? <p className="capture-quality-note">{draft.warning}</p> : null}
 
           <label className="ks-field">
-            <span>Add a caption <small>optional</small></span>
+            <span>Moment title <small>optional · above the bubble</small></span>
             <textarea
               value={caption}
               maxLength={160}
-              placeholder="Dinner on the balcony with everyone…"
+              placeholder="Dinner together on the balcony…"
               onChange={(event) => setCaption(event.target.value)}
             />
           </label>
@@ -353,69 +373,54 @@ export function Capture360Page({
           </button>
           <p className="ks-inline-note">
             {connectedFamilySync
-              ? 'Approved family members will receive this as a new bubble in Memories.'
-              : 'This device will add the panorama to Memories. Connect a Family Circle to send it to other phones.'}
+              ? 'Everyone in your circle will find it in Memories.'
+              : 'It’ll be saved to Memories on this device.'}
           </p>
         </form>
       ) : (
         <>
           {source === 'manual' ? (
             <section className="ks-card capture-manual-panel" aria-labelledby="manual-upload-title">
-              <span className="capture-manual-panel__icon"><CaptureIcon name="image" /></span>
-              <p className="eyebrow">Available anytime</p>
-              <h2 id="manual-upload-title">Upload a 360 now</h2>
-              <p>Choose a ready equirectangular panorama from a 360 camera or your photo library.</p>
-              <button className="ks-primary-button" type="button" onClick={() => openPicker('manual')}>
+              <h2 id="manual-upload-title">Capture a 360 moment</h2>
+              <p>Use your phone’s panorama mode, then we’ll fit the full sweep into a 360°-ready memory.</p>
+              <ol className="capture-panorama-steps" aria-label="How to take a phone panorama">
+                <li><span>1</span><p><strong>Turn sideways</strong>Hold your phone in landscape.</p></li>
+                <li><span>2</span><p><strong>Choose Pano</strong>In Camera, use Pano or Panorama mode.</p></li>
+                <li><span>3</span><p><strong>Sweep slowly</strong>Follow the guide in one steady direction.</p></li>
+              </ol>
+              <button className="ks-primary-button" type="button" onClick={() => openPicker('manual', 'camera')}>
                 <CaptureIcon name="camera" />
-                Open camera or library
+                Take panoramic photo
               </button>
+              <button className="capture-library-button" type="button" onClick={() => openPicker('manual', 'library')}>
+                <CaptureIcon name="image" />
+                Choose finished panorama
+              </button>
+              <p className="capture-camera-note">If Pano mode does not appear here, take it in your Camera app first, then choose it from Photos.</p>
               <button className="capture-manual-panel__daily" type="button" onClick={() => {
                 sourceRef.current = 'daily'
                 setSource('daily')
                 setError('')
               }}>
-                View today’s daily prompt
+                Go to today’s moment
               </button>
             </section>
           ) : (
             <>
               <section className={`ks-card capture-window capture-window--${phase}`} aria-labelledby="capture-window-title">
-                <div className="capture-window__status">
-                  <span className="capture-window__orb" aria-hidden="true">
-                    <span><CaptureIcon name={phase === 'open' ? 'camera' : phase === 'complete' ? 'check' : 'lock'} /></span>
-                  </span>
-                  <span className="capture-window__pulse" aria-hidden="true" />
-                </div>
                 <div className="capture-window__copy">
-                  <p className="eyebrow">{phaseCopy.eyebrow}</p>
                   <h2 id="capture-window-title">{phaseCopy.title}</h2>
                   <p>{phaseCopy.body}</p>
                 </div>
 
-                <dl className="capture-window__facts">
-                  <div>
-                    <dt>Today</dt>
-                    <dd>{phase === 'open' ? 'Open now' : phase === 'complete' ? 'Completed' : 'Surprise time'}</dd>
-                  </div>
-                  <div>
-                    <dt>Window</dt>
-                    <dd>{Math.round((captureWindow.endsAt.getTime() - captureWindow.startsAt.getTime()) / 60_000)} minutes</dd>
-                  </div>
-                  <div>
-                    <dt>Limit</dt>
-                    <dd>One photo</dd>
-                  </div>
-                </dl>
-
                 {canUseDailyWindow ? (
-                  <button className="ks-primary-button capture-window__action" type="button" onClick={() => openPicker('daily')}>
+                  <button className="ks-primary-button capture-window__action" type="button" onClick={() => openPicker('daily', 'camera')}>
                     <CaptureIcon name="camera" />
-                    Choose today’s 360
+                    Take today’s panorama
                   </button>
                 ) : (
                   <div className="capture-window__locked" role="status">
-                    <CaptureIcon name={phase === 'complete' ? 'check' : 'lock'} />
-                    <span>{phase === 'upcoming' ? 'Daily capture locked' : phase === 'complete' ? 'Daily capture complete' : 'Daily capture closed'}</span>
+                    <span>{phase === 'upcoming' ? 'Today’s moment is locked' : phase === 'complete' ? 'Today’s moment is shared' : 'Today’s moment has closed'}</span>
                   </div>
                 )}
               </section>
@@ -424,46 +429,50 @@ export function Capture360Page({
                 className="capture-manual-entry"
                 type="button"
                 aria-label="Upload a 360 photo now"
-                onClick={() => openPicker('manual')}
+                onClick={() => openPicker('manual', 'library')}
               >
                 <span className="capture-manual-entry__icon"><CaptureIcon name="image" /></span>
                 <span>
-                  <small>Don’t want to wait?</small>
-                  <strong>Upload a 360 photo now</strong>
+                  <strong>Share a 360 anytime</strong>
                 </span>
                 <span aria-hidden="true">›</span>
               </button>
 
               <details className="capture-prototype-note">
-                <summary>About the random window</summary>
+                <summary>Today’s window</summary>
                 <p>
                   {connectedFamilySync
-                    ? `Your Family Circle shares this server-time window: ${timeFormatter.format(captureWindow.startsAt)}–${timeFormatter.format(captureWindow.endsAt)} today.`
-                    : `This local preview calculates a stable demo window on this device: ${timeFormatter.format(captureWindow.startsAt)}–${timeFormatter.format(captureWindow.endsAt)} today. Connect a Family Circle so every member receives the same server-time window.`}
+                    ? `${timeFormatter.format(captureWindow.startsAt)}–${timeFormatter.format(captureWindow.endsAt)} for everyone in your circle.`
+                    : `${timeFormatter.format(captureWindow.startsAt)}–${timeFormatter.format(captureWindow.endsAt)} on this device. Family Sync keeps the same time on everyone’s phone.`}
                 </p>
               </details>
             </>
           )}
 
-          {checking ? <p className="capture-checking" role="status">Checking panorama shape…</p> : null}
+          {checking ? <p className="capture-checking" role="status">Preparing the 360° frame…</p> : null}
           {error ? <p className="capture-error" role="alert">{error}</p> : null}
 
-          <aside className="capture-howto" aria-labelledby="capture-howto-title">
-            <span className="capture-howto__icon"><CaptureIcon name="camera" /></span>
-            <div>
-              <h2 id="capture-howto-title">What counts as a 360 photo?</h2>
-              <p>Use a 360 camera or select an existing 2:1 equirectangular panorama. A normal phone camera does not capture a complete 360° scene by itself.</p>
-            </div>
-          </aside>
+          <details className="capture-prototype-note capture-photo-help">
+            <summary>About 360 photos</summary>
+            <p>A wide phone panorama becomes a draggable 360° scene for this MVP. It wraps the horizontal sweep and extends its own edge pixels above and below; it does not invent areas your camera never captured.</p>
+          </details>
         </>
       )}
 
       <input
-        ref={fileInputRef}
+        ref={cameraInputRef}
         className="capture-file-input"
         type="file"
         accept="image/*"
         capture="environment"
+        aria-label="Take a panorama with camera"
+        onChange={(event) => void selectFile(event)}
+      />
+      <input
+        ref={libraryInputRef}
+        className="capture-file-input"
+        type="file"
+        accept="image/*"
         aria-label="Choose a 360 photo from camera or library"
         onChange={(event) => void selectFile(event)}
       />

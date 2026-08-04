@@ -4,7 +4,7 @@ import type {
   StoredPanoramaMoment,
 } from './types'
 
-const DATABASE_NAME = 'kinsphere-family-moments'
+const DATABASE_PREFIX = 'kinsphere-family-moments'
 const DATABASE_VERSION = 1
 const STORE_NAME = 'panoramas'
 
@@ -93,9 +93,17 @@ export function createMemoryMomentStore(
   }
 }
 
-function openDatabase(indexedDb: IDBFactory): Promise<IDBDatabase> {
+export function momentDatabaseNameForSubject(subject: string) {
+  const namespace = subject.trim() || 'signed-out'
+  return `${DATABASE_PREFIX}:${encodeURIComponent(namespace)}`
+}
+
+function openDatabase(
+  indexedDb: IDBFactory,
+  databaseName: string,
+): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
-    const request = indexedDb.open(DATABASE_NAME, DATABASE_VERSION)
+    const request = indexedDb.open(databaseName, DATABASE_VERSION)
 
     request.onupgradeneeded = () => {
       const database = request.result
@@ -112,10 +120,14 @@ function openDatabase(indexedDb: IDBFactory): Promise<IDBDatabase> {
   })
 }
 
-export function createIndexedDbMomentStore(indexedDb: IDBFactory): MomentStore {
+export function createIndexedDbMomentStore(
+  indexedDb: IDBFactory,
+  subject = 'local-preview',
+): MomentStore {
+  const databaseName = momentDatabaseNameForSubject(subject)
   return {
     async list() {
-      const database = await openDatabase(indexedDb)
+      const database = await openDatabase(indexedDb, databaseName)
 
       try {
         return await new Promise<StoredPanoramaMoment[]>((resolve, reject) => {
@@ -141,7 +153,7 @@ export function createIndexedDbMomentStore(indexedDb: IDBFactory): MomentStore {
     },
 
     async save(moment) {
-      const database = await openDatabase(indexedDb)
+      const database = await openDatabase(indexedDb, databaseName)
 
       try {
         await new Promise<void>((resolve, reject) => {
@@ -196,7 +208,9 @@ export function createResilientMomentStore(
   }
 }
 
-export function createDefaultMomentStore(): MomentStore {
+export function createDefaultMomentStore(
+  subject = 'local-preview',
+): MomentStore {
   if (
     typeof window === 'undefined' ||
     typeof window.indexedDB === 'undefined'
@@ -205,6 +219,6 @@ export function createDefaultMomentStore(): MomentStore {
   }
 
   return createResilientMomentStore(
-    createIndexedDbMomentStore(window.indexedDB),
+    createIndexedDbMomentStore(window.indexedDB, subject),
   )
 }

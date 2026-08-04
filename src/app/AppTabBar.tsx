@@ -1,31 +1,70 @@
 import { Link, useLocation } from 'react-router-dom'
 import { Icon, type IconName } from '../components/Icon'
 
-const tabs: Array<{ label: string; path: string; icon: IconName }> = [
-  { label: 'Capsules', path: '/capsules', icon: 'capsules' },
-  { label: 'Memories', path: '/', icon: 'memories' },
-  { label: 'Relay', path: '/relay', icon: 'relay' },
-  { label: 'Events', path: '/events', icon: 'events' },
-  { label: 'Profile', path: '/profile', icon: 'profile' },
+type Tab = {
+  label: string
+  path: string
+  icon: IconName
+  isActive: (pathname: string, returnTo?: string) => boolean
+}
+
+const tabs: Tab[] = [
+  {
+    label: 'Moments',
+    path: '/',
+    icon: 'memories',
+    isActive: (pathname, returnTo) =>
+      pathname === '/' ||
+      (pathname.startsWith('/memory/') && returnTo !== '/journal') ||
+      pathname.startsWith('/capture') ||
+      pathname.startsWith('/relay'),
+  },
+  {
+    label: 'Journal',
+    path: '/journal',
+    icon: 'journal',
+    isActive: (pathname, returnTo) =>
+      pathname.startsWith('/journal') ||
+      (pathname.startsWith('/memory/') && returnTo === '/journal'),
+  },
+  {
+    label: 'Together',
+    path: '/events',
+    icon: 'events',
+    isActive: (pathname) =>
+      pathname.startsWith('/events') || pathname.startsWith('/capsules'),
+  },
+  {
+    label: 'Profile',
+    path: '/profile',
+    icon: 'profile',
+    isActive: (pathname) => pathname.startsWith('/profile'),
+  },
 ]
 
 export function AppTabBar() {
   const location = useLocation()
+  const routeState = location.state as {
+    returnTo?: string
+    journalContext?: unknown
+  } | null
 
   return (
     <nav className="tab-bar" aria-label="Primary navigation">
       {tabs.map((tab) => {
-        const isActive =
-          tab.path === '/'
-            ? location.pathname === '/' ||
-              location.pathname.startsWith('/memory/') ||
-              location.pathname.startsWith('/capture')
-            : location.pathname.startsWith(tab.path)
+        const isActive = tab.isActive(location.pathname, routeState?.returnTo)
+        const preservesJournalContext =
+          tab.path === '/journal' && routeState?.returnTo === '/journal'
 
         return (
           <Link
             key={tab.path}
             to={tab.path}
+            state={
+              preservesJournalContext
+                ? { journalContext: routeState.journalContext }
+                : undefined
+            }
             aria-current={isActive ? 'page' : undefined}
             className={`tab-bar__item${isActive ? ' tab-bar__item--active' : ''}`}
           >
