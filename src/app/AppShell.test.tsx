@@ -66,6 +66,14 @@ describe('AppShell', () => {
     ).not.toBeInTheDocument()
   })
 
+  it('gives native capture a distraction-free screen with its own close control', () => {
+    renderShell('/capture?mode=manual', 'Capture')
+
+    expect(
+      screen.queryByRole('navigation', { name: 'Primary navigation' }),
+    ).not.toBeInTheDocument()
+  })
+
   it('hides primary navigation and capture controls on login', () => {
     renderShell('/login', 'Sign in')
 

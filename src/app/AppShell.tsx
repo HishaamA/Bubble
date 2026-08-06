@@ -12,6 +12,8 @@ export function AppShell({ children }: PropsWithChildren) {
     location.pathname !== '/login' &&
     location.pathname !== '/onboarding' &&
     authStatus === 'signed-in'
+  const showPrimaryNavigation =
+    showPrimaryChrome && !location.pathname.startsWith('/capture')
   const showCaptureShortcut = showPrimaryChrome && location.pathname === '/'
 
   return (
@@ -24,7 +26,7 @@ export function AppShell({ children }: PropsWithChildren) {
           }
         />
       ) : null}
-      {showPrimaryChrome ? <AppTabBar /> : null}
+      {showPrimaryNavigation ? <AppTabBar /> : null}
     </div>
   )
 }

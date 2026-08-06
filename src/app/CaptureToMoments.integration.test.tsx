@@ -70,7 +70,7 @@ describe('capture to Moments integration', () => {
     )
 
     await user.click(
-      screen.getByRole('button', { name: 'Take panoramic photo' }),
+      screen.getByRole('button', { name: 'Use the phone camera instead' }),
     )
     await user.upload(
       screen.getByLabelText('Take a panorama with camera'),

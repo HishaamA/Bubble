@@ -1,6 +1,10 @@
 # KinSphere
 
-KinSphere is a private family app for sharing immersive memories. A family member imports an existing equirectangular panorama, adds a caption or voice note, and shares a sanitized derivative with an approved Family Circle. Other members can explore the panorama, hear a voice Echo Pin, and follow one doorway into a second scene.
+KinSphere is a private family app for sharing immersive memories. A family
+member can follow a native dot guide to capture the surrounding sphere or
+import an existing equirectangular panorama, add a caption, and share a
+sanitized derivative with an approved Family Circle. Other members can explore
+the panorama, hear a voice Echo Pin, and follow one doorway into a second scene.
 
 > [!IMPORTANT]
 > [`KinSphere_Implementation_Handoff.docx`](./KinSphere_Implementation_Handoff.docx) is the source of truth for the first build. Implement its phases in order, and do not add optional features until the two-phone core flow is stable.
@@ -9,7 +13,8 @@ KinSphere is a private family app for sharing immersive memories. A family membe
 
 The first end-to-end proof is intentionally narrow:
 
-1. Phone A imports a panorama and processes it entirely on-device.
+1. Phone A captures pose-tagged overlapping views with the native guide, or
+   imports a finished panorama, and processes the result entirely on-device.
 2. Only newly encoded, metadata-free viewer and thumbnail files are uploaded.
 3. Phone B opens the private panorama as an approved circle member.
 4. Touch, zoom, optional device motion, and a flat fallback all work.
@@ -92,11 +97,13 @@ docs/           architecture, decisions, roadmap, test gates, and AI-use log
 
 Simulators are useful during implementation, but they do not replace the required two-device acceptance runs.
 
-The current Codex host has Node 22, but it does not yet have full Xcode, Android
-Studio, or Docker. Web builds can run here now. Native compilation and local
-Supabase integration tests require those tools before their corresponding gates
-can pass. Android builds must use Android Studio's bundled JDK rather than the
-host JDK 26, which is newer than the generated Gradle wrapper supports.
+The current Codex host has Node 22 and Xcode 26.6. The iOS project is verified
+against both the iOS Simulator and generic arm64 iPhone targets. Installing it
+on a physical iPhone still requires selecting an Apple Development team in
+Xcode. Android Studio and Docker are not installed, so Android compilation and
+local Supabase integration tests still require those tools. Android builds must
+use Android Studio's bundled JDK rather than the host JDK 26, which is newer
+than the generated Gradle wrapper supports.
 
 ## Local setup
 
@@ -117,10 +124,24 @@ Clerk must be enabled as a native third-party auth provider in Supabase. Follow
 [`docs/decisions/0004-clerk-supabase-third-party-auth.md`](./docs/decisions/0004-clerk-supabase-third-party-auth.md); do not use Clerk's deprecated Supabase
 JWT template.
 
-The 360 Moment button imports an existing 2:1 equirectangular image. Ordinary
-phone cameras do not produce a complete stitched 360 image; use a 360 camera or
-an exported panorama. The app re-encodes viewer and thumbnail derivatives before
-the secure Supabase upload path.
+The 360 Moment screen launches native guided capture only from an installed
+Capacitor build. Its ring, ceiling, and floor targets capture automatically when
+the phone is aligned and steady. The LAN/web build provides the same interactive
+guide as a preview and can still import an existing 2:1 panorama, but it does not
+claim access to the native capture plugin. The app re-encodes viewer and
+thumbnail derivatives before the secure Supabase upload path.
+
+After installing native prerequisites, synchronize and open a device project:
+
+```bash
+pnpm cap:sync
+npx cap open ios
+# or
+npx cap open android
+```
+
+Camera and motion quality must be verified on physical phones; simulators and
+the Vite preview cannot satisfy the guided-capture acceptance gate.
 
 ## Quality checks
 

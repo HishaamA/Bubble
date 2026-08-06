@@ -47,12 +47,18 @@ Build the repository contract: README, environment template, architecture invari
 
 ## Phase 5 — Secure media pipeline
 
+- Add the app-local guided spherical-capture bridge, native target/steady-state
+  camera sessions, pose-tagged temporary frames, and on-device spherical
+  composition.
 - Validate JPEG format, dimensions, pixel count, byte size, and approximate 2:1 ratio.
 - Re-encode on-device to a viewer image up to 4096 x 2048 and a thumbnail; remove metadata.
 - Reserve immutable media paths, upload with TUS, verify, and mark ready.
 - Download authorized media into app-private storage before viewing.
 
-**Gate:** Phone A uploads only metadata-free derivatives, Phone B opens them privately, an interrupted transfer resumes, and a non-member cannot fetch them.
+**Gate:** Both physical platforms complete all guide targets and clean their
+temporary frames; Phone A uploads only metadata-free derivatives, Phone B opens
+them privately, an interrupted transfer resumes, and a non-member cannot fetch
+them.
 
 ## Phase 6 — Persistent queue and cache
 
@@ -124,8 +130,8 @@ loads thumbnails before full panoramas.
 
 ## Explicitly out of scope
 
-Custom panorama capture or stitching, live 360 video, standalone-headset/WebXR
-VR, positional tracking, 3D reconstruction, tours beyond two scenes, Same Moment
+Live 360 video, standalone-headset/WebXR VR, positional tracking, 3D
+reconstruction, tours beyond two scenes, Same Moment
 prompts, public social features, rankings, streaks, direct messaging,
 hidden-message games, advanced virtual tours, face identification, emotion
 detection, image-understanding AI, Privacy Lens, Capture Coach, and automatic

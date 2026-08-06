@@ -115,6 +115,11 @@ Run the current supported Android and iOS targets on physical devices. Verify:
   thermal stability, and clean exit on both supported phones
 - 360 photo-library/camera handoff, ordinary-photo rejection, derivative
   encoding, and the new memory opening in both normal and Cardboard viewers
+- guided capture camera permission accepted and denied; complete the standard
+  rings, zenith, and nadir; verify auto-capture requires alignment and a steady
+  hold, output is exact 2:1, cancellation removes partial frames, successful
+  composition removes source frames, and rotating around one point avoids
+  obvious parallax tears
 - event reminders while the installed app is backgrounded and normally
   terminated, plus permission-denied, Android inexact-alarm, reboot, and cancel
   cases; verify the browser copy never promises closed-tab delivery

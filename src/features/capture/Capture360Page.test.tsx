@@ -22,7 +22,8 @@ beforeEach(() => {
 })
 
 describe('Capture360Page', () => {
-  it('opens on the anytime upload path when initialMode is manual', () => {
+  it('opens on the guided capture path when initialMode is manual', async () => {
+    const user = userEvent.setup()
     render(
       <Capture360Page
         initialMode="manual"
@@ -31,10 +32,16 @@ describe('Capture360Page', () => {
       />,
     )
 
-    expect(screen.getByRole('heading', { name: 'Capture a 360 moment' })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'Take panoramic photo' })).toBeEnabled()
+    expect(screen.getByRole('heading', { name: 'Capture every direction' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Preview guided capture' })).toBeEnabled()
     expect(screen.getByRole('button', { name: 'Choose finished panorama' })).toBeEnabled()
-    expect(screen.getByText('Hold your phone in landscape.')).toBeInTheDocument()
+    expect(screen.getByText(/each aligned view captures itself/i)).toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: 'Preview guided capture' }))
+    expect(screen.getByLabelText('Guided 360 capture preview')).toBeInTheDocument()
+    expect(screen.getByText(/drag to preview here/i)).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Close guided capture preview' }))
+    expect(screen.getByRole('heading', { name: 'Capture every direction' })).toBeInTheDocument()
   })
 
   it('shows the locked daily use case and an always-available manual entry', () => {
@@ -54,7 +61,7 @@ describe('Capture360Page', () => {
     expect(cameraInput).toHaveAttribute('accept', 'image/*')
     expect(cameraInput).toHaveAttribute('capture', 'environment')
     expect(libraryInput).not.toHaveAttribute('capture')
-    expect(screen.getByText(/does not invent areas your camera never captured/i)).toBeInTheDocument()
+    expect(screen.getByText(/including above and below/i)).toBeInTheDocument()
   })
 
   it('validates, previews, captions, and shares a manual 360 upload', async () => {
@@ -132,7 +139,7 @@ describe('Capture360Page', () => {
       />,
     )
 
-    await user.click(screen.getByRole('button', { name: 'Take panoramic photo' }))
+    await user.click(screen.getByRole('button', { name: 'Use the phone camera instead' }))
     const phonePanorama = new File(['wide sweep'], 'garden-pano.heic', {
       type: 'image/heic',
     })
@@ -161,21 +168,45 @@ describe('Capture360Page', () => {
   it('uses the daily source only while its window is open', async () => {
     const user = userEvent.setup()
     const onShare = vi.fn()
+    const startGuidedCapture = vi.fn().mockResolvedValue({
+      frames: Array.from({ length: 8 }, (_, index) => ({
+        width: 1920,
+        height: 1440,
+        uri: `file:///capture/${index}.jpg`,
+        targetYawDegrees: index * 45,
+        targetPitchDegrees: 0,
+      })),
+      targetCount: 8,
+      capturedCount: 8,
+      directoryUrl: 'file:///capture/session',
+    })
+    const composeGuidedCapture = vi.fn().mockResolvedValue({
+      viewer: new Blob(['full sphere'], { type: 'image/jpeg' }),
+      thumbnail: new Blob(['thumbnail'], { type: 'image/jpeg' }),
+      viewerWidth: 2048,
+      viewerHeight: 1024,
+      thumbnailWidth: 640,
+      thumbnailHeight: 320,
+    })
+    const discardGuidedCapture = vi.fn().mockResolvedValue(undefined)
     render(
       <Capture360Page
         now={new Date('2026-08-26T12:05:00')}
         dailyWindow={upcomingWindow}
         onShare={onShare}
         readDimensions={vi.fn().mockResolvedValue({ width: 4096, height: 2048 })}
+        guidedCaptureAvailable
+        startGuidedCapture={startGuidedCapture}
+        composeGuidedCapture={composeGuidedCapture}
+        discardGuidedCapture={discardGuidedCapture}
       />,
     )
 
-    await user.click(screen.getByRole('button', { name: 'Take today’s panorama' }))
-    await user.upload(
-      screen.getByLabelText('Choose a 360 photo from camera or library'),
-      new File(['panorama'], 'daily.jpg', { type: 'image/jpeg' }),
-    )
+    await user.click(screen.getByRole('button', { name: 'Capture today in 360°' }))
     await screen.findByAltText('Preview of selected 360 panorama')
+    expect(startGuidedCapture).toHaveBeenCalledTimes(1)
+    expect(composeGuidedCapture).toHaveBeenCalledTimes(1)
+    expect(discardGuidedCapture).toHaveBeenCalledTimes(1)
     await user.click(screen.getByRole('button', { name: 'Share with family' }))
 
     await waitFor(() => expect(onShare).toHaveBeenCalledWith(expect.objectContaining({ source: 'daily' })))

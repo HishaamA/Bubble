@@ -2,7 +2,9 @@
 
 ## Status
 
-Accepted for the MVP prototype.
+Accepted for the MVP prototype. The capture limitation is superseded by
+[ADR 0006](./0006-guided-spherical-capture.md); the daily-window and secure
+sharing decisions remain active.
 
 ## Context
 

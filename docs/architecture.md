@@ -90,8 +90,11 @@ Required database guarantees include one membership per user/circle, one contrib
 
 ### Panorama contribution
 
-1. The client validates the selected JPEG and approximate 2:1 geometry.
-2. The client creates metadata-free viewer and thumbnail derivatives.
+1. The client either receives pose-tagged frames from the installed native
+   guided-capture plugin or validates an imported JPEG and approximate 2:1
+   geometry.
+2. The client creates metadata-free viewer and thumbnail derivatives. Guided
+   frames are projected onto a complete 2:1 sphere and removed after encoding.
 3. The client persists a queue job and immutable destination paths before transfer.
 4. TUS uploads one job at a time to private Storage.
 5. Finalization verifies the objects and atomically marks media ready.

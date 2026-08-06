@@ -17,6 +17,8 @@ The following decisions are already fixed for the first build and are described 
 - approved-text-only Family Thread with source traceability and human publication approval
 - exactly two linked panorama scenes in the core build
 - monochrome, content-first UI with gradients limited to Memories bubble depth
+- guided native multi-frame spherical capture behind an app-local Capacitor
+  plugin, with an explicit browser preview/import fallback
 
 ## ADR format
 

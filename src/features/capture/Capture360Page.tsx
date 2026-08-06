@@ -23,6 +23,18 @@ import {
   processPanoramaForSharing,
   type ProcessedPanorama,
 } from '../../services/media/processPanorama'
+import {
+  composeGuidedPanorama,
+  type GuidedPanoramaProgress,
+} from '../../services/media/composeGuidedPanorama'
+import { GuidedCapturePreview } from './GuidedCapturePreview'
+import {
+  discardNativePanoramaCapture,
+  isNativeCaptureCancellation,
+  isNativePanoramaCaptureAvailable,
+  startNativePanoramaCapture,
+  type NativePanoramaCaptureResult,
+} from './nativePanoramaCapture'
 
 export type CaptureSource = 'daily' | 'manual'
 
@@ -48,6 +60,13 @@ type Capture360PageProps = {
   onShare?: (submission: Capture360Submission) => void | Promise<void>
   readDimensions?: (file: File) => Promise<ImageDimensions>
   processPanorama?: (file: File) => Promise<ProcessedPanorama>
+  guidedCaptureAvailable?: boolean
+  startGuidedCapture?: () => Promise<NativePanoramaCaptureResult>
+  discardGuidedCapture?: (result: NativePanoramaCaptureResult) => Promise<void>
+  composeGuidedCapture?: (
+    result: NativePanoramaCaptureResult,
+    onProgress?: (progress: GuidedPanoramaProgress) => void,
+  ) => Promise<ProcessedPanorama>
   successMessage?: string
 }
 
@@ -135,6 +154,10 @@ export function Capture360Page({
   onShare,
   readDimensions = readImageDimensions,
   processPanorama = processPanoramaForSharing,
+  guidedCaptureAvailable = isNativePanoramaCaptureAvailable(),
+  startGuidedCapture = startNativePanoramaCapture,
+  discardGuidedCapture = discardNativePanoramaCapture,
+  composeGuidedCapture = composeGuidedPanorama,
   successMessage,
 }: Capture360PageProps) {
   const [clock, setClock] = useState(() => new Date())
@@ -147,6 +170,9 @@ export function Capture360Page({
   const [shared, setShared] = useState(false)
   const [completedDaily, setCompletedDaily] = useState(false)
   const [announcement, setAnnouncement] = useState('')
+  const [guidePreview, setGuidePreview] = useState(false)
+  const [guidedCaptureRunning, setGuidedCaptureRunning] = useState(false)
+  const [guidedCaptureStatus, setGuidedCaptureStatus] = useState('')
   const cameraInputRef = useRef<HTMLInputElement>(null)
   const libraryInputRef = useRef<HTMLInputElement>(null)
   const sourceRef = useRef<CaptureSource>(initialMode)
@@ -199,6 +225,92 @@ export function Capture360Page({
     input.current?.click()
   }
 
+  function installDraft(
+    file: File,
+    dimensions: ImageDimensions,
+    selectedSource: CaptureSource,
+    warning?: string,
+  ) {
+    if (previewUrlRef.current) URL.revokeObjectURL(previewUrlRef.current)
+    const previewUrl = URL.createObjectURL(file)
+    previewUrlRef.current = previewUrl
+    setSource(selectedSource)
+    setDraft({
+      file,
+      dimensions,
+      previewUrl,
+      source: selectedSource,
+      warning,
+    })
+  }
+
+  async function beginGuidedCapture(nextSource: CaptureSource) {
+    if (nextSource === 'daily' && !canUseDailyWindow) return
+    sourceRef.current = nextSource
+    setSource(nextSource)
+    setShared(false)
+    setError('')
+
+    if (!guidedCaptureAvailable) {
+      setGuidePreview(true)
+      setAnnouncement('Opened the guided capture preview.')
+      return
+    }
+
+    setGuidedCaptureRunning(true)
+    setGuidedCaptureStatus('Opening the camera guide…')
+    let captureResult: NativePanoramaCaptureResult | undefined
+    try {
+      const result = await startGuidedCapture()
+      captureResult = result
+      if (!result.frames.length || result.capturedCount < result.targetCount) {
+        throw new Error('Capture every surrounding dot before finishing.')
+      }
+
+      setGuidedCaptureStatus('Building your 360° moment…')
+      const processed = await composeGuidedCapture(result, (progress) => {
+        if (progress.phase === 'reading') {
+          setGuidedCaptureStatus(`Reading view ${Math.min(progress.completed + 1, progress.total)} of ${progress.total}…`)
+        } else if (progress.phase === 'projecting') {
+          setGuidedCaptureStatus(`Joining view ${Math.min(progress.completed + 1, progress.total)} of ${progress.total}…`)
+        } else {
+          setGuidedCaptureStatus('Finishing your 360° moment…')
+        }
+      })
+      const file = new File(
+        [processed.viewer],
+        `kinsphere-${new Date().toISOString().replace(/[:.]/g, '-')}-360.jpg`,
+        { type: 'image/jpeg', lastModified: Date.now() },
+      )
+      installDraft(
+        file,
+        { width: processed.viewerWidth, height: processed.viewerHeight },
+        nextSource,
+        `Built from ${result.capturedCount} overlapping views around you.`,
+      )
+      setAnnouncement('Your guided 360° moment is ready to title and share.')
+    } catch (captureError) {
+      if (!isNativeCaptureCancellation(captureError)) {
+        const message = captureError instanceof Error
+          ? captureError.message
+          : 'The guided capture could not be completed. Your family has not received anything yet.'
+        setError(message)
+        setAnnouncement(message)
+      }
+    } finally {
+      if (captureResult) {
+        try {
+          await discardGuidedCapture(captureResult)
+        } catch {
+          // Cache directories are OS-evictable; cleanup failure must not throw
+          // away the finished, already-sanitized panorama.
+        }
+      }
+      setGuidedCaptureRunning(false)
+      setGuidedCaptureStatus('')
+    }
+  }
+
   async function selectFile(event: ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0]
     if (!file) return
@@ -246,16 +358,12 @@ export function Capture360Page({
         }
       }
 
-      const previewUrl = URL.createObjectURL(preparedFile)
-      previewUrlRef.current = previewUrl
-      setSource(selectedSource)
-      setDraft({
-        file: preparedFile,
-        dimensions: preparedDimensions,
-        previewUrl,
-        source: selectedSource,
-        warning: validation.warning,
-      })
+      installDraft(
+        preparedFile,
+        preparedDimensions,
+        selectedSource,
+        validation.warning,
+      )
       setAnnouncement(
         validation.needsNormalization
           ? `${file.name} was fitted to a 360-degree frame and is ready to share.`
@@ -299,6 +407,10 @@ export function Capture360Page({
     } finally {
       setSharing(false)
     }
+  }
+
+  if (guidePreview) {
+    return <GuidedCapturePreview onClose={() => setGuidePreview(false)} />
   }
 
   return (
@@ -381,22 +493,38 @@ export function Capture360Page({
         <>
           {source === 'manual' ? (
             <section className="ks-card capture-manual-panel" aria-labelledby="manual-upload-title">
-              <h2 id="manual-upload-title">Capture a 360 moment</h2>
-              <p>Use your phone’s panorama mode, then we’ll fit the full sweep into a 360°-ready memory.</p>
-              <ol className="capture-panorama-steps" aria-label="How to take a phone panorama">
-                <li><span>1</span><p><strong>Turn sideways</strong>Hold your phone in landscape.</p></li>
-                <li><span>2</span><p><strong>Choose Pano</strong>In Camera, use Pano or Panorama mode.</p></li>
-                <li><span>3</span><p><strong>Sweep slowly</strong>Follow the guide in one steady direction.</p></li>
+              <h2 id="manual-upload-title">Capture every direction</h2>
+              <p>KinSphere places a quiet field of dots around you and takes each view automatically when your phone is lined up and still.</p>
+              <ol className="capture-panorama-steps" aria-label="How guided 360 capture works">
+                <li><span>1</span><p><strong>Stand in one place</strong>Keep the phone close to where your head will be in VR.</p></li>
+                <li><span>2</span><p><strong>Follow the dots</strong>Turn slowly through the middle, ceiling, and floor.</p></li>
+                <li><span>3</span><p><strong>Hold for a moment</strong>Each aligned view captures itself—no shutter tapping.</p></li>
               </ol>
-              <button className="ks-primary-button" type="button" onClick={() => openPicker('manual', 'camera')}>
+              <button
+                className="ks-primary-button"
+                type="button"
+                disabled={guidedCaptureRunning}
+                onClick={() => void beginGuidedCapture('manual')}
+              >
                 <CaptureIcon name="camera" />
-                Take panoramic photo
+                {guidedCaptureRunning
+                  ? 'Preparing capture…'
+                  : guidedCaptureAvailable
+                    ? 'Start guided 360 capture'
+                    : 'Preview guided capture'}
               </button>
               <button className="capture-library-button" type="button" onClick={() => openPicker('manual', 'library')}>
                 <CaptureIcon name="image" />
                 Choose finished panorama
               </button>
-              <p className="capture-camera-note">If Pano mode does not appear here, take it in your Camera app first, then choose it from Photos.</p>
+              <button className="capture-manual-panel__daily" type="button" onClick={() => openPicker('manual', 'camera')}>
+                Use the phone camera instead
+              </button>
+              <p className="capture-camera-note">
+                {guidedCaptureAvailable
+                  ? 'Captured frames stay in the app’s temporary storage while your sphere is assembled.'
+                  : 'This browser shows the interaction preview. Install the Capacitor app on your phone for live camera and motion capture.'}
+              </p>
               <button className="capture-manual-panel__daily" type="button" onClick={() => {
                 sourceRef.current = 'daily'
                 setSource('daily')
@@ -414,9 +542,9 @@ export function Capture360Page({
                 </div>
 
                 {canUseDailyWindow ? (
-                  <button className="ks-primary-button capture-window__action" type="button" onClick={() => openPicker('daily', 'camera')}>
+                  <button className="ks-primary-button capture-window__action" type="button" onClick={() => void beginGuidedCapture('daily')}>
                     <CaptureIcon name="camera" />
-                    Take today’s panorama
+                    Capture today in 360°
                   </button>
                 ) : (
                   <div className="capture-window__locked" role="status">
@@ -449,12 +577,16 @@ export function Capture360Page({
             </>
           )}
 
-          {checking ? <p className="capture-checking" role="status">Preparing the 360° frame…</p> : null}
+          {checking || guidedCaptureRunning ? (
+            <p className="capture-checking" role="status">
+              {guidedCaptureStatus || 'Preparing the 360° frame…'}
+            </p>
+          ) : null}
           {error ? <p className="capture-error" role="alert">{error}</p> : null}
 
           <details className="capture-prototype-note capture-photo-help">
             <summary>About 360 photos</summary>
-            <p>A wide phone panorama becomes a draggable 360° scene for this MVP. It wraps the horizontal sweep and extends its own edge pixels above and below; it does not invent areas your camera never captured.</p>
+            <p>Guided capture photographs overlapping views around you, including above and below, then projects them onto one 2:1 sphere. A finished 360 camera image can still be imported here.</p>
           </details>
         </>
       )}
