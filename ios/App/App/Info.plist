@@ -7,7 +7,7 @@
 	<key>CFBundleDevelopmentRegion</key>
 	<string>en</string>
 	<key>CFBundleDisplayName</key>
-        <string>KinSphere</string>
+	<string>KinSphere</string>
 	<key>CFBundleExecutable</key>
 	<string>$(EXECUTABLE_NAME)</string>
 	<key>CFBundleIdentifier</key>
@@ -26,6 +26,8 @@
 	<true/>
 	<key>NSMotionUsageDescription</key>
 	<string>KinSphere uses device motion to let you look around panoramic memories and use Cardboard mode.</string>
+	<key>NSCameraUsageDescription</key>
+	<string>KinSphere uses the camera to guide you through capturing overlapping frames for panoramic memories.</string>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>
