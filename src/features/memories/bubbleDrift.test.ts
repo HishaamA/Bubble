@@ -10,6 +10,11 @@ describe('createBubbleDrift', () => {
       reverseY: '-5.5px',
       duration: '19s',
       delay: '0s',
+      phoneX: '7.8px',
+      phoneY: '6.9px',
+      phoneReverseX: '-7.8px',
+      phoneReverseY: '-6.9px',
+      phoneDuration: '17s',
     })
     expect(createBubbleDrift(1)).toEqual({
       x: '-7.1px',
@@ -18,6 +23,11 @@ describe('createBubbleDrift', () => {
       reverseY: '-10.5px',
       duration: '21.6s',
       delay: '-3.7s',
+      phoneX: '-9.2px',
+      phoneY: '13px',
+      phoneReverseX: '9.2px',
+      phoneReverseY: '-13px',
+      phoneDuration: '17.7s',
     })
   })
 })

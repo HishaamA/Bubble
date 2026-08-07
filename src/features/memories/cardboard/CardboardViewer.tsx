@@ -7,12 +7,18 @@ import {
   useState,
 } from 'react'
 import { createPortal } from 'react-dom'
-import {
-  PanoramaViewer,
-  type PanoramaScene,
-  type PanoramaViewerHandle,
-} from '../../../viewer'
+import type { PanoramaScene } from '../../../viewer'
 import './CardboardViewer.css'
+import {
+  StereoPanoramaRenderer,
+  type StereoPanoramaRendererHandle,
+} from './StereoPanoramaRenderer'
+import {
+  nativeCardboardOrientationAvailable,
+  requestNativeCardboardLandscape,
+  restoreNativeAppOrientation,
+} from './nativeCardboardOrientation'
+import { useLandscapeOrientation } from './useLandscapeOrientation'
 
 export type CardboardMotionPermission =
   | 'granted'
@@ -26,9 +32,13 @@ export interface CardboardEntryResult {
   motionPermission: CardboardMotionPermission
 }
 
+export interface CardboardEntryOptions {
+  forceLandscape?: boolean
+}
+
 export interface CardboardViewerHandle {
   /** Call directly from the VR button's click handler to preserve user activation. */
-  enter: () => Promise<CardboardEntryResult>
+  enter: (options?: CardboardEntryOptions) => Promise<CardboardEntryResult>
   exit: () => Promise<void>
 }
 
@@ -47,7 +57,6 @@ type MotionStatus =
   | 'preparing'
   | 'starting'
   | 'active'
-  | 'manual'
   | 'unavailable'
   | 'denied'
   | 'insecure'
@@ -76,16 +85,11 @@ type InertSnapshot = {
   attributeValue: string | null
 }
 
-const MOTION_MESSAGES: Record<MotionStatus, string> = {
-  idle: 'Motion tracking is ready to begin.',
-  preparing: 'Preparing the Cardboard view…',
-  starting: 'Starting phone motion tracking…',
-  active: 'Motion tracking active. Both eyes move together.',
-  manual: 'Manual look-around active. Drag either view, or enable motion again.',
+const MOTION_FALLBACK_MESSAGES: Partial<Record<MotionStatus, string>> = {
   unavailable:
-    'Motion tracking is unavailable. You can still drag either view to look around.',
+    'Motion tracking could not start. Leave and re-enter VR to retry; synchronized drag is still available.',
   denied:
-    'Motion access was not granted. Use Enable motion to try again.',
+    'Motion access is off. Allow Motion & Orientation Access, then leave and re-enter VR.',
   insecure:
     'Phone motion needs HTTPS or the installed app. This HTTP page still supports synchronized drag.',
   unsupported:
@@ -216,14 +220,6 @@ function unlockOrientation(): void {
   }
 }
 
-function isPortraitViewport(): boolean {
-  if (typeof window === 'undefined') return false
-  if (typeof window.matchMedia === 'function') {
-    return window.matchMedia('(orientation: portrait)').matches
-  }
-  return window.innerHeight > window.innerWidth
-}
-
 function makeAppViewportInert(): () => void {
   const snapshots: InertSnapshot[] = Array.from(
     document.querySelectorAll<HTMLElement>('.app-viewport'),
@@ -244,17 +240,6 @@ function makeAppViewportInert(): () => void {
       }
     })
   }
-}
-
-function CardboardGlyph() {
-  return (
-    <svg viewBox="0 0 32 22" aria-hidden="true">
-      <path d="M3.2 5.2h25.6v12.1a2 2 0 0 1-2 2h-5.2l-3.4-5.1h-4.4l-3.4 5.1H5.2a2 2 0 0 1-2-2z" />
-      <circle cx="9.2" cy="11.2" r="3.1" />
-      <circle cx="22.8" cy="11.2" r="3.1" />
-      <path d="M12.3 11.2h7.4M8 5.2l1.1-2.5h13.8L24 5.2" />
-    </svg>
-  )
 }
 
 function ExitGlyph() {
@@ -281,8 +266,7 @@ export const CardboardViewer = forwardRef<
   forwardedRef,
 ) {
   const rootRef = useRef<HTMLElement>(null)
-  const leftViewerRef = useRef<PanoramaViewerHandle>(null)
-  const rightViewerRef = useRef<PanoramaViewerHandle>(null)
+  const stereoViewerRef = useRef<StereoPanoramaRendererHandle>(null)
   const exitButtonRef = useRef<HTMLButtonElement>(null)
   const previousFocusRef = useRef<HTMLElement | null>(null)
   const callbacksRef = useRef({ onActiveChange, onSceneChange, onExit })
@@ -292,8 +276,6 @@ export const CardboardViewer = forwardRef<
   const entryPromiseRef = useRef<Promise<CardboardEntryResult> | null>(null)
   const exitPromiseRef = useRef<Promise<void> | null>(null)
   const focusFrameRef = useRef<number | null>(null)
-  const syncFrameRef = useRef<number | null>(null)
-  const syncSourceRef = useRef<'left' | 'right'>('left')
   const motionActiveRef = useRef(false)
   const viewerGenerationRef = useRef(0)
   const mountedScenesRef = useRef(scenes)
@@ -301,14 +283,12 @@ export const CardboardViewer = forwardRef<
   const fullscreenOwnedRef = useRef(false)
   const permissionRef = useRef<CardboardMotionPermission>('not-required')
   const motionAttemptedRef = useRef(false)
+  const landscape = useLandscapeOrientation()
   const resolvedInitialSceneId = resolveInitialSceneId(scenes, initialSceneId)
   const currentSceneIdRef = useRef(resolvedInitialSceneId)
 
   const [active, setActive] = useState(false)
-  const [leftReadyScenes, setLeftReadyScenes] = useState<
-    readonly PanoramaScene[] | null
-  >(null)
-  const [rightReadyScenes, setRightReadyScenes] = useState<
+  const [readyScenes, setReadyScenes] = useState<
     readonly PanoramaScene[] | null
   >(null)
   const [permission, setPermission] = useState<
@@ -316,12 +296,13 @@ export const CardboardViewer = forwardRef<
   >('not-required')
   const [motionStatus, setMotionStatus] = useState<MotionStatus>('idle')
   const [fullscreenAvailable, setFullscreenAvailable] = useState(true)
-  const [portrait, setPortrait] = useState(isPortraitViewport)
+  const [landscapeOverride, setLandscapeOverride] = useState(false)
   const [currentSceneId, setCurrentSceneId] = useState(resolvedInitialSceneId)
-  const leftReady = leftReadyScenes === scenes
-  const rightReady = rightReadyScenes === scenes
+  const viewerReady = readyScenes === scenes
   const activeScene =
     scenes.find(({ id }) => id === currentSceneId) ?? scenes[0]
+  const forceLandscape = active && landscapeOverride && !landscape
+  const motionFallbackMessage = MOTION_FALLBACK_MESSAGES[motionStatus]
 
   useEffect(() => {
     callbacksRef.current = { onActiveChange, onSceneChange, onExit }
@@ -338,10 +319,13 @@ export const CardboardViewer = forwardRef<
     setCurrentSceneId(nextSceneId)
   }, [initialSceneId, scenes])
 
-  const stopBothViewers = useCallback(() => {
+  const stopStereoViewer = useCallback(() => {
     motionActiveRef.current = false
-    leftViewerRef.current?.stopOrientation()
-    rightViewerRef.current?.stopOrientation()
+    stereoViewerRef.current?.stopOrientation()
+  }, [])
+
+  const resizeStereoViewer = useCallback(() => {
+    stereoViewerRef.current?.resize()
   }, [])
 
   useEffect(() => {
@@ -354,10 +338,10 @@ export const CardboardViewer = forwardRef<
     // gate too, otherwise the old "attempted" flag prevents gyro reattachment.
     viewerGenerationRef.current += 1
     motionAttemptedRef.current = false
-    syncSourceRef.current = 'left'
-    stopBothViewers()
+    setReadyScenes(null)
+    stopStereoViewer()
     setMotionStatus('preparing')
-  }, [scenes, stopBothViewers])
+  }, [scenes, stopStereoViewer])
 
   useEffect(() => {
     mountedRef.current = true
@@ -367,16 +351,12 @@ export const CardboardViewer = forwardRef<
       activeRef.current = false
       sessionRef.current += 1
       entryPromiseRef.current = null
-      stopBothViewers()
+      stopStereoViewer()
       unlockOrientation()
 
       if (focusFrameRef.current !== null) {
         window.cancelAnimationFrame(focusFrameRef.current)
         focusFrameRef.current = null
-      }
-      if (syncFrameRef.current !== null) {
-        window.cancelAnimationFrame(syncFrameRef.current)
-        syncFrameRef.current = null
       }
 
       const fullscreenRoot = fullscreenRootRef.current
@@ -384,30 +364,27 @@ export const CardboardViewer = forwardRef<
       fullscreenOwnedRef.current = false
       fullscreenRootRef.current = null
       void leaveOwnedFullscreen(fullscreenRoot, ownedFullscreen)
+      void restoreNativeAppOrientation()
     }
-  }, [stopBothViewers])
+  }, [stopStereoViewer])
 
   const startPrimaryViewer = useCallback(async (
     permissionAlreadyGranted = false,
   ) => {
-    const leftViewer = leftViewerRef.current
-    const rightViewer = rightViewerRef.current
-    if (!activeRef.current || !leftViewer || !rightViewer) return
+    const stereoViewer = stereoViewerRef.current
+    if (!activeRef.current || !stereoViewer) return
 
     const requestedSession = sessionRef.current
     const requestedViewerGeneration = viewerGenerationRef.current
     motionAttemptedRef.current = true
     motionActiveRef.current = false
-    syncSourceRef.current = 'left'
     setMotionStatus('starting')
 
-    // Only one Pannellum instance owns the deviceorientation listener. Its
-    // camera is mirrored into the passive eye every animation frame, avoiding
-    // tiny sensor timing differences that otherwise make Cardboard feel split.
-    rightViewer.stopOrientation()
+    // One listener feeds one full yaw / pitch / roll pose into one WebGL frame,
+    // which is then drawn into both eye viewports without inter-eye drift.
     let started = false
     try {
-      started = await leftViewer.startOrientation({ permissionAlreadyGranted })
+      started = await stereoViewer.startOrientation({ permissionAlreadyGranted })
     } catch {
       started = false
     }
@@ -430,30 +407,34 @@ export const CardboardViewer = forwardRef<
     activeRef.current = false
     sessionRef.current += 1
     entryPromiseRef.current = null
-    stopBothViewers()
+    stopStereoViewer()
     unlockOrientation()
     if (mountedRef.current) {
       setActive(false)
-      setLeftReadyScenes(null)
-      setRightReadyScenes(null)
+      setReadyScenes(null)
       setPermission('not-required')
       setMotionStatus('idle')
+      setLandscapeOverride(false)
     }
     permissionRef.current = 'not-required'
+
+    // Leave the synthetic panorama host route immediately. Native orientation
+    // restoration can finish a moment later on iPhone and must never keep the
+    // user stranded on the underlying Sunday dinner memory.
+    callbacksRef.current.onActiveChange?.(false)
+    callbacksRef.current.onExit?.()
 
     const ownedFullscreen = fullscreenOwnedRef.current
     const fullscreenRoot = fullscreenRootRef.current ?? rootRef.current
     fullscreenOwnedRef.current = false
-    const exitPromise = leaveOwnedFullscreen(
-      fullscreenRoot,
-      ownedFullscreen,
-    ).then(() => {
+    const exitPromise = Promise.all([
+      leaveOwnedFullscreen(fullscreenRoot, ownedFullscreen),
+      restoreNativeAppOrientation(),
+    ]).then(() => {
       if (fullscreenRootRef.current === fullscreenRoot) {
         fullscreenRootRef.current = null
       }
       if (!mountedRef.current) return
-      callbacksRef.current.onActiveChange?.(false)
-      callbacksRef.current.onExit?.()
       if (focusFrameRef.current !== null) {
         window.cancelAnimationFrame(focusFrameRef.current)
       }
@@ -469,9 +450,11 @@ export const CardboardViewer = forwardRef<
     })
     exitPromiseRef.current = exitPromise
     return exitPromise
-  }, [stopBothViewers])
+  }, [stopStereoViewer])
 
-  const enter = useCallback(function enterCardboardViewer(): Promise<CardboardEntryResult> {
+  const enter = useCallback(function enterCardboardViewer(
+    options: CardboardEntryOptions = {},
+  ): Promise<CardboardEntryResult> {
     if (entryPromiseRef.current) return entryPromiseRef.current
     if (exitPromiseRef.current) {
       return Promise.reject(
@@ -495,20 +478,21 @@ export const CardboardViewer = forwardRef<
         : null
     motionAttemptedRef.current = false
     if (mountedRef.current) {
-      setLeftReadyScenes(null)
-      setRightReadyScenes(null)
+      setReadyScenes(null)
       setMotionStatus('preparing')
       setPermission('checking')
       setFullscreenAvailable(true)
-      setPortrait(isPortraitViewport())
+      setLandscapeOverride(options.forceLandscape === true)
       setActive(true)
     }
     callbacksRef.current.onActiveChange?.(true)
 
-    // Both calls begin inside the originating click. This is important for
-    // fullscreen and for iOS' user-gesture-gated motion permission prompt.
+    // These calls begin inside the originating click. This is important for
+    // fullscreen, native rotation, and iOS' motion permission prompt.
+    const nativeOrientationCapable = nativeCardboardOrientationAvailable()
+    const nativeOrientationRequest = requestNativeCardboardLandscape()
     const permissionRequest = requestMotionPermission()
-    const fullscreenRequest = fullscreenRoot
+    const fullscreenRequest = !nativeOrientationCapable && fullscreenRoot
       ? requestElementFullscreen(fullscreenRoot)
       : Promise.resolve(false)
 
@@ -548,7 +532,7 @@ export const CardboardViewer = forwardRef<
       }
 
       fullscreenOwnedRef.current = fullscreen
-      setFullscreenAvailable(fullscreen)
+      setFullscreenAvailable(fullscreen || nativeOrientationCapable)
       if (fullscreen) {
         await lockLandscape()
         if (!activeRef.current || !mountedRef.current) {
@@ -558,9 +542,29 @@ export const CardboardViewer = forwardRef<
       return fullscreen
     })
 
+    const settledNativeOrientation = nativeOrientationRequest.then(
+      async (requested) => {
+        const entryIsCurrent =
+          activeRef.current &&
+          requestedSession === sessionRef.current &&
+          mountedRef.current
+
+        if (!entryIsCurrent && requested) {
+          const newerSessionNeedsLandscape =
+            activeRef.current && requestedSession !== sessionRef.current
+          if (!newerSessionNeedsLandscape) {
+            await restoreNativeAppOrientation()
+          }
+        }
+
+        return requested
+      },
+    )
+
     const entryPromise = Promise.all([
       settledPermission,
       settledFullscreen,
+      settledNativeOrientation,
     ]).then(([motionPermission, fullscreen]) => ({
       fullscreen,
       motionPermission,
@@ -582,8 +586,7 @@ export const CardboardViewer = forwardRef<
   useEffect(() => {
     if (
       !active ||
-      !leftReady ||
-      !rightReady ||
+      !viewerReady ||
       permission === 'checking' ||
       motionAttemptedRef.current
     ) {
@@ -593,42 +596,12 @@ export const CardboardViewer = forwardRef<
     if (permission !== 'granted' && permission !== 'not-required') return
 
     void startPrimaryViewer(permission === 'granted')
-  }, [active, leftReady, permission, rightReady, startPrimaryViewer])
-
-  useEffect(() => {
-    if (!active || !leftReady || !rightReady) return
-
-    let cancelled = false
-    const mirrorActiveEye = () => {
-      if (cancelled || !activeRef.current) return
-      const source =
-        syncSourceRef.current === 'left'
-          ? leftViewerRef.current
-          : rightViewerRef.current
-      const target =
-        syncSourceRef.current === 'left'
-          ? rightViewerRef.current
-          : leftViewerRef.current
-      const view = source?.getView()
-      if (view) target?.setView(view)
-      syncFrameRef.current = window.requestAnimationFrame(mirrorActiveEye)
-    }
-
-    mirrorActiveEye()
-    return () => {
-      cancelled = true
-      if (syncFrameRef.current !== null) {
-        window.cancelAnimationFrame(syncFrameRef.current)
-        syncFrameRef.current = null
-      }
-    }
-  }, [active, currentSceneId, leftReady, rightReady])
+  }, [active, permission, startPrimaryViewer, viewerReady])
 
   useEffect(() => {
     if (!active) return
 
     const root = rootRef.current
-    const updatePortrait = () => setPortrait(isPortraitViewport())
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key !== 'Escape') return
       event.preventDefault()
@@ -643,26 +616,18 @@ export const CardboardViewer = forwardRef<
         void exit()
       }
     }
-    const portraitQuery =
-      typeof window.matchMedia === 'function'
-        ? window.matchMedia('(orientation: portrait)')
-        : undefined
     const restoreAppViewport = makeAppViewportInert()
 
     document.addEventListener('fullscreenchange', handleFullscreenChange)
     document.addEventListener('webkitfullscreenchange', handleFullscreenChange)
     window.addEventListener('keydown', handleKeyDown)
-    window.addEventListener('resize', updatePortrait)
-    window.addEventListener('orientationchange', updatePortrait)
-    portraitQuery?.addEventListener?.('change', updatePortrait)
 
     const previousOverflow = document.documentElement.style.overflow
     document.documentElement.style.overflow = 'hidden'
     focusFrameRef.current = window.requestAnimationFrame(() => {
       focusFrameRef.current = null
       exitButtonRef.current?.focus({ preventScroll: true })
-      leftViewerRef.current?.resize()
-      rightViewerRef.current?.resize()
+      stereoViewerRef.current?.resize()
     })
 
     return () => {
@@ -676,76 +641,47 @@ export const CardboardViewer = forwardRef<
         handleFullscreenChange,
       )
       window.removeEventListener('keydown', handleKeyDown)
-      window.removeEventListener('resize', updatePortrait)
-      window.removeEventListener('orientationchange', updatePortrait)
-      portraitQuery?.removeEventListener?.('change', updatePortrait)
       document.documentElement.style.overflow = previousOverflow
       restoreAppViewport()
     }
-  }, [active, exit, stopBothViewers])
+  }, [active, exit])
 
-  const retryMotion = useCallback(async () => {
-    if (!activeRef.current) return
-
-    const requestedSession = sessionRef.current
-    setPermission('checking')
-    setMotionStatus('preparing')
-    motionAttemptedRef.current = false
-    const motionPermission = await requestMotionPermission()
-    if (
-      !activeRef.current ||
-      requestedSession !== sessionRef.current ||
-      !mountedRef.current
-    ) {
-      return
+  useEffect(() => {
+    if (!active) return
+    let frame: number | null = null
+    const scheduleResize = () => {
+      if (frame !== null) window.cancelAnimationFrame(frame)
+      frame = window.requestAnimationFrame(() => {
+        frame = null
+        resizeStereoViewer()
+      })
     }
-
-    permissionRef.current = motionPermission
-    setPermission(motionPermission)
-    if (
-      motionPermission === 'denied' ||
-      motionPermission === 'insecure' ||
-      motionPermission === 'unsupported'
-    ) {
-      setMotionStatus(motionPermission)
-      return
+    window.addEventListener('resize', scheduleResize)
+    window.addEventListener('orientationchange', scheduleResize)
+    window.visualViewport?.addEventListener('resize', scheduleResize)
+    scheduleResize()
+    return () => {
+      if (frame !== null) window.cancelAnimationFrame(frame)
+      window.removeEventListener('resize', scheduleResize)
+      window.removeEventListener('orientationchange', scheduleResize)
+      window.visualViewport?.removeEventListener('resize', scheduleResize)
     }
-    await startPrimaryViewer(motionPermission === 'granted')
-  }, [startPrimaryViewer])
+  }, [active, forceLandscape, landscape, resizeStereoViewer, viewerReady])
 
-  const selectSyncSource = useCallback(
-    (source: 'left' | 'right') => {
-      syncSourceRef.current = source
-      if (!motionActiveRef.current) return
-
-      stopBothViewers()
-      setMotionStatus('manual')
-    },
-    [stopBothViewers],
-  )
-
-  const handleSceneChange = useCallback(
-    (nextSceneId: string) => {
-      if (
-        nextSceneId === currentSceneIdRef.current ||
-        !scenes.some(({ id }) => id === nextSceneId)
-      ) {
-        return
-      }
-
-      currentSceneIdRef.current = nextSceneId
-      setCurrentSceneId(nextSceneId)
-      callbacksRef.current.onSceneChange?.(nextSceneId)
-    },
-    [scenes],
-  )
+  const useSplitViewAnyway = useCallback(() => {
+    setLandscapeOverride(true)
+    window.requestAnimationFrame(() => {
+      resizeStereoViewer()
+      exitButtonRef.current?.focus({ preventScroll: true })
+    })
+  }, [resizeStereoViewer])
 
   if (typeof document === 'undefined') return null
 
   return createPortal(
     <section
       ref={rootRef}
-      className={`ks-cardboard${active ? ' ks-cardboard--active' : ''}`}
+      className={`ks-cardboard${active ? ' ks-cardboard--active' : ''}${forceLandscape ? ' ks-cardboard--forced-landscape' : ''}`}
       role="dialog"
       aria-modal={active ? true : undefined}
       aria-label={ariaLabel}
@@ -755,21 +691,21 @@ export const CardboardViewer = forwardRef<
       {active ? (
         <>
           <div className="ks-cardboard__eyes" aria-label="Synchronized split view">
-            <div
-              className="ks-cardboard__eye ks-cardboard__eye--left"
-              onPointerDownCapture={() => selectSyncSource('left')}
-              onTouchStartCapture={() => selectSyncSource('left')}
-            >
-              <PanoramaViewer
-                ref={leftViewerRef}
-                scenes={scenes}
-                initialSceneId={currentSceneId}
-                sceneId={currentSceneId}
-                ariaLabel={`${ariaLabel}, left eye`}
-                showControls={false}
-                onReady={() => setLeftReadyScenes(scenes)}
-                onSceneChange={handleSceneChange}
+            {activeScene ? (
+              <StereoPanoramaRenderer
+                ref={stereoViewerRef}
+                scene={activeScene}
+                ariaLabel={`${ariaLabel}, synchronized left and right eye panorama`}
+                opticalCenterShift={0}
+                onReady={() => setReadyScenes(scenes)}
               />
+            ) : (
+              <p className="ks-cardboard__missing-scene" role="alert">
+                This panorama is unavailable.
+              </p>
+            )}
+
+            <div className="ks-cardboard__eye ks-cardboard__eye--left">
               <div className="ks-cardboard__memory-label" aria-hidden="true">
                 <strong>{activeScene?.title ?? 'Family moment'}</strong>
                 {memoryByline ? <span>{memoryByline}</span> : null}
@@ -780,30 +716,13 @@ export const CardboardViewer = forwardRef<
             <div
               className="ks-cardboard__eye ks-cardboard__eye--right"
               aria-hidden="true"
-              onPointerDownCapture={() => selectSyncSource('right')}
-              onTouchStartCapture={() => selectSyncSource('right')}
             >
-              <PanoramaViewer
-                ref={rightViewerRef}
-                scenes={scenes}
-                initialSceneId={currentSceneId}
-                sceneId={currentSceneId}
-                ariaLabel={`${ariaLabel}, right eye`}
-                showControls={false}
-                onReady={() => setRightReadyScenes(scenes)}
-                onSceneChange={handleSceneChange}
-              />
               <div className="ks-cardboard__memory-label" aria-hidden="true">
                 <strong>{activeScene?.title ?? 'Family moment'}</strong>
                 {memoryByline ? <span>{memoryByline}</span> : null}
               </div>
               <span className="ks-cardboard__reticle" aria-hidden="true" />
             </div>
-          </div>
-
-          <div className="ks-cardboard__brand" aria-hidden="true">
-            <CardboardGlyph />
-            <span>KinSphere VR</span>
           </div>
 
           <button
@@ -817,29 +736,28 @@ export const CardboardViewer = forwardRef<
             <span>Exit</span>
           </button>
 
-          <div className="ks-cardboard__status-panel">
-            <p role="status" aria-live="polite">
-              {MOTION_MESSAGES[motionStatus]}
-            </p>
-            {motionStatus === 'denied' ||
-            motionStatus === 'manual' ||
-            motionStatus === 'unavailable' ? (
-              <button type="button" onClick={() => void retryMotion()}>
-                Enable motion
-              </button>
-            ) : null}
-            {!fullscreenAvailable ? (
-              <small>
-                Fullscreen is unavailable, so the immersive overlay is being used.
-              </small>
-            ) : null}
-          </div>
+          {motionFallbackMessage || !fullscreenAvailable ? (
+            <div className="ks-cardboard__status-panel">
+              {motionFallbackMessage ? (
+                <p role="status" aria-live="polite">{motionFallbackMessage}</p>
+              ) : null}
+              {!fullscreenAvailable ? (
+                <small>Fullscreen is unavailable, so the immersive overlay is being used.</small>
+              ) : null}
+            </div>
+          ) : null}
 
-          {portrait ? (
-            <div className="ks-cardboard__rotate-hint" role="status">
+          {!landscape && !landscapeOverride ? (
+            <div
+              className="ks-cardboard__rotate-hint"
+              role="group"
+              aria-labelledby="ks-cardboard-rotate-title"
+              aria-describedby="ks-cardboard-rotate-description"
+            >
               <span className="ks-cardboard__phone" aria-hidden="true" />
-              <strong>Rotate your phone</strong>
-              <span>Use landscape before placing it in Cardboard.</span>
+              <strong id="ks-cardboard-rotate-title">Rotate your phone</strong>
+              <span id="ks-cardboard-rotate-description">Use landscape before placing it in Cardboard.</span>
+              <button type="button" onClick={useSplitViewAnyway}>Use split view anyway</button>
             </div>
           ) : null}
 

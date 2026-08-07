@@ -72,14 +72,27 @@ export function SharedMomentsProvider({
 
   const replaceMoments = useCallback(
     (records: StoredPanoramaMoment[]) => {
-      const nextMoments = records.map((moment) => ({
-        ...moment,
-        objectUrl: activeObjectUrls.create(moment.blob),
-      }))
+      const nextMoments = records.map((moment) => {
+        const annotations = (moment.annotations ?? []).map((annotation) => ({
+          ...annotation,
+          audioUrl: annotation.audioBlob
+            ? activeObjectUrls.create(annotation.audioBlob)
+            : null,
+        }))
+
+        return {
+          ...moment,
+          objectUrl: activeObjectUrls.create(moment.blob),
+          annotations,
+        }
+      })
       const previousUrls = liveUrlsRef.current
-      liveUrlsRef.current = nextMoments.flatMap((moment) =>
-        moment.objectUrl ? [moment.objectUrl] : [],
-      )
+      liveUrlsRef.current = nextMoments.flatMap((moment) => [
+        ...(moment.objectUrl ? [moment.objectUrl] : []),
+        ...moment.annotations.flatMap((annotation) =>
+          annotation.audioUrl ? [annotation.audioUrl] : [],
+        ),
+      ])
       setMoments(nextMoments)
       previousUrls.forEach((url) => activeObjectUrls.revoke(url))
     },

@@ -1,4 +1,5 @@
 import {
+  useEffect,
   useLayoutEffect,
   useRef,
   useState,
@@ -6,6 +7,7 @@ import {
   type KeyboardEvent as ReactKeyboardEvent,
 } from 'react'
 import './CardboardSetupFlow.css'
+import { useLandscapeOrientation } from './useLandscapeOrientation'
 
 export type CardboardMemoryChoice = {
   id: string
@@ -29,7 +31,7 @@ export type CardboardSetupFlowProps = {
   busy?: boolean
   error?: string | null
   onSelectMemory: (memoryId: string) => void
-  onGo: () => void
+  onGo: (options?: { forceLandscape?: boolean }) => void
   onClose: () => void
 }
 
@@ -85,6 +87,8 @@ function CardboardSetupContents({
   onClose,
 }: CardboardSetupFlowProps) {
   const [step, setStep] = useState<CardboardSetupStep>('choose')
+  const [forceLandscape, setForceLandscape] = useState(false)
+  const landscape = useLandscapeOrientation()
   const closeButtonRef = useRef<HTMLButtonElement>(null)
   const continueButtonRef = useRef<HTMLButtonElement>(null)
 
@@ -100,6 +104,12 @@ function CardboardSetupContents({
 
   const selectedChoice =
     choices.find(({ id }) => id === selectedMemoryId) ?? choices[0]
+
+  useEffect(() => {
+    if (step !== 'rotate' || !landscape) return
+    setForceLandscape(false)
+    setStep('cardboard')
+  }, [landscape, step])
 
   function handleDialogKeyDown(event: ReactKeyboardEvent<HTMLElement>) {
     if (event.key === 'Escape') {
@@ -223,9 +233,12 @@ function CardboardSetupContents({
             ref={continueButtonRef}
             className="cardboard-setup__primary"
             type="button"
-            onClick={() => setStep('cardboard')}
+            onClick={() => {
+              setForceLandscape(true)
+              setStep('cardboard')
+            }}
           >
-            Continue
+            Use split view anyway
           </button>
         </div>
       ) : null}
@@ -255,7 +268,7 @@ function CardboardSetupContents({
             type="button"
             disabled={busy || !selectedChoice}
             aria-busy={busy}
-            onClick={onGo}
+            onClick={() => onGo({ forceLandscape })}
           >
             {busy ? 'Starting…' : 'Go'}
           </button>
@@ -263,7 +276,10 @@ function CardboardSetupContents({
             className="cardboard-setup__back"
             type="button"
             disabled={busy}
-            onClick={() => setStep('choose')}
+            onClick={() => {
+              setForceLandscape(false)
+              setStep('choose')
+            }}
           >
             Choose another memory
           </button>

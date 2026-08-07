@@ -1,0 +1,64 @@
+import { beforeEach, describe, expect, it, vi } from 'vitest'
+
+const capacitor = vi.hoisted(() => ({
+  isNativePlatform: vi.fn(),
+  getPlatform: vi.fn(),
+  isPluginAvailable: vi.fn(),
+}))
+const orientationPlugin = vi.hoisted(() => ({
+  requestLandscape: vi.fn(),
+  restoreAppOrientation: vi.fn(),
+}))
+
+vi.mock('@capacitor/core', () => ({
+  Capacitor: capacitor,
+  registerPlugin: vi.fn(() => orientationPlugin),
+}))
+
+import {
+  nativeCardboardOrientationAvailable,
+  requestNativeCardboardLandscape,
+  restoreNativeAppOrientation,
+} from './nativeCardboardOrientation'
+
+describe('native Cardboard orientation', () => {
+  beforeEach(() => {
+    capacitor.isNativePlatform.mockReset()
+    capacitor.getPlatform.mockReset()
+    capacitor.isPluginAvailable.mockReset().mockReturnValue(true)
+    orientationPlugin.requestLandscape.mockReset().mockResolvedValue(undefined)
+    orientationPlugin.restoreAppOrientation.mockReset().mockResolvedValue(undefined)
+  })
+
+  it('uses the custom orientation bridge in the native iOS app', async () => {
+    capacitor.isNativePlatform.mockReturnValue(true)
+    capacitor.getPlatform.mockReturnValue('ios')
+
+    expect(nativeCardboardOrientationAvailable()).toBe(true)
+    await expect(requestNativeCardboardLandscape()).resolves.toBe(true)
+    await expect(restoreNativeAppOrientation()).resolves.toBe(true)
+    expect(orientationPlugin.requestLandscape).toHaveBeenCalledOnce()
+    expect(orientationPlugin.restoreAppOrientation).toHaveBeenCalledOnce()
+  })
+
+  it('does not invoke the native plugin from the web app', async () => {
+    capacitor.isNativePlatform.mockReturnValue(false)
+    capacitor.getPlatform.mockReturnValue('web')
+
+    expect(nativeCardboardOrientationAvailable()).toBe(false)
+    await expect(requestNativeCardboardLandscape()).resolves.toBe(false)
+    await expect(restoreNativeAppOrientation()).resolves.toBe(false)
+    expect(orientationPlugin.requestLandscape).not.toHaveBeenCalled()
+    expect(orientationPlugin.restoreAppOrientation).not.toHaveBeenCalled()
+  })
+
+  it('fails safely if the native bridge rejects an orientation request', async () => {
+    capacitor.isNativePlatform.mockReturnValue(true)
+    capacitor.getPlatform.mockReturnValue('ios')
+    orientationPlugin.requestLandscape.mockRejectedValue(new Error('busy'))
+    orientationPlugin.restoreAppOrientation.mockRejectedValue(new Error('busy'))
+
+    await expect(requestNativeCardboardLandscape()).resolves.toBe(false)
+    await expect(restoreNativeAppOrientation()).resolves.toBe(false)
+  })
+})

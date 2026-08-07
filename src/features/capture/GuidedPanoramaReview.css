@@ -1,0 +1,565 @@
+.guided-panorama-review {
+  --review-safe-top: max(
+    env(safe-area-inset-top),
+    var(--native-safe-area-top, 0px)
+  );
+  --review-safe-right: max(
+    env(safe-area-inset-right),
+    var(--native-safe-area-right, 0px)
+  );
+  --review-safe-bottom: max(
+    env(safe-area-inset-bottom),
+    var(--native-safe-area-bottom, 0px)
+  );
+  --review-safe-left: max(
+    env(safe-area-inset-left),
+    var(--native-safe-area-left, 0px)
+  );
+  position: fixed;
+  z-index: 120;
+  inset: 0;
+  inline-size: min(100%, 46rem);
+  block-size: 100dvh;
+  margin-inline: auto;
+  overflow: hidden;
+  isolation: isolate;
+  color: #fff;
+  background: #000;
+}
+
+.guided-panorama-review::before,
+.guided-panorama-review::after {
+  position: absolute;
+  z-index: 2;
+  inset-inline: 0;
+  content: '';
+  pointer-events: none;
+}
+
+.guided-panorama-review::before {
+  inset-block-start: 0;
+  block-size: calc(8rem + var(--review-safe-top));
+  background: linear-gradient(rgb(0 0 0 / 72%), transparent);
+}
+
+.guided-panorama-review::after {
+  inset-block-end: 0;
+  block-size: calc(11rem + var(--review-safe-bottom));
+  background: linear-gradient(transparent, rgb(0 0 0 / 82%));
+}
+
+.guided-panorama-review__viewer.ks-panorama {
+  position: absolute;
+  inset: 0;
+  min-block-size: 0;
+  block-size: 100%;
+  border-radius: 0;
+}
+
+.guided-panorama-review__topbar {
+  position: absolute;
+  z-index: 4;
+  inset-block-start: 0;
+  inset-inline: 0;
+  display: flex;
+  min-inline-size: 0;
+  padding:
+    calc(var(--review-safe-top) + 1rem)
+    calc(var(--review-safe-right) + 1.15rem)
+    1rem
+    calc(var(--review-safe-left) + 1.15rem);
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  pointer-events: none;
+}
+
+.guided-panorama-review__topbar > div {
+  min-inline-size: 0;
+}
+
+.guided-panorama-review__topbar h1,
+.guided-panorama-review__topbar p {
+  margin: 0;
+  text-shadow: 0 1px 18px rgb(0 0 0 / 84%);
+}
+
+.guided-panorama-review__topbar h1 {
+  font-size: clamp(1.05rem, 4.6vw, 1.25rem);
+  font-weight: 650;
+  letter-spacing: -0.035em;
+}
+
+.guided-panorama-review__topbar p {
+  margin-block-start: 0.15rem;
+  color: rgb(255 255 255 / 62%);
+  font-size: 0.68rem;
+}
+
+.guided-panorama-review__topbar > span {
+  flex: 0 0 auto;
+  padding: 0.42rem 0.65rem;
+  border: 1px solid rgb(255 255 255 / 17%);
+  border-radius: 999px;
+  color: rgb(255 255 255 / 78%);
+  background: rgb(16 16 17 / 56%);
+  font-size: 0.64rem;
+  font-weight: 630;
+  backdrop-filter: blur(22px) saturate(140%);
+}
+
+.guided-panorama-review__status {
+  position: absolute;
+  z-index: 4;
+  inset-inline-start: 50%;
+  inset-block-end: calc(var(--review-safe-bottom) + 6.9rem);
+  inline-size: max-content;
+  max-inline-size: calc(
+    100% - var(--review-safe-left) - var(--review-safe-right) - 2rem
+  );
+  margin: 0;
+  padding: 0.54rem 0.78rem;
+  border: 1px solid rgb(255 255 255 / 15%);
+  border-radius: 999px;
+  color: rgb(255 255 255 / 84%);
+  background: rgb(12 12 13 / 68%);
+  font-size: 0.68rem;
+  line-height: 1.35;
+  text-align: center;
+  transform: translateX(-50%);
+  backdrop-filter: blur(20px) saturate(140%);
+  pointer-events: none;
+}
+
+.guided-panorama-review.is-placing-point__status,
+.guided-panorama-review.is-placing-point .guided-panorama-review__status {
+  color: #111;
+  background: rgb(255 255 255 / 92%);
+}
+
+.guided-panorama-review__dock {
+  position: absolute;
+  z-index: 5;
+  inset-inline: 0;
+  inset-block-end: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 4.4rem minmax(0, 1fr);
+  min-block-size: calc(5.7rem + var(--review-safe-bottom));
+  padding:
+    0.72rem
+    calc(var(--review-safe-right) + 1rem)
+    calc(var(--review-safe-bottom) + 0.8rem)
+    calc(var(--review-safe-left) + 1rem);
+  align-items: center;
+  gap: 0.65rem;
+  background: rgb(8 8 9 / 58%);
+  border-block-start: 1px solid rgb(255 255 255 / 12%);
+  backdrop-filter: blur(28px) saturate(145%);
+}
+
+.guided-panorama-review__dock button,
+.guided-panorama-review__sheet button {
+  min-block-size: 44px;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.guided-panorama-review__dock button:focus-visible,
+.guided-panorama-review__sheet button:focus-visible,
+.guided-panorama-review__sheet textarea:focus-visible {
+  outline: 2px solid #fff;
+  outline-offset: 2px;
+}
+
+.guided-panorama-review__dock button:disabled,
+.guided-panorama-review__sheet button:disabled {
+  opacity: 0.38;
+  cursor: default;
+}
+
+.guided-panorama-review__side-action {
+  min-inline-size: 0;
+  padding: 0.7rem 0.6rem;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: rgb(255 255 255 / 74%);
+  font-size: 0.76rem;
+  font-weight: 610;
+}
+
+.guided-panorama-review__side-action:first-child {
+  justify-self: start;
+}
+
+.guided-panorama-review__side-action:last-child {
+  justify-self: end;
+}
+
+.guided-panorama-review__side-action.is-primary {
+  padding-inline: 1rem;
+  color: #090909;
+  background: #fff;
+}
+
+.guided-panorama-review__add {
+  display: grid;
+  inline-size: 3.8rem;
+  block-size: 3.8rem;
+  padding: 0;
+  place-items: center;
+  justify-self: center;
+  border: 1px solid rgb(255 255 255 / 38%);
+  border-radius: 50%;
+  color: #090909;
+  background: #fff;
+  box-shadow:
+    0 0 0 0.42rem rgb(255 255 255 / 10%),
+    0 0.7rem 2rem rgb(0 0 0 / 42%);
+  transition:
+    color 180ms ease,
+    background-color 180ms ease,
+    transform 180ms ease;
+}
+
+.guided-panorama-review__add svg {
+  inline-size: 1.55rem;
+}
+
+.guided-panorama-review__add[aria-pressed='true'] {
+  color: #fff;
+  background: #ec5b5b;
+  transform: rotate(45deg);
+}
+
+.guided-panorama-review__sheet-layer {
+  position: absolute;
+  z-index: 10;
+  inset: 0;
+  display: grid;
+  padding:
+    calc(var(--review-safe-top) + 1rem)
+    calc(var(--review-safe-right) + 0.75rem)
+    calc(var(--review-safe-bottom) + 0.75rem)
+    calc(var(--review-safe-left) + 0.75rem);
+  align-items: end;
+  background: rgb(0 0 0 / 38%);
+  backdrop-filter: blur(5px);
+}
+
+.guided-panorama-review__sheet {
+  display: grid;
+  inline-size: 100%;
+  max-block-size: min(35rem, calc(100dvh - var(--review-safe-top) - 2rem));
+  padding: 0.55rem 1rem 1rem;
+  overflow-x: hidden;
+  overflow-y: auto;
+  gap: 0.9rem;
+  border: 1px solid rgb(255 255 255 / 15%);
+  border-radius: 1.55rem;
+  color: #fff;
+  background: rgb(25 25 27 / 94%);
+  box-shadow: 0 -1.5rem 5rem rgb(0 0 0 / 54%);
+  backdrop-filter: blur(32px) saturate(155%);
+}
+
+.guided-panorama-review__sheet-handle {
+  inline-size: 2.4rem;
+  block-size: 0.28rem;
+  margin-inline: auto;
+  background: rgb(255 255 255 / 24%);
+  border-radius: 999px;
+}
+
+.guided-panorama-review__sheet-header {
+  display: flex;
+  min-inline-size: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.guided-panorama-review__sheet-header > div {
+  min-inline-size: 0;
+}
+
+.guided-panorama-review__sheet-header p,
+.guided-panorama-review__sheet-header h2 {
+  margin: 0;
+}
+
+.guided-panorama-review__sheet-header p {
+  margin-block-end: 0.16rem;
+  color: rgb(255 255 255 / 46%);
+  font-size: 0.61rem;
+  font-weight: 650;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.guided-panorama-review__sheet-header h2 {
+  font-size: 1.12rem;
+  font-weight: 650;
+  letter-spacing: -0.03em;
+}
+
+.guided-panorama-review__cancel {
+  padding-inline: 0.3rem;
+  border: 0;
+  color: #78adff !important;
+  background: transparent;
+  font-size: 0.76rem !important;
+  font-weight: 620 !important;
+}
+
+.guided-panorama-review__kind-picker {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.65rem;
+}
+
+.guided-panorama-review__kind-picker > button {
+  display: grid;
+  min-inline-size: 0;
+  min-block-size: 7.2rem;
+  padding: 0.85rem;
+  justify-items: start;
+  gap: 0.2rem;
+  border: 1px solid rgb(255 255 255 / 11%);
+  border-radius: 1.05rem;
+  color: #fff;
+  background: rgb(255 255 255 / 7%);
+  text-align: start;
+}
+
+.guided-panorama-review__kind-picker > button > span {
+  display: grid;
+  inline-size: 2.3rem;
+  block-size: 2.3rem;
+  margin-block-end: 0.32rem;
+  place-items: center;
+  border-radius: 50%;
+  color: #0c0c0c;
+  background: #fff;
+}
+
+.guided-panorama-review__kind-picker svg {
+  inline-size: 1.2rem;
+}
+
+.guided-panorama-review__kind-picker strong {
+  font-size: 0.82rem;
+}
+
+.guided-panorama-review__kind-picker small {
+  color: rgb(255 255 255 / 48%);
+  font-size: 0.63rem;
+  line-height: 1.35;
+}
+
+.guided-panorama-review__editor {
+  display: grid;
+  min-inline-size: 0;
+  gap: 0.65rem;
+}
+
+.guided-panorama-review__editor > label {
+  color: rgb(255 255 255 / 62%);
+  font-size: 0.68rem;
+  font-weight: 620;
+}
+
+.guided-panorama-review__editor textarea {
+  box-sizing: border-box;
+  inline-size: 100%;
+  min-inline-size: 0;
+  min-block-size: 6.4rem;
+  padding: 0.82rem;
+  resize: vertical;
+  border: 1px solid rgb(255 255 255 / 13%);
+  border-radius: 0.95rem;
+  color: #fff;
+  background: rgb(0 0 0 / 28%);
+  font: 400 0.9rem/1.45 system-ui, sans-serif;
+}
+
+.guided-panorama-review__editor textarea::placeholder {
+  color: rgb(255 255 255 / 28%);
+}
+
+.guided-panorama-review__editor-meta {
+  display: flex;
+  min-inline-size: 0;
+  justify-content: space-between;
+  gap: 0.75rem;
+  color: rgb(255 255 255 / 40%);
+  font-size: 0.61rem;
+}
+
+.guided-panorama-review__save {
+  inline-size: 100%;
+  padding: 0.72rem 1rem;
+  border: 0;
+  border-radius: 999px;
+  color: #0a0a0a !important;
+  background: #fff;
+  font-size: 0.77rem !important;
+  font-weight: 680 !important;
+}
+
+.guided-panorama-review__voice-editor {
+  justify-items: stretch;
+}
+
+.guided-panorama-review__recording {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  min-block-size: 3rem;
+  padding: 0.65rem 0.8rem;
+  align-items: center;
+  gap: 0.55rem;
+  border: 1px solid rgb(255 104 104 / 26%);
+  border-radius: 0.9rem;
+  background: rgb(255 74 74 / 8%);
+}
+
+.guided-panorama-review__recording > span {
+  inline-size: 0.62rem;
+  block-size: 0.62rem;
+  background: #ff6464;
+  border-radius: 50%;
+  box-shadow: 0 0 0 0.28rem rgb(255 100 100 / 12%);
+  animation: guided-review-recording-pulse 1.4s ease-in-out infinite;
+}
+
+.guided-panorama-review__recording strong,
+.guided-panorama-review__recording time {
+  font-size: 0.72rem;
+}
+
+.guided-panorama-review__recording time {
+  color: rgb(255 255 255 / 58%);
+  font-variant-numeric: tabular-nums;
+}
+
+.guided-panorama-review__audio {
+  inline-size: 100%;
+  min-inline-size: 0;
+  block-size: 2.8rem;
+  color-scheme: dark;
+}
+
+.guided-panorama-review__record {
+  display: flex;
+  inline-size: 100%;
+  padding: 0.58rem 0.8rem;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  border: 1px solid rgb(255 255 255 / 14%);
+  border-radius: 999px;
+  color: #fff;
+  background: rgb(255 255 255 / 7%);
+  font-size: 0.74rem !important;
+  font-weight: 620 !important;
+}
+
+.guided-panorama-review__record > span {
+  display: grid;
+  inline-size: 1.75rem;
+  block-size: 1.75rem;
+  place-items: center;
+  border-radius: 50%;
+  color: #fff;
+  background: #eb5757;
+}
+
+.guided-panorama-review__record svg {
+  inline-size: 0.92rem;
+}
+
+.guided-panorama-review__record.is-recording {
+  border-color: rgb(255 100 100 / 30%);
+}
+
+.guided-panorama-review__voice-hint,
+.guided-panorama-review__voice-error {
+  margin: 0;
+  font-size: 0.64rem;
+  line-height: 1.4;
+  text-align: center;
+}
+
+.guided-panorama-review__voice-hint {
+  color: rgb(255 255 255 / 40%);
+}
+
+.guided-panorama-review__voice-error {
+  color: #ffaaaa;
+}
+
+.guided-panorama-review__delete {
+  inline-size: 100%;
+  padding: 0.65rem;
+  border: 0;
+  border-block-start: 1px solid rgb(255 255 255 / 9%);
+  color: #ff7474 !important;
+  background: transparent;
+  font-size: 0.72rem !important;
+  font-weight: 620 !important;
+}
+
+@keyframes guided-review-recording-pulse {
+  50% {
+    opacity: 0.52;
+    transform: scale(0.82);
+  }
+}
+
+@media (max-width: 23rem) {
+  .guided-panorama-review__dock {
+    grid-template-columns: minmax(0, 1fr) 3.9rem minmax(0, 1fr);
+    padding-inline:
+      calc(var(--review-safe-left) + 0.65rem)
+      calc(var(--review-safe-right) + 0.65rem);
+    gap: 0.35rem;
+  }
+
+  .guided-panorama-review__add {
+    inline-size: 3.5rem;
+    block-size: 3.5rem;
+  }
+
+  .guided-panorama-review__side-action.is-primary {
+    padding-inline: 0.72rem;
+  }
+
+  .guided-panorama-review__kind-picker {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .guided-panorama-review__kind-picker > button {
+    grid-template-columns: auto 1fr;
+    min-block-size: 4.7rem;
+    align-items: center;
+    column-gap: 0.7rem;
+  }
+
+  .guided-panorama-review__kind-picker > button > span {
+    grid-row: 1 / 3;
+    margin: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .guided-panorama-review *,
+  .guided-panorama-review *::before,
+  .guided-panorama-review *::after {
+    scroll-behavior: auto !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}

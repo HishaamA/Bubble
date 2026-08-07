@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   createCameraBasis,
   directionToEquirectangular,
+  resolveFrameCameraBasis,
   resolveFrameOrientation,
 } from './composeGuidedPanorama'
 
@@ -19,7 +20,7 @@ describe('guided panorama geometry', () => {
     expect(coordinate.y).toBe(512)
   })
 
-  it('uses target angles over noisy device pose values', () => {
+  it('uses the actual shutter pose over the nearby guide target', () => {
     expect(resolveFrameOrientation({
       width: 1920,
       height: 1440,
@@ -28,8 +29,21 @@ describe('guided panorama geometry', () => {
       yaw: 0.2,
       pitch: 0.1,
     })).toEqual({
-      yawDegrees: 90,
-      pitchDegrees: 30,
+      yawDegrees: 0.2,
+      pitchDegrees: 0.1,
+      rollDegrees: 0,
+    })
+  })
+
+  it('falls back to guide angles for older frames without shutter pose metadata', () => {
+    expect(resolveFrameOrientation({
+      width: 1920,
+      height: 1440,
+      targetYawDegrees: 315,
+      targetPitchDegrees: -60,
+    })).toEqual({
+      yawDegrees: 315,
+      pitchDegrees: -60,
       rollDegrees: 0,
     })
   })
@@ -40,6 +54,30 @@ describe('guided panorama geometry', () => {
       pitchDegrees: 0,
       rollDegrees: 0,
     })
+    expect(basis.forward[0]).toBeCloseTo(1)
+    expect(basis.forward[1]).toBeCloseTo(0)
+    expect(basis.forward[2]).toBeCloseTo(0)
+    expect(basis.right[2]).toBeCloseTo(-1)
+    expect(basis.up[1]).toBeCloseTo(1)
+  })
+
+  it('preserves the native AR camera matrix instead of quantizing it to a target', () => {
+    const basis = resolveFrameCameraBasis({
+      width: 1920,
+      height: 1440,
+      yawDegrees: 0,
+      pitchDegrees: 0,
+      targetYawDegrees: 0,
+      targetPitchDegrees: 0,
+      // Column-major native camera transform looking 90 degrees to the right.
+      transform: [
+        0, 0, 1, 0,
+        0, 1, 0, 0,
+        -1, 0, 0, 0,
+        0, 0, 0, 1,
+      ],
+    })
+
     expect(basis.forward[0]).toBeCloseTo(1)
     expect(basis.forward[1]).toBeCloseTo(0)
     expect(basis.forward[2]).toBeCloseTo(0)

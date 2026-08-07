@@ -27,7 +27,10 @@ export type {
   MomentObjectUrlManager,
   MomentSource,
   MomentStore,
+  PanoramaAnnotation,
+  PanoramaAnnotationKind,
   PanoramaMoment,
   SavePanoramaMomentInput,
+  StoredPanoramaAnnotation,
   StoredPanoramaMoment,
 } from './types'

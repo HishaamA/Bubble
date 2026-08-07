@@ -12,6 +12,12 @@ const MIN_CAPTURED_FRAMES = 8
 
 type Vec3 = readonly [number, number, number]
 
+export type GuidedCameraBasis = {
+  forward: Vec3
+  right: Vec3
+  up: Vec3
+}
+
 export type GuidedFrameOrientation = {
   yawDegrees: number
   pitchDegrees: number
@@ -36,17 +42,20 @@ function firstFinite(...values: Array<number | undefined>) {
 export function resolveFrameOrientation(
   frame: NativePanoramaFrame,
 ): GuidedFrameOrientation {
+  // The actual camera pose is authoritative. Target angles describe where the
+  // guide dot was placed, not the exact optical axis at shutter time. Using the
+  // target first can stamp many nearly identical frames around a fake sphere.
   const yawDegrees = firstFinite(
-    frame.targetYawDegrees,
-    frame.targetYaw,
     frame.yawDegrees,
     frame.yaw,
+    frame.targetYawDegrees,
+    frame.targetYaw,
   )
   const pitchDegrees = firstFinite(
-    frame.targetPitchDegrees,
-    frame.targetPitch,
     frame.pitchDegrees,
     frame.pitch,
+    frame.targetPitchDegrees,
+    frame.targetPitch,
   )
   const rollDegrees = firstFinite(
     frame.rollDegrees,
@@ -82,7 +91,7 @@ function addScaled(
 
 export function createCameraBasis(
   orientation: GuidedFrameOrientation,
-): { forward: Vec3; right: Vec3; up: Vec3 } {
+): GuidedCameraBasis {
   const yaw = orientation.yawDegrees * (Math.PI / 180)
   const pitch = orientation.pitchDegrees * (Math.PI / 180)
   const roll = orientation.rollDegrees * (Math.PI / 180)
@@ -115,6 +124,30 @@ export function createCameraBasis(
       levelUp[1] * Math.cos(roll) - levelRight[1] * Math.sin(roll),
       levelUp[2] * Math.cos(roll) - levelRight[2] * Math.sin(roll),
     ]),
+  }
+}
+
+function finiteTransform(transform: number[] | undefined) {
+  return transform?.length === 16 && transform.every(Number.isFinite)
+    ? transform
+    : undefined
+}
+
+/**
+ * Uses the native pose matrix when available, preserving the exact camera
+ * orientation and roll captured by ARKit. Native coordinates look down -Z;
+ * the compositor reflects world Z so its zero-yaw convention looks down +Z.
+ */
+export function resolveFrameCameraBasis(
+  frame: NativePanoramaFrame,
+): GuidedCameraBasis {
+  const transform = finiteTransform(frame.transform)
+  if (!transform) return createCameraBasis(resolveFrameOrientation(frame))
+
+  return {
+    right: normalize([transform[0], transform[1], -transform[2]]),
+    up: normalize([transform[4], transform[5], -transform[6]]),
+    forward: normalize([-transform[8], -transform[9], transform[10]]),
   }
 }
 
@@ -334,8 +367,7 @@ export async function composeGuidedPanorama(
       const luma = calculateAverageLuma(imageData.data)
       referenceLuma ??= luma
       const exposure = Math.max(0.72, Math.min(1.38, referenceLuma / Math.max(1, luma)))
-      const orientation = resolveFrameOrientation(frame)
-      const basis = createCameraBasis(orientation)
+      const basis = resolveFrameCameraBasis(frame)
       const { fx, fy } = frameFocalLength(frame, sampleWidth, sampleHeight)
       const centerX = (sampleWidth - 1) / 2
       const centerY = (sampleHeight - 1) / 2

@@ -1,8 +1,9 @@
+import { Capacitor } from '@capacitor/core'
 import type { ReactNode } from 'react'
 import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { MemoryRouter, useLocation } from 'react-router-dom'
-import { describe, expect, it } from 'vitest'
+import { MemoryRouter, useLocation, useNavigate } from 'react-router-dom'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   AuthContext,
   type AuthContextValue,
@@ -43,10 +44,69 @@ function renderShell(
 
 function LocationProbe() {
   const location = useLocation()
-  return <output aria-label="Current route">{location.pathname}{location.search}</output>
+  return (
+    <output aria-label="Current route">
+      {location.pathname}
+      {location.search}
+    </output>
+  )
 }
 
+function RouteSwitcher() {
+  const location = useLocation()
+  const navigate = useNavigate()
+  const routes = [
+    ['Moments', '/'],
+    ['Journal', '/journal'],
+    ['Together', '/events'],
+    ['Profile', '/profile'],
+    ['Panorama', '/memory/family-dinner'],
+    ['Capture', '/capture?mode=manual'],
+  ] as const
+
+  return (
+    <>
+      <output aria-label="Current route">
+        {location.pathname}
+        {location.search}
+      </output>
+      {routes.map(([label, path]) => (
+        <button key={path} type="button" onClick={() => navigate(path)}>
+          {label}
+        </button>
+      ))}
+    </>
+  )
+}
+
+afterEach(() => {
+  vi.restoreAllMocks()
+})
+
 describe('AppShell', () => {
+  it('keeps one native safe-area shell across app route changes', async () => {
+    vi.spyOn(Capacitor, 'isNativePlatform').mockReturnValue(true)
+    const user = userEvent.setup()
+    const { container } = renderShell('/', <RouteSwitcher />)
+    const shell = container.querySelector('[data-app-shell="native"]')
+
+    expect(shell).toHaveClass('app-viewport--native')
+
+    for (const route of [
+      'Journal',
+      'Together',
+      'Profile',
+      'Panorama',
+      'Capture',
+      'Moments',
+    ]) {
+      await user.click(screen.getByRole('button', { name: route }))
+      expect(container.querySelector('[data-app-shell="native"]')).toBe(shell)
+    }
+
+    expect(screen.getByLabelText('Current route')).toHaveTextContent('/')
+  })
+
   it('makes the 360 upload entry point available from Memories', async () => {
     const user = userEvent.setup()
     renderShell('/', <LocationProbe />)

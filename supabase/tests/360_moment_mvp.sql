@@ -1,7 +1,7 @@
 begin;
 
 create extension if not exists pgtap with schema extensions;
-select plan(26);
+select plan(38);
 
 insert into auth.users (
   instance_id,
@@ -147,7 +147,16 @@ from (
     ('cccccccc-cccc-4ccc-8ccc-cccccccccccc/panoramas/20000000-0000-4000-8000-000000000001/40000000-0000-4000-8000-000000000006.jpg'),
     ('cccccccc-cccc-4ccc-8ccc-cccccccccccc/thumbnails/20000000-0000-4000-8000-000000000001/40000000-0000-4000-8000-000000000006.jpg'),
     ('cccccccc-cccc-4ccc-8ccc-cccccccccccc/panoramas/20000000-0000-4000-8000-000000000002/40000000-0000-4000-8000-000000000010.jpg'),
-    ('cccccccc-cccc-4ccc-8ccc-cccccccccccc/thumbnails/20000000-0000-4000-8000-000000000002/40000000-0000-4000-8000-000000000010.jpg')
+    ('cccccccc-cccc-4ccc-8ccc-cccccccccccc/thumbnails/20000000-0000-4000-8000-000000000002/40000000-0000-4000-8000-000000000010.jpg'),
+    ('cccccccc-cccc-4ccc-8ccc-cccccccccccc/panoramas/20000000-0000-4000-8000-000000000001/40000000-0000-4000-8000-000000000011.jpg'),
+    ('cccccccc-cccc-4ccc-8ccc-cccccccccccc/thumbnails/20000000-0000-4000-8000-000000000001/40000000-0000-4000-8000-000000000011.jpg'),
+    ('cccccccc-cccc-4ccc-8ccc-cccccccccccc/voice/20000000-0000-4000-8000-000000000001/40000000-0000-4000-8000-000000000011-voice-note.m4a'),
+    ('cccccccc-cccc-4ccc-8ccc-cccccccccccc/panoramas/20000000-0000-4000-8000-000000000001/40000000-0000-4000-8000-000000000012.jpg'),
+    ('cccccccc-cccc-4ccc-8ccc-cccccccccccc/thumbnails/20000000-0000-4000-8000-000000000001/40000000-0000-4000-8000-000000000012.jpg'),
+    ('cccccccc-cccc-4ccc-8ccc-cccccccccccc/panoramas/20000000-0000-4000-8000-000000000001/40000000-0000-4000-8000-000000000013.jpg'),
+    ('cccccccc-cccc-4ccc-8ccc-cccccccccccc/thumbnails/20000000-0000-4000-8000-000000000001/40000000-0000-4000-8000-000000000013.jpg'),
+    ('cccccccc-cccc-4ccc-8ccc-cccccccccccc/panoramas/20000000-0000-4000-8000-000000000001/40000000-0000-4000-8000-000000000014.jpg'),
+    ('cccccccc-cccc-4ccc-8ccc-cccccccccccc/thumbnails/20000000-0000-4000-8000-000000000001/40000000-0000-4000-8000-000000000014.jpg')
 ) as fixture(object_name);
 
 create or replace function pg_temp.capture_window_result(p_circle_id uuid)
@@ -187,6 +196,40 @@ begin
     800,
     400,
     null
+  );
+  return 'ok';
+exception
+  when others then
+    return sqlstate || ':' || sqlerrm;
+end;
+$$;
+
+create or replace function pg_temp.finalize_annotated_moment_result(
+  p_moment_id uuid,
+  p_annotations jsonb
+)
+returns text
+language plpgsql
+as $$
+begin
+  perform public.finalize_360_moment_with_annotations(
+    'cccccccc-cccc-4ccc-8ccc-cccccccccccc',
+    p_moment_id,
+    'manual',
+    pg_catalog.format(
+      'cccccccc-cccc-4ccc-8ccc-cccccccccccc/panoramas/20000000-0000-4000-8000-000000000001/%s.jpg',
+      p_moment_id
+    ),
+    pg_catalog.format(
+      'cccccccc-cccc-4ccc-8ccc-cccccccccccc/thumbnails/20000000-0000-4000-8000-000000000001/%s.jpg',
+      p_moment_id
+    ),
+    4096,
+    2048,
+    800,
+    400,
+    'Annotated family moment',
+    p_annotations
   );
   return 'ok';
 exception
@@ -580,6 +623,250 @@ select is(
   'the database uniqueness invariant leaves at most one scheduled contribution per uploader/window'
 );
 
+select is(
+  has_table_privilege(
+    'authenticated',
+    'public.family_moment_annotations',
+    'select'
+  )
+  and not has_table_privilege(
+    'authenticated',
+    'public.family_moment_annotations',
+    'insert'
+  )
+  and has_function_privilege(
+    'authenticated',
+    'public.finalize_360_moment_with_annotations(uuid,uuid,text,text,text,integer,integer,integer,integer,text,jsonb)',
+    'execute'
+  )
+  and not has_function_privilege(
+    'anon',
+    'public.finalize_360_moment_with_annotations(uuid,uuid,text,text,text,integer,integer,integer,integer,text,jsonb)',
+    'execute'
+  ),
+  true,
+  'annotation rows are read-only to authenticated clients and finalization is not exposed anonymously'
+);
+
+set local role authenticated;
+select set_config(
+  'request.jwt.claims',
+  json_build_object(
+    'sub', '20000000-0000-4000-8000-000000000001',
+    'role', 'authenticated'
+  )::text,
+  true
+);
+
+select is(
+  pg_temp.finalize_annotated_moment_result(
+    '40000000-0000-4000-8000-000000000011',
+    jsonb_build_array(
+      jsonb_build_object(
+        'id', 'table-note',
+        'kind', 'text',
+        'pitch', 12,
+        'yaw', -24,
+        'message', 'Cake on the table',
+        'audio_path', null,
+        'audio_mime_type', null,
+        'duration_ms', null
+      ),
+      jsonb_build_object(
+        'id', 'voice-note',
+        'kind', 'voice',
+        'pitch', -4,
+        'yaw', 31,
+        'message', 'Dad describing Sunday dinner',
+        'audio_path', 'cccccccc-cccc-4ccc-8ccc-cccccccccccc/voice/20000000-0000-4000-8000-000000000001/40000000-0000-4000-8000-000000000011-voice-note.m4a',
+        'audio_mime_type', 'audio/mp4',
+        'duration_ms', 8400
+      )
+    )
+  ),
+  'ok',
+  'text and existing canonical voice media finalize with their panorama in one transaction'
+);
+
+select is(
+  (
+    select string_agg(
+      annotation.id || ':' || annotation.kind || ':' || annotation.message,
+      '|' order by annotation.sort_order
+    )
+    from public.family_moment_annotations as annotation
+    where annotation.moment_id = '40000000-0000-4000-8000-000000000011'
+  ),
+  'table-note:text:Cake on the table|voice-note:voice:Dad describing Sunday dinner',
+  'annotation order, kind, and accessible text survive finalization'
+);
+
+select is(
+  pg_temp.finalize_annotated_moment_result(
+    '40000000-0000-4000-8000-000000000012',
+    jsonb_build_array(
+      jsonb_build_object(
+        'id', 'same-note',
+        'kind', 'text',
+        'pitch', 0,
+        'yaw', 0,
+        'message', 'First'
+      ),
+      jsonb_build_object(
+        'id', 'same-note',
+        'kind', 'text',
+        'pitch', 1,
+        'yaw', 1,
+        'message', 'Second'
+      )
+    )
+  ),
+  '22023:duplicate_annotation_id',
+  'one moment cannot finalize duplicate annotation IDs'
+);
+
+select is(
+  pg_temp.finalize_annotated_moment_result(
+    '40000000-0000-4000-8000-000000000013',
+    jsonb_build_array(
+      jsonb_build_object(
+        'id', 'missing-voice',
+        'kind', 'voice',
+        'pitch', 0,
+        'yaw', 0,
+        'message', 'Accessible voice summary',
+        'audio_path', 'cccccccc-cccc-4ccc-8ccc-cccccccccccc/voice/20000000-0000-4000-8000-000000000001/40000000-0000-4000-8000-000000000013-missing-voice.m4a',
+        'audio_mime_type', 'audio/mp4',
+        'duration_ms', 1000
+      )
+    )
+  ),
+  'P0001:voice_storage_object_not_found',
+  'voice metadata cannot become ready before its exact private Storage object exists'
+);
+
+select is(
+  pg_temp.finalize_annotated_moment_result(
+    '40000000-0000-4000-8000-000000000014',
+    jsonb_build_array(
+      jsonb_build_object(
+        'id', 'ceiling-note',
+        'kind', 'text',
+        'pitch', 91,
+        'yaw', 0,
+        'message', 'Outside the sphere'
+      )
+    )
+  ),
+  '22023:annotation_coordinates_out_of_bounds',
+  'annotation coordinates are bounded to the panorama sphere'
+);
+
+select is(
+  (
+    select count(*)
+    from public.family_moments
+    where id in (
+      '40000000-0000-4000-8000-000000000012',
+      '40000000-0000-4000-8000-000000000013',
+      '40000000-0000-4000-8000-000000000014'
+    )
+  ),
+  0::bigint,
+  'failed annotation validation leaves no partially finalized base moment'
+);
+
+select set_config(
+  'request.jwt.claims',
+  json_build_object(
+    'sub', '20000000-0000-4000-8000-000000000002',
+    'role', 'authenticated'
+  )::text,
+  true
+);
+
+select is(
+  (
+    select count(*)
+    from public.family_moment_annotations
+    where moment_id = '40000000-0000-4000-8000-000000000011'
+  ),
+  2::bigint,
+  'an approved family member can receive another member annotation'
+);
+
+select set_config(
+  'request.jwt.claims',
+  json_build_object(
+    'sub', '20000000-0000-4000-8000-000000000003',
+    'role', 'authenticated'
+  )::text,
+  true
+);
+
+select is(
+  (
+    select count(*)
+    from public.family_moment_annotations
+    where moment_id = '40000000-0000-4000-8000-000000000011'
+  ),
+  0::bigint,
+  'annotation RLS hides private points from users in another circle'
+);
+
+reset role;
+
+set local role authenticated;
+select set_config(
+  'request.jwt.claims',
+  json_build_object(
+    'sub', '20000000-0000-4000-8000-000000000001',
+    'role', 'authenticated'
+  )::text,
+  true
+);
+
+delete from storage.objects
+where name = 'cccccccc-cccc-4ccc-8ccc-cccccccccccc/panoramas/20000000-0000-4000-8000-000000000001/40000000-0000-4000-8000-000000000012.jpg';
+
+select is(
+  (
+    select count(*)
+    from storage.objects
+    where name = 'cccccccc-cccc-4ccc-8ccc-cccccccccccc/panoramas/20000000-0000-4000-8000-000000000001/40000000-0000-4000-8000-000000000012.jpg'
+  ),
+  0::bigint,
+  'the uploader can clean up their own unreferenced object after failed finalization'
+);
+
+delete from storage.objects
+where name = 'cccccccc-cccc-4ccc-8ccc-cccccccccccc/panoramas/20000000-0000-4000-8000-000000000001/40000000-0000-4000-8000-000000000001.jpg';
+
+select is(
+  (
+    select count(*)
+    from storage.objects
+    where name = 'cccccccc-cccc-4ccc-8ccc-cccccccccccc/panoramas/20000000-0000-4000-8000-000000000001/40000000-0000-4000-8000-000000000001.jpg'
+  ),
+  1::bigint,
+  'a finalized panorama remains immutable to its uploader'
+);
+
+delete from storage.objects
+where name = 'cccccccc-cccc-4ccc-8ccc-cccccccccccc/panoramas/20000000-0000-4000-8000-000000000002/40000000-0000-4000-8000-000000000010.jpg';
+
+select is(
+  (
+    select count(*)
+    from storage.objects
+    where name = 'cccccccc-cccc-4ccc-8ccc-cccccccccccc/panoramas/20000000-0000-4000-8000-000000000002/40000000-0000-4000-8000-000000000010.jpg'
+  ),
+  1::bigint,
+  'one family member cannot clean up another uploader object'
+);
+
+reset role;
+
 select ok(
   not exists (
     select 1
@@ -587,10 +874,10 @@ select ok(
     where pubname = 'supabase_realtime'
   ) or exists (
     select 1
-    from pg_catalog.pg_publication_tables
-    where pubname = 'supabase_realtime'
-      and schemaname = 'public'
-      and tablename = 'family_moments'
+    from pg_catalog.pg_publication_tables as moment_publication
+    where moment_publication.pubname = 'supabase_realtime'
+      and moment_publication.schemaname = 'public'
+      and moment_publication.tablename = 'family_moments'
   ),
   'ready moments join Supabase Realtime when its standard publication exists'
 );

@@ -1,11 +1,17 @@
 import { useState } from 'react'
 import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   CardboardSetupFlow,
   type CardboardMemoryChoice,
 } from './CardboardSetupFlow'
+
+const orientationMock = vi.hoisted(() => ({ landscape: false }))
+
+vi.mock('./useLandscapeOrientation', () => ({
+  useLandscapeOrientation: () => orientationMock.landscape,
+}))
 
 const choices: readonly CardboardMemoryChoice[] = [
   {
@@ -22,7 +28,11 @@ const choices: readonly CardboardMemoryChoice[] = [
   },
 ]
 
-function SetupHarness({ onGo = vi.fn() }: { onGo?: () => void }) {
+function SetupHarness({
+  onGo = vi.fn(),
+}: {
+  onGo?: (options?: { forceLandscape?: boolean }) => void
+}) {
   const [selectedMemoryId, setSelectedMemoryId] = useState('dinner')
   return (
     <CardboardSetupFlow
@@ -37,6 +47,10 @@ function SetupHarness({ onGo = vi.fn() }: { onGo?: () => void }) {
 }
 
 describe('CardboardSetupFlow', () => {
+  beforeEach(() => {
+    orientationMock.landscape = false
+  })
+
   it('keeps memory selection, rotation, and Cardboard insertion in that order', async () => {
     const user = userEvent.setup()
     const onGo = vi.fn()
@@ -68,7 +82,9 @@ describe('CardboardSetupFlow', () => {
       screen.getByRole('heading', { name: 'Turn your phone sideways' }),
     ).toBeVisible()
     expect(onGo).not.toHaveBeenCalled()
-    await user.click(screen.getByRole('button', { name: 'Continue' }))
+    await user.click(
+      screen.getByRole('button', { name: 'Use split view anyway' }),
+    )
 
     expect(
       screen.getByRole('heading', { name: 'Place your phone in Cardboard' }),
@@ -76,7 +92,7 @@ describe('CardboardSetupFlow', () => {
     expect(onGo).not.toHaveBeenCalled()
 
     await user.click(screen.getByRole('button', { name: 'Go' }))
-    expect(onGo).toHaveBeenCalledOnce()
+    expect(onGo).toHaveBeenCalledWith({ forceLandscape: true })
   })
 
   it('lets the user return to the chooser before starting VR', async () => {
@@ -86,7 +102,9 @@ describe('CardboardSetupFlow', () => {
     await user.click(
       screen.getByRole('button', { name: 'Continue with Sunday dinner' }),
     )
-    await user.click(screen.getByRole('button', { name: 'Continue' }))
+    await user.click(
+      screen.getByRole('button', { name: 'Use split view anyway' }),
+    )
     await user.click(
       screen.getByRole('button', { name: 'Choose another memory' }),
     )
@@ -94,5 +112,26 @@ describe('CardboardSetupFlow', () => {
     expect(
       screen.getByRole('heading', { name: 'Choose a moment' }),
     ).toBeVisible()
+  })
+
+  it('advances automatically after the phone reaches landscape', async () => {
+    orientationMock.landscape = true
+    const user = userEvent.setup()
+    const onGo = vi.fn()
+    render(<SetupHarness onGo={onGo} />)
+
+    await user.click(
+      screen.getByRole('button', { name: 'Continue with Sunday dinner' }),
+    )
+
+    expect(
+      screen.getByRole('heading', { name: 'Place your phone in Cardboard' }),
+    ).toBeVisible()
+    expect(
+      screen.queryByRole('button', { name: 'Use split view anyway' }),
+    ).not.toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: 'Go' }))
+    expect(onGo).toHaveBeenCalledWith({ forceLandscape: false })
   })
 })

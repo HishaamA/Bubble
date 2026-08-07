@@ -1,5 +1,23 @@
 export type MomentSource = 'daily' | 'manual'
 
+export type PanoramaAnnotationKind = 'text' | 'voice'
+
+export type StoredPanoramaAnnotation = {
+  id: string
+  kind: PanoramaAnnotationKind
+  pitch: number
+  yaw: number
+  message: string
+  audioBlob?: Blob
+  audioMimeType?: string
+  durationMs?: number
+}
+
+export type PanoramaAnnotation = StoredPanoramaAnnotation & {
+  /** A short-lived local playback URL for a saved voice note. */
+  audioUrl: string | null
+}
+
 export type StoredPanoramaMoment = {
   id: string
   blob: Blob
@@ -10,11 +28,14 @@ export type StoredPanoramaMoment = {
   height: number
   source: MomentSource
   uploaderDisplayName: string
+  /** Optional for backward compatibility with moments saved before points existed. */
+  annotations?: StoredPanoramaAnnotation[]
 }
 
-export type PanoramaMoment = StoredPanoramaMoment & {
+export type PanoramaMoment = Omit<StoredPanoramaMoment, 'annotations'> & {
   /** A short-lived local preview URL. Null when object URLs are unavailable. */
   objectUrl: string | null
+  annotations?: PanoramaAnnotation[]
 }
 
 export type SavePanoramaMomentInput = {
@@ -27,6 +48,7 @@ export type SavePanoramaMomentInput = {
   height: number
   source: MomentSource
   uploaderDisplayName: string
+  annotations?: StoredPanoramaAnnotation[]
 }
 
 export interface MomentStore {

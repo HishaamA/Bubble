@@ -313,7 +313,7 @@ export function MemoryConstellation({
         )
         motionElement.style.setProperty(
           '--bubble-motion-scale',
-          `${displayedScale}`,
+          `${displayedScale * motion.scale}`,
         )
         motionElement.style.setProperty('--bubble-energy', `${motion.proximity}`)
         motionElement.style.setProperty('--bubble-depth', `${displayedProximity}`)
@@ -535,7 +535,6 @@ export function MemoryConstellation({
           onClick={() =>
             navigate('/memory/dinner', {
               state: { sourceMemoryId: 'dinner', openVr: true },
-              viewTransition: true,
             })
           }
         >
@@ -559,6 +558,8 @@ export function MemoryConstellation({
         onPointerCancel={finishPointerInteraction}
         onLostPointerCapture={handleLostPointerCapture}
         onFocusCapture={centerFocusedBubble}
+        onContextMenu={(event) => event.preventDefault()}
+        onDragStart={(event) => event.preventDefault()}
         onPointerLeave={(event) => {
           if (activePointerRef.current !== null) return
           if (event.pointerType === 'mouse') clearPointerInteraction()

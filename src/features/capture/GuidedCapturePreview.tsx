@@ -8,30 +8,12 @@ import {
 } from 'react'
 import {
   projectGuideTarget,
-  type GuideTarget,
+  STANDARD_GUIDE_TARGETS,
 } from './guidedCaptureGeometry'
 
 type GuidedCapturePreviewProps = {
   onClose: () => void
 }
-
-function makeRing(pitch: number, count: number, offset: number) {
-  return Array.from({ length: count }, (_, index) => ({
-    id: `${pitch}-${index}`,
-    yaw: offset + index * (360 / count),
-    pitch,
-  }))
-}
-
-const TARGETS: GuideTarget[] = [
-  { id: 'zenith', yaw: 0, pitch: 82 },
-  ...makeRing(60, 4, 45),
-  ...makeRing(30, 8, 0),
-  ...makeRing(0, 8, 22.5),
-  ...makeRing(-30, 8, 0),
-  ...makeRing(-60, 4, 45),
-  { id: 'nadir', yaw: 0, pitch: -82 },
-]
 
 export function GuidedCapturePreview({ onClose }: GuidedCapturePreviewProps) {
   const [view, setView] = useState({ yaw: 22.5, pitch: 0 })
@@ -45,7 +27,7 @@ export function GuidedCapturePreview({ onClose }: GuidedCapturePreviewProps) {
   } | null>(null)
 
   const projected = useMemo(
-    () => TARGETS.map((target) => ({
+    () => STANDARD_GUIDE_TARGETS.map((target) => ({
       target,
       projection: projectGuideTarget(target, view),
     })),
@@ -129,7 +111,7 @@ export function GuidedCapturePreview({ onClose }: GuidedCapturePreviewProps) {
           Close
         </button>
         <div>
-          <strong>{captured.size} of {TARGETS.length}</strong>
+          <strong>{captured.size} of {STANDARD_GUIDE_TARGETS.length}</strong>
           <span>guide preview</span>
         </div>
         <span aria-hidden="true">360°</span>
@@ -169,7 +151,7 @@ export function GuidedCapturePreview({ onClose }: GuidedCapturePreviewProps) {
           motion move this view, and each steady alignment captures itself.
         </p>
         <div className="guided-capture__progress" aria-hidden="true">
-          <span style={{ width: `${(captured.size / TARGETS.length) * 100}%` }} />
+          <span style={{ width: `${(captured.size / STANDARD_GUIDE_TARGETS.length) * 100}%` }} />
         </div>
       </div>
     </section>

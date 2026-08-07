@@ -45,6 +45,7 @@ function createFakeViewer(options: { orientationSupported?: boolean } = {}): Fak
     getPitch: vi.fn(() => pitch),
     getYaw: vi.fn(() => yaw),
     getHfov: vi.fn(() => hfov),
+    mouseEventToCoords: vi.fn((): [number, number] => [pitch, yaw]),
     setPitch: vi.fn((nextPitch) => {
       pitch = nextPitch
       return instance
@@ -113,6 +114,21 @@ describe('createPannellumAdapter', () => {
     expect(config.escapeHTML).toBe(true)
     expect(config.scenes.dinner.panorama).toBe('/media/dinner.jpg')
     expect(fakeViewer.instance.on).toHaveBeenCalledTimes(3)
+  })
+
+  it('converts a tapped screen point into panorama pitch and yaw', async () => {
+    const fakeViewer = createFakeViewer()
+    vi.mocked(fakeViewer.instance.mouseEventToCoords).mockReturnValue([18, -64])
+    const { runtime } = createFakeRuntime(fakeViewer)
+    const adapter = createPannellumAdapter({ loadRuntime: async () => runtime })
+    await adapter.mount(document.createElement('div'), { scenes })
+
+    const event = new MouseEvent('click', { clientX: 120, clientY: 180 })
+    expect(adapter.getCoordinatesFromEvent(event)).toEqual({
+      pitch: 18,
+      yaw: -64,
+    })
+    expect(fakeViewer.instance.mouseEventToCoords).toHaveBeenCalledWith(event)
   })
 
   it('removes the exact event listeners and destroys the old viewer before remounting', async () => {

@@ -71,6 +71,9 @@ export interface PanoramaAdapter {
   isOrientationSupported: () => boolean
   isOrientationActive: () => boolean
   getView: () => PanoramaViewState | null
+  getCoordinatesFromEvent: (
+    event: MouseEvent,
+  ) => Pick<PanoramaViewState, 'pitch' | 'yaw'> | null
   setView: (view: PanoramaViewState) => boolean
   panBy: (pitchDelta: number, yawDelta: number) => void
   zoomIn: () => void
@@ -141,6 +144,7 @@ export interface PannellumViewerInstance {
   getPitch: () => number
   getYaw: () => number
   getHfov: () => number
+  mouseEventToCoords: (event: MouseEvent) => [number, number]
   setPitch: (
     pitch: number,
     animated?: number | boolean,

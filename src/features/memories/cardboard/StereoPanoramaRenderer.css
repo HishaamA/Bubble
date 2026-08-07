@@ -1,0 +1,49 @@
+.ks-stereo-panorama,
+.ks-stereo-panorama__canvas,
+.ks-stereo-panorama__fallback {
+  position: absolute;
+  inset: 0;
+  inline-size: 100%;
+  block-size: 100%;
+}
+
+.ks-stereo-panorama {
+  overflow: hidden;
+  background: #000;
+}
+
+.ks-stereo-panorama__canvas {
+  display: block;
+  touch-action: none;
+  cursor: grab;
+}
+
+.ks-stereo-panorama__canvas:active { cursor: grabbing; }
+.ks-stereo-panorama__fallback {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.ks-stereo-panorama__fallback img {
+  inline-size: 100%;
+  block-size: 100%;
+  min-inline-size: 0;
+  object-fit: cover;
+}
+
+.ks-stereo-panorama__status {
+  position: absolute;
+  z-index: 2;
+  inset-block-end: 1rem;
+  inset-inline-start: 50%;
+  max-inline-size: min(80%, 24rem);
+  padding: 0.45rem 0.7rem;
+  color: rgb(255 255 255 / 78%);
+  border: 1px solid rgb(255 255 255 / 14%);
+  border-radius: 999px;
+  background: rgb(0 0 0 / 72%);
+  font: 520 0.67rem/1.3 system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+  text-align: center;
+  transform: translateX(-50%);
+  pointer-events: none;
+}

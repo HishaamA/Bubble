@@ -19,7 +19,19 @@
   pointer-events: auto;
 }
 
+.ks-cardboard--forced-landscape {
+  inset: auto;
+  top: 50%;
+  left: 50%;
+  width: 100dvh;
+  height: 100dvw;
+  transform: translate(-50%, -50%) rotate(90deg);
+  transform-origin: center;
+}
+
 .ks-cardboard__eyes {
+  position: absolute;
+  inset: 0;
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   inline-size: 100%;
@@ -28,9 +40,12 @@
 
 .ks-cardboard__eye {
   position: relative;
+  z-index: 2;
   min-inline-size: 0;
+  min-block-size: 0;
   overflow: hidden;
-  background: #030303;
+  background: transparent;
+  pointer-events: none;
 }
 
 .ks-cardboard__eye--left {
@@ -39,6 +54,10 @@
 
 .ks-cardboard__eye--right {
   border-inline-start: 1px solid rgb(0 0 0 / 72%);
+}
+
+.ks-cardboard__eyes .ks-stereo-panorama {
+  z-index: 1;
 }
 
 .ks-cardboard__eye .ks-panorama {
@@ -69,7 +88,17 @@
   pointer-events: none;
 }
 
-.ks-cardboard__brand,
+.ks-cardboard__missing-scene {
+  position: absolute;
+  z-index: 3;
+  inset: 0;
+  display: grid;
+  margin: 0;
+  place-items: center;
+  color: rgb(255 255 255 / 70%);
+  background: #000;
+}
+
 .ks-cardboard__exit,
 .ks-cardboard__status-panel {
   position: absolute;
@@ -77,31 +106,6 @@
   border: 1px solid var(--cardboard-border);
   background: var(--cardboard-glass);
   backdrop-filter: blur(22px);
-}
-
-.ks-cardboard__brand {
-  inset-block-start: max(0.75rem, env(safe-area-inset-top));
-  inset-inline-start: max(0.75rem, env(safe-area-inset-left));
-  display: flex;
-  min-block-size: 2.35rem;
-  padding: 0.4rem 0.72rem;
-  gap: 0.48rem;
-  align-items: center;
-  color: var(--cardboard-accent);
-  border-radius: 999px;
-  font-size: 0.67rem;
-  font-weight: 680;
-  letter-spacing: 0.075em;
-  text-transform: uppercase;
-}
-
-.ks-cardboard__brand svg {
-  inline-size: 1.45rem;
-  fill: none;
-  stroke: currentcolor;
-  stroke-linecap: round;
-  stroke-linejoin: round;
-  stroke-width: 1.35;
 }
 
 .ks-cardboard__memory-label {
@@ -145,8 +149,16 @@
 
 .ks-cardboard__exit {
   z-index: 50;
-  inset-block-start: max(0.75rem, env(safe-area-inset-top));
-  inset-inline-end: max(0.75rem, env(safe-area-inset-right));
+  inset-block-start: max(
+    1.25rem,
+    calc(env(safe-area-inset-top) + 0.65rem),
+    calc(var(--native-safe-area-top, 0px) + 0.65rem)
+  );
+  inset-inline-end: max(
+    1.5rem,
+    calc(env(safe-area-inset-right) + 0.75rem),
+    calc(var(--native-safe-area-right, 0px) + 0.75rem)
+  );
   display: flex;
   min-block-size: 44px;
   padding: 0 0.78rem;
@@ -235,7 +247,6 @@
   text-align: center;
   background: rgb(0 0 0 / 82%);
   backdrop-filter: blur(20px);
-  pointer-events: none;
 }
 
 .ks-cardboard__rotate-hint strong {
@@ -244,9 +255,20 @@
   letter-spacing: -0.035em;
 }
 
-.ks-cardboard__rotate-hint > span:last-child {
+.ks-cardboard__rotate-hint > span:not(.ks-cardboard__phone) {
   color: rgb(255 255 255 / 64%);
   font: 520 0.8rem/1.4 system-ui, sans-serif;
+}
+
+.ks-cardboard__rotate-hint button {
+  min-block-size: 44px;
+  margin-block-start: 0.75rem;
+  padding: 0.7rem 1.05rem;
+  color: #120d06;
+  border: 1px solid var(--cardboard-accent);
+  border-radius: 999px;
+  background: var(--cardboard-accent);
+  font: 650 0.78rem/1 system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
 }
 
 .ks-cardboard__phone {
@@ -282,13 +304,15 @@
 }
 
 @media (orientation: landscape) {
-  .ks-cardboard__rotate-hint {
-    display: none;
+  .ks-cardboard--forced-landscape {
+    inset: 0;
+    width: auto;
+    height: auto;
+    transform: none;
   }
 }
 
 @media (max-height: 28rem) and (orientation: landscape) {
-  .ks-cardboard__brand,
   .ks-cardboard__status-panel {
     transform: scale(0.88);
     transform-origin: left center;

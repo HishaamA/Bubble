@@ -1,5 +1,20 @@
+.events-page {
+  padding-inline:
+    max(
+      1.25rem,
+      env(safe-area-inset-left),
+      var(--native-safe-area-left, 0px)
+    )
+    max(
+      1.25rem,
+      env(safe-area-inset-right),
+      var(--native-safe-area-right, 0px)
+    );
+}
+
 .events-header-action {
   display: inline-flex;
+  max-width: 8.5rem;
   min-height: 2.75rem;
   padding: 0.45rem 0.78rem 0.45rem 0.56rem;
   align-items: center;
@@ -11,6 +26,7 @@
   font: inherit;
   font-size: 0.7rem;
   font-weight: 680;
+  white-space: nowrap;
   backdrop-filter: blur(18px);
   cursor: pointer;
 }
@@ -70,7 +86,27 @@
   display: grid;
   width: min(100%, 31.25rem);
   margin-inline: auto;
-  padding: 1rem;
+  padding:
+    max(
+      0.85rem,
+      env(safe-area-inset-top),
+      var(--native-safe-area-top, 0px)
+    )
+    max(
+      0.85rem,
+      env(safe-area-inset-right),
+      var(--native-safe-area-right, 0px)
+    )
+    max(
+      0.85rem,
+      env(safe-area-inset-bottom),
+      var(--native-safe-area-bottom, 0px)
+    )
+    max(
+      0.85rem,
+      env(safe-area-inset-left),
+      var(--native-safe-area-left, 0px)
+    );
   align-items: end;
   background: rgba(0, 0, 0, 0.56);
   backdrop-filter: blur(12px);
@@ -78,8 +114,11 @@
 
 .event-sheet__panel {
   display: grid;
-  max-height: calc(100dvh - 2rem);
+  width: 100%;
+  min-width: 0;
+  max-height: calc(100dvh - 1.7rem);
   padding: 1rem;
+  overflow-x: hidden;
   overflow-y: auto;
   gap: 0.82rem;
   border: 1px solid rgba(255, 255, 255, 0.14);
@@ -96,6 +135,7 @@
 }
 
 .event-sheet__header h2 {
+  min-width: 0;
   margin: 0;
   color: #fff;
   font-size: 1.18rem;
@@ -107,6 +147,7 @@
   width: 2.75rem;
   height: 2.75rem;
   padding: 0;
+  flex: 0 0 2.75rem;
   place-items: center;
   border: 0;
   border-radius: 50%;
@@ -123,6 +164,13 @@
   gap: 0.65rem;
 }
 
+.event-sheet__row > .ks-field,
+.event-sheet .ks-field,
+.event-sheet .ks-field input {
+  min-width: 0;
+  max-width: 100%;
+}
+
 .event-sheet__hint {
   margin: -0.15rem 0 0;
   color: rgba(255, 255, 255, 0.42);
@@ -134,9 +182,10 @@
   width: 100%;
 }
 
-@media (max-width: 23rem) {
+@media (max-width: 28rem) {
   .events-header-action {
     width: 2.75rem;
+    max-width: 2.75rem;
     padding: 0;
     justify-content: center;
   }
@@ -149,6 +198,13 @@
     clip: rect(0, 0, 0, 0);
     white-space: nowrap;
   }
+
+  .event-sheet__row {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+@media (max-width: 23rem) {
 
   .event-list-item {
     padding-inline: 0.2rem;

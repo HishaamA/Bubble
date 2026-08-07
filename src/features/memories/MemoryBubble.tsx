@@ -40,6 +40,11 @@ export function MemoryBubble({
     '--bubble-drift-reverse-y': drift.reverseY,
     '--bubble-drift-duration': drift.duration,
     '--bubble-drift-delay': drift.delay,
+    '--bubble-phone-drift-x': drift.phoneX,
+    '--bubble-phone-drift-y': drift.phoneY,
+    '--bubble-phone-drift-reverse-x': drift.phoneReverseX,
+    '--bubble-phone-drift-reverse-y': drift.phoneReverseY,
+    '--bubble-phone-drift-duration': drift.phoneDuration,
   } as CSSProperties
 
   return (

@@ -8,8 +8,27 @@
   min-height: 100svh;
   min-height: 100dvh;
   margin: 0 auto;
-  padding: max(1rem, env(safe-area-inset-top)) 1.25rem
-    max(1.25rem, env(safe-area-inset-bottom));
+  padding:
+    max(
+      1.5rem,
+      calc(env(safe-area-inset-top) + 0.65rem),
+      calc(var(--native-safe-area-top, 0px) + 0.65rem)
+    )
+    max(
+      1.5rem,
+      calc(env(safe-area-inset-right) + 0.75rem),
+      calc(var(--native-safe-area-right, 0px) + 0.75rem)
+    )
+    max(
+      1.5rem,
+      calc(env(safe-area-inset-bottom) + 0.65rem),
+      calc(var(--native-safe-area-bottom, 0px) + 0.65rem)
+    )
+    max(
+      1.5rem,
+      calc(env(safe-area-inset-left) + 0.75rem),
+      calc(var(--native-safe-area-left, 0px) + 0.75rem)
+    );
   grid-template-rows: auto minmax(0, 1fr);
   overflow: hidden;
   color: #fff;
@@ -435,7 +454,17 @@
 @media (orientation: landscape) {
   .cardboard-setup {
     width: 100%;
-    padding-inline: max(1.25rem, env(safe-area-inset-left));
+    padding-inline:
+      max(
+        1.5rem,
+        calc(env(safe-area-inset-left) + 0.75rem),
+        calc(var(--native-safe-area-left, 0px) + 0.75rem)
+      )
+      max(
+        1.5rem,
+        calc(env(safe-area-inset-right) + 0.75rem),
+        calc(var(--native-safe-area-right, 0px) + 0.75rem)
+      );
   }
 
   .cardboard-setup__step--rotate,

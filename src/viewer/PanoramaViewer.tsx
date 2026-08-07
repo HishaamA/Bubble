@@ -9,6 +9,7 @@ import {
   type CSSProperties,
   type KeyboardEvent as ReactKeyboardEvent,
   type MouseEvent as ReactMouseEvent,
+  type PointerEvent as ReactPointerEvent,
 } from 'react'
 import { createPannellumAdapter } from './PannellumAdapter'
 import type {
@@ -42,6 +43,9 @@ export interface PanoramaViewerProps {
   style?: CSSProperties
   ariaLabel?: string
   showControls?: boolean
+  pointSelectionEnabled?: boolean
+  onPointSelect?: (point: Pick<PanoramaViewState, 'pitch' | 'yaw'>) => void
+  onPointSelectionCancel?: () => void
   onReady?: () => void
   onSceneChange?: (sceneId: string) => void
   onError?: (error: Error) => void
@@ -102,6 +106,9 @@ export const PanoramaViewer = forwardRef<
     style,
     ariaLabel = 'Interactive panoramic memory',
     showControls = true,
+    pointSelectionEnabled = false,
+    onPointSelect,
+    onPointSelectionCancel,
     onReady,
     onSceneChange,
     onError,
@@ -114,6 +121,11 @@ export const PanoramaViewer = forwardRef<
   const requestedSceneIdRef = useRef(sceneId)
   const componentActiveRef = useRef(false)
   const motionRequestVersionRef = useRef(0)
+  const pointPointerRef = useRef<{
+    id: number
+    x: number
+    y: number
+  } | null>(null)
   const hotspotListHeadingId = useId()
 
   const firstSceneId = initialSceneId ?? scenes[0]?.id
@@ -310,6 +322,22 @@ export const PanoramaViewer = forwardRef<
     const adapter = adapterRef.current
     if (!adapter) return
 
+    if (pointSelectionEnabled && event.key === 'Escape') {
+      event.preventDefault()
+      onPointSelectionCancel?.()
+      return
+    }
+
+    if (
+      pointSelectionEnabled &&
+      (event.key === 'Enter' || event.key === ' ')
+    ) {
+      const view = adapter.getView()
+      if (view) onPointSelect?.({ pitch: view.pitch, yaw: view.yaw })
+      event.preventDefault()
+      return
+    }
+
     switch (event.key) {
       case 'ArrowUp':
         adapter.panBy(KEYBOARD_PAN_STEP, 0)
@@ -340,6 +368,45 @@ export const PanoramaViewer = forwardRef<
     }
 
     event.preventDefault()
+  }
+
+  const beginPointSelection = (
+    event: ReactPointerEvent<HTMLDivElement>,
+  ) => {
+    if (motionActive) stopMotion()
+    if (
+      !pointSelectionEnabled ||
+      !event.isPrimary ||
+      event.button !== 0
+    ) {
+      return
+    }
+
+    pointPointerRef.current = {
+      id: event.pointerId,
+      x: event.clientX,
+      y: event.clientY,
+    }
+  }
+
+  const finishPointSelection = (
+    event: ReactPointerEvent<HTMLDivElement>,
+  ) => {
+    const start = pointPointerRef.current
+    pointPointerRef.current = null
+    if (
+      !pointSelectionEnabled ||
+      !start ||
+      start.id !== event.pointerId ||
+      Math.hypot(event.clientX - start.x, event.clientY - start.y) > 8
+    ) {
+      return
+    }
+
+    const point = adapterRef.current?.getCoordinatesFromEvent(
+      event.nativeEvent as MouseEvent,
+    )
+    if (point) onPointSelect?.(point)
   }
 
   const activateFlatHotSpot = (
@@ -387,6 +454,7 @@ export const PanoramaViewer = forwardRef<
       className={joinClassNames(
         'ks-panorama',
         flatMode && 'ks-panorama--flat',
+        pointSelectionEnabled && 'ks-panorama--selecting-point',
         className,
       )}
       style={style}
@@ -403,8 +471,10 @@ export const PanoramaViewer = forwardRef<
           flatMode ? undefined : 'ArrowUp ArrowDown ArrowLeft ArrowRight + -'
         }
         onKeyDown={handleViewerKeyDown}
-        onPointerDown={() => {
-          if (motionActive) stopMotion()
+        onPointerDown={beginPointSelection}
+        onPointerUp={finishPointSelection}
+        onPointerCancel={() => {
+          pointPointerRef.current = null
         }}
       />
 
@@ -471,7 +541,9 @@ export const PanoramaViewer = forwardRef<
         </figure>
       ) : (
         <div className="ks-panorama__instructions">
-          Drag to look around. Pinch or use the controls to zoom.
+          {pointSelectionEnabled
+            ? 'Tap the object where this memory point belongs.'
+            : 'Drag to look around. Pinch or use the controls to zoom.'}
         </div>
       )}
 

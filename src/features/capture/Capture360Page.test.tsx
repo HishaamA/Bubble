@@ -1,11 +1,51 @@
-import { render, screen, waitFor } from '@testing-library/react'
+import { act, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { Capture360Page } from './Capture360Page'
+import type { NativePanoramaCaptureResult } from './nativePanoramaCapture'
+import type { ProcessedPanorama } from '../../services/media/processPanorama'
 
 const upcomingWindow = {
   startsAt: new Date('2026-08-26T12:00:00'),
   endsAt: new Date('2026-08-26T12:15:00'),
+}
+
+function makeGuidedCaptureResult(
+  frameCount = 34,
+  targetCount = 34,
+  capturedCount = targetCount,
+): NativePanoramaCaptureResult {
+  return {
+    frames: Array.from({ length: frameCount }, (_, index) => ({
+      width: 1920,
+      height: 1440,
+      uri: `file:///capture/${index}.jpg`,
+      targetYawDegrees: (index % 12) * 30,
+      targetPitchDegrees: index < 12 ? -45 : index < 24 ? 0 : 45,
+    })),
+    targetCount,
+    capturedCount,
+    directoryUrl: 'file:///capture/session',
+  }
+}
+
+function makeProcessedPanorama(): ProcessedPanorama {
+  return {
+    viewer: new Blob(['full sphere'], { type: 'image/jpeg' }),
+    thumbnail: new Blob(['thumbnail'], { type: 'image/jpeg' }),
+    viewerWidth: 2048,
+    viewerHeight: 1024,
+    thumbnailWidth: 640,
+    thumbnailHeight: 320,
+  }
+}
+
+function makeDeferred<T>() {
+  let resolve!: (value: T) => void
+  const promise = new Promise<T>((next) => {
+    resolve = next
+  })
+  return { promise, resolve }
 }
 
 beforeEach(() => {
@@ -165,19 +205,75 @@ describe('Capture360Page', () => {
     expect(submission.file.type).toBe('image/jpeg')
   })
 
+  it('disables daily capture while native capture and composition are running', async () => {
+    const user = userEvent.setup()
+    const nativeCapture = makeDeferred<NativePanoramaCaptureResult>()
+    const composition = makeDeferred<ProcessedPanorama>()
+    const startGuidedCapture = vi.fn(() => nativeCapture.promise)
+    const composeGuidedCapture = vi.fn(() => composition.promise)
+
+    render(
+      <Capture360Page
+        now={new Date('2026-08-26T12:05:00')}
+        dailyWindow={upcomingWindow}
+        guidedCaptureAvailable
+        startGuidedCapture={startGuidedCapture}
+        composeGuidedCapture={composeGuidedCapture}
+        discardGuidedCapture={vi.fn().mockResolvedValue(undefined)}
+      />,
+    )
+
+    const captureButton = screen.getByRole('button', { name: 'Capture today in 360°' })
+    await user.click(captureButton)
+    expect(captureButton).toBeDisabled()
+
+    await act(async () => nativeCapture.resolve(makeGuidedCaptureResult()))
+    await waitFor(() => expect(composeGuidedCapture).toHaveBeenCalledTimes(1))
+    expect(captureButton).toBeDisabled()
+
+    await act(async () => composition.resolve(makeProcessedPanorama()))
+    expect(await screen.findByRole('heading', { name: 'Review your 360°' })).toBeInTheDocument()
+  })
+
+  it('rejects a completed counter when fewer frames than targets were returned', async () => {
+    const user = userEvent.setup()
+    const composeGuidedCapture = vi.fn()
+    const discardGuidedCapture = vi.fn().mockResolvedValue(undefined)
+
+    render(
+      <Capture360Page
+        now={new Date('2026-08-26T12:05:00')}
+        dailyWindow={upcomingWindow}
+        guidedCaptureAvailable
+        startGuidedCapture={vi.fn().mockResolvedValue(makeGuidedCaptureResult(33, 34, 34))}
+        composeGuidedCapture={composeGuidedCapture}
+        discardGuidedCapture={discardGuidedCapture}
+      />,
+    )
+
+    await user.click(screen.getByRole('button', { name: 'Capture today in 360°' }))
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      'Capture every surrounding dot before finishing.',
+    )
+    expect(composeGuidedCapture).not.toHaveBeenCalled()
+    expect(discardGuidedCapture).toHaveBeenCalledTimes(1)
+    expect(screen.getByRole('button', { name: 'Capture today in 360°' })).toBeEnabled()
+  })
+
   it('uses the daily source only while its window is open', async () => {
     const user = userEvent.setup()
     const onShare = vi.fn()
     const startGuidedCapture = vi.fn().mockResolvedValue({
-      frames: Array.from({ length: 8 }, (_, index) => ({
+      frames: Array.from({ length: 34 }, (_, index) => ({
         width: 1920,
         height: 1440,
         uri: `file:///capture/${index}.jpg`,
-        targetYawDegrees: index * 45,
-        targetPitchDegrees: 0,
+        targetYawDegrees: (index % 12) * 30,
+        targetPitchDegrees: index < 12 ? -45 : index < 24 ? 0 : 45,
       })),
-      targetCount: 8,
-      capturedCount: 8,
+      targetCount: 34,
+      capturedCount: 34,
       directoryUrl: 'file:///capture/session',
     })
     const composeGuidedCapture = vi.fn().mockResolvedValue({
@@ -203,6 +299,8 @@ describe('Capture360Page', () => {
     )
 
     await user.click(screen.getByRole('button', { name: 'Capture today in 360°' }))
+    expect(await screen.findByRole('heading', { name: 'Review your 360°' })).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Continue' }))
     await screen.findByAltText('Preview of selected 360 panorama')
     expect(startGuidedCapture).toHaveBeenCalledTimes(1)
     expect(composeGuidedCapture).toHaveBeenCalledTimes(1)

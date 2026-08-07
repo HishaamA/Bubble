@@ -20,6 +20,16 @@ const sharedMoment: PanoramaMoment = {
   height: 2000,
   source: 'manual',
   uploaderDisplayName: 'Maya',
+  annotations: [
+    {
+      id: 'balcony-note',
+      kind: 'text',
+      pitch: 3,
+      yaw: 18,
+      message: 'Grandma planted this jasmine.',
+      audioUrl: null,
+    },
+  ],
 }
 
 afterEach(() => {
@@ -117,6 +127,34 @@ describe('MemoryConstellation', () => {
     expect(screen.getByText('Keyboard panorama opened')).toBeInTheDocument()
   })
 
+  it('blocks the native image preview and drag ghost inside a bubble', () => {
+    render(
+      <MemoryRouter>
+        <MemoryConstellation now={testNow} />
+      </MemoryRouter>,
+    )
+
+    const dinner = screen.getByRole('button', {
+      name: /open sunday dinner memory/i,
+    })
+    const image = dinner.querySelector('img')
+    expect(image).not.toBeNull()
+
+    const contextMenu = new MouseEvent('contextmenu', {
+      bubbles: true,
+      cancelable: true,
+    })
+    const dragStart = new Event('dragstart', {
+      bubbles: true,
+      cancelable: true,
+    })
+
+    expect(image?.dispatchEvent(contextMenu)).toBe(false)
+    expect(contextMenu).toHaveProperty('defaultPrevented', true)
+    expect(image?.dispatchEvent(dragStart)).toBe(false)
+    expect(dragStart).toHaveProperty('defaultPrevented', true)
+  })
+
   it('surfaces the newest received 360 as a memory bubble', async () => {
     const user = userEvent.setup()
     render(
@@ -140,12 +178,16 @@ describe('MemoryConstellation', () => {
     expect(
       sharedBubble.querySelector('.memory-bubble__arc-sender'),
     ).toHaveTextContent(/^Maya$/)
+    expect(sharedBubble).toHaveAccessibleName(/1 memory point/i)
+    expect(
+      sharedBubble.querySelector('.memory-bubble__point-count'),
+    ).toHaveTextContent('+1')
 
     await user.click(sharedBubble)
     expect(screen.getByText('Shared panorama opened')).toBeInTheDocument()
   })
 
-  it('pans the memory space and suppresses the delayed click after a drag', () => {
+  it('keeps a long-pressed bubble in the constellation while it is dragged', () => {
     vi.useFakeTimers()
     render(
       <MemoryRouter>
@@ -196,10 +238,44 @@ describe('MemoryConstellation', () => {
         value: releasePointerCapture,
       },
     })
+    const dinnerImage = dinner.querySelector('img')
+    expect(dinnerImage).not.toBeNull()
 
     vi.advanceTimersByTime(20)
 
-    fireEvent.pointerDown(dinner, {
+    fireEvent.pointerDown(dinnerImage as HTMLImageElement, {
+      pointerId: 91,
+      pointerType: 'touch',
+      isPrimary: true,
+      button: 0,
+      clientX: 180,
+      clientY: 280,
+    })
+    vi.advanceTimersByTime(20)
+
+    const dinnerMotion = dinner.querySelector<HTMLElement>(
+      '.memory-bubble__motion',
+    )
+    expect(
+      Number(dinnerMotion?.style.getPropertyValue('--bubble-motion-scale')),
+    ).toBeGreaterThan(
+      Number(dinnerMotion?.style.getPropertyValue('--bubble-center-scale')),
+    )
+
+    fireEvent.pointerUp(dinnerImage as HTMLImageElement, {
+      pointerId: 91,
+      pointerType: 'touch',
+      isPrimary: true,
+      button: 0,
+      clientX: 180,
+      clientY: 280,
+    })
+    vi.advanceTimersByTime(20)
+    expect(dinnerMotion?.style.getPropertyValue('--bubble-motion-scale')).toBe(
+      dinnerMotion?.style.getPropertyValue('--bubble-center-scale'),
+    )
+
+    fireEvent.pointerDown(dinnerImage as HTMLImageElement, {
       pointerId: 1,
       pointerType: 'touch',
       isPrimary: true,
@@ -207,14 +283,15 @@ describe('MemoryConstellation', () => {
       clientX: 110,
       clientY: 180,
     })
-    fireEvent.pointerMove(dinner, {
+    vi.advanceTimersByTime(700)
+    fireEvent.pointerMove(dinnerImage as HTMLImageElement, {
       pointerId: 1,
       pointerType: 'touch',
       isPrimary: true,
       clientX: 145,
       clientY: 220,
     })
-    fireEvent.pointerUp(dinner, {
+    fireEvent.pointerUp(dinnerImage as HTMLImageElement, {
       pointerId: 1,
       pointerType: 'touch',
       isPrimary: true,
@@ -236,6 +313,26 @@ describe('MemoryConstellation', () => {
     fireEvent.click(dinner, { detail: 1 })
 
     expect(screen.queryByText('Unexpected panorama')).not.toBeInTheDocument()
+
+    fireEvent.pointerDown(dinner, {
+      pointerId: 2,
+      pointerType: 'touch',
+      isPrimary: true,
+      button: 0,
+      clientX: 145,
+      clientY: 220,
+    })
+    fireEvent.pointerUp(dinner, {
+      pointerId: 2,
+      pointerType: 'touch',
+      isPrimary: true,
+      button: 0,
+      clientX: 145,
+      clientY: 220,
+    })
+    fireEvent.click(dinner, { detail: 1 })
+
+    expect(screen.getByText('Unexpected panorama')).toBeInTheDocument()
   })
 
   it('opens with a random memory already enlarged at the center', () => {

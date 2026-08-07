@@ -13,10 +13,11 @@ import {
   CardboardSetupFlow,
   CardboardViewer,
   type CardboardMemoryChoice,
+  type CardboardEntryOptions,
   type CardboardViewerHandle,
 } from './cardboard'
 import { memories } from './memories'
-import type { PanoramaMoment } from './shared'
+import type { PanoramaAnnotation, PanoramaMoment } from './shared'
 
 const DEMO_VOICE_NOTE =
   'Sunday dinner always sounds like this: everyone talking, everyone laughing, and nobody ready to leave.'
@@ -57,6 +58,8 @@ export function PanoramaMemoryScreen({
   const requestedReturnTo = routeState?.returnTo
   const requestedOpenVr = routeState?.openVr === true
   const [voiceMessage, setVoiceMessage] = useState<string | null>(null)
+  const [activeAnnotation, setActiveAnnotation] =
+    useState<PanoramaAnnotation | null>(null)
   const [cardboardActive, setCardboardActive] = useState(false)
   const [vrEntering, setVrEntering] = useState(false)
   const [vrError, setVrError] = useState<string | null>(null)
@@ -111,6 +114,10 @@ export function PanoramaMemoryScreen({
     setVoiceMessage(null)
   }, [])
 
+  const openAnnotation = useCallback((annotation: PanoramaAnnotation) => {
+    setActiveAnnotation(annotation)
+  }, [])
+
   const returnToMemories = useCallback(() => {
     if ('speechSynthesis' in window) window.speechSynthesis.cancel()
     navigate(returnTo, {
@@ -121,6 +128,14 @@ export function PanoramaMemoryScreen({
       viewTransition: true,
     })
   }, [memory.id, navigate, returnTo, routeState?.journalContext])
+
+  const returnFromVrToMoments = useCallback(() => {
+    if ('speechSynthesis' in window) window.speechSynthesis.cancel()
+    navigate('/', {
+      replace: true,
+      state: { restoreMemoryId: selectedVrMemoryId },
+    })
+  }, [navigate, selectedVrMemoryId])
 
   const playVoiceNote = useCallback(() => {
     setVoiceMessage(DEMO_VOICE_NOTE)
@@ -133,13 +148,13 @@ export function PanoramaMemoryScreen({
     window.speechSynthesis.speak(note)
   }, [])
 
-  const enterCardboard = useCallback(async () => {
+  const enterCardboard = useCallback(async (options?: CardboardEntryOptions) => {
     if (vrEntering || cardboardActive) return
 
     setVrEntering(true)
     setVrError(null)
     try {
-      await cardboardRef.current?.enter()
+      await cardboardRef.current?.enter(options)
       setVrSetupOpen(false)
     } catch {
       setVrError(
@@ -212,6 +227,17 @@ export function PanoramaMemoryScreen({
           description:
             selectedVrSharedMoment.caption ||
             `Shared by ${selectedVrSharedMoment.uploaderDisplayName} with the family.`,
+          hotSpots: (selectedVrSharedMoment.annotations ?? []).map((annotation) => ({
+            id: annotation.id,
+            kind: annotation.kind === 'voice' ? 'audio' : 'info',
+            pitch: annotation.pitch,
+            yaw: annotation.yaw,
+            label:
+              annotation.kind === 'voice'
+                ? `Play voice note${annotation.message ? `: ${annotation.message}` : ''}`
+                : `Read note: ${annotation.message}`,
+            onActivate: () => openAnnotation(annotation),
+          })),
           pitch: 0,
           yaw: 0,
           hfov: 104,
@@ -241,7 +267,7 @@ export function PanoramaMemoryScreen({
         maxHfov: 120,
       },
     ]
-  }, [selectedVrSharedMoment, selectedVrStaticMemory])
+  }, [openAnnotation, selectedVrSharedMoment, selectedVrStaticMemory])
 
   const scenes = useMemo<PanoramaScene[]>(
     () => {
@@ -255,6 +281,17 @@ export function PanoramaMemoryScreen({
             description:
               sharedMoment.caption ||
               `Shared by ${sharedMoment.uploaderDisplayName} with the family.`,
+            hotSpots: (sharedMoment.annotations ?? []).map((annotation) => ({
+              id: annotation.id,
+              kind: annotation.kind === 'voice' ? 'audio' : 'info',
+              pitch: annotation.pitch,
+              yaw: annotation.yaw,
+              label:
+                annotation.kind === 'voice'
+                  ? `Play voice note${annotation.message ? `: ${annotation.message}` : ''}`
+                  : `Read note: ${annotation.message}`,
+              onActivate: () => openAnnotation(annotation),
+            })),
             pitch: 0,
             yaw: 0,
             hfov: 104,
@@ -318,14 +355,16 @@ export function PanoramaMemoryScreen({
         },
       ]
     },
-    [isDinnerMemory, memory.label, playVoiceNote, sharedMoment],
+    [isDinnerMemory, memory.label, openAnnotation, playVoiceNote, sharedMoment],
   )
 
   const initialSceneId = scenes[0]?.id
 
-  const transitionStyle = {
-    viewTransitionName: `memory-${memory.id}`,
-  } as CSSProperties
+  const transitionStyle = requestedOpenVr
+    ? undefined
+    : ({
+        viewTransitionName: `memory-${memory.id}`,
+      } as CSSProperties)
 
   if (sharedMemoryMissing && sharedMomentsLoading) {
     return (
@@ -352,7 +391,7 @@ export function PanoramaMemoryScreen({
   return (
     <section className="panorama-screen" aria-labelledby="panorama-memory-title">
       <div className="panorama-transition-surface" style={transitionStyle}>
-        {!cardboardActive ? (
+        {!cardboardActive && !requestedOpenVr ? (
           <PanoramaViewer
             scenes={scenes}
             initialSceneId={initialSceneId}
@@ -371,6 +410,7 @@ export function PanoramaMemoryScreen({
           setCardboardActive(active)
           if (active) setVrSetupOpen(false)
         }}
+        onExit={returnFromVrToMoments}
       />
 
       <CardboardSetupFlow
@@ -383,9 +423,13 @@ export function PanoramaMemoryScreen({
           setSelectedVrMemoryId(memoryId)
           setVrError(null)
         }}
-        onGo={() => void enterCardboard()}
+        onGo={(options) => void enterCardboard(options)}
         onClose={() => {
           if (vrEntering) return
+          if (requestedOpenVr) {
+            returnFromVrToMoments()
+            return
+          }
           setVrSetupOpen(false)
           setVrError(null)
           window.requestAnimationFrame(() => {
@@ -394,31 +438,34 @@ export function PanoramaMemoryScreen({
         }}
       />
 
-      <header className="panorama-top-bar">
-        <button type="button" onClick={returnToMemories} aria-label={returnLabel}>
-          <Icon name="arrow" size={24} />
-        </button>
-        <div>
-          <p className="eyebrow">{memory.date}</p>
-          <h1 id="panorama-memory-title" ref={titleRef} tabIndex={-1}>
-            {memory.label}
-          </h1>
-        </div>
-        <button
-          ref={vrButtonRef}
-          className="panorama-vr-button"
-          type="button"
-          onClick={openVrSetup}
-          aria-label="Set up Cardboard VR view"
-          disabled={cardboardActive}
-        >
-          <Icon name="vr" size={25} />
-        </button>
-      </header>
+      {!requestedOpenVr ? (
+        <header className="panorama-top-bar">
+          <button type="button" onClick={returnToMemories} aria-label={returnLabel}>
+            <Icon name="arrow" size={24} />
+          </button>
+          <div>
+            <p className="eyebrow">{memory.date}</p>
+            <h1 id="panorama-memory-title" ref={titleRef} tabIndex={-1}>
+              {memory.label}
+            </h1>
+          </div>
+          <button
+            ref={vrButtonRef}
+            className="panorama-vr-button"
+            type="button"
+            onClick={openVrSetup}
+            aria-label="Set up Cardboard VR view"
+            disabled={cardboardActive}
+          >
+            <Icon name="vr" size={25} />
+          </button>
+        </header>
+      ) : null}
 
       <p className="screen-reader-only" role="status" aria-live="polite">
-        {memory.label} panoramic memory opened.
-        {requestedOpenVr ? ' Cardboard setup opened.' : ''}
+        {requestedOpenVr
+          ? 'Cardboard setup opened.'
+          : `${memory.label} panoramic memory opened.`}
       </p>
 
       {vrError ? (
@@ -435,6 +482,38 @@ export function PanoramaMemoryScreen({
             Close
           </button>
         </div>
+      ) : null}
+
+      {activeAnnotation ? (
+        <aside className="memory-point-card" role="dialog" aria-label="Memory point">
+          <div>
+            <span aria-hidden="true">
+              {activeAnnotation.kind === 'voice' ? '◉' : '✦'}
+            </span>
+            <p>
+              {activeAnnotation.message ||
+                (activeAnnotation.kind === 'voice'
+                  ? 'A voice note from this moment'
+                  : 'A note from this moment')}
+            </p>
+          </div>
+          {activeAnnotation.kind === 'voice' && activeAnnotation.audioUrl ? (
+            <audio
+              key={activeAnnotation.audioUrl}
+              src={activeAnnotation.audioUrl}
+              controls
+              autoPlay
+              aria-label="Voice note playback"
+            />
+          ) : null}
+          <button
+            type="button"
+            onClick={() => setActiveAnnotation(null)}
+            aria-label="Close memory point"
+          >
+            Close
+          </button>
+        </aside>
       ) : null}
     </section>
   )

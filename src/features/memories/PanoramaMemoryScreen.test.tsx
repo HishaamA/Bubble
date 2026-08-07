@@ -1,6 +1,6 @@
 import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { MemoryRouter, Route, Routes } from 'react-router-dom'
+import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { PanoramaScene } from '../../viewer'
 import { MemoryConstellation } from './MemoryConstellation'
@@ -32,6 +32,18 @@ class SpeechSynthesisUtteranceMock {
   constructor(text: string) {
     this.text = text
   }
+}
+
+function MomentsRouteProbe() {
+  const location = useLocation()
+  const state = location.state as { restoreMemoryId?: string } | null
+
+  return (
+    <>
+      <h1>Moments bubbles</h1>
+      <output aria-label="Restored memory">{state?.restoreMemoryId ?? ''}</output>
+    </>
+  )
 }
 
 describe('PanoramaMemoryScreen lifecycle', () => {
@@ -147,10 +159,10 @@ describe('PanoramaMemoryScreen lifecycle', () => {
     await user.click(
       screen.getByRole('button', { name: 'Continue with Beach day' }),
     )
-    expect(
-      screen.getByRole('heading', { name: 'Turn your phone sideways' }),
-    ).toBeVisible()
-    await user.click(screen.getByRole('button', { name: 'Continue' }))
+    const landscapeOverride = screen.queryByRole('button', {
+      name: 'Use split view anyway',
+    })
+    if (landscapeOverride) await user.click(landscapeOverride)
     expect(
       screen.getByRole('heading', { name: 'Place your phone in Cardboard' }),
     ).toBeVisible()
@@ -160,7 +172,8 @@ describe('PanoramaMemoryScreen lifecycle', () => {
       expect(
         document.querySelector('.ks-cardboard--active'),
       ).toBeInTheDocument()
-      expect(document.querySelectorAll('[data-panorama]')).toHaveLength(2)
+      expect(document.querySelectorAll('[data-panorama]')).toHaveLength(1)
+      expect(document.querySelectorAll('.ks-cardboard__reticle')).toHaveLength(2)
       document.querySelectorAll('[data-panorama]').forEach((viewport) => {
         expect(viewport).toHaveAttribute(
           'data-panorama',
@@ -169,6 +182,123 @@ describe('PanoramaMemoryScreen lifecycle', () => {
         expect(viewport).toHaveAttribute('data-scene-title', 'Beach day')
       })
     })
+  })
+
+  it('returns VR exits to the Moments bubbles even when opened from Journal', async () => {
+    const user = userEvent.setup()
+    render(
+      <MemoryRouter
+        initialEntries={[
+          {
+            pathname: '/memory/dinner',
+            state: { returnTo: '/journal' },
+          },
+        ]}
+      >
+        <Routes>
+          <Route path="/" element={<MomentsRouteProbe />} />
+          <Route path="/journal" element={<h1>Memory journal</h1>} />
+          <Route path="/memory/:memoryId" element={<PanoramaMemoryScreen />} />
+        </Routes>
+      </MemoryRouter>,
+    )
+
+    await user.click(
+      screen.getByRole('button', { name: 'Set up Cardboard VR view' }),
+    )
+    await user.click(
+      screen.getByRole('radio', { name: /beach day, hishaam/i }),
+    )
+    await user.click(
+      screen.getByRole('button', { name: 'Continue with Beach day' }),
+    )
+    const landscapeOverride = screen.queryByRole('button', {
+      name: 'Use split view anyway',
+    })
+    if (landscapeOverride) await user.click(landscapeOverride)
+    await user.click(screen.getByRole('button', { name: 'Go' }))
+    await user.click(
+      await screen.findByRole('button', { name: 'Exit Cardboard view' }),
+    )
+
+    expect(
+      await screen.findByRole('heading', { name: 'Moments bubbles' }),
+    ).toBeVisible()
+    expect(
+      screen.queryByRole('heading', { name: 'Memory journal' }),
+    ).not.toBeInTheDocument()
+    expect(screen.getByLabelText('Restored memory')).toHaveTextContent('beach')
+  })
+
+  it('closes a shortcut-launched VR chooser back to the Moments bubbles', async () => {
+    const user = userEvent.setup()
+    render(
+      <MemoryRouter
+        initialEntries={[
+          {
+            pathname: '/memory/dinner',
+            state: { openVr: true, sourceMemoryId: 'dinner' },
+          },
+        ]}
+      >
+        <Routes>
+          <Route path="/" element={<MomentsRouteProbe />} />
+          <Route path="/memory/:memoryId" element={<PanoramaMemoryScreen />} />
+        </Routes>
+      </MemoryRouter>,
+    )
+
+    expect(
+      await screen.findByRole('heading', { name: 'Choose a moment' }),
+    ).toBeVisible()
+    await user.click(screen.getByRole('button', { name: 'Close VR setup' }))
+
+    expect(
+      await screen.findByRole('heading', { name: 'Moments bubbles' }),
+    ).toBeVisible()
+    expect(screen.getByLabelText('Restored memory')).toHaveTextContent('dinner')
+  })
+
+  it('never exposes Sunday dinner while an immediately closed Moments VR shortcut restores the bubbles', async () => {
+    const user = userEvent.setup()
+    render(
+      <MemoryRouter initialEntries={['/']}>
+        <Routes>
+          <Route path="/" element={<MemoryConstellation />} />
+          <Route path="/memory/:memoryId" element={<PanoramaMemoryScreen />} />
+        </Routes>
+      </MemoryRouter>,
+    )
+
+    await user.click(
+      screen.getByRole('button', { name: 'Set up Cardboard VR' }),
+    )
+
+    expect(
+      await screen.findByRole('heading', { name: 'Choose a moment' }),
+    ).toBeVisible()
+    expect(
+      document.querySelector(
+        '[data-panorama="/assets/panoramas/sunday-dinner-demo.jpg"]',
+      ),
+    ).not.toBeInTheDocument()
+    expect(
+      screen.queryByRole('heading', { name: 'Sunday dinner' }),
+    ).not.toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: 'Close VR setup' }))
+
+    expect(
+      await screen.findByRole('heading', { name: 'Moments' }),
+    ).toBeVisible()
+    expect(
+      document.querySelector(
+        '[data-panorama="/assets/panoramas/sunday-dinner-demo.jpg"]',
+      ),
+    ).not.toBeInTheDocument()
+    expect(
+      screen.queryByRole('heading', { name: 'Sunday dinner' }),
+    ).not.toBeInTheDocument()
   })
 
   it('offers current shared uploads and keeps static fixture memories available', async () => {
@@ -195,6 +325,16 @@ describe('PanoramaMemoryScreen lifecycle', () => {
                     height: 2000,
                     source: 'manual',
                     uploaderDisplayName: 'Maya',
+                    annotations: [
+                      {
+                        id: 'jasmine-note',
+                        kind: 'text',
+                        pitch: 4,
+                        yaw: 22,
+                        message: 'Grandma planted this jasmine.',
+                        audioUrl: null,
+                      },
+                    ],
                   },
                   {
                     id: 'yesterday',
@@ -207,6 +347,16 @@ describe('PanoramaMemoryScreen lifecycle', () => {
                     height: 2000,
                     source: 'manual',
                     uploaderDisplayName: 'Maya',
+                    annotations: [
+                      {
+                        id: 'jasmine-note',
+                        kind: 'text',
+                        pitch: -8,
+                        yaw: 24,
+                        message: 'Grandma planted this jasmine.',
+                        audioUrl: null,
+                      },
+                    ],
                   },
                 ]}
               />
@@ -276,6 +426,16 @@ describe('PanoramaMemoryScreen lifecycle', () => {
                     height: 2000,
                     source: 'manual',
                     uploaderDisplayName: 'Maya',
+                    annotations: [
+                      {
+                        id: 'family-balcony-note',
+                        kind: 'text',
+                        pitch: -8,
+                        yaw: 24,
+                        message: 'Grandma planted this jasmine.',
+                        audioUrl: null,
+                      },
+                    ],
                   },
                 ]}
               />
@@ -293,6 +453,14 @@ describe('PanoramaMemoryScreen lifecycle', () => {
     ).toHaveAttribute('data-panorama', 'blob:family-balcony')
 
     await user.click(
+      screen.getByRole('button', { name: 'Trigger voice hotspot' }),
+    )
+    expect(
+      screen.getByRole('dialog', { name: 'Memory point' }),
+    ).toHaveTextContent('Grandma planted this jasmine.')
+    await user.click(screen.getByRole('button', { name: 'Close memory point' }))
+
+    await user.click(
       screen.getByRole('button', { name: 'Set up Cardboard VR view' }),
     )
     expect(
@@ -303,15 +471,73 @@ describe('PanoramaMemoryScreen lifecycle', () => {
         name: 'Continue with Family balcony',
       }),
     )
-    await user.click(screen.getByRole('button', { name: 'Continue' }))
+    const landscapeOverride = screen.queryByRole('button', {
+      name: 'Use split view anyway',
+    })
+    if (landscapeOverride) await user.click(landscapeOverride)
     await user.click(screen.getByRole('button', { name: 'Go' }))
 
     await waitFor(() => {
       const stereoViews = document.querySelectorAll('[data-panorama]')
-      expect(stereoViews).toHaveLength(2)
+      expect(stereoViews).toHaveLength(1)
       stereoViews.forEach((viewport) =>
         expect(viewport).toHaveAttribute('data-panorama', 'blob:family-balcony'),
       )
     })
+  })
+
+  it('plays a received voice point from inside the family panorama', async () => {
+    const user = userEvent.setup()
+    render(
+      <MemoryRouter initialEntries={['/memory/shared-family-kitchen']}>
+        <Routes>
+          <Route
+            path="/memory/:memoryId"
+            element={
+              <PanoramaMemoryScreen
+                sharedMoments={[
+                  {
+                    id: 'family-kitchen',
+                    blob: new Blob(['panorama'], { type: 'image/jpeg' }),
+                    objectUrl: 'blob:family-kitchen',
+                    label: 'Family kitchen',
+                    caption: 'Sunday lunch.',
+                    createdAt: new Date().toISOString(),
+                    width: 4000,
+                    height: 2000,
+                    source: 'manual',
+                    uploaderDisplayName: 'Dad',
+                    annotations: [
+                      {
+                        id: 'dad-voice-note',
+                        kind: 'voice',
+                        pitch: 3,
+                        yaw: -18,
+                        message: 'Dad explains the old recipe.',
+                        audioBlob: new Blob(['voice'], { type: 'audio/mp4' }),
+                        audioMimeType: 'audio/mp4',
+                        durationMs: 4_200,
+                        audioUrl: 'blob:dad-voice-note',
+                      },
+                    ],
+                  },
+                ]}
+              />
+            }
+          />
+        </Routes>
+      </MemoryRouter>,
+    )
+
+    await user.click(
+      await screen.findByRole('button', { name: 'Trigger voice hotspot' }),
+    )
+    expect(screen.getByRole('dialog', { name: 'Memory point' })).toHaveTextContent(
+      'Dad explains the old recipe.',
+    )
+    expect(screen.getByLabelText('Voice note playback')).toHaveAttribute(
+      'src',
+      'blob:dad-voice-note',
+    )
   })
 })

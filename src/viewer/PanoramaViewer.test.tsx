@@ -27,6 +27,7 @@ const viewerMocks = vi.hoisted(() => ({
   >(),
   isOrientationActive: vi.fn<PanoramaAdapter['isOrientationActive']>(),
   getView: vi.fn<PanoramaAdapter['getView']>(),
+  getCoordinatesFromEvent: vi.fn<PanoramaAdapter['getCoordinatesFromEvent']>(),
   setView: vi.fn<PanoramaAdapter['setView']>(),
   panBy: vi.fn<PanoramaAdapter['panBy']>(),
   zoomIn: vi.fn<PanoramaAdapter['zoomIn']>(),
@@ -118,6 +119,76 @@ describe('PanoramaViewer accessibility controls', () => {
     expect(ref.current?.getView()).toEqual(view)
     expect(ref.current?.setView(view)).toBe(true)
     expect(viewerMocks.setView).toHaveBeenCalledWith(view)
+  })
+
+  it('places a memory point on a tap without treating a drag as a placement', async () => {
+    const onPointSelect = vi.fn()
+    viewerMocks.getCoordinatesFromEvent.mockReturnValue({
+      pitch: 12,
+      yaw: -38,
+    })
+    const { container } = render(
+      <PanoramaViewer
+        scenes={scenes}
+        pointSelectionEnabled
+        onPointSelect={onPointSelect}
+      />,
+    )
+    await waitFor(() => expect(viewerMocks.mount).toHaveBeenCalled())
+    const canvas = container.querySelector<HTMLDivElement>(
+      '.ks-panorama__canvas',
+    ) as HTMLDivElement
+
+    fireEvent.pointerDown(canvas, {
+      pointerId: 4,
+      isPrimary: true,
+      button: 0,
+      clientX: 120,
+      clientY: 180,
+    })
+    fireEvent.pointerUp(canvas, {
+      pointerId: 4,
+      isPrimary: true,
+      button: 0,
+      clientX: 124,
+      clientY: 184,
+    })
+    expect(onPointSelect).toHaveBeenCalledWith({ pitch: 12, yaw: -38 })
+
+    fireEvent.pointerDown(canvas, {
+      pointerId: 5,
+      isPrimary: true,
+      button: 0,
+      clientX: 80,
+      clientY: 100,
+    })
+    fireEvent.pointerUp(canvas, {
+      pointerId: 5,
+      isPrimary: true,
+      button: 0,
+      clientX: 140,
+      clientY: 160,
+    })
+    expect(onPointSelect).toHaveBeenCalledTimes(1)
+  })
+
+  it('places a keyboard memory point at the current view centre', async () => {
+    const onPointSelect = vi.fn()
+    viewerMocks.getView.mockReturnValue({ pitch: -8, yaw: 42, hfov: 95 })
+    const { container } = render(
+      <PanoramaViewer
+        scenes={scenes}
+        pointSelectionEnabled
+        onPointSelect={onPointSelect}
+      />,
+    )
+    await waitFor(() => expect(viewerMocks.mount).toHaveBeenCalled())
+    const canvas = container.querySelector<HTMLDivElement>(
+      '.ks-panorama__canvas',
+    ) as HTMLDivElement
+
+    fireEvent.keyDown(canvas, { key: 'Enter' })
+    expect(onPointSelect).toHaveBeenCalledWith({ pitch: -8, yaw: 42 })
   })
 
   it('makes the canvas inert in flat mode and does not intercept ArrowDown on its scene select', async () => {

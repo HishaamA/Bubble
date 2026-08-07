@@ -27,6 +27,7 @@ const firstMoment: StoredPanoramaMoment = {
   height: 2048,
   source: 'daily',
   uploaderDisplayName: 'Maya',
+  annotations: [],
 }
 
 function createSilentNotifier(): MomentChangeNotifier {

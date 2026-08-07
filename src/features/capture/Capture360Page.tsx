@@ -23,11 +23,13 @@ import {
   processPanoramaForSharing,
   type ProcessedPanorama,
 } from '../../services/media/processPanorama'
+import type { StoredPanoramaAnnotation } from '../memories/shared'
 import {
   composeGuidedPanorama,
   type GuidedPanoramaProgress,
 } from '../../services/media/composeGuidedPanorama'
 import { GuidedCapturePreview } from './GuidedCapturePreview'
+import { GuidedPanoramaReview } from './GuidedPanoramaReview'
 import {
   discardNativePanoramaCapture,
   isNativeCaptureCancellation,
@@ -46,6 +48,7 @@ export type Capture360Submission = {
   width: number
   height: number
   createdAt: Date
+  annotations: StoredPanoramaAnnotation[]
 }
 
 type Capture360PageProps = {
@@ -75,6 +78,7 @@ type CaptureDraft = {
   dimensions: ImageDimensions
   previewUrl: string
   source: CaptureSource
+  origin: 'guided' | 'upload'
   warning?: string
 }
 
@@ -164,6 +168,8 @@ export function Capture360Page({
   const [source, setSource] = useState<CaptureSource>(initialMode)
   const [draft, setDraft] = useState<CaptureDraft | null>(null)
   const [caption, setCaption] = useState('')
+  const [annotations, setAnnotations] = useState<StoredPanoramaAnnotation[]>([])
+  const [reviewingGuidedCapture, setReviewingGuidedCapture] = useState(false)
   const [error, setError] = useState('')
   const [checking, setChecking] = useState(false)
   const [sharing, setSharing] = useState(false)
@@ -207,6 +213,8 @@ export function Capture360Page({
     }
     setDraft(null)
     setCaption('')
+    setAnnotations([])
+    setReviewingGuidedCapture(false)
     setError('')
     if (cameraInputRef.current) cameraInputRef.current.value = ''
     if (libraryInputRef.current) libraryInputRef.current.value = ''
@@ -229,6 +237,7 @@ export function Capture360Page({
     file: File,
     dimensions: ImageDimensions,
     selectedSource: CaptureSource,
+    origin: CaptureDraft['origin'],
     warning?: string,
   ) {
     if (previewUrlRef.current) URL.revokeObjectURL(previewUrlRef.current)
@@ -240,8 +249,11 @@ export function Capture360Page({
       dimensions,
       previewUrl,
       source: selectedSource,
+      origin,
       warning,
     })
+    setAnnotations([])
+    setReviewingGuidedCapture(origin === 'guided')
   }
 
   async function beginGuidedCapture(nextSource: CaptureSource) {
@@ -263,7 +275,10 @@ export function Capture360Page({
     try {
       const result = await startGuidedCapture()
       captureResult = result
-      if (!result.frames.length || result.capturedCount < result.targetCount) {
+      if (
+        result.frames.length < result.targetCount ||
+        result.capturedCount < result.targetCount
+      ) {
         throw new Error('Capture every surrounding dot before finishing.')
       }
 
@@ -286,9 +301,10 @@ export function Capture360Page({
         file,
         { width: processed.viewerWidth, height: processed.viewerHeight },
         nextSource,
+        'guided',
         `Built from ${result.capturedCount} overlapping views around you.`,
       )
-      setAnnouncement('Your guided 360° moment is ready to title and share.')
+      setAnnouncement('Your guided 360° moment is ready to review.')
     } catch (captureError) {
       if (!isNativeCaptureCancellation(captureError)) {
         const message = captureError instanceof Error
@@ -362,6 +378,7 @@ export function Capture360Page({
         preparedFile,
         preparedDimensions,
         selectedSource,
+        'upload',
         validation.warning,
       )
       setAnnouncement(
@@ -394,6 +411,7 @@ export function Capture360Page({
         width: draft.dimensions.width,
         height: draft.dimensions.height,
         createdAt: new Date(),
+        annotations,
       })
       if (draft.source === 'daily') setCompletedDaily(true)
       setShared(true)
@@ -456,6 +474,25 @@ export function Capture360Page({
             </button>
           </div>
         </section>
+      ) : draft && reviewingGuidedCapture ? (
+        <GuidedPanoramaReview
+          panoramaUrl={draft.previewUrl}
+          annotations={annotations}
+          onAnnotationsChange={setAnnotations}
+          onContinue={() => {
+            setReviewingGuidedCapture(false)
+            setAnnouncement(
+              annotations.length > 0
+                ? `${annotations.length} memory ${annotations.length === 1 ? 'point is' : 'points are'} ready to share.`
+                : 'Your 360° review is complete. Add a title, then share it.',
+            )
+          }}
+          onRetake={() => {
+            const captureSource = draft.source
+            clearDraft()
+            void beginGuidedCapture(captureSource)
+          }}
+        />
       ) : draft ? (
         <form className="capture-editor" onSubmit={shareCapture}>
           <div className="capture-preview">
@@ -466,6 +503,12 @@ export function Capture360Page({
           </div>
 
           {draft.warning ? <p className="capture-quality-note">{draft.warning}</p> : null}
+
+          {annotations.length > 0 ? (
+            <p className="capture-quality-note">
+              {annotations.length} memory {annotations.length === 1 ? 'point' : 'points'} will appear inside this 360° moment.
+            </p>
+          ) : null}
 
           <label className="ks-field">
             <span>Moment title <small>optional · above the bubble</small></span>
@@ -542,7 +585,12 @@ export function Capture360Page({
                 </div>
 
                 {canUseDailyWindow ? (
-                  <button className="ks-primary-button capture-window__action" type="button" onClick={() => void beginGuidedCapture('daily')}>
+                  <button
+                    className="ks-primary-button capture-window__action"
+                    type="button"
+                    disabled={guidedCaptureRunning}
+                    onClick={() => void beginGuidedCapture('daily')}
+                  >
                     <CaptureIcon name="camera" />
                     Capture today in 360°
                   </button>

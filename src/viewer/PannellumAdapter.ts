@@ -291,6 +291,21 @@ export function createPannellumAdapter(
     return Object.values(view).every(Number.isFinite) ? view : null
   }
 
+  const getCoordinatesFromEvent = (
+    event: MouseEvent,
+  ): Pick<PanoramaViewState, 'pitch' | 'yaw'> | null => {
+    if (!viewer) return null
+
+    try {
+      const [pitch, yaw] = viewer.mouseEventToCoords(event)
+      return Number.isFinite(pitch) && Number.isFinite(yaw)
+        ? { pitch, yaw }
+        : null
+    } catch {
+      return null
+    }
+  }
+
   const setView = (view: PanoramaViewState): boolean => {
     if (!viewer || !Object.values(view).every(Number.isFinite)) return false
 
@@ -326,6 +341,7 @@ export function createPannellumAdapter(
     isOrientationSupported: () => viewer?.isOrientationSupported() ?? false,
     isOrientationActive: () => viewer?.isOrientationActive() ?? false,
     getView,
+    getCoordinatesFromEvent,
     setView,
     panBy,
     zoomIn: () => zoom(-ZOOM_STEP),

@@ -1,6 +1,7 @@
 import type {
   MomentStore,
   SavePanoramaMomentInput,
+  StoredPanoramaAnnotation,
   StoredPanoramaMoment,
 } from './types'
 
@@ -15,8 +16,17 @@ function compareNewestFirst(
   return second.createdAt.localeCompare(first.createdAt)
 }
 
+function cloneAnnotation(
+  annotation: StoredPanoramaAnnotation,
+): StoredPanoramaAnnotation {
+  return { ...annotation }
+}
+
 function cloneMoment(moment: StoredPanoramaMoment): StoredPanoramaMoment {
-  return { ...moment }
+  return {
+    ...moment,
+    annotations: (moment.annotations ?? []).map(cloneAnnotation),
+  }
 }
 
 function createMomentId() {
@@ -73,6 +83,7 @@ export function preparePanoramaMoment(
       input.uploaderDisplayName,
       'uploaderDisplayName',
     ),
+    annotations: (input.annotations ?? []).map(cloneAnnotation),
   }
 }
 

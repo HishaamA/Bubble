@@ -16,6 +16,7 @@ import {
   subscribeToFamilyMoments,
   type FamilyDailyCaptureWindow,
   type FamilyMomentConnection,
+  type FamilyMomentSubscription,
 } from '../../../services/media/familyMomentService'
 import { useSharedMoments } from './useSharedMoments'
 import {
@@ -61,10 +62,11 @@ export function FamilyMomentSyncProvider({ children }: PropsWithChildren) {
   useEffect(() => {
     let active = true
     let connectionVersion = 0
-    let unsubscribeFromMoments: () => void = () => undefined
+    let familySubscription: FamilyMomentSubscription | null = null
 
     async function connect() {
       const requestedConnection = ++connectionVersion
+      let requestedSubscription: FamilyMomentSubscription | null = null
       setStatus('checking')
       try {
         const connection = await getFamilyMomentConnection()
@@ -78,19 +80,26 @@ export function FamilyMomentSyncProvider({ children }: PropsWithChildren) {
           return
         }
 
+        requestedSubscription = subscribeToFamilyMoments(
+          connection.circleId,
+          () => void refreshFamilyMoments(),
+        )
+        familySubscription = requestedSubscription
+        await requestedSubscription.ready
+        if (!active || requestedConnection !== connectionVersion) return
+
         const window = await getFamilyDailyCaptureWindow(connection)
         if (!active || requestedConnection !== connectionVersion) return
         setDailyWindow(window)
         setStatus('connected')
         setError(null)
         await refreshFamilyMoments()
-        if (!active || requestedConnection !== connectionVersion) return
-        unsubscribeFromMoments = subscribeToFamilyMoments(
-          connection.circleId,
-          () => void refreshFamilyMoments(),
-        )
       } catch (reason) {
         if (!active || requestedConnection !== connectionVersion) return
+        if (familySubscription === requestedSubscription) {
+          requestedSubscription?.unsubscribe()
+          familySubscription = null
+        }
         connectionRef.current = null
         setDailyWindow(null)
         setStatus('error')
@@ -103,8 +112,9 @@ export function FamilyMomentSyncProvider({ children }: PropsWithChildren) {
     }
 
     function reconnect() {
-      unsubscribeFromMoments()
-      unsubscribeFromMoments = () => undefined
+      familySubscription?.unsubscribe()
+      familySubscription = null
+      connectionRef.current = null
       void connect()
     }
 
@@ -121,7 +131,8 @@ export function FamilyMomentSyncProvider({ children }: PropsWithChildren) {
     return () => {
       active = false
       connectionVersion += 1
-      unsubscribeFromMoments()
+      familySubscription?.unsubscribe()
+      familySubscription = null
       unsubscribeFromAuth()
       window.removeEventListener('kinsphere:family-sync-refresh', reconnect)
       window.removeEventListener('focus', reconnect)
@@ -134,6 +145,7 @@ export function FamilyMomentSyncProvider({ children }: PropsWithChildren) {
       submission: Capture360Submission,
     ): Promise<{ delivery: 'local' | 'family' }> => {
       const connection = connectionRef.current
+      const annotations = submission.annotations ?? []
 
       if (!connection) {
         await saveMoment({
@@ -146,6 +158,7 @@ export function FamilyMomentSyncProvider({ children }: PropsWithChildren) {
           height: submission.height,
           source: submission.source,
           uploaderDisplayName: 'You',
+          annotations,
         })
         return { delivery: 'local' }
       }
@@ -161,6 +174,7 @@ export function FamilyMomentSyncProvider({ children }: PropsWithChildren) {
         height: processed.viewerHeight,
         source: submission.source,
         uploaderDisplayName: 'You',
+        annotations,
       })
       return { delivery: 'family' }
     },
