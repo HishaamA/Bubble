@@ -12,7 +12,7 @@ final class PanoramaCaptureViewController: UIViewController, ARSessionDelegate {
     private struct CaptureTarget {
         let yaw: Float
         let pitch: Float
-        let worldPosition: SIMD3<Float>
+        let direction: SIMD3<Float>
         var isCaptured = false
     }
 
@@ -48,6 +48,7 @@ final class PanoramaCaptureViewController: UIViewController, ARSessionDelegate {
     private let sessionId: String
     private let directoryURL: URL
     private let sceneView = ARSCNView(frame: .zero)
+    private let targetFieldNode = SCNNode()
     private let stateQueue = DispatchQueue(label: "com.kinsphere.panorama.state", qos: .userInitiated)
     private let imageQueue = DispatchQueue(label: "com.kinsphere.panorama.image", qos: .userInitiated)
     private let ciContext = CIContext(options: [.cacheIntermediates: false])
@@ -82,6 +83,7 @@ final class PanoramaCaptureViewController: UIViewController, ARSessionDelegate {
     private var previousIdleTimerState = false
     private var captureOrientation: UIInterfaceOrientation = .portrait
     private var isOrientationTransitioning = false
+    private var targetFieldIsAnchored = false
 
     // Main-thread-only presentation state.
     private var displayedTargetIndex: Int?
@@ -179,6 +181,7 @@ final class PanoramaCaptureViewController: UIViewController, ARSessionDelegate {
         view.backgroundColor = .black
         sceneView.translatesAutoresizingMaskIntoConstraints = false
         sceneView.scene = SCNScene()
+        sceneView.scene.rootNode.addChildNode(targetFieldNode)
         sceneView.automaticallyUpdatesLighting = true
         sceneView.session.delegate = self
         sceneView.session.delegateQueue = stateQueue
@@ -313,7 +316,10 @@ final class PanoramaCaptureViewController: UIViewController, ARSessionDelegate {
     }
 
     private func configureTargets() {
-        let radius: Float = 3.0
+        // Keep the guides on a large, user-centred angular shell. Their capture
+        // direction must not change when the phone translates a few centimetres;
+        // the old three-metre world points could bunch together through parallax.
+        let radius: Float = 8.0
         targets = Self.targetAngles(for: options.mode).map { yaw, pitch in
             let cosPitch = cos(pitch)
             let direction = SIMD3<Float>(
@@ -321,9 +327,8 @@ final class PanoramaCaptureViewController: UIViewController, ARSessionDelegate {
                 sin(pitch),
                 -cos(yaw) * cosPitch
             )
-            let worldPosition = direction * radius
 
-            let sphere = SCNSphere(radius: 0.085)
+            let sphere = SCNSphere(radius: 0.09)
             sphere.segmentCount = 24
             let material = SCNMaterial()
             material.lightingModel = .constant
@@ -332,15 +337,15 @@ final class PanoramaCaptureViewController: UIViewController, ARSessionDelegate {
             sphere.materials = [material]
 
             let node = SCNNode(geometry: sphere)
-            node.simdPosition = worldPosition
+            node.simdPosition = direction * radius
             node.opacity = 0.78
-            sceneView.scene.rootNode.addChildNode(node)
+            targetFieldNode.addChildNode(node)
             targetNodes.append(node)
 
             return CaptureTarget(
                 yaw: yaw,
                 pitch: pitch,
-                worldPosition: worldPosition
+                direction: direction
             )
         }
 
@@ -349,6 +354,9 @@ final class PanoramaCaptureViewController: UIViewController, ARSessionDelegate {
     }
 
     private static func targetAngles(for mode: PanoramaCaptureOptions.Mode) -> [(Float, Float)] {
+        // Rings are staggered so each frame owns a distinct spherical arc.
+        // Standard intentionally totals 34 views and spans +82° through -82°:
+        // one ceiling, 5/7/8/7/5 around the room, and one floor view.
         var degrees: [(yaw: Float, pitch: Float)] = [(0, 82)]
 
         func appendRing(pitch: Float, count: Int, offset: Float) {
@@ -364,11 +372,11 @@ final class PanoramaCaptureViewController: UIViewController, ARSessionDelegate {
             appendRing(pitch: 0, count: 8, offset: 0)
             appendRing(pitch: -45, count: 4, offset: 45)
         case .standard:
-            appendRing(pitch: 60, count: 4, offset: 45)
-            appendRing(pitch: 30, count: 8, offset: 0)
+            appendRing(pitch: 55, count: 5, offset: 36)
+            appendRing(pitch: 27, count: 7, offset: 0)
             appendRing(pitch: 0, count: 8, offset: 22.5)
-            appendRing(pitch: -30, count: 8, offset: 0)
-            appendRing(pitch: -60, count: 4, offset: 45)
+            appendRing(pitch: -27, count: 7, offset: 360 / 14)
+            appendRing(pitch: -55, count: 5, offset: 0)
         case .detailed:
             appendRing(pitch: 60, count: 6, offset: 30)
             appendRing(pitch: 30, count: 10, offset: 0)
@@ -413,6 +421,7 @@ final class PanoramaCaptureViewController: UIViewController, ARSessionDelegate {
 
         let orientationState = currentOrientationState()
         let transform = simd_inverse(frame.camera.viewMatrix(for: orientationState.orientation))
+        anchorTargetFieldIfNeeded(to: transform)
         let motionIsSteady = updateMotion(transform: transform, timestamp: frame.timestamp)
         let trackingMessage = trackingMessage(for: frame.camera.trackingState)
         let trackingIsNormal: Bool
@@ -496,20 +505,32 @@ final class PanoramaCaptureViewController: UIViewController, ARSessionDelegate {
     }
 
     func sessionInterruptionEnded(_ session: ARSession) {
+        targetFieldIsAnchored = false
         resetSteadiness()
 
         DispatchQueue.main.async { [weak self] in
+            self?.targetFieldNode.simdPosition = .zero
             self?.guidanceLabel.text = "Move slowly to resume"
             self?.runSession(resetTracking: true)
         }
     }
 
-    private func closestUncapturedTarget(to cameraTransform: simd_float4x4) -> (index: Int, angle: Float)? {
+    private func anchorTargetFieldIfNeeded(to cameraTransform: simd_float4x4) {
+        guard !targetFieldIsAnchored else { return }
+        targetFieldIsAnchored = true
         let cameraPosition = SIMD3<Float>(
             cameraTransform.columns.3.x,
             cameraTransform.columns.3.y,
             cameraTransform.columns.3.z
         )
+
+        DispatchQueue.main.async { [weak self] in
+            guard let self, !self.hasEnded else { return }
+            self.targetFieldNode.simdPosition = cameraPosition
+        }
+    }
+
+    private func closestUncapturedTarget(to cameraTransform: simd_float4x4) -> (index: Int, angle: Float)? {
         let forward = simd_normalize(SIMD3<Float>(
             -cameraTransform.columns.2.x,
             -cameraTransform.columns.2.y,
@@ -520,8 +541,7 @@ final class PanoramaCaptureViewController: UIViewController, ARSessionDelegate {
         var closestAngle = Float.greatestFiniteMagnitude
 
         for (index, target) in targets.enumerated() where !target.isCaptured {
-            let targetDirection = simd_normalize(target.worldPosition - cameraPosition)
-            let cosine = min(max(simd_dot(forward, targetDirection), -1), 1)
+            let cosine = min(max(simd_dot(forward, target.direction), -1), 1)
             let angle = acos(cosine)
             if angle < closestAngle {
                 closestAngle = angle
@@ -776,6 +796,7 @@ final class PanoramaCaptureViewController: UIViewController, ARSessionDelegate {
             "targetPitchDegrees": targetPitchDegrees,
             "horizontalFovDegrees": horizontalFovDegrees,
             "verticalFovDegrees": verticalFovDegrees,
+            "rotationDegrees": 0,
             "position": [
                 "x": Double(transform.columns.3.x),
                 "y": Double(transform.columns.3.y),
