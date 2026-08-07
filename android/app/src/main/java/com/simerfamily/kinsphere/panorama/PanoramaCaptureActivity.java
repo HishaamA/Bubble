@@ -1085,7 +1085,7 @@ public final class PanoramaCaptureActivity extends AppCompatActivity implements 
         }
     }
 
-    private static List<PanoramaTarget> createTargets(String mode) {
+    static List<PanoramaTarget> createTargets(String mode) {
         ArrayList<PanoramaTarget> targets = new ArrayList<>();
         if ("quick".equals(mode)) {
             addTarget(targets, 0.0, 82.0);
@@ -1103,11 +1103,11 @@ public final class PanoramaCaptureActivity extends AppCompatActivity implements 
             addTarget(targets, 0.0, -82.0);
         } else {
             addTarget(targets, 0.0, 82.0);
-            addRing(targets, 60.0, 4, 45.0, 90.0);
-            addRing(targets, 30.0, 8, 0.0, 45.0);
+            addRing(targets, 55.0, 5, 36.0, 72.0);
+            addRing(targets, 27.0, 7, 0.0, 360.0 / 7.0);
             addRing(targets, 0.0, 8, 22.5, 45.0);
-            addRing(targets, -30.0, 8, 0.0, 45.0);
-            addRing(targets, -60.0, 4, 45.0, 90.0);
+            addRing(targets, -27.0, 7, 360.0 / 14.0, 360.0 / 7.0);
+            addRing(targets, -55.0, 5, 0.0, 72.0);
             addTarget(targets, 0.0, -82.0);
         }
         return targets;
