@@ -24,8 +24,14 @@ function isSameLocalDay(first: string | Date, second: Date) {
 
 export function MemoriesRoute() {
   const { moments } = useSharedMoments()
+  const { deleteMoment } = useFamilyMomentSync()
 
-  return <MemoryConstellation sharedMoments={moments} />
+  return (
+    <MemoryConstellation
+      sharedMoments={moments}
+      onDelete360={deleteMoment}
+    />
+  )
 }
 
 export function JournalRoute({ now }: { now?: Date } = {}) {

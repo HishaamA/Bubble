@@ -1,9 +1,25 @@
 .capture-page {
   --feature-accent: #f5f5f7;
   --feature-accent-rgb: 245, 245, 247;
+  width: 100%;
+  max-width: 100%;
   padding-right: 1rem;
   padding-left: 1rem;
   color-scheme: dark;
+}
+
+.app-content > .capture-page.capture-page--editor {
+  height: min(100%, var(--capture-editor-viewport-height, 100dvh));
+  max-height: 100%;
+  padding-bottom: max(
+    1rem,
+    env(safe-area-inset-bottom),
+    var(--native-safe-area-bottom, 0px)
+  );
+  overflow-x: clip;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scroll-padding-block: 0.75rem;
 }
 
 .capture-page__header {
@@ -497,7 +513,24 @@
 
 .capture-editor {
   display: grid;
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
   gap: 0.85rem;
+}
+
+.capture-editor > *,
+.capture-editor__composer,
+.capture-editor__composer > * {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.capture-editor__composer {
+  display: grid;
+  width: 100%;
+  gap: 0.85rem;
+  scroll-margin-block: 0.75rem;
 }
 
 .capture-preview {
@@ -558,21 +591,66 @@
 
 .capture-editor .ks-field > span {
   display: flex;
+  min-width: 0;
   justify-content: space-between;
+  gap: 0.75rem;
 }
 
 .capture-editor .ks-field small {
+  min-width: 0;
   color: rgba(255, 255, 255, 0.32);
   font-size: 0.63rem;
   font-weight: 500;
+  text-align: right;
+}
+
+.capture-editor .ks-field textarea {
+  max-width: 100%;
+  min-height: 5.6rem;
+  resize: none;
+  /* iOS zooms the whole WebView when a focused field is below 16px. */
+  font-size: 1rem;
 }
 
 .capture-editor .ks-primary-button {
   width: 100%;
 }
 
+.capture-editor__review-button {
+  width: 100%;
+}
+
+.app-content > .capture-page.capture-page--editor[data-compact-editor='true']:has(.capture-editor textarea:focus) {
+  padding-top: max(
+    0.6rem,
+    env(safe-area-inset-top),
+    var(--native-safe-area-top, 0px)
+  );
+}
+
+.capture-page--editor[data-compact-editor='true']:has(.capture-editor textarea:focus) .capture-page__header {
+  min-height: 2.75rem;
+  margin-bottom: 0.45rem;
+}
+
+.capture-page--editor[data-compact-editor='true']:has(.capture-editor textarea:focus) .capture-page__header h1 {
+  font-size: 1.45rem;
+}
+
+.capture-page--editor[data-compact-editor='true']:has(.capture-editor textarea:focus) .capture-preview {
+  max-height: 5.25rem;
+}
+
+.capture-page--editor[data-compact-editor='true']:has(.capture-editor textarea:focus) .capture-quality-note {
+  margin-top: 0;
+  padding: 0.45rem 0;
+}
+
 .capture-success {
   display: grid;
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
   padding: 1.3rem 0;
   justify-items: center;
   border: 0;
@@ -582,6 +660,11 @@
   background: #000;
   box-shadow: none;
   text-align: center;
+}
+
+.capture-success > * {
+  min-width: 0;
+  max-width: 100%;
 }
 
 .capture-success__icon {
@@ -602,14 +685,20 @@
 }
 
 .capture-success > p:not(.eyebrow) {
+  width: 100%;
   max-width: 19rem;
   margin: 0.6rem 0 1rem;
   color: rgba(255, 255, 255, 0.5);
   font-size: 0.75rem;
   line-height: 1.5;
+  overflow-wrap: anywhere;
 }
 
 .capture-success img {
+  display: block;
+  width: 100%;
+  max-width: 100%;
+  height: auto;
   aspect-ratio: 2 / 1;
   margin-bottom: 1rem;
   border-radius: 0.9rem;
@@ -618,6 +707,8 @@
 .capture-success__actions {
   display: grid;
   width: 100%;
+  min-width: 0;
+  max-width: 100%;
   gap: 0.55rem;
 }
 

@@ -8,7 +8,14 @@ import {
 } from 'react'
 import { useLocation, useNavigate, useParams } from 'react-router-dom'
 import { Icon } from '../../components/Icon'
+import {
+  addFamilyMomentComment,
+  fetchFamilyMomentComments,
+  subscribeToFamilyMomentComments,
+  type FamilyMomentComment,
+} from '../../services/media/familyMomentCommentService'
 import { PanoramaViewer, type PanoramaScene } from '../../viewer'
+import { FamilyCommentsPanel } from './FamilyCommentsPanel'
 import {
   CardboardSetupFlow,
   CardboardViewer,
@@ -22,6 +29,15 @@ import type { PanoramaAnnotation, PanoramaMoment } from './shared'
 const DEMO_VOICE_NOTE =
   'Sunday dinner always sounds like this: everyone talking, everyone laughing, and nobody ready to leave.'
 const MEMORY_SPRITE_WIDTH = 1536
+
+function CommentsIcon() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M5.5 5.5h13A2.5 2.5 0 0 1 21 8v7a2.5 2.5 0 0 1-2.5 2.5H11l-4.5 3v-3h-1A2.5 2.5 0 0 1 3 15V8a2.5 2.5 0 0 1 2.5-2.5Z" />
+      <path d="M7.5 10h9M7.5 13h6" />
+    </svg>
+  )
+}
 
 function isSameLocalDay(value: string, reference: Date): boolean {
   const date = new Date(value)
@@ -65,8 +81,17 @@ export function PanoramaMemoryScreen({
   const [vrError, setVrError] = useState<string | null>(null)
   const [vrSetupOpen, setVrSetupOpen] = useState(requestedOpenVr)
   const [selectedVrMemoryId, setSelectedVrMemoryId] = useState(memoryId)
+  const [comments, setComments] = useState<FamilyMomentComment[]>([])
+  const [commentsOpen, setCommentsOpen] = useState(false)
+  const [commentsLoading, setCommentsLoading] = useState(false)
+  const [commentsSending, setCommentsSending] = useState(false)
+  const [commentsError, setCommentsError] = useState<string | null>(null)
+  const [commentTargetAnnotationId, setCommentTargetAnnotationId] = useState<
+    string | null
+  >(null)
   const titleRef = useRef<HTMLHeadingElement>(null)
   const vrButtonRef = useRef<HTMLButtonElement>(null)
+  const commentsButtonRef = useRef<HTMLButtonElement>(null)
   const cardboardRef = useRef<CardboardViewerHandle>(null)
   const sharedMomentId = memoryId.startsWith('shared-')
     ? memoryId.slice('shared-'.length)
@@ -93,6 +118,59 @@ export function PanoramaMemoryScreen({
   const sharedMemoryMissing = Boolean(sharedMomentId && !sharedMoment)
 
   useEffect(() => {
+    let active = true
+    let unsubscribe: (() => void) | undefined
+
+    queueMicrotask(() => {
+      if (!active) return
+      setComments([])
+      setCommentsOpen(false)
+      setCommentTargetAnnotationId(null)
+      setCommentsError(null)
+      if (!sharedMomentId) setCommentsLoading(false)
+    })
+    if (!sharedMomentId) {
+      return () => undefined
+    }
+
+    const refresh = async (announceLoading = false) => {
+      if (announceLoading && active) setCommentsLoading(true)
+      try {
+        const next = await fetchFamilyMomentComments(sharedMomentId)
+        if (!active) return
+        setComments(next)
+        setCommentsError(null)
+      } catch {
+        if (active) {
+          setCommentsError('The family conversation could not be loaded. Try again in a moment.')
+        }
+      } finally {
+        if (active && announceLoading) setCommentsLoading(false)
+      }
+    }
+
+    void subscribeToFamilyMomentComments(sharedMomentId, () => {
+      void refresh(false)
+    }).then((cleanup) => {
+      if (!active) {
+        cleanup()
+        return
+      }
+      unsubscribe = cleanup
+    }).catch(() => {
+      if (active) {
+        setCommentsError('Live family comments are temporarily unavailable.')
+      }
+    })
+    void refresh(true)
+
+    return () => {
+      active = false
+      unsubscribe?.()
+    }
+  }, [sharedMomentId])
+
+  useEffect(() => {
     const frame = window.requestAnimationFrame(() => {
       if (!vrSetupOpen) {
         titleRef.current?.focus({ preventScroll: true })
@@ -117,6 +195,54 @@ export function PanoramaMemoryScreen({
   const openAnnotation = useCallback((annotation: PanoramaAnnotation) => {
     setActiveAnnotation(annotation)
   }, [])
+
+  const closeComments = useCallback(() => {
+    setCommentsOpen(false)
+    setCommentsError(null)
+    window.requestAnimationFrame(() => {
+      commentsButtonRef.current?.focus({ preventScroll: true })
+    })
+  }, [])
+
+  const openComments = useCallback((annotationId: string | null = null) => {
+    setCommentTargetAnnotationId(annotationId)
+    setCommentsError(null)
+    setCommentsOpen(true)
+  }, [])
+
+  const submitComment = useCallback(async (
+    body: string,
+    annotationId: string | null,
+  ) => {
+    if (!sharedMomentId || commentsSending) return
+    setCommentsSending(true)
+    setCommentsError(null)
+    try {
+      const saved = await addFamilyMomentComment({
+        momentId: sharedMomentId,
+        annotationId,
+        body,
+        authorDisplayName: 'You',
+      })
+      setComments((current) => {
+        const byId = new Map(current.map((comment) => [comment.id, comment]))
+        byId.set(saved.id, saved)
+        return [...byId.values()].sort(
+          (left, right) =>
+            new Date(left.createdAt).getTime() - new Date(right.createdAt).getTime(),
+        )
+      })
+    } catch (reason) {
+      setCommentsError(
+        reason instanceof Error
+          ? reason.message
+          : 'Your comment could not be shared. Please try again.',
+      )
+      throw reason
+    } finally {
+      setCommentsSending(false)
+    }
+  }, [commentsSending, sharedMomentId])
 
   const returnToMemories = useCallback(() => {
     if ('speechSynthesis' in window) window.speechSynthesis.cancel()
@@ -152,6 +278,7 @@ export function PanoramaMemoryScreen({
     if (vrEntering || cardboardActive) return
 
     setVrEntering(true)
+    setCommentsOpen(false)
     setVrError(null)
     try {
       await cardboardRef.current?.enter(options)
@@ -168,6 +295,7 @@ export function PanoramaMemoryScreen({
   const openVrSetup = useCallback(() => {
     setSelectedVrMemoryId(memory.id)
     setVrError(null)
+    setCommentsOpen(false)
     setVrSetupOpen(true)
   }, [memory.id])
 
@@ -396,6 +524,24 @@ export function PanoramaMemoryScreen({
             scenes={scenes}
             initialSceneId={initialSceneId}
             ariaLabel={`${memory.label} panoramic memory`}
+            additionalControls={sharedMoment ? (
+              <button
+                ref={commentsButtonRef}
+                type="button"
+                className={commentsOpen ? 'is-active ks-panorama__comments-button' : 'ks-panorama__comments-button'}
+                onClick={() => openComments(null)}
+                aria-label={`Open family comments, ${comments.length} ${comments.length === 1 ? 'comment' : 'comments'}`}
+                aria-expanded={commentsOpen}
+                aria-controls="family-comments-panel"
+              >
+                <CommentsIcon />
+                {comments.length > 0 ? (
+                  <span className="ks-panorama__comment-count" aria-hidden="true">
+                    {comments.length > 99 ? '99+' : comments.length}
+                  </span>
+                ) : null}
+              </button>
+            ) : undefined}
           />
         ) : null}
       </div>
@@ -408,7 +554,10 @@ export function PanoramaMemoryScreen({
         memoryByline={selectedVrChoice?.sender}
         onActiveChange={(active) => {
           setCardboardActive(active)
-          if (active) setVrSetupOpen(false)
+          if (active) {
+            setVrSetupOpen(false)
+            setCommentsOpen(false)
+          }
         }}
         onExit={returnFromVrToMoments}
       />
@@ -486,7 +635,7 @@ export function PanoramaMemoryScreen({
 
       {activeAnnotation ? (
         <aside className="memory-point-card" role="dialog" aria-label="Memory point">
-          <div>
+          <div className="memory-point-card__content">
             <span aria-hidden="true">
               {activeAnnotation.kind === 'voice' ? '◉' : '✦'}
             </span>
@@ -506,15 +655,41 @@ export function PanoramaMemoryScreen({
               aria-label="Voice note playback"
             />
           ) : null}
-          <button
-            type="button"
-            onClick={() => setActiveAnnotation(null)}
-            aria-label="Close memory point"
-          >
-            Close
-          </button>
+          <div className="memory-point-card__actions">
+            {sharedMoment ? (
+              <button
+                type="button"
+                onClick={() => {
+                  openComments(activeAnnotation.id)
+                  setActiveAnnotation(null)
+                }}
+              >
+                Reply
+              </button>
+            ) : null}
+            <button
+              type="button"
+              onClick={() => setActiveAnnotation(null)}
+              aria-label="Close memory point"
+            >
+              Close
+            </button>
+          </div>
         </aside>
       ) : null}
+
+      <FamilyCommentsPanel
+        open={commentsOpen && Boolean(sharedMoment) && !cardboardActive && !vrSetupOpen}
+        comments={comments}
+        annotations={sharedMoment?.annotations ?? []}
+        targetAnnotationId={commentTargetAnnotationId}
+        loading={commentsLoading}
+        sending={commentsSending}
+        error={commentsError}
+        onClose={closeComments}
+        onTargetChange={setCommentTargetAnnotationId}
+        onSubmit={submitComment}
+      />
     </section>
   )
 }

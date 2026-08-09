@@ -1,5 +1,6 @@
 import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
+import type { ReactNode } from 'react'
 import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { PanoramaScene } from '../../viewer'
@@ -7,17 +8,26 @@ import { MemoryConstellation } from './MemoryConstellation'
 import { PanoramaMemoryScreen } from './PanoramaMemoryScreen'
 
 vi.mock('../../viewer', () => ({
-  PanoramaViewer: ({ scenes }: { scenes: readonly PanoramaScene[] }) => (
-    <button
-      type="button"
-      data-panorama={scenes[0]?.panorama}
-      data-scene-title={scenes[0]?.title}
-      onClick={() =>
-        scenes[0]?.hotSpots?.[0]?.onActivate?.(new MouseEvent('click'))
-      }
-    >
-      Trigger voice hotspot
-    </button>
+  PanoramaViewer: ({
+    scenes,
+    additionalControls,
+  }: {
+    scenes: readonly PanoramaScene[]
+    additionalControls?: ReactNode
+  }) => (
+    <div>
+      <button
+        type="button"
+        data-panorama={scenes[0]?.panorama}
+        data-scene-title={scenes[0]?.title}
+        onClick={() =>
+          scenes[0]?.hotSpots?.[0]?.onActivate?.(new MouseEvent('click'))
+        }
+      >
+        Trigger voice hotspot
+      </button>
+      {additionalControls}
+    </div>
   ),
 }))
 
@@ -55,6 +65,7 @@ describe('PanoramaMemoryScreen lifecycle', () => {
       cancel: cancelSpeech,
       speak,
     })
+    window.localStorage.removeItem('kinsphere:family-moment-comments:v1')
   })
 
   afterEach(() => vi.unstubAllGlobals())
@@ -539,5 +550,78 @@ describe('PanoramaMemoryScreen lifecycle', () => {
       'src',
       'blob:dad-voice-note',
     )
+  })
+
+  it('lets the family comment on the panorama and reply to an embedded point', async () => {
+    const user = userEvent.setup()
+    render(
+      <MemoryRouter initialEntries={['/memory/shared-family-comments']}>
+        <Routes>
+          <Route
+            path="/memory/:memoryId"
+            element={(
+              <PanoramaMemoryScreen
+                sharedMoments={[
+                  {
+                    id: 'family-comments',
+                    blob: new Blob(['panorama'], { type: 'image/jpeg' }),
+                    objectUrl: 'blob:family-comments',
+                    label: 'Our new house',
+                    caption: 'Walk through together.',
+                    createdAt: new Date().toISOString(),
+                    width: 4000,
+                    height: 2000,
+                    source: 'manual',
+                    uploaderDisplayName: 'You',
+                    annotations: [
+                      {
+                        id: 'hallway-note',
+                        kind: 'text',
+                        pitch: 2,
+                        yaw: 14,
+                        message: 'This is where Grandma’s clock will go.',
+                        audioUrl: null,
+                      },
+                    ],
+                  },
+                ]}
+              />
+            )}
+          />
+        </Routes>
+      </MemoryRouter>,
+    )
+
+    const commentsButton = await screen.findByRole('button', {
+      name: 'Open family comments, 0 comments',
+    })
+    await user.click(commentsButton)
+    expect(screen.getByRole('dialog', { name: 'Family comments' })).toBeVisible()
+    expect(screen.getByText(/no comments yet/i)).toBeVisible()
+
+    await user.type(
+      screen.getByRole('textbox', { name: /comment on this whole moment/i }),
+      'The light in here is beautiful.',
+    )
+    await user.click(screen.getByRole('button', { name: 'Post' }))
+    expect(await screen.findByText('The light in here is beautiful.')).toBeVisible()
+    expect(screen.getByText('On this device')).toBeVisible()
+    await user.click(screen.getByRole('button', { name: 'Close comments' }))
+    await waitFor(() => expect(commentsButton).toHaveFocus())
+
+    await user.click(screen.getByRole('button', { name: 'Trigger voice hotspot' }))
+    await user.click(screen.getByRole('button', { name: 'Reply' }))
+    expect(screen.getByText(/comment on/i)).toHaveTextContent(
+      'This is where Grandma’s clock…',
+    )
+    await user.type(
+      screen.getByRole('textbox', { name: /comment on this is where grandma/i }),
+      'I remember that clock!',
+    )
+    await user.click(screen.getByRole('button', { name: 'Post' }))
+
+    expect(await screen.findByText('I remember that clock!')).toBeVisible()
+    expect(screen.getByText(/reply to this is where grandma/i)).toBeVisible()
+    expect(screen.getByText('2 thoughts together')).toBeVisible()
   })
 })

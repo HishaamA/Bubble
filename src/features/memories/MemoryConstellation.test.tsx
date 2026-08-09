@@ -1,11 +1,16 @@
 import { StrictMode } from 'react'
-import { fireEvent, render, screen } from '@testing-library/react'
+import { act, fireEvent, render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { Link, MemoryRouter, Route, Routes } from 'react-router-dom'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { MemoryConstellation } from './MemoryConstellation'
+import { BUBBLE_PLACEMENT_STORAGE_KEY } from './bubblePlacement'
 import { memories } from './memories'
 import type { PanoramaMoment } from './shared'
+import {
+  getSharedMomentPositions,
+  getSharedMomentWorldHeightPercent,
+} from './sharedMomentLayout'
 
 const testNow = new Date(2026, 7, 26, 12)
 
@@ -32,9 +37,19 @@ const sharedMoment: PanoramaMoment = {
   ],
 }
 
+const ownedSharedMoment: PanoramaMoment = {
+  ...sharedMoment,
+  id: 'owned-family-balcony',
+  objectUrl: 'blob:owned-family-balcony',
+  uploaderDisplayName: 'You',
+  ownedByCurrentUser: true,
+  familySynced: true,
+}
+
 afterEach(() => {
   vi.useRealTimers()
   vi.restoreAllMocks()
+  window.localStorage.removeItem(BUBBLE_PLACEMENT_STORAGE_KEY)
 })
 
 describe('MemoryConstellation', () => {
@@ -187,6 +202,385 @@ describe('MemoryConstellation', () => {
     expect(screen.getByText('Shared panorama opened')).toBeInTheDocument()
   })
 
+  it('never swaps a built-in memory in or out when a family upload is removed', () => {
+    const view = render(
+      <MemoryRouter>
+        <MemoryConstellation sharedMoments={[sharedMoment]} />
+      </MemoryRouter>,
+    )
+
+    expect(screen.getByRole('button', {
+      name: /open sunset walk memory/i,
+    })).toBeInTheDocument()
+    expect(document.querySelectorAll('.memory-bubble')).toHaveLength(11)
+
+    view.rerender(
+      <MemoryRouter>
+        <MemoryConstellation sharedMoments={[]} />
+      </MemoryRouter>,
+    )
+
+    expect(screen.getByRole('button', {
+      name: /open sunset walk memory/i,
+    })).toBeInTheDocument()
+    expect(document.querySelectorAll('.memory-bubble')).toHaveLength(10)
+  })
+
+  it('keeps a touch tap targeted at the shared open button during pointer capture', () => {
+    render(
+      <MemoryRouter>
+        <Routes>
+          <Route
+            path="/"
+            element={<MemoryConstellation sharedMoments={[sharedMoment]} />}
+          />
+          <Route path="/memory/:memoryId" element={<p>Touch panorama opened</p>} />
+        </Routes>
+      </MemoryRouter>,
+    )
+
+    const sharedSurface = screen.getByRole('button', {
+      name: /open family balcony shared by maya/i,
+    })
+    const sharedShell = sharedSurface.closest<HTMLElement>('.memory-bubble')
+    if (!sharedShell) throw new Error('Shared bubble shell was not rendered')
+    const capture = vi.fn()
+    const release = vi.fn()
+    Object.assign(sharedSurface, {
+      setPointerCapture: capture,
+      releasePointerCapture: release,
+    })
+    Object.assign(sharedShell, { setPointerCapture: vi.fn() })
+
+    fireEvent.pointerDown(sharedSurface, {
+      pointerId: 21,
+      pointerType: 'touch',
+      isPrimary: true,
+      button: 0,
+      clientX: 120,
+      clientY: 180,
+    })
+    expect(capture).toHaveBeenCalledWith(21)
+    expect(sharedShell.setPointerCapture).not.toHaveBeenCalled()
+
+    fireEvent.pointerUp(sharedSurface, {
+      pointerId: 21,
+      pointerType: 'touch',
+      isPrimary: true,
+      button: 0,
+      clientX: 120,
+      clientY: 180,
+    })
+    expect(release).toHaveBeenCalledWith(21)
+    fireEvent.click(sharedSurface, { detail: 1 })
+
+    expect(screen.getByText('Touch panorama opened')).toBeInTheDocument()
+  })
+
+  it('reveals removal only after a sustained hold on your own 360, then requires the X', () => {
+    vi.useFakeTimers()
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true)
+    const onDelete360 = vi.fn(async () => undefined)
+    render(
+      <MemoryRouter>
+        <MemoryConstellation
+          sharedMoments={[ownedSharedMoment, sharedMoment]}
+          onDelete360={onDelete360}
+        />
+      </MemoryRouter>,
+    )
+
+    const ownedBubble = screen.getByRole('button', {
+      name: /open family balcony shared by you/i,
+    })
+    const receivedBubble = screen.getByRole('button', {
+      name: /open family balcony shared by maya/i,
+    })
+    const ownedBubbleShell = ownedBubble.closest<HTMLElement>('.memory-bubble')
+    const receivedBubbleShell = receivedBubble.closest<HTMLElement>('.memory-bubble')
+    const removeButton = screen.getByRole('button', {
+      name: 'Remove Family balcony from your family',
+    })
+    expect(removeButton).toHaveAttribute('data-visible', 'false')
+    expect(screen.getAllByRole('button', { name: /remove family balcony/i })).toHaveLength(1)
+
+    fireEvent.pointerDown(receivedBubble, {
+      pointerId: 11,
+      pointerType: 'touch',
+      isPrimary: true,
+      button: 0,
+      clientX: 100,
+      clientY: 100,
+    })
+    act(() => vi.advanceTimersByTime(1_300))
+    expect(receivedBubbleShell).toHaveAttribute('data-delete-mode', 'false')
+    expect(receivedBubbleShell).toHaveAttribute('data-picked-up', 'true')
+    expect(removeButton).toHaveAttribute('data-visible', 'false')
+    fireEvent.pointerUp(receivedBubble, {
+      pointerId: 11,
+      pointerType: 'touch',
+      isPrimary: true,
+      button: 0,
+      clientX: 100,
+      clientY: 100,
+    })
+    expect(receivedBubbleShell).toHaveAttribute('data-picked-up', 'false')
+
+    fireEvent.pointerDown(ownedBubble, {
+      pointerId: 12,
+      pointerType: 'touch',
+      isPrimary: true,
+      button: 0,
+      clientX: 120,
+      clientY: 120,
+    })
+    // A real thumb shifts slightly while being held. That jitter must not
+    // cancel the iPhone-style edit gesture.
+    fireEvent.pointerMove(ownedBubble, {
+      pointerId: 12,
+      pointerType: 'touch',
+      isPrimary: true,
+      clientX: 132,
+      clientY: 120,
+    })
+    act(() => vi.advanceTimersByTime(1_300))
+    expect(confirm).not.toHaveBeenCalled()
+    expect(ownedBubble).toHaveAccessibleName(
+      'Family balcony selected for removal',
+    )
+    expect(ownedBubbleShell).toHaveAttribute('data-delete-mode', 'true')
+    expect(ownedBubbleShell).toHaveAttribute('data-picked-up', 'true')
+    expect(removeButton).toHaveAttribute('data-visible', 'true')
+    expect(removeButton.parentElement).toHaveClass('memory-bubble__drift')
+    expect(removeButton.closest('.memory-bubble__motion')).toBeNull()
+
+    fireEvent.pointerMove(ownedBubble, {
+      pointerId: 12,
+      pointerType: 'touch',
+      isPrimary: true,
+      clientX: 145,
+      clientY: 145,
+    })
+    fireEvent.pointerUp(ownedBubble, {
+      pointerId: 12,
+      pointerType: 'touch',
+      isPrimary: true,
+      button: 0,
+      clientX: 145,
+      clientY: 145,
+    })
+    expect(ownedBubbleShell).toHaveAttribute('data-picked-up', 'false')
+    fireEvent.click(ownedBubble, { detail: 1 })
+    expect(confirm).not.toHaveBeenCalled()
+    expect(onDelete360).not.toHaveBeenCalled()
+
+    act(() => vi.advanceTimersByTime(500))
+    fireEvent.click(ownedBubble, { detail: 1 })
+    expect(confirm).not.toHaveBeenCalled()
+
+    fireEvent.pointerDown(removeButton, {
+      pointerId: 13,
+      pointerType: 'touch',
+      isPrimary: true,
+      button: 0,
+      clientX: 92,
+      clientY: 92,
+    })
+    fireEvent.pointerUp(removeButton, {
+      pointerId: 13,
+      pointerType: 'touch',
+      isPrimary: true,
+      button: 0,
+      clientX: 92,
+      clientY: 92,
+    })
+    fireEvent.click(removeButton, { detail: 1 })
+    expect(confirm).toHaveBeenCalledWith(
+      'Remove “Family balcony” from your phone and your family’s phones?',
+    )
+    expect(onDelete360).toHaveBeenCalledWith(ownedSharedMoment.id)
+  })
+
+  it('lets a keyboard user enter remove mode without exposing it on received posts', () => {
+    render(
+      <MemoryRouter>
+        <MemoryConstellation
+          sharedMoments={[ownedSharedMoment, sharedMoment]}
+          onDelete360={vi.fn(async () => undefined)}
+        />
+      </MemoryRouter>,
+    )
+
+    const ownedBubble = screen.getByRole('button', {
+      name: /open family balcony shared by you/i,
+    })
+    const receivedBubble = screen.getByRole('button', {
+      name: /open family balcony shared by maya/i,
+    })
+    const removeButton = screen.getByRole('button', {
+      name: 'Remove Family balcony from your family',
+    })
+    fireEvent.keyDown(receivedBubble, { key: 'Delete' })
+    expect(receivedBubble).toHaveAccessibleName(/open family balcony/i)
+    expect(removeButton).toHaveAttribute('data-visible', 'false')
+
+    fireEvent.keyDown(ownedBubble, { key: 'Delete' })
+    expect(ownedBubble).toHaveAccessibleName(
+      'Family balcony selected for removal',
+    )
+    expect(removeButton).toHaveAttribute('data-visible', 'true')
+  })
+
+  it('offers an assistive-technology remove action without requiring a gesture', () => {
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true)
+    const onDelete360 = vi.fn(async () => undefined)
+    render(
+      <MemoryRouter>
+        <MemoryConstellation
+          sharedMoments={[ownedSharedMoment]}
+          onDelete360={onDelete360}
+        />
+      </MemoryRouter>,
+    )
+
+    const removeButton = screen.getByRole('button', {
+      name: 'Remove Family balcony from your family',
+    })
+    expect(removeButton).toHaveAttribute('data-visible', 'false')
+
+    fireEvent.click(removeButton)
+
+    expect(confirm).toHaveBeenCalledOnce()
+    expect(onDelete360).toHaveBeenCalledWith(ownedSharedMoment.id)
+  })
+
+  it('gives every cached shared moment a distinct position and grows the world', () => {
+    const sharedMoments = Array.from({ length: 45 }, (_, index) => ({
+      ...sharedMoment,
+      id: `shared-${index}`,
+      objectUrl: `blob:shared-${index}`,
+      label: `Shared moment ${index}`,
+    }))
+    render(
+      <MemoryRouter>
+        <MemoryConstellation sharedMoments={sharedMoments} />
+      </MemoryRouter>,
+    )
+
+    const sharedBubbles = Array.from(
+      document.querySelectorAll<HTMLElement>('[data-shared-moment-id]'),
+    )
+    const positions = sharedBubbles.map(
+      (bubble) =>
+        `${bubble.style.getPropertyValue('--bubble-top')}:${bubble.style.getPropertyValue('--bubble-left')}`,
+    )
+
+    expect(sharedBubbles).toHaveLength(45)
+    expect(new Set(positions)).toHaveProperty('size', 45)
+    expect(screen.getByTestId('memory-constellation-space')).toHaveStyle({
+      '--constellation-world-height': '268.57%',
+    })
+
+    const longArchivePositions = getSharedMomentPositions(205).map((position) =>
+      position.join(':'),
+    )
+    expect(new Set(longArchivePositions)).toHaveProperty('size', 205)
+
+    const worldHeightScale = getSharedMomentWorldHeightPercent(45) / 100
+    const numericSharedPositions = sharedBubbles.map((bubble) => ({
+        top: Number.parseFloat(bubble.style.getPropertyValue('--bubble-top')),
+        left: Number.parseFloat(bubble.style.getPropertyValue('--bubble-left')),
+      }))
+    const renderedDistance = (
+      first: { top: number; left: number },
+      second: { top: number; left: number },
+    ) => {
+      const horizontal = ((first.left - second.left) * 1.4 * 320) / 100
+      const vertical =
+        ((first.top - second.top) * worldHeightScale * 560) / 100
+      return Math.hypot(horizontal, vertical)
+    }
+
+    numericSharedPositions.forEach((sharedPosition, index) => {
+      numericSharedPositions.slice(0, index).forEach((otherSharedPosition) => {
+        expect(
+          renderedDistance(sharedPosition, otherSharedPosition),
+        ).toBeGreaterThanOrEqual(81.5)
+      })
+      memories.forEach(({ position }) => {
+          expect(
+            renderedDistance(sharedPosition, {
+              top: Number.parseFloat(position.top),
+              left: Number.parseFloat(position.left),
+            }),
+          ).toBeGreaterThanOrEqual(
+            81.5,
+          )
+        })
+    })
+  })
+
+  it('clamps the pan when a large shared world shrinks after deletion', () => {
+    vi.useFakeTimers()
+    vi.spyOn(Math, 'random').mockReturnValue(0.999)
+    const sharedMoments = Array.from({ length: 60 }, (_, index) => ({
+      ...sharedMoment,
+      id: `shrinking-shared-${index}`,
+      objectUrl: `blob:shrinking-shared-${index}`,
+      label: `Shrinking shared moment ${index}`,
+    }))
+    const view = render(
+      <MemoryRouter>
+        <MemoryConstellation sharedMoments={sharedMoments} />
+      </MemoryRouter>,
+    )
+
+    const field = screen.getByLabelText('Family memory constellation')
+    const space = screen.getByTestId('memory-constellation-space')
+    Object.defineProperties(field, {
+      clientWidth: { configurable: true, value: 360 },
+      clientHeight: { configurable: true, value: 560 },
+    })
+    Object.defineProperties(space, {
+      clientWidth: { configurable: true, value: 720 },
+      clientHeight: { configurable: true, value: 1_176 },
+    })
+    document.querySelectorAll<HTMLElement>('.memory-bubble').forEach((bubble) => {
+      Object.defineProperties(bubble, {
+        offsetLeft: { configurable: true, value: 20 },
+        offsetTop: { configurable: true, value: 20 },
+        offsetWidth: { configurable: true, value: 80 },
+        offsetHeight: { configurable: true, value: 80 },
+      })
+    })
+    const lastShared = screen
+      .getByRole('button', {
+        name: /open shrinking shared moment 59 shared by maya/i,
+      })
+      .closest<HTMLElement>('.memory-bubble')
+    if (!lastShared) throw new Error('Last shared bubble was not rendered')
+    Object.defineProperties(lastShared, {
+      offsetLeft: { configurable: true, value: 320 },
+      offsetTop: { configurable: true, value: 1_000 },
+    })
+
+    vi.advanceTimersByTime(20)
+    expect(field).toHaveStyle({ '--constellation-pan-y': '-760px' })
+
+    Object.defineProperty(space, 'clientHeight', {
+      configurable: true,
+      value: 896,
+    })
+    view.rerender(
+      <MemoryRouter>
+        <MemoryConstellation sharedMoments={[]} />
+      </MemoryRouter>,
+    )
+    vi.advanceTimersByTime(20)
+
+    expect(field).toHaveStyle({ '--constellation-pan-y': '-616px' })
+  })
+
   it('keeps a long-pressed bubble in the constellation while it is dragged', () => {
     vi.useFakeTimers()
     render(
@@ -242,6 +636,8 @@ describe('MemoryConstellation', () => {
     expect(dinnerImage).not.toBeNull()
 
     vi.advanceTimersByTime(20)
+    const initialPanX = field.style.getPropertyValue('--constellation-pan-x')
+    const initialPanY = field.style.getPropertyValue('--constellation-pan-y')
 
     fireEvent.pointerDown(dinnerImage as HTMLImageElement, {
       pointerId: 91,
@@ -303,11 +699,20 @@ describe('MemoryConstellation', () => {
 
     expect(setPointerCapture).toHaveBeenCalledWith(1)
     expect(releasePointerCapture).toHaveBeenCalledWith(1)
-    expect(field).toHaveStyle({
-      '--constellation-pan-x': '39px',
-      '--constellation-pan-y': '34px',
-    })
-    expect(field).toHaveAttribute('data-space-moved', 'true')
+    expect(field.style.getPropertyValue('--constellation-pan-x')).toBe(
+      initialPanX,
+    )
+    expect(field.style.getPropertyValue('--constellation-pan-y')).toBe(
+      initialPanY,
+    )
+    expect(field).toHaveAttribute('data-space-moved', 'false')
+    expect(dinner).toHaveAttribute('data-picked-up', 'false')
+    expect(parseFloat(dinner.style.getPropertyValue('--bubble-left'))).toBeCloseTo(
+      (121 / 594) * 100,
+    )
+    expect(parseFloat(dinner.style.getPropertyValue('--bubble-top'))).toBeCloseTo(
+      (236 / 896) * 100,
+    )
 
     vi.advanceTimersByTime(350)
     fireEvent.click(dinner, { detail: 1 })
@@ -333,6 +738,25 @@ describe('MemoryConstellation', () => {
     fireEvent.click(dinner, { detail: 1 })
 
     expect(screen.getByText('Unexpected panorama')).toBeInTheDocument()
+  })
+
+  it('restores an individually moved bubble on the next Moments visit', () => {
+    window.localStorage.setItem(
+      BUBBLE_PLACEMENT_STORAGE_KEY,
+      JSON.stringify({ dinner: { top: 23.5, left: 31.25 } }),
+    )
+
+    render(
+      <MemoryRouter>
+        <MemoryConstellation />
+      </MemoryRouter>,
+    )
+
+    const dinner = screen.getByRole('button', {
+      name: /open sunday dinner memory/i,
+    })
+    expect(dinner.style.getPropertyValue('--bubble-top')).toBe('23.5%')
+    expect(dinner.style.getPropertyValue('--bubble-left')).toBe('31.25%')
   })
 
   it('opens with a random memory already enlarged at the center', () => {
@@ -495,17 +919,19 @@ describe('MemoryConstellation', () => {
     const sharedBubble = screen.getByRole('button', {
       name: /open family balcony shared by maya/i,
     })
-    Object.defineProperties(sharedBubble, {
+    const sharedBubbleShell = sharedBubble.closest<HTMLElement>('.memory-bubble')
+    if (!sharedBubbleShell) throw new Error('Shared bubble shell was not rendered')
+    Object.defineProperties(sharedBubbleShell, {
       offsetLeft: { configurable: true, value: 500 },
       offsetTop: { configurable: true, value: 408 },
     })
 
     vi.advanceTimersByTime(20)
 
-    expect(sharedBubble).toHaveAttribute('data-center-focus', 'true')
+    expect(sharedBubbleShell).toHaveAttribute('data-center-focus', 'true')
     expect(
       Number(
-        sharedBubble
+        sharedBubbleShell
           .querySelector<HTMLElement>('.memory-bubble__motion')
           ?.style.getPropertyValue('--bubble-center-scale'),
       ),

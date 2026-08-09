@@ -239,6 +239,30 @@
   stroke-width: 1.55;
 }
 
+.ks-panorama__controls .ks-panorama__comments-button {
+  position: relative;
+}
+
+.ks-panorama__comment-count {
+  position: absolute;
+  top: -0.12rem;
+  right: -0.12rem;
+  display: grid;
+  min-width: 1.05rem;
+  height: 1.05rem;
+  padding: 0 0.22rem;
+  place-items: center;
+  color: #17120b;
+  background: #e8c690;
+  border: 1.5px solid #1c1c1e;
+  border-radius: 999px;
+  font: 700 0.48rem/1 system-ui, sans-serif;
+}
+
+.ks-panorama__comments-button.is-active .ks-panorama__comment-count {
+  border-color: #fff;
+}
+
 .ks-panorama__status,
 .ks-panorama__notice,
 .ks-panorama__instructions,

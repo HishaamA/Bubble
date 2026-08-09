@@ -121,7 +121,13 @@ describe('Capture360Page', () => {
     const file = new File(['panorama'], 'balcony-360.jpg', { type: 'image/jpeg' })
     await user.upload(screen.getByLabelText('Choose a 360 photo from camera or library'), file)
 
+    expect(await screen.findByRole('heading', { name: 'Review your 360°' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Choose another' })).toBeEnabled()
+    await user.click(screen.getByRole('button', { name: 'Continue' }))
     expect(await screen.findByAltText('Preview of selected 360 panorama')).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Edit 360 & points' }))
+    expect(screen.getByRole('heading', { name: 'Review your 360°' })).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Continue' }))
     await user.type(screen.getByRole('textbox', { name: /moment title/i }), 'Dinner together')
     await user.click(screen.getByRole('button', { name: 'Share with family' }))
 
@@ -185,8 +191,10 @@ describe('Capture360Page', () => {
     })
     await user.upload(screen.getByLabelText('Take a panorama with camera'), phonePanorama)
 
-    expect(await screen.findByAltText('Preview of selected 360 panorama')).toBeInTheDocument()
+    expect(await screen.findByRole('heading', { name: 'Review your 360°' })).toBeInTheDocument()
     expect(processPanorama).toHaveBeenCalledWith(phonePanorama)
+    await user.click(screen.getByRole('button', { name: 'Continue' }))
+    expect(await screen.findByAltText('Preview of selected 360 panorama')).toBeInTheDocument()
     expect(screen.getByText(/fit the full phone panorama/i)).toBeInTheDocument()
 
     await user.type(screen.getByRole('textbox', { name: /moment title/i }), 'Garden walk')

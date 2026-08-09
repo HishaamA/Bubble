@@ -1,5 +1,6 @@
 import type { CSSProperties, MouseEvent } from 'react'
 import { createBubbleDrift } from './bubbleDrift'
+import type { BubblePlacement } from './bubblePlacement'
 import { MemoryArcLabels } from './MemoryArcLabels'
 import type { Memory } from './memories'
 
@@ -9,6 +10,8 @@ type MemoryBubbleProps = {
   memory: Memory
   order: number
   entryFocused?: boolean
+  placement?: BubblePlacement
+  pickedUp?: boolean
   onOpen: (memory: Memory, event: MouseEvent<HTMLButtonElement>) => void
 }
 
@@ -16,6 +19,8 @@ export function MemoryBubble({
   memory,
   order,
   entryFocused = false,
+  placement,
+  pickedUp = false,
   onOpen,
 }: MemoryBubbleProps) {
   const spriteScale = SPRITE_WIDTH / memory.crop.diameter
@@ -25,8 +30,8 @@ export function MemoryBubble({
     top: `${(-memory.crop.top / memory.crop.diameter) * 100}%`,
   }
   const bubbleStyle = {
-    '--bubble-top': memory.position.top,
-    '--bubble-left': memory.position.left,
+    '--bubble-top': placement ? `${placement.top}%` : memory.position.top,
+    '--bubble-left': placement ? `${placement.left}%` : memory.position.left,
     '--bubble-order': order,
   } as CSSProperties
   const motionStyle = {
@@ -52,6 +57,8 @@ export function MemoryBubble({
       type="button"
       id={`memory-${memory.id}`}
       data-memory-id={memory.id}
+      data-memory-label={memory.label}
+      data-picked-up={pickedUp ? 'true' : 'false'}
       data-entry-focus={entryFocused ? 'true' : 'false'}
       className="memory-bubble"
       style={bubbleStyle}

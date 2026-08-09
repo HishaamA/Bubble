@@ -37,6 +37,7 @@ import {
   startNativePanoramaCapture,
   type NativePanoramaCaptureResult,
 } from './nativePanoramaCapture'
+import { installCaptureEditorViewportSync } from './captureEditorViewport'
 
 export type CaptureSource = 'daily' | 'manual'
 
@@ -79,6 +80,7 @@ type CaptureDraft = {
   previewUrl: string
   source: CaptureSource
   origin: 'guided' | 'upload'
+  picker?: 'camera' | 'library'
   warning?: string
 }
 
@@ -169,7 +171,7 @@ export function Capture360Page({
   const [draft, setDraft] = useState<CaptureDraft | null>(null)
   const [caption, setCaption] = useState('')
   const [annotations, setAnnotations] = useState<StoredPanoramaAnnotation[]>([])
-  const [reviewingGuidedCapture, setReviewingGuidedCapture] = useState(false)
+  const [reviewingPanorama, setReviewingPanorama] = useState(false)
   const [error, setError] = useState('')
   const [checking, setChecking] = useState(false)
   const [sharing, setSharing] = useState(false)
@@ -181,7 +183,11 @@ export function Capture360Page({
   const [guidedCaptureStatus, setGuidedCaptureStatus] = useState('')
   const cameraInputRef = useRef<HTMLInputElement>(null)
   const libraryInputRef = useRef<HTMLInputElement>(null)
+  const capturePageRef = useRef<HTMLElement>(null)
+  const captionInputRef = useRef<HTMLTextAreaElement>(null)
+  const captionComposerRef = useRef<HTMLDivElement>(null)
   const sourceRef = useRef<CaptureSource>(initialMode)
+  const pickerRef = useRef<'camera' | 'library'>('library')
   const previewUrlRef = useRef<string | null>(null)
 
   useEffect(() => {
@@ -194,6 +200,43 @@ export function Capture360Page({
   useEffect(() => () => {
     if (previewUrlRef.current) URL.revokeObjectURL(previewUrlRef.current)
   }, [])
+
+  useEffect(() => {
+    if (!draft || reviewingPanorama || shared) return
+
+    const captionInput = captionInputRef.current
+    const captionComposer = captionComposerRef.current
+    const capturePage = capturePageRef.current
+    if (!captionInput || !captionComposer || !capturePage) return
+
+    let animationFrame = 0
+    const uninstallViewportSync = installCaptureEditorViewportSync(capturePage)
+    const revealCaptionControls = () => {
+      if (document.activeElement !== captionInput) return
+      window.cancelAnimationFrame(animationFrame)
+      animationFrame = window.requestAnimationFrame(() => {
+        captionComposer.scrollIntoView?.({
+          block: 'nearest',
+          inline: 'nearest',
+        })
+      })
+    }
+    const visualViewport = window.visualViewport
+
+    captionInput.addEventListener('focus', revealCaptionControls)
+    window.addEventListener('resize', revealCaptionControls)
+    visualViewport?.addEventListener('resize', revealCaptionControls)
+    visualViewport?.addEventListener('scroll', revealCaptionControls)
+
+    return () => {
+      uninstallViewportSync()
+      window.cancelAnimationFrame(animationFrame)
+      captionInput.removeEventListener('focus', revealCaptionControls)
+      window.removeEventListener('resize', revealCaptionControls)
+      visualViewport?.removeEventListener('resize', revealCaptionControls)
+      visualViewport?.removeEventListener('scroll', revealCaptionControls)
+    }
+  }, [draft, reviewingPanorama, shared])
 
   const currentTime = now ?? clock
   const captureWindow = useMemo(
@@ -214,7 +257,7 @@ export function Capture360Page({
     setDraft(null)
     setCaption('')
     setAnnotations([])
-    setReviewingGuidedCapture(false)
+    setReviewingPanorama(false)
     setError('')
     if (cameraInputRef.current) cameraInputRef.current.value = ''
     if (libraryInputRef.current) libraryInputRef.current.value = ''
@@ -226,6 +269,7 @@ export function Capture360Page({
   ) {
     if (nextSource === 'daily' && !canUseDailyWindow) return
     sourceRef.current = nextSource
+    pickerRef.current = picker
     setSource(nextSource)
     setShared(false)
     setError('')
@@ -250,10 +294,11 @@ export function Capture360Page({
       previewUrl,
       source: selectedSource,
       origin,
+      picker: origin === 'upload' ? pickerRef.current : undefined,
       warning,
     })
     setAnnotations([])
-    setReviewingGuidedCapture(origin === 'guided')
+    setReviewingPanorama(true)
   }
 
   async function beginGuidedCapture(nextSource: CaptureSource) {
@@ -400,6 +445,7 @@ export function Capture360Page({
     event.preventDefault()
     if (!draft || sharing) return
 
+    captionInputRef.current?.blur()
     setSharing(true)
     setError('')
     try {
@@ -432,7 +478,11 @@ export function Capture360Page({
   }
 
   return (
-    <section className="ks-feature capture-page" aria-labelledby="capture-title">
+    <section
+      ref={capturePageRef}
+      className={`ks-feature capture-page${draft && !reviewingPanorama && !isSuccess ? ' capture-page--editor' : ''}`}
+      aria-labelledby="capture-title"
+    >
       <header className="ks-feature__header capture-page__header">
         <div className="ks-feature__header-copy">
           <h1 id="capture-title">360 Moment</h1>
@@ -474,13 +524,13 @@ export function Capture360Page({
             </button>
           </div>
         </section>
-      ) : draft && reviewingGuidedCapture ? (
+      ) : draft && reviewingPanorama ? (
         <GuidedPanoramaReview
           panoramaUrl={draft.previewUrl}
           annotations={annotations}
           onAnnotationsChange={setAnnotations}
           onContinue={() => {
-            setReviewingGuidedCapture(false)
+            setReviewingPanorama(false)
             setAnnouncement(
               annotations.length > 0
                 ? `${annotations.length} memory ${annotations.length === 1 ? 'point is' : 'points are'} ready to share.`
@@ -489,9 +539,16 @@ export function Capture360Page({
           }}
           onRetake={() => {
             const captureSource = draft.source
+            const captureOrigin = draft.origin
+            const capturePicker = draft.picker ?? 'library'
             clearDraft()
-            void beginGuidedCapture(captureSource)
+            if (captureOrigin === 'guided') {
+              void beginGuidedCapture(captureSource)
+            } else {
+              openPicker(captureSource, capturePicker)
+            }
           }}
+          retakeLabel={draft.origin === 'upload' ? 'Choose another' : 'Retake'}
         />
       ) : draft ? (
         <form className="capture-editor" onSubmit={shareCapture}>
@@ -510,27 +567,41 @@ export function Capture360Page({
             </p>
           ) : null}
 
-          <label className="ks-field">
-            <span>Moment title <small>optional · above the bubble</small></span>
-            <textarea
-              value={caption}
-              maxLength={160}
-              placeholder="Dinner together on the balcony…"
-              onChange={(event) => setCaption(event.target.value)}
-            />
-          </label>
-
-          {error ? <p className="capture-error" role="alert">{error}</p> : null}
-
-          <button className="ks-primary-button" type="submit" disabled={sharing}>
-            <CaptureIcon name="check" />
-            {sharing ? 'Sharing…' : 'Share with family'}
+          <button
+            className="ks-secondary-button capture-editor__review-button"
+            type="button"
+            onClick={() => setReviewingPanorama(true)}
+          >
+            Edit 360 &amp; points
           </button>
-          <p className="ks-inline-note">
-            {connectedFamilySync
-              ? 'Everyone in your circle will find it in Memories.'
-              : 'It’ll be saved to Memories on this device.'}
-          </p>
+
+          <div className="capture-editor__composer" ref={captionComposerRef}>
+            <label className="ks-field">
+              <span>Moment title <small>optional · above the bubble</small></span>
+              <textarea
+                ref={captionInputRef}
+                value={caption}
+                rows={3}
+                maxLength={160}
+                enterKeyHint="done"
+                autoCapitalize="sentences"
+                placeholder="Dinner together on the balcony…"
+                onChange={(event) => setCaption(event.target.value)}
+              />
+            </label>
+
+            {error ? <p className="capture-error" role="alert">{error}</p> : null}
+
+            <button className="ks-primary-button" type="submit" disabled={sharing}>
+              <CaptureIcon name="check" />
+              {sharing ? 'Sharing…' : 'Share with family'}
+            </button>
+            <p className="ks-inline-note">
+              {connectedFamilySync
+                ? 'Everyone in your circle will find it in Memories.'
+                : 'It’ll be saved to Memories on this device.'}
+            </p>
+          </div>
         </form>
       ) : (
         <>

@@ -24,6 +24,7 @@
   );
   position: relative;
   width: min(100%, 31.25rem);
+  max-width: 100%;
   height: 100svh;
   height: 100dvh;
   margin: 0 auto;
@@ -47,7 +48,10 @@
 
 .app-content {
   width: 100%;
+  min-width: 0;
+  max-width: 100%;
   height: 100%;
+  overflow-x: clip;
 }
 
 .app-content > :is(.ks-feature, .journal-page) {
@@ -163,7 +167,7 @@
   top: 0;
   left: 0;
   width: 140%;
-  height: 140%;
+  height: var(--constellation-world-height, 140%);
   transform: translate3d(
     var(--constellation-pan-x),
     var(--constellation-pan-y),
@@ -171,7 +175,6 @@
   );
   transform-origin: center;
   transition: transform 360ms cubic-bezier(0.2, 0.8, 0.2, 1);
-  will-change: transform;
 }
 
 .memory-constellation[data-panning='true'] {
@@ -180,6 +183,7 @@
 
 .memory-constellation[data-panning='true'] .memory-constellation__space {
   transition: none;
+  will-change: transform;
 }
 
 .memory-constellation[data-panning='true'] .memory-bubble__drift {
@@ -190,21 +194,25 @@
   cursor: grabbing;
 }
 
+.memory-constellation[data-moving-bubble='true'] {
+  cursor: grabbing;
+}
+
 .memory-constellation__glow {
   position: absolute;
   z-index: 0;
   top: 50%;
   left: 50%;
-  width: min(78vw, 21rem);
-  height: min(78vw, 21rem);
+  width: min(94vw, 25rem);
+  height: min(94vw, 25rem);
   border-radius: 50%;
   background: radial-gradient(
     circle,
-    rgba(228, 176, 78, 0.17) 0%,
-    rgba(190, 126, 27, 0.065) 42%,
-    rgba(115, 70, 8, 0) 72%
+    rgba(228, 176, 78, 0.15) 0%,
+    rgba(190, 126, 27, 0.08) 32%,
+    rgba(153, 94, 13, 0.035) 56%,
+    rgba(115, 70, 8, 0) 76%
   );
-  filter: blur(2.8rem);
   transform: translate(-50%, -50%);
   pointer-events: none;
 }
@@ -218,8 +226,12 @@
   height: 9rem;
   border-radius: 50%;
   opacity: 0;
-  background: rgba(255, 255, 255, 0.055);
-  filter: blur(1rem);
+  background: radial-gradient(
+    circle,
+    rgba(255, 255, 255, 0.055),
+    rgba(255, 255, 255, 0.02) 46%,
+    transparent 74%
+  );
   transform: translate(-50%, -50%);
   transition: opacity 260ms ease;
   pointer-events: none;
@@ -233,6 +245,9 @@
   --bubble-top: 0;
   --bubble-left: 0;
   --bubble-size: clamp(4.8rem, 18vw, 5.6rem);
+  --bubble-remove-radius: 2.8rem;
+  --bubble-remove-shift-x: 0px;
+  --bubble-remove-shift-y: 0px;
   position: absolute;
   z-index: 2;
   top: var(--bubble-top);
@@ -263,6 +278,28 @@
   opacity: 0.48;
 }
 
+.memory-bubble[data-picked-up='true'] {
+  z-index: 18;
+  opacity: 1;
+  cursor: grabbing;
+}
+
+.memory-bubble[data-picked-up='true'] .memory-bubble__drift {
+  animation-play-state: paused;
+}
+
+.memory-bubble[data-picked-up='true'] .memory-bubble__motion {
+  --bubble-focus-scale: 1.055;
+  transition-duration: 140ms;
+}
+
+.memory-bubble[data-picked-up='true'] .memory-bubble__image {
+  animation: none;
+  box-shadow:
+    0 1.8rem 4.2rem rgba(0, 0, 0, 0.82),
+    0 0 3rem rgba(218, 158, 54, 0.32);
+}
+
 .memory-bubble:focus-visible,
 .memory-bubble:hover {
   opacity: 1;
@@ -270,6 +307,25 @@
 
 .memory-bubble:focus-visible {
   outline-color: rgba(255, 222, 161, 0.9);
+}
+
+.memory-bubble__surface {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  padding: 0;
+  border: 0;
+  border-radius: inherit;
+  color: inherit;
+  background: transparent;
+  cursor: pointer;
+  touch-action: none;
+}
+
+.memory-bubble__surface:focus-visible {
+  outline: 2px solid rgba(255, 222, 161, 0.9);
+  outline-offset: 0.3rem;
 }
 
 .memory-bubble__drift {
@@ -289,7 +345,6 @@
   border-radius: inherit;
   animation: memory-bubble-drift var(--bubble-active-drift-duration) ease-in-out
     var(--bubble-drift-delay) infinite both;
-  will-change: transform;
 }
 
 @media (max-width: 48rem) and (prefers-reduced-motion: no-preference),
@@ -338,15 +393,16 @@
 .memory-bubble__motion::before {
   position: absolute;
   z-index: 0;
-  inset: -24%;
+  inset: -42%;
   border-radius: inherit;
   background: radial-gradient(
     circle,
-    rgba(255, 210, 127, 0.28) 0%,
-    rgba(211, 146, 42, 0.14) 38%,
-    rgba(135, 78, 11, 0) 72%
+    rgba(255, 210, 127, 0.24) 0%,
+    rgba(235, 175, 76, 0.15) 25%,
+    rgba(189, 119, 24, 0.075) 48%,
+    rgba(135, 78, 11, 0.025) 64%,
+    rgba(135, 78, 11, 0) 76%
   );
-  filter: blur(0.72rem);
   opacity: 0;
   transform: scale(0.82);
   transition:
@@ -379,8 +435,7 @@
     inset 0 0 0 1px rgba(255, 224, 164, 0.07);
   transition:
     border-color 300ms ease,
-    box-shadow 300ms ease,
-    filter 300ms ease;
+    box-shadow 300ms ease;
 }
 
 .memory-bubble[data-depth='far'] .memory-bubble__image {
@@ -423,6 +478,35 @@
 .memory-bubble[data-center-focus='true'] .memory-bubble__motion::before {
   opacity: 1;
   transform: scale(1);
+}
+
+/* iOS WebKit can leave stale rectangular compositor tiles when a large,
+   transformed bubble also owns CSS filters and wide external shadows. On
+   touch devices the same warm depth comes from the radial halo and inset ring,
+   which stay clean while the constellation is dragged. */
+@media (hover: none) and (pointer: coarse) {
+  .memory-bubble__image,
+  .memory-bubble[data-depth='far'] .memory-bubble__image,
+  .memory-bubble[data-depth='middle'] .memory-bubble__image,
+  .memory-bubble[data-depth='near'] .memory-bubble__image,
+  .memory-bubble[data-center-focus='true'] .memory-bubble__image,
+  .memory-bubble[data-picked-up='true'] .memory-bubble__image {
+    box-shadow:
+      0 0 0 1px rgba(255, 240, 209, 0.11),
+      inset 0 1px rgba(255, 248, 230, 0.18);
+    filter: none;
+  }
+
+  .memory-bubble__arc-labels,
+  .memory-bubble__point-count {
+    filter: none !important;
+  }
+
+  .memory-constellation[data-panning='true'] .memory-bubble__motion::before,
+  .memory-constellation[data-moving-bubble='true'] .memory-bubble__motion::before {
+    opacity: 0;
+    transition: none;
+  }
 }
 
 .memory-bubble__image img {
@@ -524,13 +608,107 @@
   line-height: 1;
 }
 
+.memory-bubble__remove {
+  position: absolute;
+  z-index: 8;
+  top: calc(
+    50% - var(--bubble-remove-radius) + var(--bubble-remove-shift-y) - 1.375rem
+  );
+  left: calc(
+    50% - var(--bubble-remove-radius) + var(--bubble-remove-shift-x) - 1.375rem
+  );
+  display: grid;
+  width: 2.75rem;
+  height: 2.75rem;
+  padding: 0;
+  place-items: center;
+  border: 0;
+  border-radius: 50%;
+  color: #111;
+  background: transparent;
+  font-family: -apple-system, BlinkMacSystemFont, sans-serif;
+  cursor: pointer;
+  pointer-events: auto;
+  touch-action: manipulation;
+}
+
+.memory-bubble__remove > span {
+  display: grid;
+  width: 1.45rem;
+  height: 1.45rem;
+  place-items: center;
+  border: 1px solid rgba(255, 255, 255, 0.82);
+  border-radius: 50%;
+  background: rgba(247, 247, 247, 0.96);
+  box-shadow:
+    0 0.35rem 0.9rem rgba(0, 0, 0, 0.48),
+    inset 0 1px rgba(255, 255, 255, 0.9);
+  font-size: 1.18rem;
+  font-weight: 340;
+  line-height: 1;
+}
+
+.memory-bubble__remove[data-visible='false']:not(:focus-visible) {
+  top: 0;
+  left: 0;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+.memory-bubble__remove:focus-visible {
+  outline: 2px solid rgba(255, 222, 161, 0.96);
+  outline-offset: 0.12rem;
+}
+
+.memory-bubble[data-delete-mode='true'] .memory-bubble__image {
+  animation: memory-bubble-edit-wiggle 160ms ease-in-out infinite alternate;
+}
+
+.memory-bubble[data-delete-mode='true'][data-picked-up='true']
+  .memory-bubble__image {
+  animation: none;
+}
+
+.memory-bubble[data-delete-mode='true'] .memory-bubble__surface:disabled,
+.memory-bubble[data-delete-mode='true'] .memory-bubble__remove:disabled {
+  cursor: wait;
+}
+
+.memory-delete-status {
+  position: absolute;
+  z-index: 30;
+  right: 1.25rem;
+  bottom: max(6.6rem, calc(5.4rem + var(--safe-bottom)));
+  left: 1.25rem;
+  margin: 0;
+  padding: 0.72rem 0.9rem;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 1rem;
+  color: rgba(255, 255, 255, 0.88);
+  background: rgba(28, 28, 30, 0.9);
+  box-shadow: 0 0.8rem 2rem rgba(0, 0, 0, 0.48);
+  backdrop-filter: blur(22px);
+  font-size: 0.75rem;
+  line-height: 1.4;
+}
+
 .memory-bubble:hover,
-.memory-bubble:focus-visible {
+.memory-bubble:focus-visible,
+.memory-bubble:focus-within {
   z-index: 10;
 }
 
 .memory-bubble[data-center-focus='true'] {
   z-index: 12;
+  opacity: 1;
+}
+
+.memory-bubble[data-delete-mode='true'] {
+  z-index: 14;
   opacity: 1;
 }
 
@@ -860,14 +1038,14 @@
   backdrop-filter: blur(28px);
 }
 
-.memory-point-card > div {
+.memory-point-card__content {
   display: flex;
   min-width: 0;
   align-items: center;
   gap: 0.62rem;
 }
 
-.memory-point-card > div > span {
+.memory-point-card__content > span {
   display: grid;
   width: 2rem;
   height: 2rem;
@@ -891,7 +1069,13 @@
   height: 2.6rem;
 }
 
-.memory-point-card > button {
+.memory-point-card__actions {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.memory-point-card__actions button {
   min-width: 2.75rem;
   min-height: 2.75rem;
   padding: 0.45rem 0.75rem;
@@ -1001,6 +1185,7 @@
 
   .memory-bubble__image {
     transition: none;
+    animation: none !important;
   }
 
   .memory-constellation__space {
@@ -1025,5 +1210,14 @@
   }
   75% {
     transform: translate3d(0, var(--bubble-active-drift-y), 0);
+  }
+}
+
+@keyframes memory-bubble-edit-wiggle {
+  from {
+    transform: rotate(-1.1deg);
+  }
+  to {
+    transform: rotate(1.1deg);
   }
 }

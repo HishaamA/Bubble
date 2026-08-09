@@ -10,6 +10,7 @@ import {
   type KeyboardEvent as ReactKeyboardEvent,
   type MouseEvent as ReactMouseEvent,
   type PointerEvent as ReactPointerEvent,
+  type ReactNode,
 } from 'react'
 import { createPannellumAdapter } from './PannellumAdapter'
 import type {
@@ -43,6 +44,8 @@ export interface PanoramaViewerProps {
   style?: CSSProperties
   ariaLabel?: string
   showControls?: boolean
+  /** Domain-specific actions appended to the standard control rail. */
+  additionalControls?: ReactNode
   pointSelectionEnabled?: boolean
   onPointSelect?: (point: Pick<PanoramaViewState, 'pitch' | 'yaw'>) => void
   onPointSelectionCancel?: () => void
@@ -106,6 +109,7 @@ export const PanoramaViewer = forwardRef<
     style,
     ariaLabel = 'Interactive panoramic memory',
     showControls = true,
+    additionalControls,
     pointSelectionEnabled = false,
     onPointSelect,
     onPointSelectionCancel,
@@ -626,6 +630,7 @@ export const PanoramaViewer = forwardRef<
           >
             <IconPanorama />
           </button>
+          {additionalControls}
         </div>
       )}
     </section>

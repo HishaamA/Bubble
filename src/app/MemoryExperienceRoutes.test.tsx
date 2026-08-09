@@ -27,6 +27,7 @@ describe('JournalRoute', () => {
           error: null,
           moments: [uploadedMoment],
           saveMoment: vi.fn(),
+          removeMoments: vi.fn(),
           refresh: vi.fn(),
         }}
       >

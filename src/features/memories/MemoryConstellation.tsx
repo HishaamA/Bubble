@@ -1,7 +1,10 @@
 import {
   useEffect,
   useLayoutEffect,
+  useMemo,
   useRef,
+  useState,
+  type CSSProperties,
   type FocusEvent as ReactFocusEvent,
   type MouseEvent as ReactMouseEvent,
   type PointerEvent as ReactPointerEvent,
@@ -12,6 +15,13 @@ import { formatLocalDay, toLocalIsoDate } from '../../lib/appDate'
 import { Capture360Shortcut } from '../capture'
 import { calculateBubbleMotion } from './bubbleMotion'
 import {
+  constrainBubblePosition,
+  normalizeBubblePosition,
+  readBubblePlacements,
+  saveBubblePlacements,
+  type BubblePlacementMap,
+} from './bubblePlacement'
+import {
   calculateCenterDepth,
   calculateConstellationPan,
   calculateInitialConstellationPan,
@@ -20,31 +30,59 @@ import { MemoryBubble } from './MemoryBubble'
 import { memories, type Memory } from './memories'
 import { SharedMomentBubble } from './SharedMomentBubble'
 import type { PanoramaMoment } from './shared'
+import {
+  getSharedMomentPositions,
+  getSharedMomentWorldHeightPercent,
+} from './sharedMomentLayout'
 
 type MemoryConstellationProps = {
   sharedMoments?: PanoramaMoment[]
   onUpload360?: () => void
+  onDelete360?: (momentId: string) => Promise<void>
   now?: Date
+}
+
+const OWNED_MOMENT_HOLD_DELAY_MS = 560
+const OWNED_MOMENT_HOLD_CANCEL_DISTANCE_PX = 16
+const CONSTELLATION_DRAG_DISTANCE_PX = 8
+
+type PickedBubbleInteraction = {
+  element: HTMLElement
+  id: string
+  label: string
+  startClient: { x: number; y: number }
+  startPosition: { top: number; left: number }
+  currentPosition: { top: number; left: number }
 }
 
 export function MemoryConstellation({
   sharedMoments = [],
   onUpload360,
+  onDelete360,
   now = new Date(),
 }: MemoryConstellationProps = {}) {
   const navigate = useNavigate()
   const location = useLocation()
   const restoreMemoryId = (location.state as { restoreMemoryId?: string } | null)
     ?.restoreMemoryId
-  const newestSharedMoment = sharedMoments[0]
-  const constellationMemories = newestSharedMoment
-    ? memories.filter(({ id }) => id !== 'sunset')
-    : memories
+  const visibleSharedMoments = sharedMoments.filter(
+    (moment): moment is PanoramaMoment & { objectUrl: string } =>
+      Boolean(moment.objectUrl),
+  )
+  const visibleSharedMomentIds = visibleSharedMoments
+    .map(({ id }) => id)
+    .join(':')
+  const constellationSpaceStyle = {
+    '--constellation-world-height': `${getSharedMomentWorldHeightPercent(visibleSharedMoments.length)}%`,
+  } as CSSProperties
+  const sharedMomentPositions = useMemo(
+    () => getSharedMomentPositions(visibleSharedMoments.length),
+    [visibleSharedMoments.length],
+  )
+  const constellationMemories = memories
   const entryCandidateIds = [
     ...constellationMemories.map(({ id }) => id),
-    ...(newestSharedMoment?.objectUrl
-      ? [`shared-${newestSharedMoment.id}`]
-      : []),
+    ...visibleSharedMoments.map(({ id }) => `shared-${id}`),
   ]
   const fieldRef = useRef<HTMLDivElement>(null)
   const spaceRef = useRef<HTMLDivElement>(null)
@@ -82,11 +120,30 @@ export function MemoryConstellation({
   const hasExploredRef = useRef(true)
   const suppressNextPointerClickRef = useRef(false)
   const suppressResetTimerRef = useRef<number | null>(null)
+  const holdTimerRef = useRef<number | null>(null)
+  const longPressActivatedRef = useRef(false)
+  const latestPointerClientRef = useRef({ x: 0, y: 0 })
+  const pickedBubbleRef = useRef<PickedBubbleInteraction | null>(null)
+  const [bubblePlacements, setBubblePlacements] = useState<BubblePlacementMap>(
+    readBubblePlacements,
+  )
+  const bubblePlacementsRef = useRef(bubblePlacements)
+  const [pickedUpMemoryId, setPickedUpMemoryId] = useState<string | null>(null)
+  const [moveStatus, setMoveStatus] = useState('')
+  const [deletionModeMomentId, setDeletionModeMomentId] = useState<
+    string | null
+  >(null)
+  const [deletingMomentId, setDeletingMomentId] = useState<string | null>(null)
+  const [deleteError, setDeleteError] = useState('')
   const reducedMotionRef = useRef(
     typeof window !== 'undefined' &&
       typeof window.matchMedia === 'function' &&
       window.matchMedia('(prefers-reduced-motion: reduce)').matches,
   )
+
+  useEffect(() => {
+    bubblePlacementsRef.current = bubblePlacements
+  }, [bubblePlacements])
 
   useEffect(() => {
     if (!restoreMemoryId) return
@@ -107,6 +164,11 @@ export function MemoryConstellation({
       if (suppressResetTimerRef.current !== null) {
         window.clearTimeout(suppressResetTimerRef.current)
         suppressResetTimerRef.current = null
+      }
+      clearHoldTimer()
+      if (pickedBubbleRef.current) {
+        pickedBubbleRef.current.element.dataset.pickedUp = 'false'
+        pickedBubbleRef.current = null
       }
     },
     [],
@@ -129,7 +191,7 @@ export function MemoryConstellation({
     // old equal-sized layout. The animation-frame and observer paths below
     // remain as fallbacks for a view transition that temporarily measures 0px.
     renderBubbleMotion()
-  }, [newestSharedMoment?.id])
+  }, [visibleSharedMomentIds])
 
   useEffect(() => {
     scheduleRender()
@@ -224,6 +286,19 @@ export function MemoryConstellation({
       initialPanRef.current = { ...panRef.current }
       panInitializedRef.current = true
     }
+    const clampedPan = calculateConstellationPan({
+      origin: { x: 0, y: 0 },
+      delta: panRef.current,
+      field: { width, height },
+      world: { width: worldWidth, height: worldHeight },
+    })
+    if (
+      clampedPan.x !== panRef.current.x ||
+      clampedPan.y !== panRef.current.y
+    ) {
+      panRef.current = clampedPan
+      panStartRef.current = { ...clampedPan }
+    }
     const pan = panRef.current
 
     field.style.setProperty('--constellation-pan-x', `${pan.x}px`)
@@ -236,7 +311,10 @@ export function MemoryConstellation({
       : pointer.visible
         ? 'hover'
         : 'false'
-    field.dataset.panning = pointer.pressed && draggedRef.current ? 'true' : 'false'
+    const movingBubble = pickedBubbleRef.current !== null
+    field.dataset.panning =
+      pointer.pressed && draggedRef.current && !movingBubble ? 'true' : 'false'
+    field.dataset.movingBubble = movingBubble ? 'true' : 'false'
     field.dataset.spaceMoved =
       pan.x !== initialPanRef.current.x || pan.y !== initialPanRef.current.y
         ? 'true'
@@ -315,6 +393,12 @@ export function MemoryConstellation({
           '--bubble-motion-scale',
           `${displayedScale * motion.scale}`,
         )
+        bubble.style.setProperty(
+          '--bubble-remove-radius',
+          `${(Math.max(bubble.offsetWidth, bubble.offsetHeight) * displayedScale * motion.scale) / 2}px`,
+        )
+        bubble.style.setProperty('--bubble-remove-shift-x', `${motion.x}px`)
+        bubble.style.setProperty('--bubble-remove-shift-y', `${motion.y}px`)
         motionElement.style.setProperty('--bubble-energy', `${motion.proximity}`)
         motionElement.style.setProperty('--bubble-depth', `${displayedProximity}`)
         bubble.dataset.centerFocus =
@@ -352,17 +436,112 @@ export function MemoryConstellation({
     scheduleRender()
   }
 
+  function clearHoldTimer() {
+    if (holdTimerRef.current === null) return
+    window.clearTimeout(holdTimerRef.current)
+    holdTimerRef.current = null
+  }
+
+  function beginBubblePickup(
+    bubble: HTMLElement,
+    memoryId: string,
+    ownedMomentId?: string,
+  ) {
+    clearHoldTimer()
+    const label = bubble.dataset.memoryLabel || 'Memory'
+    const startPosition = {
+      top: bubble.offsetTop,
+      left: bubble.offsetLeft,
+    }
+    pickedBubbleRef.current = {
+      element: bubble,
+      id: memoryId,
+      label,
+      startClient: { ...latestPointerClientRef.current },
+      startPosition,
+      currentPosition: startPosition,
+    }
+    bubble.dataset.pickedUp = 'true'
+    longPressActivatedRef.current = true
+    draggedRef.current = false
+    setPickedUpMemoryId(memoryId)
+    setMoveStatus(`${label} picked up. Keep holding and drag to move it.`)
+    if (ownedMomentId && onDelete360) {
+      setDeleteError('')
+      setDeletionModeMomentId(ownedMomentId)
+    }
+    if (typeof navigator.vibrate === 'function') navigator.vibrate(12)
+    scheduleRender()
+  }
+
+  function finishBubblePickup() {
+    const picked = pickedBubbleRef.current
+    if (!picked) return false
+
+    const world = spaceRef.current
+    if (world && world.clientWidth > 0 && world.clientHeight > 0) {
+      const placement = normalizeBubblePosition(picked.currentPosition, {
+        width: world.clientWidth,
+        height: world.clientHeight,
+      })
+      const nextPlacements: BubblePlacementMap = {
+        ...bubblePlacementsRef.current,
+        [picked.id]: placement,
+      }
+      bubblePlacementsRef.current = nextPlacements
+      setBubblePlacements(nextPlacements)
+      saveBubblePlacements(nextPlacements)
+    }
+
+    picked.element.dataset.pickedUp = 'false'
+    pickedBubbleRef.current = null
+    setPickedUpMemoryId(null)
+    setMoveStatus(`${picked.label} moved.`)
+    scheduleRender()
+    return true
+  }
+
   function handlePointerDown(event: ReactPointerEvent<HTMLDivElement>) {
     if (!event.isPrimary || event.button !== 0) return
     if (activePointerRef.current !== null) return
 
     activePointerRef.current = event.pointerId
     dragStartRef.current = { x: event.clientX, y: event.clientY }
+    latestPointerClientRef.current = { x: event.clientX, y: event.clientY }
     panStartRef.current = { ...panRef.current }
     draggedRef.current = false
+    longPressActivatedRef.current = false
 
     const eventTarget = event.target as HTMLElement
-    const captureTarget = eventTarget.closest<HTMLElement>('.memory-bubble') ?? fieldRef.current
+    const targetBubble = eventTarget.closest<HTMLElement>(
+      '.memory-bubble[data-memory-id]',
+    )
+    const targetMemoryId = targetBubble?.dataset.memoryId
+    const ownedSharedBubble = eventTarget.closest<HTMLElement>(
+      '.memory-bubble--shared[data-owned-by-current-user="true"]',
+    )
+    const ownedMomentId = ownedSharedBubble?.dataset.sharedMomentId
+    if (
+      deletionModeMomentId &&
+      ownedMomentId !== deletionModeMomentId
+    ) {
+      setDeletionModeMomentId(null)
+    }
+    clearHoldTimer()
+    if (targetBubble && targetMemoryId && !deletingMomentId) {
+      if (ownedMomentId && deletionModeMomentId === ownedMomentId) {
+        beginBubblePickup(targetBubble, targetMemoryId, ownedMomentId)
+      } else {
+        holdTimerRef.current = window.setTimeout(() => {
+          holdTimerRef.current = null
+          beginBubblePickup(targetBubble, targetMemoryId, ownedMomentId)
+        }, OWNED_MOMENT_HOLD_DELAY_MS)
+      }
+    }
+    const captureTarget =
+      eventTarget.closest<HTMLElement>(
+        '.memory-bubble__surface, .memory-bubble',
+      ) ?? fieldRef.current
     pointerCaptureTargetRef.current = captureTarget
     if (captureTarget && typeof captureTarget.setPointerCapture === 'function') {
       try {
@@ -380,12 +559,51 @@ export function MemoryConstellation({
     if (event.pointerType !== 'mouse' && !isActive) return
 
     if (isActive) {
+      latestPointerClientRef.current = { x: event.clientX, y: event.clientY }
+      const picked = pickedBubbleRef.current
+      if (picked) {
+        const field = fieldRef.current
+        const space = spaceRef.current
+        if (!field || !space) return
+        const rect = field.getBoundingClientRect()
+        const scaleX = rect.width > 0 ? field.clientWidth / rect.width : 1
+        const scaleY = rect.height > 0 ? field.clientHeight / rect.height : 1
+        const delta = {
+          x: (event.clientX - picked.startClient.x) * scaleX,
+          y: (event.clientY - picked.startClient.y) * scaleY,
+        }
+        const nextPosition = constrainBubblePosition({
+          requested: {
+            top: picked.startPosition.top + delta.y,
+            left: picked.startPosition.left + delta.x,
+          },
+          bubble: {
+            width: picked.element.offsetWidth,
+            height: picked.element.offsetHeight,
+          },
+          world: { width: space.clientWidth, height: space.clientHeight },
+        })
+        picked.currentPosition = nextPosition
+        picked.element.style.setProperty('--bubble-top', `${nextPosition.top}px`)
+        picked.element.style.setProperty('--bubble-left', `${nextPosition.left}px`)
+        if (Math.hypot(delta.x, delta.y) > 1) draggedRef.current = true
+        hasExploredRef.current = true
+        scheduleBubbleMotion(event, true)
+        event.preventDefault()
+        return
+      }
+
       const delta = {
         x: event.clientX - dragStartRef.current.x,
         y: event.clientY - dragStartRef.current.y,
       }
       const travel = Math.hypot(delta.x, delta.y)
-      if (travel > 8) {
+      const dragDistance =
+        holdTimerRef.current === null
+          ? CONSTELLATION_DRAG_DISTANCE_PX
+          : OWNED_MOMENT_HOLD_CANCEL_DISTANCE_PX
+      if (travel > dragDistance) {
+        clearHoldTimer()
         draggedRef.current = true
         hasExploredRef.current = true
         const field = fieldRef.current
@@ -408,7 +626,12 @@ export function MemoryConstellation({
 
   function finishPointerInteraction(event: ReactPointerEvent<HTMLDivElement>) {
     if (activePointerRef.current !== event.pointerId) return
-    if (draggedRef.current) armPointerClickSuppression()
+    clearHoldTimer()
+    const droppedBubble = finishBubblePickup()
+    if (draggedRef.current || longPressActivatedRef.current || droppedBubble) {
+      armPointerClickSuppression()
+    }
+    longPressActivatedRef.current = false
     activePointerRef.current = null
 
     const captureTarget = pointerCaptureTargetRef.current
@@ -427,7 +650,12 @@ export function MemoryConstellation({
 
   function handleLostPointerCapture(event: ReactPointerEvent<HTMLDivElement>) {
     if (activePointerRef.current !== event.pointerId) return
-    if (draggedRef.current) armPointerClickSuppression()
+    clearHoldTimer()
+    const droppedBubble = finishBubblePickup()
+    if (draggedRef.current || longPressActivatedRef.current || droppedBubble) {
+      armPointerClickSuppression()
+    }
+    longPressActivatedRef.current = false
     activePointerRef.current = null
     pointerCaptureTargetRef.current = null
     clearPointerInteraction()
@@ -510,12 +738,46 @@ export function MemoryConstellation({
   ) {
     if (suppressNextPointerClickRef.current && event.detail > 0) {
       suppressNextPointerClickRef.current = false
+      if (suppressResetTimerRef.current !== null) {
+        window.clearTimeout(suppressResetTimerRef.current)
+        suppressResetTimerRef.current = null
+      }
+      return
+    }
+    if (deletionModeMomentId === moment.id) {
       return
     }
     navigate(`/memory/shared-${moment.id}`, {
       state: { sourceMemoryId: `shared-${moment.id}` },
       viewTransition: true,
     })
+  }
+
+  function requestRemoveSharedMoment(moment: PanoramaMoment) {
+    if (
+      moment.ownedByCurrentUser !== true ||
+      !onDelete360 ||
+      deletingMomentId
+    ) {
+      return
+    }
+    const confirmed = window.confirm(
+      `Remove “${moment.label}” from your phone and your family’s phones?`,
+    )
+    if (!confirmed) return
+
+    setDeletingMomentId(moment.id)
+    setDeleteError('')
+    void onDelete360(moment.id)
+      .then(() => setDeletionModeMomentId(null))
+      .catch((reason) => {
+        setDeleteError(
+          reason instanceof Error
+            ? reason.message
+            : 'This moment could not be removed. Try again.',
+        )
+      })
+      .finally(() => setDeletingMomentId(null))
   }
 
   return (
@@ -550,6 +812,7 @@ export function MemoryConstellation({
         data-interacting="false"
         data-pointer-visible="false"
         data-panning="false"
+        data-moving-bubble="false"
         data-space-moved="false"
         data-layout-ready="false"
         onPointerDown={handlePointerDown}
@@ -571,6 +834,7 @@ export function MemoryConstellation({
           ref={spaceRef}
           className="memory-constellation__space"
           data-testid="memory-constellation-space"
+          style={constellationSpaceStyle}
         >
           {constellationMemories.map((memory, order) => (
             <MemoryBubble
@@ -578,19 +842,34 @@ export function MemoryConstellation({
               memory={memory}
               order={order}
               entryFocused={entryMemoryIdRef.current === memory.id}
+              placement={bubblePlacements[memory.id]}
+              pickedUp={pickedUpMemoryId === memory.id}
               onOpen={openMemory}
             />
           ))}
-          {newestSharedMoment ? (
+          {visibleSharedMoments.map((sharedMoment, sharedIndex) => (
             <SharedMomentBubble
-              moment={newestSharedMoment}
-              order={constellationMemories.length}
+              key={sharedMoment.id}
+              moment={sharedMoment}
+              order={constellationMemories.length + sharedIndex}
+              sharedIndex={sharedIndex}
+              sharedCount={visibleSharedMoments.length}
+              position={sharedMomentPositions[sharedIndex]}
+              placement={bubblePlacements[`shared-${sharedMoment.id}`]}
+              pickedUp={pickedUpMemoryId === `shared-${sharedMoment.id}`}
               entryFocused={
-                entryMemoryIdRef.current === `shared-${newestSharedMoment.id}`
+                entryMemoryIdRef.current === `shared-${sharedMoment.id}`
               }
+              deletionMode={deletionModeMomentId === sharedMoment.id}
+              deleting={deletingMomentId === sharedMoment.id}
+              onEnterDeletionMode={(momentId) => {
+                setDeleteError('')
+                setDeletionModeMomentId(momentId)
+              }}
+              onRequestRemove={requestRemoveSharedMoment}
               onOpen={openSharedMoment}
             />
-          ) : null}
+          ))}
         </div>
       </div>
 
@@ -598,8 +877,18 @@ export function MemoryConstellation({
         <Capture360Shortcut onClick={onUpload360} />
       ) : null}
 
+      {deleteError ? (
+        <p className="memory-delete-status" role="alert">
+          {deleteError}
+        </p>
+      ) : null}
+
+      <p className="screen-reader-only" role="status" aria-live="polite">
+        {moveStatus}
+      </p>
+
       <p id="memory-explore-instructions" className="screen-reader-only">
-        One memory is brought forward when Moments opens. Drag or swipe to explore the memory space. The memory nearest the center grows larger. Use Tab to center each memory, then select one to open its panoramic view.
+        One memory is brought forward when Moments opens. Drag or swipe empty space to explore the memory space. The memory nearest the center grows larger. Touch and hold any bubble, then keep holding and drag to move that bubble. Use Tab to center each memory, then select one to open its panoramic view. Touch and hold a 360 moment you shared to also reveal its remove control.
       </p>
     </section>
   )

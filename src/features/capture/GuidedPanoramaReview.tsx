@@ -36,6 +36,7 @@ export type GuidedPanoramaReviewProps = {
   onAnnotationsChange: (next: StoredPanoramaAnnotation[]) => void
   onContinue: () => void
   onRetake: () => void
+  retakeLabel?: string
 }
 
 function makePointId() {
@@ -85,6 +86,7 @@ export function GuidedPanoramaReview({
   onAnnotationsChange,
   onContinue,
   onRetake,
+  retakeLabel = 'Retake',
 }: GuidedPanoramaReviewProps) {
   const [placingPoint, setPlacingPoint] = useState(false)
   const [selectedPoint, setSelectedPoint] = useState<SelectedPoint | null>(null)
@@ -414,7 +416,7 @@ export function GuidedPanoramaReview({
           onClick={handleRetake}
           disabled={controlsLocked || placingPoint}
         >
-          Retake
+          {retakeLabel}
         </button>
         <button
           className="guided-panorama-review__add"

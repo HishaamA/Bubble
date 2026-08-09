@@ -75,6 +75,45 @@ const scenes: readonly PanoramaScene[] = [
 ]
 
 describe('PanoramaViewer accessibility controls', () => {
+  it('appends a domain action to the standard control rail', () => {
+    render(
+      <PanoramaViewer
+        scenes={scenes}
+        additionalControls={(
+          <button type="button" aria-label="Open family comments">
+            Comments
+          </button>
+        )}
+      />,
+    )
+
+    const controls = screen.getByRole('group', { name: 'Panorama controls' })
+    expect(controls).toContainElement(
+      screen.getByRole('button', { name: 'Open family comments' }),
+    )
+  })
+
+  it('updates an auxiliary count without remounting or resetting the panorama', async () => {
+    const { rerender } = render(
+      <PanoramaViewer
+        scenes={scenes}
+        additionalControls={<button type="button">0 comments</button>}
+      />,
+    )
+    await waitFor(() => expect(viewerMocks.mount).toHaveBeenCalledTimes(1))
+
+    rerender(
+      <PanoramaViewer
+        scenes={scenes}
+        additionalControls={<button type="button">1 comment</button>}
+      />,
+    )
+
+    expect(screen.getByRole('button', { name: '1 comment' })).toBeInTheDocument()
+    expect(viewerMocks.mount).toHaveBeenCalledTimes(1)
+    expect(viewerMocks.destroy).not.toHaveBeenCalled()
+  })
+
   beforeEach(() => {
     vi.clearAllMocks()
     viewerMocks.mount.mockImplementation(async (_container, options) => {
