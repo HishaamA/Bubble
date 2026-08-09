@@ -29,6 +29,14 @@ const mocks = vi.hoisted(() => {
   }
   profileQuery.select.mockReturnValue(profileQuery)
 
+  const deletionQuery = {
+    select: vi.fn(),
+    eq: vi.fn(),
+    in: vi.fn(),
+  }
+  deletionQuery.select.mockReturnValue(deletionQuery)
+  deletionQuery.eq.mockReturnValue(deletionQuery)
+
   const storageUpload = vi.fn()
   const storageDownload = vi.fn()
   const storageRemove = vi.fn()
@@ -49,6 +57,7 @@ const mocks = vi.hoisted(() => {
     from: vi.fn((table: string) => {
       if (table === 'family_moments') return momentQuery
       if (table === 'family_moment_annotations') return annotationQuery
+      if (table === 'family_moment_deletions') return deletionQuery
       return profileQuery
     }),
     storage: { from: vi.fn(() => storageBucket) },
@@ -60,6 +69,7 @@ const mocks = vi.hoisted(() => {
   return {
     annotationQuery,
     client,
+    deletionQuery,
     momentQuery,
     processPanoramaForSharing: vi.fn(),
     profileQuery,
@@ -80,8 +90,11 @@ vi.mock('./processPanorama', () => ({
 }))
 
 import {
+  deleteFamilyMoment,
+  fetchFamilyMomentDeletionIds,
   fetchFamilyMoments,
   publishFamilyMoment,
+  resumePendingFamilyMomentDeletions,
   subscribeToFamilyMoments,
   type FamilyMomentConnection,
 } from './familyMomentService'
@@ -101,6 +114,8 @@ beforeEach(() => {
   mocks.annotationQuery.select.mockReturnValue(mocks.annotationQuery)
   mocks.annotationQuery.eq.mockReturnValue(mocks.annotationQuery)
   mocks.annotationQuery.in.mockReturnValue(mocks.annotationQuery)
+  mocks.deletionQuery.select.mockReturnValue(mocks.deletionQuery)
+  mocks.deletionQuery.eq.mockReturnValue(mocks.deletionQuery)
   mocks.profileQuery.select.mockReturnValue(mocks.profileQuery)
   mocks.realtimeChannel.on.mockReturnValue(mocks.realtimeChannel)
   mocks.realtimeChannel.subscribe.mockReturnValue(mocks.realtimeChannel)
@@ -258,7 +273,9 @@ describe('family moment annotation sync', () => {
       expect.objectContaining({
         id: momentId,
         blob: panorama,
-        uploaderDisplayName: 'Dad',
+        uploaderDisplayName: 'You',
+        ownedByCurrentUser: true,
+        familySynced: true,
         annotations: [
           {
             id: textId,
@@ -441,16 +458,27 @@ describe('family moment annotation sync', () => {
     ])
   })
 
-  it('refreshes once for the transactional moment insert', async () => {
+  it('refreshes for moment inserts and durable family deletion tombstones', async () => {
     const onChange = vi.fn()
     const subscription = subscribeToFamilyMoments(circleId, onChange)
 
-    expect(mocks.realtimeChannel.on).toHaveBeenCalledOnce()
+    expect(mocks.realtimeChannel.on).toHaveBeenCalledTimes(2)
     expect(mocks.realtimeChannel.on).toHaveBeenCalledWith(
       'postgres_changes',
       expect.objectContaining({ table: 'family_moments' }),
-      onChange,
+      expect.any(Function),
     )
+    expect(mocks.realtimeChannel.on).toHaveBeenCalledWith(
+      'postgres_changes',
+      expect.objectContaining({ table: 'family_moment_deletions' }),
+      expect.any(Function),
+    )
+    const insertHandler = mocks.realtimeChannel.on.mock.calls[0][2]
+    const deletionHandler = mocks.realtimeChannel.on.mock.calls[1][2]
+    insertHandler({ new: { id: momentId } })
+    deletionHandler({ new: { moment_id: momentId } })
+    expect(onChange).toHaveBeenNthCalledWith(1)
+    expect(onChange).toHaveBeenNthCalledWith(2, momentId)
     const onStatus = mocks.realtimeChannel.subscribe.mock.calls[0][0] as (
       status: string,
     ) => void
@@ -461,5 +489,101 @@ describe('family moment annotation sync', () => {
     expect(mocks.client.removeChannel).toHaveBeenCalledWith(
       mocks.realtimeChannel,
     )
+  })
+
+  it('queries tombstones only for cached IDs so old deletions cannot be truncated', async () => {
+    const secondId = '40000000-0000-4000-8000-000000000002'
+    mocks.deletionQuery.in.mockResolvedValue({
+      data: [{ moment_id: momentId }],
+      error: null,
+    })
+
+    await expect(
+      fetchFamilyMomentDeletionIds(connection, [momentId, secondId]),
+    ).resolves.toEqual([momentId])
+    expect(mocks.deletionQuery.in).toHaveBeenCalledWith('moment_id', [
+      momentId,
+      secondId,
+    ])
+  })
+
+  it('marks an uploader-owned deletion before removing every private media object', async () => {
+    const mediaPaths = [
+      `${circleId}/panoramas/${userId}/${momentId}.jpg`,
+      `${circleId}/thumbnails/${userId}/${momentId}.jpg`,
+      `${circleId}/voice/${userId}/${momentId}-${voiceId}.m4a`,
+    ]
+    mocks.client.rpc.mockImplementation(async (name: string) => {
+      if (name === 'begin_delete_own_family_moment') {
+        return {
+          data: [{ moment_id: momentId, media_paths: mediaPaths }],
+          error: null,
+        }
+      }
+      return { data: momentId, error: null }
+    })
+
+    await expect(deleteFamilyMoment(connection, momentId)).resolves.toEqual({
+      cleanupPending: false,
+    })
+    expect(mocks.client.rpc).toHaveBeenNthCalledWith(
+      1,
+      'begin_delete_own_family_moment',
+      { p_circle_id: circleId, p_moment_id: momentId },
+    )
+    expect(mocks.storageRemove).toHaveBeenCalledWith(mediaPaths)
+    expect(mocks.client.rpc).toHaveBeenNthCalledWith(
+      2,
+      'finish_delete_own_family_moment',
+      { p_circle_id: circleId, p_moment_id: momentId },
+    )
+  })
+
+  it('leaves interrupted cleanup pending for a safe reconnect retry', async () => {
+    const panoramaPath = `${circleId}/panoramas/${userId}/${momentId}.jpg`
+    mocks.client.rpc.mockResolvedValue({
+      data: [{ moment_id: momentId, media_paths: [panoramaPath] }],
+      error: null,
+    })
+    mocks.storageRemove.mockResolvedValue({
+      data: null,
+      error: new Error('offline'),
+    })
+
+    await expect(deleteFamilyMoment(connection, momentId)).resolves.toEqual({
+      cleanupPending: true,
+    })
+    expect(mocks.client.rpc).toHaveBeenCalledTimes(1)
+  })
+
+  it('resumes pending cleanup and finalization after reconnect', async () => {
+    const panoramaPath = `${circleId}/panoramas/${userId}/${momentId}.jpg`
+    mocks.client.rpc.mockImplementation(async (name: string) =>
+      name === 'list_pending_own_family_moment_deletions'
+        ? {
+            data: [{ moment_id: momentId, media_paths: [panoramaPath] }],
+            error: null,
+          }
+        : { data: momentId, error: null },
+    )
+
+    await expect(
+      resumePendingFamilyMomentDeletions(connection),
+    ).resolves.toBeUndefined()
+    expect(mocks.storageRemove).toHaveBeenCalledWith([panoramaPath])
+    expect(mocks.client.rpc).toHaveBeenLastCalledWith(
+      'finish_delete_own_family_moment',
+      { p_circle_id: circleId, p_moment_id: momentId },
+    )
+  })
+
+  it('does not touch Storage when the backend rejects deletion ownership', async () => {
+    const ownershipError = new Error('moment_uploader_required')
+    mocks.client.rpc.mockResolvedValue({ data: null, error: ownershipError })
+
+    await expect(deleteFamilyMoment(connection, momentId)).rejects.toBe(
+      ownershipError,
+    )
+    expect(mocks.storageRemove).not.toHaveBeenCalled()
   })
 })

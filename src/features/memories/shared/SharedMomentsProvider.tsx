@@ -154,9 +154,20 @@ export function SharedMomentsProvider({
     [activeStore, refresh],
   )
 
+  const removeMoments = useCallback(
+    async (ids: readonly string[]) => {
+      const uniqueIds = [...new Set(ids.map((id) => id.trim()).filter(Boolean))]
+      if (uniqueIds.length === 0) return
+      await activeStore.remove(uniqueIds)
+      await refresh()
+      notifierRef.current?.publish()
+    },
+    [activeStore, refresh],
+  )
+
   const value = useMemo<SharedMomentsContextValue>(
-    () => ({ loading, error, moments, saveMoment, refresh }),
-    [error, loading, moments, refresh, saveMoment],
+    () => ({ loading, error, moments, saveMoment, removeMoments, refresh }),
+    [error, loading, moments, refresh, removeMoments, saveMoment],
   )
 
   return (

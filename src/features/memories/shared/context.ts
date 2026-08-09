@@ -13,6 +13,7 @@ export type SharedMomentsContextValue = {
   error: Error | null
   moments: PanoramaMoment[]
   saveMoment(input: SavePanoramaMomentInput): Promise<StoredPanoramaMoment>
+  removeMoments(ids: readonly string[]): Promise<void>
   refresh(): Promise<void>
 }
 

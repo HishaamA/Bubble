@@ -28,6 +28,13 @@ export type StoredPanoramaMoment = {
   height: number
   source: MomentSource
   uploaderDisplayName: string
+  /**
+   * Set only when the signed-in account is known to be the uploader. The
+   * delete UI must never infer ownership from a display name alone.
+   */
+  ownedByCurrentUser?: boolean
+  /** True when this record mirrors a row in the family backend. */
+  familySynced?: boolean
   /** Optional for backward compatibility with moments saved before points existed. */
   annotations?: StoredPanoramaAnnotation[]
 }
@@ -48,12 +55,15 @@ export type SavePanoramaMomentInput = {
   height: number
   source: MomentSource
   uploaderDisplayName: string
+  ownedByCurrentUser?: boolean
+  familySynced?: boolean
   annotations?: StoredPanoramaAnnotation[]
 }
 
 export interface MomentStore {
   list(): Promise<StoredPanoramaMoment[]>
   save(moment: StoredPanoramaMoment): Promise<void>
+  remove(ids: readonly string[]): Promise<void>
 }
 
 export interface MomentObjectUrlManager {

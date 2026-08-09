@@ -83,6 +83,8 @@ export function preparePanoramaMoment(
       input.uploaderDisplayName,
       'uploaderDisplayName',
     ),
+    ownedByCurrentUser: input.ownedByCurrentUser ?? false,
+    familySynced: input.familySynced ?? false,
     annotations: (input.annotations ?? []).map(cloneAnnotation),
   }
 }
@@ -100,6 +102,9 @@ export function createMemoryMomentStore(
     },
     async save(moment) {
       records.set(moment.id, cloneMoment(moment))
+    },
+    async remove(ids) {
+      ids.forEach((id) => records.delete(id))
     },
   }
 }
@@ -180,6 +185,28 @@ export function createIndexedDbMomentStore(
         database.close()
       }
     },
+
+    async remove(ids) {
+      if (ids.length === 0) return
+      const database = await openDatabase(indexedDb, databaseName)
+
+      try {
+        await new Promise<void>((resolve, reject) => {
+          const transaction = database.transaction(STORE_NAME, 'readwrite')
+          const objectStore = transaction.objectStore(STORE_NAME)
+          ids.forEach((id) => objectStore.delete(id))
+          transaction.oncomplete = () => resolve()
+          transaction.onerror = () =>
+            reject(transaction.error ?? new Error('Could not remove the moments'))
+          transaction.onabort = () =>
+            reject(
+              transaction.error ?? new Error('Removing the moments was aborted'),
+            )
+        })
+      } finally {
+        database.close()
+      }
+    },
   }
 }
 
@@ -215,6 +242,20 @@ export function createResilientMomentStore(
       }
 
       await fallback.save(moment)
+    },
+
+    async remove(ids) {
+      if (!fallbackOnly) {
+        try {
+          await primary.remove(ids)
+          await fallback.remove(ids)
+          return
+        } catch {
+          fallbackOnly = true
+        }
+      }
+
+      await fallback.remove(ids)
     },
   }
 }

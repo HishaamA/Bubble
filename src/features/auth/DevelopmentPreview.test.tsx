@@ -63,6 +63,8 @@ describe('development preview authentication', () => {
     expect(canUseDevelopmentPreview(false, true)).toBe(false)
     expect(canUseDevelopmentPreview(true, true)).toBe(false)
     expect(canUseDevelopmentPreview(true, false)).toBe(true)
+    expect(canUseDevelopmentPreview(false, false, true)).toBe(true)
+    expect(canUseDevelopmentPreview(false, true, true)).toBe(false)
   })
 
   it('lets a developer opt in, bypasses family setup, and restores after reload', async () => {
@@ -71,7 +73,7 @@ describe('development preview authentication', () => {
     const firstRender = render(<PreviewRoutes />)
 
     const continueButton = await screen.findByRole('button', {
-      name: 'Continue to main app',
+      name: 'Proceed to app',
     })
     await user.click(continueButton)
     expect(
@@ -93,14 +95,14 @@ describe('development preview authentication', () => {
     const user = userEvent.setup()
     render(<PreviewRoutes />)
     await user.click(
-      await screen.findByRole('button', { name: 'Continue to main app' }),
+      await screen.findByRole('button', { name: 'Proceed to app' }),
     )
     await user.click(
       await screen.findByRole('button', { name: 'Sign out of preview' }),
     )
 
     expect(
-      await screen.findByRole('button', { name: 'Continue to main app' }),
+      await screen.findByRole('button', { name: 'Proceed to app' }),
     ).toBeInTheDocument()
   })
 })

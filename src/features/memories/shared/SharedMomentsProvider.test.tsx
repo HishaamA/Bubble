@@ -39,7 +39,7 @@ function createSilentNotifier(): MomentChangeNotifier {
 }
 
 function MomentHarness() {
-  const { loading, moments, saveMoment } = useSharedMoments()
+  const { loading, moments, removeMoments, saveMoment } = useSharedMoments()
 
   return (
     <div>
@@ -69,6 +69,14 @@ function MomentHarness() {
       >
         Save panorama
       </button>
+      {moments[0] ? (
+        <button
+          type="button"
+          onClick={() => void removeMoments([moments[0].id])}
+        >
+          Remove panorama
+        </button>
+      ) : null}
     </div>
   )
 }
@@ -142,12 +150,40 @@ describe('SharedMomentsProvider', () => {
     expect(objectUrls.revoke).toHaveBeenCalledWith('blob:preview-3')
   })
 
+  it('removes a panorama from the account-scoped store and refreshes object URLs', async () => {
+    const user = userEvent.setup()
+    const store = createMemoryMomentStore([firstMoment])
+    const objectUrls: MomentObjectUrlManager = {
+      create: vi.fn(() => 'blob:owned-preview'),
+      revoke: vi.fn(),
+    }
+
+    render(
+      <SharedMomentsProvider
+        store={store}
+        objectUrls={objectUrls}
+        notifierFactory={createSilentNotifier}
+      >
+        <MomentHarness />
+      </SharedMomentsProvider>,
+    )
+
+    expect(await screen.findByText('1 moments')).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Remove panorama' }))
+    expect(await screen.findByText('0 moments')).toBeInTheDocument()
+    await expect(store.list()).resolves.toEqual([])
+    expect(objectUrls.revoke).toHaveBeenCalledWith('blob:owned-preview')
+  })
+
   it('falls back to memory when persistent storage is unavailable', async () => {
     const unavailableStore: MomentStore = {
       list: vi.fn(async () => {
         throw new Error('IndexedDB denied')
       }),
       save: vi.fn(async () => {
+        throw new Error('IndexedDB denied')
+      }),
+      remove: vi.fn(async () => {
         throw new Error('IndexedDB denied')
       }),
     }
@@ -157,6 +193,9 @@ describe('SharedMomentsProvider', () => {
     await expect(store.list()).resolves.toEqual([])
     await store.save(firstMoment)
     await expect(store.list()).resolves.toEqual([firstMoment])
+    await store.remove([firstMoment.id])
+    await expect(store.list()).resolves.toEqual([])
     expect(unavailableStore.save).not.toHaveBeenCalled()
+    expect(unavailableStore.remove).not.toHaveBeenCalled()
   })
 })

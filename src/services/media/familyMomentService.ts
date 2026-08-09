@@ -68,6 +68,11 @@ export type FamilyMomentSubscription = {
   unsubscribe: () => void
 }
 
+export type FamilyMomentDeletion = {
+  momentId: string
+  mediaPaths: string[]
+}
+
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 const ANNOTATION_ID_PATTERN = /^[a-z0-9][a-z0-9_-]{0,79}$/
@@ -449,8 +454,11 @@ export async function fetchFamilyMoments(
         height: row.panorama_height,
         source: row.capture_kind === 'scheduled' ? 'daily' : 'manual',
         uploaderDisplayName:
-          names.get(row.uploader_id) ??
-          (row.uploader_id === connection.userId ? 'You' : 'Family member'),
+          row.uploader_id === connection.userId
+            ? 'You'
+            : names.get(row.uploader_id) ?? 'Family member',
+        ownedByCurrentUser: row.uploader_id === connection.userId,
+        familySynced: true,
         annotations: downloadedAnnotations,
       }
     }),
@@ -461,9 +469,140 @@ export async function fetchFamilyMoments(
   )
 }
 
+export async function fetchFamilyMomentDeletionIds(
+  connection: FamilyMomentConnection,
+  cachedMomentIds: readonly string[],
+): Promise<string[]> {
+  const client = getSupabaseClient()
+  if (!client) return []
+  const candidateIds = [
+    ...new Set(cachedMomentIds.filter((id) => UUID_PATTERN.test(id))),
+  ]
+  if (candidateIds.length === 0) return []
+
+  const chunks = Array.from(
+    { length: Math.ceil(candidateIds.length / 100) },
+    (_, index) => candidateIds.slice(index * 100, index * 100 + 100),
+  )
+  const results = await Promise.all(
+    chunks.map(async (ids) => {
+      const { data, error } = await client
+        .from('family_moment_deletions')
+        .select('moment_id')
+        .eq('circle_id', connection.circleId)
+        .in('moment_id', ids)
+      if (error) throw error
+      return data ?? []
+    }),
+  )
+
+  return results.flat().flatMap((row) => {
+    if (!row || typeof row !== 'object' || !('moment_id' in row)) return []
+    const momentId = String(row.moment_id)
+    return UUID_PATTERN.test(momentId) ? [momentId] : []
+  })
+}
+
+function parseFamilyMomentDeletions(data: unknown): FamilyMomentDeletion[] {
+  const rows = Array.isArray(data) ? data : data ? [data] : []
+  return rows.flatMap((row) => {
+    if (!row || typeof row !== 'object') return []
+    const record = row as { moment_id?: unknown; media_paths?: unknown }
+    const momentId = String(record.moment_id ?? '')
+    if (!UUID_PATTERN.test(momentId) || !Array.isArray(record.media_paths)) {
+      return []
+    }
+    const mediaPaths = record.media_paths.filter(
+      (path): path is string => typeof path === 'string' && path.length > 0,
+    )
+    return [{ momentId, mediaPaths }]
+  })
+}
+
+async function completeFamilyMomentDeletion(
+  connection: FamilyMomentConnection,
+  deletion: FamilyMomentDeletion,
+) {
+  const client = getSupabaseClient()
+  if (!client) throw new Error('Family sync is not configured.')
+
+  if (deletion.mediaPaths.length > 0) {
+    const removal = await client.storage
+      .from(FAMILY_MEDIA_BUCKET)
+      .remove(deletion.mediaPaths)
+    if (removal.error) throw removal.error
+  }
+
+  const { error } = await client.rpc('finish_delete_own_family_moment', {
+    p_circle_id: connection.circleId,
+    p_moment_id: deletion.momentId,
+  })
+  if (error) throw error
+}
+
+/**
+ * Records the deletion for every family device before cleaning private media.
+ * Once the tombstone exists the post is logically deleted; interrupted media
+ * cleanup is intentionally retried by resumePendingFamilyMomentDeletions.
+ */
+export async function deleteFamilyMoment(
+  connection: FamilyMomentConnection,
+  momentId: string,
+): Promise<{ cleanupPending: boolean }> {
+  if (!UUID_PATTERN.test(momentId)) {
+    throw new TypeError('A family moment must have a valid UUID before deletion.')
+  }
+  const client = getSupabaseClient()
+  if (!client) throw new Error('Family sync is not configured.')
+
+  const { data, error } = await client.rpc('begin_delete_own_family_moment', {
+    p_circle_id: connection.circleId,
+    p_moment_id: momentId,
+  })
+  if (error) throw error
+
+  const deletion = parseFamilyMomentDeletions(data)[0]
+  if (!deletion) {
+    throw new Error('The family deletion could not be confirmed securely.')
+  }
+
+  try {
+    await completeFamilyMomentDeletion(connection, deletion)
+    return { cleanupPending: false }
+  } catch {
+    // The durable tombstone already removed the post for the family. Keep the
+    // pending row so this device can safely resume Storage cleanup on reconnect.
+    return { cleanupPending: true }
+  }
+}
+
+export async function resumePendingFamilyMomentDeletions(
+  connection: FamilyMomentConnection,
+): Promise<void> {
+  const client = getSupabaseClient()
+  if (!client) return
+
+  const { data, error } = await client.rpc(
+    'list_pending_own_family_moment_deletions',
+    { p_circle_id: connection.circleId },
+  )
+  if (error) throw error
+
+  const pending = parseFamilyMomentDeletions(data)
+  const results = await Promise.allSettled(
+    pending.map((deletion) =>
+      completeFamilyMomentDeletion(connection, deletion),
+    ),
+  )
+  const failure = results.find(
+    (result): result is PromiseRejectedResult => result.status === 'rejected',
+  )
+  if (failure) throw failure.reason
+}
+
 export function subscribeToFamilyMoments(
   circleId: string,
-  onChange: () => void,
+  onChange: (deletedMomentId?: string) => void,
 ): FamilyMomentSubscription {
   const client = getSupabaseClient()
   if (!client) {
@@ -491,7 +630,21 @@ export function subscribeToFamilyMoments(
         table: 'family_moments',
         filter: `circle_id=eq.${circleId}`,
       },
-      onChange,
+      () => onChange(),
+    )
+    .on(
+      'postgres_changes',
+      {
+        event: 'INSERT',
+        schema: 'public',
+        table: 'family_moment_deletions',
+        filter: `circle_id=eq.${circleId}`,
+      },
+      (payload) => {
+        const record = payload.new as { moment_id?: unknown } | null
+        const momentId = String(record?.moment_id ?? '')
+        onChange(UUID_PATTERN.test(momentId) ? momentId : undefined)
+      },
     )
     .subscribe((status, error) => {
       if (readySettled) return

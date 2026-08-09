@@ -9,10 +9,13 @@ import {
 import type { Capture360Submission } from '../../capture'
 import { subscribeToSupabaseAuthChanges } from '../../../lib/supabase'
 import {
+  deleteFamilyMoment,
+  fetchFamilyMomentDeletionIds,
   fetchFamilyMoments,
   getFamilyDailyCaptureWindow,
   getFamilyMomentConnection,
   publishFamilyMoment,
+  resumePendingFamilyMomentDeletions,
   subscribeToFamilyMoments,
   type FamilyDailyCaptureWindow,
   type FamilyMomentConnection,
@@ -26,27 +29,108 @@ import {
 } from './useFamilyMomentSync'
 
 export function FamilyMomentSyncProvider({ children }: PropsWithChildren) {
-  const { moments, saveMoment } = useSharedMoments()
+  const { moments, removeMoments, saveMoment } = useSharedMoments()
   const [status, setStatus] = useState<FamilySyncStatus>('checking')
   const [dailyWindow, setDailyWindow] =
     useState<FamilyDailyCaptureWindow | null>(null)
   const [error, setError] = useState<Error | null>(null)
   const connectionRef = useRef<FamilyMomentConnection | null>(null)
   const momentIdsRef = useRef(new Set<string>())
+  const momentsRef = useRef(moments)
+  const deletedIdsRef = useRef(new Set<string>())
+  const refreshRequestedRef = useRef(false)
+  const refreshRunRef = useRef<Promise<void> | null>(null)
 
   useEffect(() => {
+    momentsRef.current = moments
     momentIdsRef.current = new Set(moments.map(({ id }) => id))
   }, [moments])
 
-  const refreshFamilyMoments = useCallback(async () => {
-    const connection = connectionRef.current
-    if (!connection) return
+  useEffect(() => {
+    if (status !== 'local') return
 
+    const legacyLocalMoment = moments.find(
+      (moment) =>
+        moment.uploaderDisplayName === 'You' &&
+        moment.ownedByCurrentUser === undefined &&
+        moment.familySynced === undefined,
+    )
+    if (!legacyLocalMoment) return
+
+    // Builds before ownership metadata existed saved device captures as
+    // "You" only. Backfill them exclusively while there is no family
+    // connection, so this migration can enable local removal but can never
+    // authorize a server-side family deletion.
+    const annotations = (legacyLocalMoment.annotations ?? []).map(
+      ({ audioUrl: _audioUrl, ...annotation }) => annotation,
+    )
+    void saveMoment({
+      id: legacyLocalMoment.id,
+      blob: legacyLocalMoment.blob,
+      label: legacyLocalMoment.label,
+      caption: legacyLocalMoment.caption,
+      createdAt: legacyLocalMoment.createdAt,
+      width: legacyLocalMoment.width,
+      height: legacyLocalMoment.height,
+      source: legacyLocalMoment.source,
+      uploaderDisplayName: legacyLocalMoment.uploaderDisplayName,
+      ownedByCurrentUser: true,
+      familySynced: false,
+      annotations,
+    }).catch((reason) => {
+      setError(
+        reason instanceof Error
+          ? reason
+          : new Error('An older device moment could not be updated.'),
+      )
+    })
+  }, [moments, saveMoment, status])
+
+  const performFamilyMomentRefresh = useCallback(async (
+    connection: FamilyMomentConnection,
+  ) => {
     try {
+      // Fetch media first, then query durable tombstones for every cached or
+      // fetched ID. Realtime also pre-marks deletions that happen mid-download.
       const incoming = await fetchFamilyMoments(connection)
+      const deletionIds = await fetchFamilyMomentDeletionIds(connection, [
+        ...momentsRef.current.map(({ id }) => id),
+        ...incoming.flatMap(({ id }) => (id ? [id] : [])),
+      ])
+      if (connectionRef.current !== connection) return
+
+      deletionIds.forEach((id) => deletedIdsRef.current.add(id))
+      if (deletionIds.length > 0) {
+        await removeMoments(deletionIds)
+        deletionIds.forEach((id) => momentIdsRef.current.delete(id))
+      }
+
       for (const moment of incoming) {
-        if (moment.id && momentIdsRef.current.has(moment.id)) continue
+        if (
+          !moment.id ||
+          deletedIdsRef.current.has(moment.id) ||
+          connectionRef.current !== connection
+        ) {
+          continue
+        }
+        const existing = moment.id
+          ? momentsRef.current.find(({ id }) => id === moment.id)
+          : undefined
+        if (
+          existing?.familySynced === true &&
+          existing.ownedByCurrentUser === moment.ownedByCurrentUser
+        ) {
+          continue
+        }
         const saved = await saveMoment(moment)
+        if (
+          deletedIdsRef.current.has(saved.id) ||
+          connectionRef.current !== connection
+        ) {
+          await removeMoments([saved.id])
+          momentIdsRef.current.delete(saved.id)
+          continue
+        }
         momentIdsRef.current.add(saved.id)
       }
       setError(null)
@@ -57,7 +141,27 @@ export function FamilyMomentSyncProvider({ children }: PropsWithChildren) {
           : new Error('Family moments could not be refreshed.'),
       )
     }
-  }, [saveMoment])
+  }, [removeMoments, saveMoment])
+
+  const refreshFamilyMoments = useCallback(async () => {
+    refreshRequestedRef.current = true
+    if (refreshRunRef.current) return refreshRunRef.current
+
+    const run = (async () => {
+      while (refreshRequestedRef.current) {
+        refreshRequestedRef.current = false
+        const connection = connectionRef.current
+        if (connection) await performFamilyMomentRefresh(connection)
+      }
+    })()
+    refreshRunRef.current = run
+
+    try {
+      await run
+    } finally {
+      if (refreshRunRef.current === run) refreshRunRef.current = null
+    }
+  }, [performFamilyMomentRefresh])
 
   useEffect(() => {
     let active = true
@@ -67,6 +171,12 @@ export function FamilyMomentSyncProvider({ children }: PropsWithChildren) {
     async function connect() {
       const requestedConnection = ++connectionVersion
       let requestedSubscription: FamilyMomentSubscription | null = null
+      const releaseRequestedSubscription = () => {
+        requestedSubscription?.unsubscribe()
+        if (familySubscription === requestedSubscription) {
+          familySubscription = null
+        }
+      }
       setStatus('checking')
       try {
         const connection = await getFamilyMomentConnection()
@@ -74,28 +184,53 @@ export function FamilyMomentSyncProvider({ children }: PropsWithChildren) {
         connectionRef.current = connection
 
         if (!connection) {
+          deletedIdsRef.current.clear()
           setDailyWindow(null)
           setStatus('local')
           setError(null)
           return
         }
 
+        try {
+          await resumePendingFamilyMomentDeletions(connection)
+        } catch {
+          // The durable deleting row remains resumable on the next launch,
+          // focus, or auth reconnect; it must not block receiving family posts.
+        }
+        if (!active || requestedConnection !== connectionVersion) return
+
         requestedSubscription = subscribeToFamilyMoments(
           connection.circleId,
-          () => void refreshFamilyMoments(),
+          (deletedMomentId) => {
+            if (deletedMomentId) {
+              deletedIdsRef.current.add(deletedMomentId)
+              momentIdsRef.current.delete(deletedMomentId)
+              void removeMoments([deletedMomentId])
+            }
+            void refreshFamilyMoments()
+          },
         )
         familySubscription = requestedSubscription
         await requestedSubscription.ready
-        if (!active || requestedConnection !== connectionVersion) return
+        if (!active || requestedConnection !== connectionVersion) {
+          releaseRequestedSubscription()
+          return
+        }
 
         const window = await getFamilyDailyCaptureWindow(connection)
-        if (!active || requestedConnection !== connectionVersion) return
+        if (!active || requestedConnection !== connectionVersion) {
+          releaseRequestedSubscription()
+          return
+        }
         setDailyWindow(window)
         setStatus('connected')
         setError(null)
         await refreshFamilyMoments()
       } catch (reason) {
-        if (!active || requestedConnection !== connectionVersion) return
+        if (!active || requestedConnection !== connectionVersion) {
+          releaseRequestedSubscription()
+          return
+        }
         if (familySubscription === requestedSubscription) {
           requestedSubscription?.unsubscribe()
           familySubscription = null
@@ -115,6 +250,7 @@ export function FamilyMomentSyncProvider({ children }: PropsWithChildren) {
       familySubscription?.unsubscribe()
       familySubscription = null
       connectionRef.current = null
+      refreshRequestedRef.current = false
       void connect()
     }
 
@@ -133,12 +269,14 @@ export function FamilyMomentSyncProvider({ children }: PropsWithChildren) {
       connectionVersion += 1
       familySubscription?.unsubscribe()
       familySubscription = null
+      connectionRef.current = null
+      refreshRequestedRef.current = false
       unsubscribeFromAuth()
       window.removeEventListener('kinsphere:family-sync-refresh', reconnect)
       window.removeEventListener('focus', reconnect)
       document.removeEventListener('visibilitychange', reconnectWhenVisible)
     }
-  }, [refreshFamilyMoments])
+  }, [refreshFamilyMoments, removeMoments])
 
   const shareMoment = useCallback(
     async (
@@ -158,6 +296,8 @@ export function FamilyMomentSyncProvider({ children }: PropsWithChildren) {
           height: submission.height,
           source: submission.source,
           uploaderDisplayName: 'You',
+          ownedByCurrentUser: true,
+          familySynced: false,
           annotations,
         })
         return { delivery: 'local' }
@@ -174,11 +314,36 @@ export function FamilyMomentSyncProvider({ children }: PropsWithChildren) {
         height: processed.viewerHeight,
         source: submission.source,
         uploaderDisplayName: 'You',
+        ownedByCurrentUser: true,
+        familySynced: true,
         annotations,
       })
       return { delivery: 'family' }
     },
     [saveMoment],
+  )
+
+  const deleteMoment = useCallback(
+    async (momentId: string) => {
+      const moment = momentsRef.current.find(({ id }) => id === momentId)
+      if (!moment?.ownedByCurrentUser) {
+        throw new Error('Only the person who shared this moment can remove it.')
+      }
+
+      if (moment.familySynced) {
+        const connection = connectionRef.current
+        if (!connection) {
+          throw new Error(
+            'Reconnect to your family before removing this moment for everyone.',
+          )
+        }
+        await deleteFamilyMoment(connection, momentId)
+      }
+
+      await removeMoments([momentId])
+      momentIdsRef.current.delete(momentId)
+    },
+    [removeMoments],
   )
 
   const value = useMemo<FamilyMomentSyncContextValue>(
@@ -187,9 +352,10 @@ export function FamilyMomentSyncProvider({ children }: PropsWithChildren) {
       dailyWindow,
       error,
       shareMoment,
+      deleteMoment,
       refreshFamilyMoments,
     }),
-    [dailyWindow, error, refreshFamilyMoments, shareMoment, status],
+    [dailyWindow, deleteMoment, error, refreshFamilyMoments, shareMoment, status],
   )
 
   return (

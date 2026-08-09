@@ -1,3 +1,4 @@
+import { Capacitor } from '@capacitor/core'
 import type { AuthUser } from './types'
 import { clerkConfigured } from './config'
 
@@ -7,13 +8,15 @@ const DEVELOPMENT_PREVIEW_STORAGE_KEY =
 export function canUseDevelopmentPreview(
   developmentBuild: boolean,
   hasClerkConfiguration: boolean,
+  nativeApp = false,
 ) {
-  return developmentBuild && !hasClerkConfiguration
+  return (developmentBuild || nativeApp) && !hasClerkConfiguration
 }
 
 export const developmentPreviewAvailable = canUseDevelopmentPreview(
   import.meta.env.DEV,
   clerkConfigured,
+  Capacitor.isNativePlatform(),
 )
 
 export const developmentPreviewUser: AuthUser = {

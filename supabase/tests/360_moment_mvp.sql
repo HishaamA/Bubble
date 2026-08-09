@@ -1,7 +1,7 @@
 begin;
 
 create extension if not exists pgtap with schema extensions;
-select plan(38);
+select plan(58);
 
 insert into auth.users (
   instance_id,
@@ -230,6 +230,42 @@ begin
     400,
     'Annotated family moment',
     p_annotations
+  );
+  return 'ok';
+exception
+  when others then
+    return sqlstate || ':' || sqlerrm;
+end;
+$$;
+
+create or replace function pg_temp.begin_moment_deletion_result(
+  p_moment_id uuid
+)
+returns text
+language plpgsql
+as $$
+begin
+  perform public.begin_delete_own_family_moment(
+    'cccccccc-cccc-4ccc-8ccc-cccccccccccc',
+    p_moment_id
+  );
+  return 'ok';
+exception
+  when others then
+    return sqlstate || ':' || sqlerrm;
+end;
+$$;
+
+create or replace function pg_temp.finish_moment_deletion_result(
+  p_moment_id uuid
+)
+returns text
+language plpgsql
+as $$
+begin
+  perform public.finish_delete_own_family_moment(
+    'cccccccc-cccc-4ccc-8ccc-cccccccccccc',
+    p_moment_id
   );
   return 'ok';
 exception
@@ -867,6 +903,372 @@ select is(
 
 reset role;
 
+select is(
+  has_table_privilege(
+    'authenticated',
+    'public.family_moment_deletions',
+    'select'
+  )
+  and not has_table_privilege(
+    'authenticated',
+    'public.family_moment_deletions',
+    'insert'
+  )
+  and not has_table_privilege(
+    'authenticated',
+    'public.family_moment_deletions',
+    'update'
+  )
+  and not has_table_privilege(
+    'authenticated',
+    'public.family_moment_deletions',
+    'delete'
+  )
+  and has_function_privilege(
+    'authenticated',
+    'public.begin_delete_own_family_moment(uuid,uuid)',
+    'execute'
+  )
+  and has_function_privilege(
+    'authenticated',
+    'public.finish_delete_own_family_moment(uuid,uuid)',
+    'execute'
+  )
+  and not has_function_privilege(
+    'anon',
+    'public.begin_delete_own_family_moment(uuid,uuid)',
+    'execute'
+  ),
+  true,
+  'deletion tombstones are read-only and only authenticated callers receive the secure RPC surface'
+);
+
+set local role authenticated;
+select set_config(
+  'request.jwt.claims',
+  json_build_object(
+    'sub', '20000000-0000-4000-8000-000000000002',
+    'role', 'authenticated'
+  )::text,
+  true
+);
+
+select is(
+  pg_temp.begin_moment_deletion_result(
+    '40000000-0000-4000-8000-000000000011'
+  ),
+  '42501:moment_uploader_required',
+  'an approved family member cannot delete another uploader''s moment'
+);
+
+select set_config(
+  'request.jwt.claims',
+  json_build_object(
+    'sub', '20000000-0000-4000-8000-000000000004',
+    'role', 'authenticated'
+  )::text,
+  true
+);
+
+select is(
+  pg_temp.begin_moment_deletion_result(
+    '40000000-0000-4000-8000-000000000011'
+  ),
+  '42501:approved_circle_membership_required',
+  'a removed family member cannot start a moment deletion'
+);
+
+select set_config(
+  'request.jwt.claims',
+  json_build_object(
+    'sub', '20000000-0000-4000-8000-000000000001',
+    'role', 'authenticated'
+  )::text,
+  true
+);
+
+select is(
+  (
+    select cardinality(deletion.media_paths)
+    from public.begin_delete_own_family_moment(
+      'cccccccc-cccc-4ccc-8ccc-cccccccccccc',
+      '40000000-0000-4000-8000-000000000011'
+    ) as deletion
+  ),
+  3,
+  'the uploader starts deletion with the exact panorama, thumbnail, and voice paths'
+);
+
+reset role;
+
+select is(
+  (
+    select family_moment.status || ':' || deletion.uploader_id::text
+    from public.family_moments as family_moment
+    join public.family_moment_deletions as deletion
+      on deletion.moment_id = family_moment.id
+    where family_moment.id = '40000000-0000-4000-8000-000000000011'
+  ),
+  'deleting:20000000-0000-4000-8000-000000000001',
+  'deletion intent atomically hides the ready row and records an uploader tombstone'
+);
+
+set local role authenticated;
+select set_config(
+  'request.jwt.claims',
+  json_build_object(
+    'sub', '20000000-0000-4000-8000-000000000002',
+    'role', 'authenticated'
+  )::text,
+  true
+);
+
+select is(
+  (
+    select count(*)
+    from public.family_moment_deletions
+    where moment_id = '40000000-0000-4000-8000-000000000011'
+  ),
+  1::bigint,
+  'approved family members receive the durable deletion tombstone'
+);
+
+select set_config(
+  'request.jwt.claims',
+  json_build_object(
+    'sub', '20000000-0000-4000-8000-000000000003',
+    'role', 'authenticated'
+  )::text,
+  true
+);
+
+select is(
+  (
+    select count(*)
+    from public.family_moment_deletions
+    where moment_id = '40000000-0000-4000-8000-000000000011'
+  ),
+  0::bigint,
+  'deletion tombstone RLS hides another circle''s private activity'
+);
+
+select set_config(
+  'request.jwt.claims',
+  json_build_object(
+    'sub', '20000000-0000-4000-8000-000000000001',
+    'role', 'authenticated'
+  )::text,
+  true
+);
+
+select is(
+  (
+    select cardinality(deletion.media_paths)
+    from public.list_pending_own_family_moment_deletions(
+      'cccccccc-cccc-4ccc-8ccc-cccccccccccc'
+    ) as deletion
+    where deletion.moment_id = '40000000-0000-4000-8000-000000000011'
+  ),
+  3,
+  'an interrupted deletion can resume with every exact media path'
+);
+
+select is(
+  pg_temp.finish_moment_deletion_result(
+    '40000000-0000-4000-8000-000000000011'
+  ),
+  'P0001:family_moment_media_cleanup_incomplete',
+  'metadata deletion cannot finish while any private media remains'
+);
+
+delete from storage.objects
+where name in (
+  'cccccccc-cccc-4ccc-8ccc-cccccccccccc/panoramas/20000000-0000-4000-8000-000000000001/40000000-0000-4000-8000-000000000011.jpg',
+  'cccccccc-cccc-4ccc-8ccc-cccccccccccc/thumbnails/20000000-0000-4000-8000-000000000001/40000000-0000-4000-8000-000000000011.jpg'
+);
+
+select is(
+  (
+    select count(*)
+    from storage.objects
+    where name in (
+      'cccccccc-cccc-4ccc-8ccc-cccccccccccc/panoramas/20000000-0000-4000-8000-000000000001/40000000-0000-4000-8000-000000000011.jpg',
+      'cccccccc-cccc-4ccc-8ccc-cccccccccccc/thumbnails/20000000-0000-4000-8000-000000000001/40000000-0000-4000-8000-000000000011.jpg'
+    )
+  ),
+  0::bigint,
+  'pending-delete Storage RLS allows only the uploader to remove referenced image media'
+);
+
+select is(
+  pg_temp.finish_moment_deletion_result(
+    '40000000-0000-4000-8000-000000000011'
+  ),
+  'P0001:family_moment_media_cleanup_incomplete',
+  'one remaining voice object still blocks final deletion'
+);
+
+delete from storage.objects
+where name = 'cccccccc-cccc-4ccc-8ccc-cccccccccccc/voice/20000000-0000-4000-8000-000000000001/40000000-0000-4000-8000-000000000011-voice-note.m4a';
+
+select is(
+  pg_temp.finish_moment_deletion_result(
+    '40000000-0000-4000-8000-000000000011'
+  ),
+  'ok',
+  'the uploader finalizes deletion after every private media object is gone'
+);
+
+reset role;
+
+select is(
+  (
+    select count(*)
+    from public.family_moments as family_moment
+    where family_moment.id = '40000000-0000-4000-8000-000000000011'
+  ) + (
+    select count(*)
+    from public.family_moment_annotations as annotation
+    where annotation.moment_id = '40000000-0000-4000-8000-000000000011'
+  ),
+  0::bigint,
+  'final deletion removes moment metadata and cascades every annotation'
+);
+
+select is(
+  (
+    select count(*)
+    from public.family_moment_deletions as deletion
+    where deletion.moment_id = '40000000-0000-4000-8000-000000000011'
+  ),
+  1::bigint,
+  'the family tombstone remains for offline cache reconciliation'
+);
+
+set local role authenticated;
+select set_config(
+  'request.jwt.claims',
+  json_build_object(
+    'sub', '20000000-0000-4000-8000-000000000001',
+    'role', 'authenticated'
+  )::text,
+  true
+);
+
+select is(
+  (
+    select cardinality(deletion.media_paths)::text
+    from public.begin_delete_own_family_moment(
+      'cccccccc-cccc-4ccc-8ccc-cccccccccccc',
+      '40000000-0000-4000-8000-000000000011'
+    ) as deletion
+  ) || ':' || pg_temp.finish_moment_deletion_result(
+    '40000000-0000-4000-8000-000000000011'
+  ),
+  '0:ok',
+  'begin and finish deletion are idempotent after cleanup completes'
+);
+
+reset role;
+
+set local role authenticated;
+select set_config(
+  'request.jwt.claims',
+  json_build_object(
+    'sub', '20000000-0000-4000-8000-000000000002',
+    'role', 'authenticated'
+  )::text,
+  true
+);
+
+select is(
+  pg_temp.begin_moment_deletion_result(
+    '40000000-0000-4000-8000-000000000010'
+  ),
+  'ok',
+  'an approved uploader can start deleting their own moment before family removal'
+);
+
+reset role;
+
+update public.circle_members
+set status = 'removed',
+    removed_at = now()
+where circle_id = 'cccccccc-cccc-4ccc-8ccc-cccccccccccc'
+  and user_id = '20000000-0000-4000-8000-000000000002';
+
+set local role authenticated;
+select set_config(
+  'request.jwt.claims',
+  json_build_object(
+    'sub', '20000000-0000-4000-8000-000000000002',
+    'role', 'authenticated'
+  )::text,
+  true
+);
+
+select is(
+  (
+    select cardinality(deletion.media_paths)
+    from public.list_pending_own_family_moment_deletions(
+      'cccccccc-cccc-4ccc-8ccc-cccccccccccc'
+    ) as deletion
+    where deletion.moment_id = '40000000-0000-4000-8000-000000000010'
+  ),
+  2,
+  'a removed uploader can resume only the deletion they already tombstoned'
+);
+
+select set_config(
+  'request.jwt.claims',
+  json_build_object(
+    'sub', '20000000-0000-4000-8000-000000000001',
+    'role', 'authenticated'
+  )::text,
+  true
+);
+
+select is(
+  (
+    select cardinality(deletion.media_paths)
+    from public.list_pending_own_family_moment_deletions(
+      'cccccccc-cccc-4ccc-8ccc-cccccccccccc'
+    ) as deletion
+    where deletion.moment_id = '40000000-0000-4000-8000-000000000010'
+  ),
+  2,
+  'the circle owner discovers a removed member''s pending deletion during normal recovery'
+);
+
+delete from storage.objects
+where name in (
+  'cccccccc-cccc-4ccc-8ccc-cccccccccccc/panoramas/20000000-0000-4000-8000-000000000002/40000000-0000-4000-8000-000000000010.jpg',
+  'cccccccc-cccc-4ccc-8ccc-cccccccccccc/thumbnails/20000000-0000-4000-8000-000000000002/40000000-0000-4000-8000-000000000010.jpg'
+);
+
+select is(
+  (
+    select count(*)
+    from storage.objects
+    where name in (
+      'cccccccc-cccc-4ccc-8ccc-cccccccccccc/panoramas/20000000-0000-4000-8000-000000000002/40000000-0000-4000-8000-000000000010.jpg',
+      'cccccccc-cccc-4ccc-8ccc-cccccccccccc/thumbnails/20000000-0000-4000-8000-000000000002/40000000-0000-4000-8000-000000000010.jpg'
+    )
+  ),
+  0::bigint,
+  'the circle owner can clean only exact media from a removed member''s pending deletion'
+);
+
+select is(
+  pg_temp.finish_moment_deletion_result(
+    '40000000-0000-4000-8000-000000000010'
+  ),
+  'ok',
+  'the circle owner can finish a removed member''s started deletion without retaining private media'
+);
+
+reset role;
+
 select ok(
   not exists (
     select 1
@@ -878,8 +1280,20 @@ select ok(
     where moment_publication.pubname = 'supabase_realtime'
       and moment_publication.schemaname = 'public'
       and moment_publication.tablename = 'family_moments'
+  ) and (
+    not exists (
+      select 1
+      from pg_catalog.pg_publication
+      where pubname = 'supabase_realtime'
+    ) or exists (
+      select 1
+      from pg_catalog.pg_publication_tables as deletion_publication
+      where deletion_publication.pubname = 'supabase_realtime'
+        and deletion_publication.schemaname = 'public'
+        and deletion_publication.tablename = 'family_moment_deletions'
+    )
   ),
-  'ready moments join Supabase Realtime when its standard publication exists'
+  'ready moments and durable deletion tombstones join Supabase Realtime when its standard publication exists'
 );
 
 select * from finish();

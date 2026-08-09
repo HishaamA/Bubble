@@ -80,6 +80,10 @@ describe('capture to Moments integration', () => {
     )
 
     expect(
+      await screen.findByRole('heading', { name: 'Review your 360°' }),
+    ).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Continue' }))
+    expect(
       await screen.findByAltText('Preview of selected 360 panorama'),
     ).toBeInTheDocument()
     await user.type(

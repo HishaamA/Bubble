@@ -39,10 +39,10 @@ Client uploads use one immutable path shape:
 ```
 
 The bucket is private. Approved members can read their circle's objects and can
-insert only below their own uploader segment. There are intentionally no client
-`UPDATE` or `DELETE` policies: uploads must not use overwrite/upsert, and future
-deletion/finalization jobs should run in the trusted backend after rechecking
-authorization.
+insert only below their own uploader segment. Uploads must not use
+overwrite/upsert. Deletion is limited to failed, unreferenced uploads or exact
+objects returned by the owner-only two-phase moment deletion RPC; a family
+member can never remove another uploader's path.
 
 ## Daily 360 Moment MVP
 
@@ -74,6 +74,27 @@ as 2:1, enforces the scheduled window, and inserts a `ready` row atomically.
 Clients cannot insert or update `family_moments` directly. Approved members can
 select ready moments in their circle, and the table is added idempotently to the
 standard Supabase Realtime publication when that publication exists.
+
+An uploader removes a post with `begin_delete_own_family_moment`, then deletes
+the exact returned panorama, thumbnail, and voice paths through Storage, and
+calls `finish_delete_own_family_moment`. The first call changes the row to
+`deleting` and creates an immutable, family-readable tombstone before any media
+is touched. That tombstone is also published through Realtime, so online and
+offline devices reliably evict their local cache. If cleanup is interrupted,
+`list_pending_own_family_moment_deletions` lets the uploader resume it on the
+next connection. It also lets the circle owner finish an already-tombstoned
+cleanup if that uploader has since been removed from the family; this never
+allows the owner to start deletion of someone else's ready post. Final metadata
+deletion is rejected until every exact object is gone. Tombstones remain after
+cleanup for future offline reconciliation.
+
+Up to eight position-bound text or voice annotations are finalized atomically
+with each panorama. Voice clips use the same private family-media boundary.
+Approved family members may then discuss a ready panorama through
+`family_moment_comments`: a null annotation target comments on the whole image,
+while a validated annotation ID replies to that embedded memory point. Comment
+authors are derived server-side, direct table writes are revoked, and Realtime
+publishes new comments without forcing clients to reload the panorama itself.
 
 ## Invite codes
 
@@ -122,6 +143,7 @@ supabase start
 supabase db reset
 supabase test db supabase/tests/rls_membership.sql
 supabase test db supabase/tests/360_moment_mvp.sql
+supabase test db supabase/tests/moment_comments.sql
 supabase test db supabase/tests/events_notifications.sql
 supabase test db supabase/tests/clerk_third_party_auth.sql
 ```

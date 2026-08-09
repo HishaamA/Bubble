@@ -11,6 +11,7 @@ export type FamilyMomentSyncContextValue = {
   shareMoment(
     submission: Capture360Submission,
   ): Promise<{ delivery: 'local' | 'family' }>
+  deleteMoment(momentId: string): Promise<void>
   refreshFamilyMoments(): Promise<void>
 }
 

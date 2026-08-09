@@ -93,9 +93,9 @@ function ClerkConfigurationState({
       {onContinue ? (
         <div className="auth-card__preview">
           <button type="button" onClick={onContinue}>
-            Continue to main app
+            Proceed to app
           </button>
-          <small>Development preview · family sync stays offline</small>
+          <small>Temporary preview · family sync stays offline</small>
         </div>
       ) : null}
     </div>
