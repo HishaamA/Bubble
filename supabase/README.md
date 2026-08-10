@@ -35,7 +35,7 @@ memberships must be reconciled explicitly before this migration can apply.
 Client uploads use one immutable path shape:
 
 ```text
-<circle-uuid>/<panoramas|thumbnails|voice>/<internal-user-uuid>/<immutable-file>
+<circle-uuid>/<panoramas|thumbnails|voice|capsule-images|capsule-thumbnails>/<internal-user-uuid>/<immutable-file>
 ```
 
 The bucket is private. Approved members can read their circle's objects and can
@@ -96,6 +96,33 @@ while a validated annotation ID replies to that embedded memory point. Comment
 authors are derived server-side, direct table writes are revoked, and Realtime
 publishes new comments without forcing clients to reload the panorama itself.
 
+## Weekly and special-event Capsules
+
+`get_or_create_weekly_capsule(circle_id)` uses the database clock and the
+family owner's IANA time zone to create exactly one Monday-through-Sunday
+Capsule for the approved circle. `create_special_capsule` creates a named
+collection such as a birthday or wedding with a server-enforced future open
+time. Both accept ordinary photos through a separate pipeline from 360
+Moments; there is deliberately no 2:1 constraint.
+
+The client re-encodes a selected photo and thumbnail as metadata-free JPEGs,
+then uploads them without upsert to exact immutable paths:
+
+```text
+<circle-id>/capsule-images/<internal-user-id>/<item-id>.jpg
+<circle-id>/capsule-thumbnails/<internal-user-id>/<item-id>.jpg
+```
+
+`finalize_capsule_photo` derives the uploader, rechecks membership and the
+server open time, verifies both objects and their canonical paths, and then
+increments the family-visible item count atomically. Before unlock, approved
+members can see Capsule metadata and the total count but can read only their
+own photo objects. After `opens_at <= now()`, every approved member can read
+the family's contributions. Realtime publishes both collection and item
+changes. The installed iPhone app renders the ordered photos as a private
+1080×1920 H.264 recap at 30 fps, holding each image for six frames (0.2 s),
+and opens the native share sheet for Save Video or AirDrop.
+
 ## Invite codes
 
 Owners create invites only through `create_circle_invite`. The function generates
@@ -146,6 +173,7 @@ supabase test db supabase/tests/360_moment_mvp.sql
 supabase test db supabase/tests/moment_comments.sql
 supabase test db supabase/tests/events_notifications.sql
 supabase test db supabase/tests/clerk_third_party_auth.sql
+supabase test db supabase/tests/family_capsules.sql
 ```
 
 ## Assumptions and current limits
@@ -163,11 +191,14 @@ supabase test db supabase/tests/clerk_third_party_auth.sql
   arithmetic and that both exact Storage object rows exist. A later image
   processing worker should decode pixels, strip unsafe metadata, and generate a
   trusted thumbnail before a production launch.
-- The current contract does not reserve uploads or clean up abandoned objects.
-  Those require a trusted cleanup worker and quotas before production launch.
-- Capsules and AI tables remain future phases and must reuse the membership
-  helper. Events and notifications now use the same approved-membership
-  boundary and keep scheduled-job dispatch restricted to the service role.
+- An approved uploader can delete their own exact, unreferenced failed-upload
+  objects. There is no automated abandoned-upload cleanup, reservation, or
+  quota yet; those require a trusted worker before production launch.
+- Capsule, event, and notification tables reuse the approved-membership
+  boundary. Scheduled-job dispatch remains restricted to the service role.
+- Weekly and special Capsule unlocks are server authoritative. The local
+  IndexedDB store is an offline preview/cache, not a cross-device permission
+  boundary.
 - The SQL suite is designed for `supabase test db`, but still requires a local
   Supabase stack to validate database-engine and Storage-version compatibility.
 - Clerk account deletion is not inferred from sign-out. A trusted webhook or
