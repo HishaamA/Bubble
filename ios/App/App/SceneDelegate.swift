@@ -18,6 +18,7 @@ final class AppBridgeViewController: CAPBridgeViewController {
     override func capacitorDidLoad() {
         bridge?.registerPluginInstance(PanoramaCapturePlugin())
         bridge?.registerPluginInstance(CardboardOrientationPlugin())
+        bridge?.registerPluginInstance(CapsuleRecapPlugin())
     }
 
     override func viewDidAppear(_ animated: Bool) {

@@ -19,6 +19,7 @@
 		A10000000000000000000001 /* PanoramaCapturePlugin.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000011 /* PanoramaCapturePlugin.swift */; };
 		A10000000000000000000002 /* PanoramaCaptureViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000012 /* PanoramaCaptureViewController.swift */; };
 		A10000000000000000000003 /* CardboardOrientationPlugin.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000013 /* CardboardOrientationPlugin.swift */; };
+		A10000000000000000000004 /* CapsuleRecapPlugin.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000014 /* CapsuleRecapPlugin.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -36,6 +37,7 @@
 		A10000000000000000000011 /* PanoramaCapturePlugin.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PanoramaCapturePlugin.swift; sourceTree = "<group>"; };
 		A10000000000000000000012 /* PanoramaCaptureViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PanoramaCaptureViewController.swift; sourceTree = "<group>"; };
 		A10000000000000000000013 /* CardboardOrientationPlugin.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CardboardOrientationPlugin.swift; sourceTree = "<group>"; };
+		A10000000000000000000014 /* CapsuleRecapPlugin.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CapsuleRecapPlugin.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -72,6 +74,7 @@
 			children = (
 				9582B6822FE993A50072D4E8 /* SceneDelegate.swift */,
 				A10000000000000000000013 /* CardboardOrientationPlugin.swift */,
+				A10000000000000000000014 /* CapsuleRecapPlugin.swift */,
 				A10000000000000000000011 /* PanoramaCapturePlugin.swift */,
 				A10000000000000000000012 /* PanoramaCaptureViewController.swift */,
 				50379B222058CBB4000EE86E /* capacitor.config.json */,
@@ -170,6 +173,7 @@
 				504EC3081FED79650016851F /* AppDelegate.swift in Sources */,
 				9582B6832FE993A70072D4E8 /* SceneDelegate.swift in Sources */,
 				A10000000000000000000003 /* CardboardOrientationPlugin.swift in Sources */,
+				A10000000000000000000004 /* CapsuleRecapPlugin.swift in Sources */,
 				A10000000000000000000001 /* PanoramaCapturePlugin.swift in Sources */,
 				A10000000000000000000002 /* PanoramaCaptureViewController.swift in Sources */,
 			);
