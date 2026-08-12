@@ -1,4 +1,8 @@
-import type { CapsuleStore, FamilyCapsule } from './types'
+import type {
+  CapsuleImageSource,
+  CapsuleStore,
+  FamilyCapsule,
+} from './types'
 
 const DATABASE_PREFIX = 'kinsphere-family-capsules'
 const DATABASE_VERSION = 1
@@ -8,6 +12,41 @@ function cloneCapsule(capsule: FamilyCapsule): FamilyCapsule {
   return {
     ...capsule,
     photos: capsule.photos.map((photo) => ({ ...photo })),
+  }
+}
+
+function isEphemeralObjectUrl(source: CapsuleImageSource): source is string {
+  return typeof source === 'string' && source.startsWith('blob:')
+}
+
+async function durableImageSource(
+  source: CapsuleImageSource,
+): Promise<CapsuleImageSource> {
+  if (!isEphemeralObjectUrl(source) || typeof fetch !== 'function') return source
+  try {
+    const response = await fetch(source)
+    if (!response.ok) return source
+    return await response.blob()
+  } catch {
+    // A legacy object URL cannot be recovered after its document closes. Keep
+    // its metadata so the family-server refresh can replace it; the UI renders
+    // an intentional placeholder instead of a browser broken-image icon.
+    return source
+  }
+}
+
+async function prepareCapsuleForPersistence(
+  capsule: FamilyCapsule,
+): Promise<FamilyCapsule> {
+  return {
+    ...capsule,
+    photos: await Promise.all(capsule.photos.map(async (photo) => {
+      const [image, thumbnail] = await Promise.all([
+        durableImageSource(photo.image),
+        durableImageSource(photo.thumbnail),
+      ])
+      return { ...photo, image, thumbnail }
+    })),
   }
 }
 
@@ -42,7 +81,8 @@ export function createMemoryCapsuleStore(seed: FamilyCapsule[] = []): CapsuleSto
       return [...records.values()].map(cloneCapsule).sort(newestFirst)
     },
     async save(capsule) {
-      records.set(capsule.id, cloneCapsule(capsule))
+      const durableCapsule = await prepareCapsuleForPersistence(capsule)
+      records.set(capsule.id, cloneCapsule(durableCapsule))
     },
     async remove(capsuleId) {
       records.delete(capsuleId)
@@ -75,9 +115,10 @@ export function createIndexedDbCapsuleStore(
     async save(capsule) {
       const database = await openDatabase(indexedDb, databaseName)
       try {
+        const durableCapsule = await prepareCapsuleForPersistence(capsule)
         await new Promise<void>((resolve, reject) => {
           const transaction = database.transaction(STORE_NAME, 'readwrite')
-          transaction.objectStore(STORE_NAME).put(cloneCapsule(capsule))
+          transaction.objectStore(STORE_NAME).put(cloneCapsule(durableCapsule))
           transaction.oncomplete = () => resolve()
           transaction.onerror = () => reject(transaction.error ?? new Error('Could not save the Capsule.'))
           transaction.onabort = () => reject(transaction.error ?? new Error('Saving the Capsule was interrupted.'))

@@ -66,7 +66,7 @@
 .auth-card__intro h1 {
   max-width: 19rem;
   color: #fff;
-  font-size: clamp(2rem, 9vw, 2.8rem);
+  font-size: var(--app-page-title-size);
   font-weight: 640;
   letter-spacing: -0.06em;
   line-height: 0.98;
@@ -82,7 +82,7 @@
 
 .auth-card__eyebrow {
   margin-bottom: 0.45rem !important;
-  color: #dfab6d;
+  color: var(--app-eyebrow-color);
   font-size: 0.62rem;
   font-weight: 720;
   letter-spacing: 0.09em;
