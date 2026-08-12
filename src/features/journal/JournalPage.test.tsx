@@ -1,9 +1,13 @@
 import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import type { PanoramaMoment } from '../memories/shared'
 import { JournalPage } from './JournalPage'
+
+vi.mock('../auth', () => ({
+  useAuth: () => ({ user: { id: 'journal-test-user' } }),
+}))
 
 const testNow = new Date(2026, 7, 26, 12)
 
@@ -68,7 +72,7 @@ describe('JournalPage', () => {
     )
     expect(screen.getByRole('heading', { name: 'Wednesday, August 26' })).toBeInTheDocument()
     expect(screen.getByText('8 memories')).toBeInTheDocument()
-    expect(screen.getAllByRole('article')).toHaveLength(8)
+    expect(container.querySelectorAll('.journal-memories article')).toHaveLength(8)
     const memoryGrid = container.querySelector('.journal-memories')
     expect(memoryGrid).toHaveAttribute('data-layout', 'grid')
     expect(memoryGrid?.children).toHaveLength(8)
@@ -104,6 +108,18 @@ describe('JournalPage', () => {
         name: 'Open Mountain day at golden hour, shared by Hishaam, panorama memory',
       }),
     ).toHaveAttribute('href', '/memory/mountains')
+    expect(
+      screen.queryByRole('button', { name: /create recap/i }),
+    ).not.toBeInTheDocument()
+    const page = container.querySelector('.journal-page')
+    const events = container.querySelector('.journal-events')
+    const week = container.querySelector('.journal-week')
+    expect(page).not.toBeNull()
+    expect(events).not.toBeNull()
+    expect(week).not.toBeNull()
+    expect(Array.from(page?.children ?? []).indexOf(events as Element)).toBeLessThan(
+      Array.from(page?.children ?? []).indexOf(week as Element),
+    )
   })
 
   it('browses archived dates while keeping the fixed photo grid', async () => {
@@ -114,7 +130,7 @@ describe('JournalPage', () => {
 
     expect(screen.getByRole('heading', { name: 'Sunday, August 23' })).toBeInTheDocument()
     expect(screen.getByText('3 memories')).toBeInTheDocument()
-    expect(screen.getAllByRole('article')).toHaveLength(3)
+    expect(container.querySelectorAll('.journal-memories article')).toHaveLength(3)
     expect(container.querySelector('.journal-memories')).toHaveAttribute('data-layout', 'grid')
     expect(screen.queryByRole('group', { name: 'Memory layout' })).not.toBeInTheDocument()
   })
@@ -138,18 +154,18 @@ describe('JournalPage', () => {
     ).toBeInTheDocument()
     expect(screen.getByText('0 memories')).toBeInTheDocument()
     expect(container.querySelector('.journal-memories')).toBeEmptyDOMElement()
-    expect(screen.queryAllByRole('article')).toHaveLength(0)
+    expect(container.querySelectorAll('.journal-memories article')).toHaveLength(0)
     expect(
       screen.queryByRole('button', { name: /create recap/i }),
     ).not.toBeInTheDocument()
-    expect(screen.getByRole('status')).toHaveTextContent(
+    expect(screen.getByText(
       'Moments from this day will appear here after they’re shared.',
-    )
+    )).toHaveAttribute('role', 'status')
   })
 
-  it('still offers recaps for archived days before today', async () => {
+  it('does not offer recaps for archived days before today', async () => {
     const user = userEvent.setup()
-    renderJournalPage()
+    const { container } = renderJournalPage()
 
     await user.click(
       screen.getByRole('button', {
@@ -157,10 +173,10 @@ describe('JournalPage', () => {
       }),
     )
 
-    expect(screen.getAllByRole('article')).toHaveLength(5)
+    expect(container.querySelectorAll('.journal-memories article')).toHaveLength(5)
     expect(
-      screen.getByRole('button', { name: /create recap/i }),
-    ).toBeInTheDocument()
+      screen.queryByRole('button', { name: /create recap/i }),
+    ).not.toBeInTheDocument()
   })
 
   it('archives uploaded moments on the local day they were created', async () => {
@@ -169,7 +185,7 @@ describe('JournalPage', () => {
       'family-balcony',
       new Date(2026, 7, 25, 18),
     )
-    renderJournalPage([yesterdayMoment])
+    const { container } = renderJournalPage([yesterdayMoment])
 
     expect(
       screen.queryByRole('link', {
@@ -188,7 +204,7 @@ describe('JournalPage', () => {
         name: 'Open Balcony laughter, shared by Maya Ahmed, panorama memory',
       }),
     ).toHaveAttribute('href', '/memory/shared-family-balcony')
-    expect(screen.getAllByRole('article')).toHaveLength(6)
+    expect(container.querySelectorAll('.journal-memories article')).toHaveLength(6)
   })
 
   it('builds the visible week around the supplied local date', () => {
@@ -213,24 +229,6 @@ describe('JournalPage', () => {
         name: 'Monday, January 4, 0 memories',
       }),
     ).toBeInTheDocument()
-  })
-
-  it('creates and dismisses an accessible recap preview', async () => {
-    const user = userEvent.setup()
-    renderJournalPage()
-
-    const createRecap = screen.getByRole('button', { name: /create recap/i })
-    expect(createRecap).toHaveAttribute('aria-expanded', 'false')
-
-    await user.click(createRecap)
-
-    const recapStatus = screen.getByRole('status')
-    expect(recapStatus).toHaveTextContent('Your family recap is ready')
-    expect(recapStatus).toHaveTextContent('8 memories')
-    expect(screen.getByRole('button', { name: /recap ready/i })).toHaveAttribute('aria-expanded', 'true')
-
-    await user.click(screen.getByRole('button', { name: /recap ready/i }))
-    expect(screen.queryByRole('status')).not.toBeInTheDocument()
   })
 
   it('opens a panorama with enough state to return to the journal', async () => {

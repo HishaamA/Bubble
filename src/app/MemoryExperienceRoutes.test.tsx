@@ -5,6 +5,10 @@ import { SharedMomentsContext } from '../features/memories/shared/context'
 import type { PanoramaMoment } from '../features/memories/shared'
 import { JournalRoute } from './MemoryExperienceRoutes'
 
+vi.mock('../features/auth', () => ({
+  useAuth: () => ({ user: { id: 'journal-route-test-user' } }),
+}))
+
 const uploadedMoment: PanoramaMoment = {
   id: 'route-balcony',
   blob: new Blob(['panorama'], { type: 'image/jpeg' }),

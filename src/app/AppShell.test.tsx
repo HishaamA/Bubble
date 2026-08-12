@@ -58,7 +58,7 @@ function RouteSwitcher() {
   const routes = [
     ['Moments', '/'],
     ['Journal', '/journal'],
-    ['Together', '/events'],
+    ['Capsule', '/capsule'],
     ['Profile', '/profile'],
     ['Panorama', '/memory/family-dinner'],
     ['Capture', '/capture?mode=manual'],
@@ -94,7 +94,7 @@ describe('AppShell', () => {
 
     for (const route of [
       'Journal',
-      'Together',
+      'Capsule',
       'Profile',
       'Panorama',
       'Capture',
@@ -119,7 +119,7 @@ describe('AppShell', () => {
   })
 
   it('hides the shortcut away from Memories', () => {
-    renderShell('/capsules', 'Capsules')
+    renderShell('/capsule', 'Capsule')
 
     expect(
       screen.queryByRole('button', { name: 'Upload a 360 photo now' }),

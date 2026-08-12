@@ -18,7 +18,7 @@ describe('AppTabBar', () => {
       within(navigation)
         .getAllByRole('link')
         .map((link) => link.textContent),
-    ).toEqual(['Moments', 'Journal', 'Together', 'Profile'])
+    ).toEqual(['Moments', 'Journal', 'Capsule', 'Profile'])
 
     expect(screen.getByRole('link', { name: 'Moments' })).toHaveAttribute(
       'href',
@@ -28,9 +28,9 @@ describe('AppTabBar', () => {
       'href',
       '/journal',
     )
-    expect(screen.getByRole('link', { name: 'Together' })).toHaveAttribute(
+    expect(screen.getByRole('link', { name: 'Capsule' })).toHaveAttribute(
       'href',
-      '/events',
+      '/capsule',
     )
     expect(screen.getByRole('link', { name: 'Profile' })).toHaveAttribute(
       'href',
@@ -105,8 +105,8 @@ describe('AppTabBar', () => {
     )
   })
 
-  it.each(['/events', '/capsules/family-trip'])(
-    'keeps Together active at %s',
+  it.each(['/capsule', '/capsule/family-trip'])(
+    'keeps Capsule active at %s',
     (path) => {
       render(
         <MemoryRouter initialEntries={[path]}>
@@ -114,7 +114,7 @@ describe('AppTabBar', () => {
         </MemoryRouter>,
       )
 
-      expect(screen.getByRole('link', { name: 'Together' })).toHaveAttribute(
+      expect(screen.getByRole('link', { name: 'Capsule' })).toHaveAttribute(
         'aria-current',
         'page',
       )

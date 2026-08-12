@@ -4,7 +4,6 @@ import {
   useRef,
   useState,
   type CSSProperties,
-  type ReactNode,
   type UIEvent,
 } from 'react'
 import { Link, useLocation } from 'react-router-dom'
@@ -15,6 +14,7 @@ import {
   startOfLocalDay,
   toLocalIsoDate,
 } from '../../lib/appDate'
+import { JournalEventsSection } from '../events'
 import type { PanoramaMoment } from '../memories/shared'
 import './JournalPage.css'
 
@@ -219,31 +219,6 @@ function createJournalWeek(
   })
 }
 
-function IconFrame({ children }: { children: ReactNode }) {
-  return (
-    <svg
-      aria-hidden="true"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.7"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-    >
-      {children}
-    </svg>
-  )
-}
-
-function SparkleIcon() {
-  return (
-    <IconFrame>
-      <path d="M8.2 3.7c.4 3 1.7 4.6 4.4 5.2-2.7.6-4 2.2-4.4 5.2-.5-3-1.8-4.6-4.5-5.2 2.7-.6 4-2.2 4.5-5.2Z" />
-      <path d="M16.8 12.2c.3 2.3 1.3 3.5 3.4 4-2.1.4-3.1 1.7-3.4 4-.4-2.3-1.4-3.6-3.5-4 2.1-.5 3.1-1.7 3.5-4Z" />
-    </IconFrame>
-  )
-}
-
 function getMemoryCountLabel(count: number) {
   return `${count} ${count === 1 ? 'memory' : 'memories'}`
 }
@@ -333,7 +308,6 @@ export function JournalPage({
   const pageRef = useRef<HTMLElement>(null)
   const [selectedDayKey, setSelectedDayKey] = useState(initialDayKey)
   const [scrollTop, setScrollTop] = useState(initialScrollTop)
-  const [showRecap, setShowRecap] = useState(false)
 
   const selectedDay =
     journalWeek.find(({ key }) => key === selectedDayKey) ?? todayJournalDay
@@ -342,7 +316,6 @@ export function JournalPage({
     .map((memoryId) => allJournalMemories.find(({ id }) => id === memoryId))
     .filter((memory): memory is JournalMemory => Boolean(memory))
   const memoryCount = getMemoryCountLabel(selectedMemories.length)
-  const recapPreviewMemory = selectedMemories[0] ?? journalMemories[0]
 
   useEffect(() => {
     if (!incomingContext) return
@@ -365,7 +338,6 @@ export function JournalPage({
 
   function selectDay(dayKey: string) {
     setSelectedDayKey(dayKey)
-    setShowRecap(false)
   }
 
   function rememberScroll(event: UIEvent<HTMLElement>) {
@@ -386,6 +358,8 @@ export function JournalPage({
           <p>Moments from your circle, kept day by day.</p>
         </div>
       </header>
+
+      <JournalEventsSection />
 
       <nav className="journal-week" aria-label="Journal week">
         <ol className="journal-week__days">
@@ -455,43 +429,6 @@ export function JournalPage({
           <p className="journal-day__empty" role="status">
             Moments from this day will appear here after they’re shared.
           </p>
-        ) : null}
-
-        {!isFutureDay && selectedMemories.length > 0 ? (
-          <div className="journal-recap">
-            <button
-              className="journal-recap__action"
-              type="button"
-              aria-expanded={showRecap}
-              aria-controls="journal-recap-preview"
-              onClick={() => setShowRecap((current) => !current)}
-            >
-              <span className="journal-recap__sparkles"><SparkleIcon /></span>
-              <span>
-                <strong>{showRecap ? 'Recap ready' : 'Create Recap'}</strong>
-                <small>{showRecap ? 'A little film of this family day' : 'See your memories come to life'}</small>
-              </span>
-              <span className="journal-recap__chevron" aria-hidden="true">{showRecap ? '−' : '›'}</span>
-            </button>
-
-            {showRecap ? (
-              <section
-                id="journal-recap-preview"
-                className="journal-recap__preview"
-                role="status"
-                aria-live="polite"
-              >
-                <div className="journal-recap__preview-image" aria-hidden="true">
-                  <JournalMemoryImage memory={recapPreviewMemory} />
-                </div>
-                <div>
-                  <p>Your family recap is ready</p>
-                  <strong>{selectedDay.fullDate}</strong>
-                  <span>{memoryCount} · Made from everyone’s point of view</span>
-                </div>
-              </section>
-            ) : null}
-          </div>
         ) : null}
       </section>
     </section>

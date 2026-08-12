@@ -28,6 +28,10 @@ Cover deterministic client logic, including:
 - upload state transitions, retry classification, and reconciliation decisions
 - media dimension, pixel-count, byte-size, and ratio validation
 - deterministic daily 360 window states and exact 2:1 derivative crop sizing
+- weekly Capsule window calculations, special-event opening validation, and
+  deterministic 0.2-second-per-photo recap plans
+- ordinary Capsule image acceptance, metadata-free derivative sizing, and
+  rejection of non-image or oversized input
 - cache bounds and protection of pending-upload files
 - hotspot coordinate bounds and scene mapping
 - reduced-motion and flat-viewer selection logic
@@ -40,7 +44,10 @@ Cover behavior at module boundaries:
 - viewer adapter mount/change/start/stop/resize/destroy lifecycle
 - no duplicated listeners or orientation subscriptions after remount
 - thumbnail-first feed behavior and authorized full-media loading
-- contribution, reaction, capsule, event, and Family Thread review flows
+- contribution, reaction, weekly/special Capsule, Journal event, and Family
+  Thread review flows
+- Capsule tab and legacy route behavior, ordinary-photo contribution,
+  server-locked recap controls, and downloadable recap generation
 - manual and scheduled 360 selection, preview, caption, local persistence, and
   capture-to-Memories routing
 - accessible names, focus order, keyboard behavior, and external hotspot list
@@ -53,10 +60,17 @@ Use distinct users and circles. Test both allowed and denied `select`, `insert`,
 - pending, rejected, expired, revoked, and removed membership states grant no content access
 - removal revokes access immediately
 - reveal rules cannot be bypassed through a direct API request
-- server time controls invite expiry, round close, event reminders, and capsule opening
-- capsule recipients gain access only after opening and non-recipients never do
+- server time controls invite expiry, round close, event reminders, and weekly
+  or special Capsule opening
+- approved members may read their own Capsule contributions before opening;
+  other members cannot read the rows or Storage objects until opening, and an
+  unrelated circle never gains access
+- one weekly Capsule exists per circle/week, special Capsules require a future
+  opening time, and finalization rejects late, malformed, noncanonical, or
+  cross-user contribution paths
 - ownership transfer and last-owner constraints preserve a valid circle
-- uniqueness rules prevent duplicate membership, contribution, reaction, recipient, and idempotency records
+- uniqueness rules prevent duplicate membership, round contribution, reaction,
+  weekly Capsule, and idempotency records
 - scheduled 360 finalization uses server time, canonical uploader paths, and a
   one-contribution-per-member/window constraint; manual uploads remain separate
 - a two-session invite rescan versus owner-approval race completes without a
@@ -86,6 +100,24 @@ For representative images at minimum, verify that:
 5. Interrupted TUS uploads resume from the correct offset.
 6. A non-member cannot fetch the object even with a known path.
 7. Revocation clears or makes inaccessible any affected local cached copy.
+
+### Capsule photo and recap gate
+
+For representative regular photos, additionally verify that:
+
+1. Capsule upload accepts portrait, landscape, square, and supported HEIC/JPEG
+   inputs without requiring 2:1 geometry, while rejecting video and invalid
+   image files.
+2. Uploaded image and thumbnail objects are fresh metadata-free derivatives;
+   the selected original and its path never leave the device.
+3. Before server unlock, another approved member cannot query the item row,
+   sign its Storage path, or infer more than the safe Capsule metadata and total
+   count.
+4. After unlock, both phones receive the same ordered photo set.
+5. The recap plan uses six frames per photo at 30 fps, so duration is exactly
+   `photo count × 0.2 seconds`.
+6. The installed app can render and save/share the recap, while an unsupported
+   browser reports an explicit fallback instead of claiming success.
 
 ## Upload recovery scenarios
 
@@ -122,7 +154,11 @@ Run the current supported Android and iOS targets on physical devices. Verify:
   obvious parallax tears
 - event reminders while the installed app is backgrounded and normally
   terminated, plus permission-denied, Android inexact-alarm, reboot, and cancel
-  cases; verify the browser copy never promises closed-tab delivery
+  cases; verify Journal owns the controls and browser copy never promises
+  closed-tab delivery
+- weekly and special Capsule ordinary-photo contribution on both phones;
+  confirm server-time unlock, cross-member reveal, 0.2-second-per-photo recap
+  playback, and native save/share behavior
 - Low-Data Mode behavior and bounded preloading
 
 ## Accessibility and resilience gate
@@ -162,7 +198,9 @@ Repeat the full flow enough times to reveal lifecycle and retry defects:
 4. Upload a sanitized panorama from Phone A and open it privately on Phone B.
 5. Use touch, optional motion, zoom, flat fallback, the chair voice message, and doorway scene.
 6. Interrupt an upload, restart, resume, and confirm there are no duplicates.
-7. Open a server-time Capsule and contribute to an Event Room.
+7. Add ordinary photos from both phones to a weekly Capsule and a named special
+   Capsule, wait for server unlock, render the 0.2-second-per-photo recap, and
+   save/share it. Create a family event and reminder from Journal.
 8. Create a text-only, source-linked Family Thread draft and explicitly approve or discard it.
 9. Verify generic push behavior, authorization re-check, membership removal, deletion, and cache cleanup.
 10. Complete the accessibility and weak-connectivity passes without a crash or manual backend repair.

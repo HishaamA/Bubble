@@ -8,11 +8,16 @@ sharing decisions remain active.
 
 ## Context
 
-Capsules are recipient- and server-time-locked collections intended to open in
-the future. They are not a camera or contribution entry point. The product also
-needs a lightweight shared ritual: once per day, the family receives one short,
-unexpected window in which each member may share one 360 panorama. A manual
-upload shortcut must remain available outside that window.
+Capsules are a separate ordinary-photo contribution space. Approved family
+members add still photos to one weekly Capsule or to a named special-event
+Capsule. Other members' contributions remain server-time locked until the
+Capsule opens, when the app can render a downloadable recap with each photo on
+screen for 0.2 seconds. Capsules never treat those regular photos as panoramas.
+
+The product also needs a lightweight immersive ritual: once per day, the family
+receives one short, unexpected window in which each member may share one 360
+panorama. A manual panorama upload shortcut must remain available outside that
+window.
 
 An ordinary single phone-camera frame does not create a complete stitched
 spherical image. Many phones can, however, stitch a wide horizontal sweep in
@@ -24,6 +29,16 @@ invented.
 ## Decision
 
 - Put 360 capture/import on Memories as a right-edge action, not under Capsules.
+- Give Capsule its own ordinary-photo picker and processing path. It accepts
+  regular still images without the panorama pipeline's 2:1 geometry rule,
+  re-encodes metadata-free image and thumbnail derivatives, and never presents
+  a regular photo as a 360 scene.
+- Create one server-time weekly Capsule per circle and support named
+  special-event Capsules with a future opening time. Until opening, each
+  contributor may read their own photos while other members see only the
+  Capsule metadata and total count.
+- Build the opened Capsule recap deterministically at 0.2 seconds per photo and
+  let the user save or share the resulting video from supported devices.
 - Offer separate phone-camera and photo-library affordances. Guide phone users
   to landscape orientation and the native Pano or Panorama mode before making a
   slow horizontal sweep.
@@ -49,6 +64,9 @@ invented.
 
 - True cross-device delivery depends on authentication, approved circle
   membership, Supabase configuration, and the migration being applied.
+- Capsule authorization and opening are server-authoritative. The local
+  IndexedDB Capsule store is an offline preview/cache, not a cross-device
+  permission boundary.
 - Abandoned immutable Storage objects need a later quota and cleanup worker.
 - PostgreSQL verifies reported dimensions and object existence but cannot decode
   JPEG pixels; a trusted media worker remains a production hardening step.

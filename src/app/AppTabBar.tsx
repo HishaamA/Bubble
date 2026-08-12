@@ -28,11 +28,11 @@ const tabs: Tab[] = [
       (pathname.startsWith('/memory/') && returnTo === '/journal'),
   },
   {
-    label: 'Together',
-    path: '/events',
-    icon: 'events',
+    label: 'Capsule',
+    path: '/capsule',
+    icon: 'capsules',
     isActive: (pathname) =>
-      pathname.startsWith('/events') || pathname.startsWith('/capsules'),
+      pathname === '/capsule' || pathname.startsWith('/capsule/'),
   },
   {
     label: 'Profile',

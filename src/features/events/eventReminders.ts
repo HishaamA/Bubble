@@ -295,7 +295,7 @@ function scheduleBrowserReminder(
     return {
       mode: 'in-app',
       message:
-        'Reminder saved in Together. This browser cannot deliver phone notifications.',
+        'Reminder saved in Journal. This browser cannot deliver phone notifications.',
     }
   }
 
@@ -304,14 +304,14 @@ function scheduleBrowserReminder(
     return {
       mode: 'in-app',
       message:
-        'Saved in Together. Allow notifications in browser settings for an alert while this tab stays open.',
+        'Saved in Journal. Allow notifications in browser settings for an alert while this tab stays open.',
     }
   }
 
   if (!Number.isFinite(delay) || delay <= 0) {
     return {
       mode: 'in-app',
-      message: 'Saved in Together. This event is too close for a one-hour alert.',
+      message: 'Saved in Journal. This event is too close for a one-hour alert.',
     }
   }
 
@@ -319,7 +319,7 @@ function scheduleBrowserReminder(
     return {
       mode: 'in-app',
       message:
-        'Saved in Together. A browser cannot deliver this after the tab closes; reopen it closer to the event.',
+        'Saved in Journal. A browser cannot deliver this after the tab closes; reopen it closer to the event.',
     }
   }
 
@@ -402,7 +402,7 @@ export async function enableEventReminder(
     if (!Number.isFinite(at) || at <= Date.now()) {
       return {
         mode: 'in-app',
-        message: 'Saved in Together. This event is too close for a one-hour alert.',
+        message: 'Saved in Journal. This event is too close for a one-hour alert.',
       }
     }
 
@@ -418,27 +418,27 @@ export async function enableEventReminder(
       return {
         mode: 'in-app',
         message:
-          'Saved in Together. Allow notifications in your phone Settings for a background alert.',
+          'Saved in Journal. Allow notifications in your phone Settings for a background alert.',
       }
     }
     if (permission === 'native-unavailable') {
       return {
         mode: 'in-app',
-        message: 'Saved in Together. Phone notifications are unavailable right now.',
+        message: 'Saved in Journal. Phone notifications are unavailable right now.',
       }
     }
     if (permission === 'browser-denied') {
       return {
         mode: 'in-app',
         message:
-          'Saved in Together. Allow notifications in browser settings for an alert while this tab stays open.',
+          'Saved in Journal. Allow notifications in browser settings for an alert while this tab stays open.',
       }
     }
     if (permission === 'browser-unavailable') {
       return {
         mode: 'in-app',
         message:
-          'Reminder saved in Together. This browser cannot deliver phone notifications.',
+          'Reminder saved in Journal. This browser cannot deliver phone notifications.',
       }
     }
     if (permission === 'browser-granted') {
@@ -466,7 +466,7 @@ export async function enableEventReminder(
       return {
         mode: 'in-app',
         message:
-          'Saved in Together. Phone scheduling failed and will retry when the app resumes.',
+          'Saved in Journal. Phone scheduling failed and will retry when the app resumes.',
       }
     }
   })

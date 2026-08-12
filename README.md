@@ -24,13 +24,22 @@ The first end-to-end proof is intentionally narrow:
    upload remains available from Memories.
 8. A validated, metadata-free 2:1 derivative can be shared privately with an
    approved Family Circle and appears as a new Memories bubble.
-9. The persistent right-edge **Upload 360 now** action is available from every
-   primary tab; Capsules is first and Memories is second in the bottom bar.
+9. **Upload 360 now** remains a Moments-only action. The separate Capsule tab
+   accepts ordinary photos, opens one family recap each week, and supports
+   named occasion Capsules without sending those images through the panorama
+   pipeline.
 
 The current web preview also keeps accepted uploads in IndexedDB so the full
 capture-to-viewer interaction works without backend credentials. Cross-device
 delivery requires configured Supabase credentials, signed-in approved circle
 members, and the included `360_moment_mvp` migration.
+
+Capsule contributions use the same account-scoped offline approach when the
+backend is unavailable. With the family Capsule migration applied, ordinary
+photos sync privately across approved family accounts, stay hidden from other
+members until the server-timed unlock, and can be exported as a rapid
+0.2-second-per-photo recap. iOS uses a native H.264 renderer and share sheet;
+compatible browsers use a feature-detected MediaRecorder fallback.
 
 Profile includes persistent Family Sync backed by Clerk identity and Supabase:
 circle creation, private one-use invite codes, join requests, owner approval,

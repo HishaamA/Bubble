@@ -8,7 +8,11 @@
 
 ### Client
 
-The Capacitor app owns interaction, local media processing, the persistent upload queue, recent-media caching, and the isolated panorama adapter. It authenticates as the current user with the public Supabase URL and publishable key. It never receives a secret key, service-role key, or provider credential.
+The Capacitor app owns interaction, local media processing, Capsule recap
+rendering, the persistent upload queue, recent-media caching, and the isolated
+panorama adapter. It authenticates as the current user with the public Supabase
+URL and publishable key. It never receives a secret key, service-role key, or
+provider credential.
 
 ### Supabase
 
@@ -51,6 +55,18 @@ scheduled or privileged work -> Edge Functions -> Postgres / providers
 - **VIEWER-01 — Adapter isolation:** The viewer accepts local scene data and emits events. It owns rendering, touch, zoom, orientation start/stop, resize, scene changes, and teardown only.
 - **VIEWER-02 — Offline dependency:** Bundle and pin Pannellum in the app. Do not load viewer code from a CDN.
 - **VIEWER-03 — Bounded tour:** The core flow supports one voice Echo Pin and one doorway to exactly one second panorama, with a flat fallback.
+- **CAPSULE-01 — Separate still-image path:** Capsule accepts ordinary still
+  photos, not panoramas. Re-encode image and thumbnail derivatives without
+  metadata, do not apply the 2:1 panorama rule, and keep selected originals on
+  the device.
+- **CAPSULE-02 — Server-authoritative reveal:** Create one weekly Capsule per
+  circle and allow named special-event Capsules. Before `opens_at`, an uploader
+  may read their own items but other members may read only safe Capsule metadata
+  and the total count. Postgres RLS and Storage policies enforce the reveal.
+- **CAPSULE-03 — Deterministic recap:** An opened Capsule recap shows each
+  ordered photo for 0.2 seconds. The client may render a downloadable video
+  natively or through a feature-detected browser fallback; it does not upload a
+  recap as a 360 Moment.
 
 ### Time, jobs, and reliability
 
@@ -64,6 +80,9 @@ scheduled or privileged work -> Edge Functions -> Postgres / providers
 ### Product truth and AI
 
 - **NOTIFY-01 — In-app source of truth:** Write the in-app notification first. Push contains no family text, media URL, caption, audio, invite secret, or other private content; opening it re-checks authorization.
+- **EVENT-01 — Journal owns plans:** Family event creation, RSVP, upcoming
+  plans, and reminder controls live in Journal. There is no separate Events tab;
+  legacy event routes redirect to Journal.
 - **AI-01 — Approved text only:** Re-read selected approved captions or explicitly approved text alternatives server-side. Never send an image or raw audio to the AI provider.
 - **AI-02 — Traceable draft:** Store source IDs with the draft so every sentence can be reviewed against selected source text.
 - **AI-03 — Human publication:** A draft can be edited, approved, discarded, or replaced manually. It is never published automatically, and AI failure never blocks the manual path.
@@ -80,11 +99,14 @@ scheduled or privileged work -> Edge Functions -> Postgres / providers
 - **Family:** `circles`, `circle_members`, `circle_invites`, `join_requests`
 - **Rounds:** `rounds`, `round_participants`, `contributions`, `reactions`
 - **Media:** `media`, `voice_notes`, `hotspots`, `upload_jobs`
-- **Capsules:** `capsules`, `capsule_recipients`, `capsule_items`
-- **Events:** `events`, `event_guestbook_entries`
+- **Capsules:** `family_capsules`, `family_capsule_items`
+- **Events:** `events`, `event_guestbook_entries`, `event_reminders`
 - **AI and operations:** `family_threads`, `family_thread_sources`, `notifications`, `scheduled_jobs`, `deletion_jobs`
 
-Required database guarantees include one membership per user/circle, one contribution per user/round, one reaction per user/contribution, one recipient row per user/capsule, bounded hotspot coordinates, and unique job idempotency keys.
+Required database guarantees include one membership per user/circle, one
+contribution per user/round, one reaction per user/contribution, one weekly
+Capsule per circle/week, canonical Capsule item paths, server-time Capsule
+reveal, bounded hotspot coordinates, and unique job idempotency keys.
 
 ## Primary data flows
 
@@ -106,6 +128,28 @@ Required database guarantees include one membership per user/circle, one contrib
 1. A server-side operation changes membership state.
 2. RLS and Storage authorization stop permitting access immediately.
 3. Retryable deletion/cleanup jobs remove server objects and local cache entries as appropriate.
+
+### Capsule contribution and recap
+
+1. The client accepts an ordinary still image and freshly encodes metadata-free
+   image and thumbnail derivatives without a panorama aspect-ratio requirement.
+2. The authenticated client uploads immutable, uploader-scoped private Storage
+   objects and finalizes one `family_capsule_items` row before `opens_at`.
+3. Before opening, RLS exposes an item only to its uploader; approved members
+   may see the Capsule metadata and total count.
+4. After the database clock reaches `opens_at`, approved circle members can
+   retrieve the ordered photos.
+5. The client renders the recap at six frames per photo at 30 fps (0.2 seconds
+   per photo) and offers the resulting video through the supported save/share
+   path.
+
+### Journal family plans
+
+1. Journal loads approved-circle events and renders the featured and upcoming
+   plan widgets before its memory calendar.
+2. A member creates an event or opts into a reminder from Journal.
+3. The installed app schedules the device reminder while the server-backed
+   reminder remains the durable cross-device preference.
 
 ### Family Thread
 

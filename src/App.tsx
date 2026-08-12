@@ -2,6 +2,7 @@ import type { ReactNode } from 'react'
 import { HashRouter, Navigate, Outlet, Route, Routes } from 'react-router-dom'
 import { AppShell } from './app/AppShell'
 import { ErrorBoundary } from './app/ErrorBoundary'
+import { LegacyRouteRedirect } from './app/LegacyRouteRedirect'
 import {
   CaptureRoute,
   JournalRoute,
@@ -15,7 +16,6 @@ import {
   RequireAuthentication,
   useAuth,
 } from './features/auth'
-import { EventsPage } from './features/events'
 import { EventReminderCoordinator } from './features/events/EventReminderCoordinator'
 import {
   FamilyMomentSyncProvider,
@@ -60,6 +60,19 @@ function OnboardingRoute() {
   return <OnboardingPage key={user?.id ?? 'signed-out'} />
 }
 
+function CapsuleRoute() {
+  const { user } = useAuth()
+  const { snapshot } = useFamilyOnboarding()
+  const familyId = snapshot?.kind === 'member'
+    ? snapshot.membership.familyId
+    : 'no-family'
+  return (
+    <CapsulesPage
+      cacheNamespace={memberCacheNamespace(user?.id ?? 'signed-out', familyId)}
+    />
+  )
+}
+
 function MemberApplication() {
   return (
     <AccountScopedData>
@@ -88,8 +101,26 @@ function App() {
                     <Route path="/memory/:memoryId" element={<PanoramaRoute />} />
                     <Route path="/capture" element={<CaptureRoute />} />
                     <Route path="/relay" element={<RelayPage />} />
-                    <Route path="/capsules" element={<CapsulesPage />} />
-                    <Route path="/events" element={<EventsPage />} />
+                    <Route path="/capsule/*" element={<CapsuleRoute />} />
+                    <Route
+                      path="/capsules/*"
+                      element={
+                        <LegacyRouteRedirect
+                          fromBase="/capsules"
+                          toBase="/capsule"
+                          preservePathSuffix
+                        />
+                      }
+                    />
+                    <Route
+                      path="/events/*"
+                      element={
+                        <LegacyRouteRedirect
+                          fromBase="/events"
+                          toBase="/journal"
+                        />
+                      }
+                    />
                     <Route path="/profile" element={<ProfilePage />} />
                     <Route path="*" element={<Navigate to="/" replace />} />
                   </Route>

@@ -93,13 +93,26 @@ loads thumbnails before full panoramas.
 
 **Gate:** Audio works Android-to-iPhone and iPhone-to-Android, the chair pin remains attached to the intended object, and the doorway opens the correct second view.
 
-## Phase 9 — One Capsule and one Event Room
+## Phase 9 — Family Capsules and Journal plans
 
-- Capsule: title, recipients, server opening time, selected panorama/voice/text items, locked state, and deletion.
-- Event: title, description, event time zone, countdown, one reminder, prompt, shared collection, and voice/text guestbook.
-- Reuse existing contribution, media, notification, audio, and permission layers.
+- Create one server-time weekly Capsule per circle. Approved members contribute
+  ordinary still photos through a metadata-stripping image path that is
+  separate from the 360 Moment pipeline.
+- Keep other members' Capsule photos locked until opening while preserving each
+  uploader's access to their own contribution and exposing only safe Capsule
+  metadata and the total count beforehand.
+- Render an opened Capsule as a downloadable recap with each photo shown for
+  exactly 0.2 seconds. Use the native video/share path where available and an
+  explicitly feature-detected browser fallback.
+- Support named special-event Capsules, such as a birthday or wedding, with a
+  future server opening time and the same regular-photo contribution flow.
+- Put family event creation, RSVP, upcoming plans, and reminder controls in
+  Journal before its memory calendar. Do not maintain a separate Events tab.
 
-**Gate:** Device-clock changes cannot open a capsule, non-recipients remain denied, event times display locally, and multiple authorized members contribute to an Event Room.
+**Gate:** Device-clock changes cannot open a Capsule, unrelated or unapproved
+members remain denied, other members cannot read a contribution before server
+unlock, regular photos never enter the panorama path, recap duration is exactly
+`photo count × 0.2 seconds`, and family events and reminders work from Journal.
 
 ## Phase 10 — Family Thread AI
 
@@ -126,7 +139,7 @@ loads thumbnails before full panoramas.
 - Tradition prompt library
 - Voice transcription and translation after explicit review
 - Elder Mode
-- Event Room-to-capsule conversion
+- Journal-event-to-Capsule linking
 
 ## Explicitly out of scope
 

@@ -20,10 +20,10 @@ const slides = [
     mark: '◎',
   },
   {
-    eyebrow: 'Together',
-    title: 'Plans, memories, and family—without the noise.',
+    eyebrow: 'Capsule',
+    title: 'A week of little moments, opened together.',
     description:
-      'Keep birthdays, gatherings, and the stories around them in one private place made only for your people.',
+      'Add everyday photos to your family Capsule. At week’s end, they unlock as a quick recap, with separate Capsules for the occasions you never want to forget.',
     mark: '∞',
   },
 ] as const

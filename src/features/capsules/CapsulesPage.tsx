@@ -1,162 +1,914 @@
-import { useState, type FormEvent } from 'react'
+import { App as CapacitorApp } from '@capacitor/app'
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ChangeEvent,
+  type FormEvent,
+} from 'react'
+import { createPortal } from 'react-dom'
+import { useAuth } from '../auth'
 import '../FeaturePages.css'
+import './CapsulesPage.css'
+import {
+  addLocalDays,
+  formatCapsuleCountdown,
+  getWeeklyCapsuleWindow,
+  isCapsuleUnlocked,
+  startOfCapsuleWeek,
+  toLocalDateInput,
+} from './capsuleDates'
+import {
+  capsuleRecapFileExtension,
+  renderBrowserCapsuleRecap,
+} from './recap/browserCapsuleRecap'
+import {
+  discardNativeCapsuleRecapArtifacts,
+  isNativeCapsuleRecapAvailable,
+  renderNativeCapsuleRecap,
+  shareNativeCapsuleRecap,
+  stageNativeCapsuleRecapImage,
+} from './recap/nativeCapsuleRecap'
+import { CAPSULE_RECAP_PHOTO_DURATION_MS } from './recap/recapPlan'
+import {
+  createDefaultCapsuleStore,
+  createMemoryCapsuleStore,
+} from './capsuleStore'
+import {
+  createFamilySpecialCapsule,
+  ensureFamilyWeeklyCapsule,
+  fetchFamilyCapsules,
+  subscribeToFamilyCapsules,
+  uploadFamilyCapsulePhoto,
+} from './capsuleService'
+import { processCapsuleImage } from './processCapsuleImage'
+import type {
+  CapsuleImageSource,
+  CapsulePhoto,
+  CapsuleStore,
+  FamilyCapsule,
+} from './types'
 
-type Capsule = {
-  id: string
-  title: string
-  recipient: string
-  owner: 'You' | 'Mum' | 'Hishaam'
-  opens: string
-  locked: boolean
+type CapsulesPageProps = {
+  now?: Date
+  store?: CapsuleStore
+  cacheNamespace?: string
 }
 
-const starterCapsules: Capsule[] = [
-  {
-    id: 'first-home',
-    title: 'For your first home',
-    recipient: 'Sara',
-    owner: 'You',
-    opens: '12 Mar 2027',
-    locked: true,
-  },
-  {
-    id: 'summer-letters',
-    title: 'Letters from this summer',
-    recipient: 'the family',
-    owner: 'Mum',
-    opens: '1 Sep 2026',
-    locked: true,
-  },
-  {
-    id: 'grandad-recipes',
-    title: 'Grandad’s recipe box',
-    recipient: 'everyone',
-    owner: 'Hishaam',
-    opens: 'Opened 14 Aug',
-    locked: false,
-  },
-]
+function createId(_prefix: string) {
+  if (typeof crypto !== 'undefined' && crypto.randomUUID) {
+    return crypto.randomUUID()
+  }
+  const bytes = new Uint8Array(16)
+  if (typeof crypto !== 'undefined' && crypto.getRandomValues) {
+    crypto.getRandomValues(bytes)
+  } else {
+    for (let index = 0; index < bytes.length; index += 1) {
+      bytes[index] = Math.floor(Math.random() * 256)
+    }
+  }
+  bytes[6] = (bytes[6] & 0x0f) | 0x40
+  bytes[8] = (bytes[8] & 0x3f) | 0x80
+  const hex = [...bytes].map((byte) => byte.toString(16).padStart(2, '0')).join('')
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`
+}
 
-function CapsuleLock({ locked }: { locked: boolean }) {
-  return (
-    <svg aria-hidden="true" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-      <rect x="5" y="10" width="14" height="10" rx="3" />
-      {locked ? <path d="M8 10V7a4 4 0 0 1 8 0v3" /> : <path d="M8 10V7a4 4 0 0 1 7-2.6" />}
-    </svg>
+function weeklyCapsuleId(weekStart: Date) {
+  return `weekly-${toLocalDateInput(weekStart)}`
+}
+
+function createCurrentWeeklyCapsule(
+  now: Date,
+  createdByName = 'You',
+): FamilyCapsule {
+  const window = getWeeklyCapsuleWindow(now)
+  return {
+    id: weeklyCapsuleId(window.weekStart),
+    kind: 'weekly',
+    title: 'This week',
+    weekStart: toLocalDateInput(window.weekStart),
+    createdAt: window.weekStart.toISOString(),
+    closesAt: window.closesAt.toISOString(),
+    opensAt: window.opensAt.toISOString(),
+    createdByName,
+    photos: [],
+    totalPhotoCount: 0,
+    familySynced: false,
+  }
+}
+
+function orderCapsules(capsules: FamilyCapsule[]) {
+  return [...capsules].sort((left, right) => {
+    if (left.kind !== right.kind) return left.kind === 'weekly' ? -1 : 1
+    return right.createdAt.localeCompare(left.createdAt)
+  })
+}
+
+function mergeCapsules(
+  localCapsules: FamilyCapsule[],
+  familyCapsules: FamilyCapsule[],
+) {
+  const consumedLocalIds = new Set<string>()
+  const mergedFamily = familyCapsules.map((familyCapsule) => {
+    const localCapsule = localCapsules.find((candidate) => (
+      candidate.id === familyCapsule.id || (
+        candidate.kind === 'weekly' &&
+        familyCapsule.kind === 'weekly' &&
+        candidate.weekStart === familyCapsule.weekStart
+      )
+    ))
+    if (!localCapsule) return familyCapsule
+    consumedLocalIds.add(localCapsule.id)
+    const familyPhotoIds = new Set(familyCapsule.photos.map(({ id }) => id))
+    const pendingPhotos = localCapsule.photos
+      .filter((photo) => photo.syncStatus === 'pending' && !familyPhotoIds.has(photo.id))
+      .map((photo) => ({ ...photo, capsuleId: familyCapsule.id }))
+    return {
+      ...familyCapsule,
+      photos: [...familyCapsule.photos, ...pendingPhotos]
+        .sort((left, right) => left.capturedAt.localeCompare(right.capturedAt)),
+      totalPhotoCount: (familyCapsule.totalPhotoCount ?? familyCapsule.photos.length) + pendingPhotos.length,
+    }
+  })
+
+  return orderCapsules([
+    ...mergedFamily,
+    ...localCapsules.filter(({ id }) => !consumedLocalIds.has(id) && !familyCapsules.some(({ id: familyId }) => familyId === id)),
+  ])
+}
+
+type CapsuleSyncResult = {
+  capsules: FamilyCapsule[]
+  authoritativeWeeklyId: string
+  familyAvailable: boolean
+}
+
+async function persistCapsuleSnapshot(
+  store: CapsuleStore,
+  previous: FamilyCapsule[],
+  next: FamilyCapsule[],
+) {
+  const nextIds = new Set(next.map(({ id }) => id))
+  await Promise.all([
+    ...previous
+      .filter(({ id }) => !nextIds.has(id))
+      .map(({ id }) => store.remove(id)),
+    ...next.map((capsule) => store.save(capsule)),
+  ])
+}
+
+async function synchronizeCapsuleSnapshot(input: {
+  store: CapsuleStore
+  displayName: string
+  now: Date
+  localWeekKey: string
+}): Promise<CapsuleSyncResult> {
+  const saved = await input.store.list()
+  let next = saved
+  let authoritativeWeeklyId = ''
+  let familyAvailable = false
+
+  try {
+    const authoritativeWeekly = await ensureFamilyWeeklyCapsule()
+    if (authoritativeWeekly) {
+      familyAvailable = true
+      authoritativeWeeklyId = authoritativeWeekly.id
+      next = mergeCapsules(saved, await fetchFamilyCapsules())
+
+      for (let index = 0; index < next.length; index += 1) {
+        const capsule = next[index]
+        if (capsule.kind !== 'special' || capsule.familySynced !== false) continue
+        try {
+          const familyId = await createFamilySpecialCapsule(
+            capsule.title,
+            capsule.opensAt,
+            capsule.id,
+          )
+          if (familyId) {
+            next[index] = {
+              ...capsule,
+              id: familyId,
+              familySynced: true,
+              photos: capsule.photos.map((photo) => ({
+                ...photo,
+                capsuleId: familyId,
+              })),
+            }
+          }
+        } catch {
+          // The durable local draft remains pending for the next refresh/resume.
+        }
+      }
+
+      for (let capsuleIndex = 0; capsuleIndex < next.length; capsuleIndex += 1) {
+        const capsule = next[capsuleIndex]
+        if (capsule.familySynced !== true || isCapsuleUnlocked(capsule.opensAt, input.now)) continue
+        const photos = [...capsule.photos]
+        for (let photoIndex = 0; photoIndex < photos.length; photoIndex += 1) {
+          const photo = photos[photoIndex]
+          if (
+            photo.syncStatus !== 'pending' ||
+            typeof photo.image === 'string' ||
+            typeof photo.thumbnail === 'string' ||
+            !photo.thumbnailWidth ||
+            !photo.thumbnailHeight
+          ) continue
+          try {
+            const familyPhotoId = await uploadFamilyCapsulePhoto({
+              capsuleId: capsule.id,
+              itemId: photo.id,
+              photo: {
+                image: photo.image,
+                thumbnail: photo.thumbnail,
+                width: photo.width,
+                height: photo.height,
+                thumbnailWidth: photo.thumbnailWidth,
+                thumbnailHeight: photo.thumbnailHeight,
+              },
+              caption: photo.caption,
+              capturedAt: photo.capturedAt,
+            })
+            if (familyPhotoId) {
+              photos[photoIndex] = {
+                ...photo,
+                id: familyPhotoId,
+                capsuleId: capsule.id,
+                syncStatus: 'synced',
+              }
+            }
+          } catch {
+            // Keep the re-encoded Blobs in IndexedDB and retry on refresh/resume.
+          }
+        }
+        next[capsuleIndex] = { ...capsule, photos }
+      }
+
+      try {
+        next = mergeCapsules(next, await fetchFamilyCapsules())
+      } catch {
+        // Successful writes remain in the local snapshot until URLs can refresh.
+      }
+    }
+  } catch {
+    // No remote family context: keep the account-and-family-scoped local queue.
+  }
+
+  if (!authoritativeWeeklyId) {
+    const localWeekly = next.find(
+      (capsule) => capsule.kind === 'weekly' && capsule.weekStart === input.localWeekKey,
+    )
+    if (localWeekly) {
+      authoritativeWeeklyId = localWeekly.id
+    } else {
+      const weekly = createCurrentWeeklyCapsule(
+        new Date(`${input.localWeekKey}T12:00:00`),
+        input.displayName,
+      )
+      next = [weekly, ...next]
+      authoritativeWeeklyId = weekly.id
+    }
+  }
+
+  next = orderCapsules(next)
+  await persistCapsuleSnapshot(input.store, saved, next)
+  return { capsules: next, authoritativeWeeklyId, familyAvailable }
+}
+
+function formatWeekRange(capsule: FamilyCapsule) {
+  const start = capsule.weekStart
+    ? new Date(`${capsule.weekStart}T12:00:00`)
+    : new Date(capsule.createdAt)
+  const end = addLocalDays(start, 6)
+  const startLabel = new Intl.DateTimeFormat('en', { month: 'short', day: 'numeric' }).format(start)
+  const endLabel = new Intl.DateTimeFormat('en', { month: 'short', day: 'numeric' }).format(end)
+  return `${startLabel}–${endLabel}`
+}
+
+function formatOpenDate(capsule: FamilyCapsule) {
+  return new Intl.DateTimeFormat('en', {
+    weekday: 'short',
+    month: 'short',
+    day: 'numeric',
+  }).format(new Date(capsule.opensAt))
+}
+
+function photoCountLabel(count: number) {
+  return `${count} ${count === 1 ? 'photo' : 'photos'}`
+}
+
+async function imageSourceToBlob(source: CapsuleImageSource) {
+  if (typeof source !== 'string') return source
+  const response = await fetch(source)
+  if (!response.ok) throw new Error('One of the Capsule photos could not be opened.')
+  return response.blob()
+}
+
+function blobToDataUrl(blob: Blob) {
+  return new Promise<string>((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = () => typeof reader.result === 'string'
+      ? resolve(reader.result)
+      : reject(new Error('One of the Capsule photos could not be prepared.'))
+    reader.onerror = () => reject(reader.error ?? new Error('One of the Capsule photos could not be prepared.'))
+    reader.readAsDataURL(blob)
+  })
+}
+
+function CapsulePhotoImage({
+  source,
+  alt,
+}: {
+  source: CapsuleImageSource
+  alt: string
+}) {
+  const src = useMemo(
+    () => typeof source === 'string' ? source : URL.createObjectURL(source),
+    [source],
   )
+
+  useEffect(() => {
+    if (typeof source !== 'string') return () => URL.revokeObjectURL(src)
+  }, [source, src])
+
+  return src ? <img src={src} alt={alt} draggable="false" /> : null
 }
 
-export function CapsulesPage() {
-  const [capsules, setCapsules] = useState(starterCapsules)
-  const [creating, setCreating] = useState(false)
-  const [title, setTitle] = useState('')
-  const [recipient, setRecipient] = useState('Sara')
-  const [openDate, setOpenDate] = useState('2027-01-01')
-  const [announcement, setAnnouncement] = useState('')
-
-  function createCapsule(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault()
-    const cleanTitle = title.trim()
-    if (!cleanTitle) return
-
-    const friendlyDate = new Intl.DateTimeFormat('en', {
-      day: 'numeric',
-      month: 'short',
-      year: 'numeric',
-      timeZone: 'UTC',
-    }).format(new Date(`${openDate}T00:00:00Z`))
-
-    setCapsules((current) => [{
-      id: `local-${current.length + 1}`,
-      title: cleanTitle,
-      recipient,
-      owner: 'You',
-      opens: friendlyDate,
-      locked: true,
-    }, ...current])
-    setCreating(false)
-    setTitle('')
-    setAnnouncement(`${cleanTitle} was added to your capsules.`)
+function PhotoStrip({ photos }: { photos: CapsulePhoto[] }) {
+  if (photos.length === 0) {
+    return (
+      <div className="capsule-photo-strip capsule-photo-strip--empty">
+        <span aria-hidden="true">＋</span>
+        <p>The first little moment can be yours.</p>
+      </div>
+    )
   }
 
   return (
+    <ul className="capsule-photo-strip" aria-label={`${photoCountLabel(photos.length)} in this Capsule`}>
+      {photos.slice(0, 6).map((photo) => (
+        <li key={photo.id}>
+          <CapsulePhotoImage
+            source={photo.thumbnail}
+            alt={`${photo.caption || 'Capsule photo'} from ${photo.contributorName}`}
+          />
+        </li>
+      ))}
+      {photos.length > 6 ? <li className="capsule-photo-strip__more">+{photos.length - 6}</li> : null}
+    </ul>
+  )
+}
+
+function CapsuleCard({
+  capsule,
+  now,
+  uploading,
+  onChoosePhoto,
+  onOpenRecap,
+}: {
+  capsule: FamilyCapsule
+  now: Date
+  uploading: boolean
+  onChoosePhoto: (event: ChangeEvent<HTMLInputElement>, capsule: FamilyCapsule) => void
+  onOpenRecap: (capsule: FamilyCapsule) => void
+}) {
+  const unlocked = isCapsuleUnlocked(capsule.opensAt, now)
+  const canContribute = !unlocked
+  const totalPhotoCount = capsule.totalPhotoCount ?? capsule.photos.length
+  const pendingPhotoCount = capsule.photos.filter(({ syncStatus }) => syncStatus === 'pending').length
+  const recapPhotoCount = capsule.photos.filter(({ syncStatus }) => syncStatus !== 'pending').length
+
+  return (
+    <article className="capsule-collection" data-kind={capsule.kind}>
+      <header className="capsule-collection__header">
+        <div>
+          <p>{capsule.kind === 'weekly' ? formatWeekRange(capsule) : 'Special Capsule'}</p>
+          <h2>{capsule.title}</h2>
+        </div>
+        <span className="capsule-collection__state" data-unlocked={unlocked ? 'true' : 'false'}>
+          {unlocked ? 'Open' : formatCapsuleCountdown(capsule.opensAt, now)}
+        </span>
+      </header>
+
+      <PhotoStrip photos={capsule.photos} />
+
+      <div className="capsule-collection__details">
+        <p>
+          <strong>{photoCountLabel(totalPhotoCount)}</strong>
+          <span>
+            {pendingPhotoCount > 0
+              ? `${photoCountLabel(pendingPhotoCount)} waiting to share`
+              : unlocked
+                ? 'ready for your family recap'
+                : `opens ${formatOpenDate(capsule)}`}
+          </span>
+        </p>
+        {canContribute ? (
+          <label className="capsule-add-photo">
+            <input
+              type="file"
+              accept="image/*"
+              disabled={uploading}
+              onChange={(event) => onChoosePhoto(event, capsule)}
+            />
+            <span aria-hidden="true">+</span>
+            {uploading ? 'Adding…' : 'Add photo'}
+          </label>
+        ) : (
+          <button
+            className="capsule-open-recap"
+            type="button"
+            disabled={recapPhotoCount === 0}
+            onClick={() => onOpenRecap(capsule)}
+          >
+            {recapPhotoCount > 0 ? 'Play recap' : 'No shared photos this time'}
+          </button>
+        )}
+      </div>
+    </article>
+  )
+}
+
+function RecapSheet({
+  capsule,
+  onClose,
+  onPreparePhotos,
+}: {
+  capsule: FamilyCapsule
+  onClose: () => void
+  onPreparePhotos: () => Promise<CapsulePhoto[]>
+}) {
+  const orderedPhotos = useMemo(
+    () => capsule.photos
+      .filter(({ syncStatus }) => syncStatus !== 'pending')
+      .sort((left, right) => left.capturedAt.localeCompare(right.capturedAt)),
+    [capsule.photos],
+  )
+  const [index, setIndex] = useState(0)
+  const [saving, setSaving] = useState(false)
+  const [status, setStatus] = useState('')
+
+  useEffect(() => {
+    if (orderedPhotos.length < 2) return
+    const timer = window.setInterval(
+      () => setIndex((current) => (current + 1) % orderedPhotos.length),
+      CAPSULE_RECAP_PHOTO_DURATION_MS,
+    )
+    return () => window.clearInterval(timer)
+  }, [orderedPhotos.length])
+
+  useEffect(() => {
+    function closeOnEscape(event: KeyboardEvent) {
+      if (event.key === 'Escape') onClose()
+    }
+    window.addEventListener('keydown', closeOnEscape)
+    return () => window.removeEventListener('keydown', closeOnEscape)
+  }, [onClose])
+
+  async function saveRecap() {
+    setSaving(true)
+    setStatus('Making your video…')
+    const nativeArtifacts: string[] = []
+    try {
+      const preparedPhotos = (await onPreparePhotos())
+        .filter(({ syncStatus }) => syncStatus !== 'pending')
+        .sort((left, right) => left.capturedAt.localeCompare(right.capturedAt))
+      if (preparedPhotos.length === 0) {
+        throw new Error('There are no shared photos available for this recap yet.')
+      }
+      if (isNativeCapsuleRecapAvailable()) {
+        const imagePaths: string[] = []
+        for (const photo of preparedPhotos) {
+          const blob = await imageSourceToBlob(photo.image)
+          const dataUrl = await blobToDataUrl(blob)
+          const staged = await stageNativeCapsuleRecapImage({ dataUrl })
+          imagePaths.push(staged.path)
+          nativeArtifacts.push(staged.path)
+        }
+        const video = await renderNativeCapsuleRecap({ imagePaths })
+        nativeArtifacts.push(video.fileUri)
+        const share = await shareNativeCapsuleRecap(video.fileUri)
+        setStatus(share.completed ? 'Your recap is ready to save or share.' : 'Your recap is ready whenever you are.')
+        return
+      }
+
+      const video = await renderBrowserCapsuleRecap(preparedPhotos)
+      const objectUrl = URL.createObjectURL(video)
+      const link = document.createElement('a')
+      link.href = objectUrl
+      link.download = `${capsule.title.replace(/[^a-z0-9]+/gi, '-').replace(/^-|-$/g, '').toLowerCase() || 'family-capsule'}.${capsuleRecapFileExtension(video)}`
+      link.click()
+      window.setTimeout(() => URL.revokeObjectURL(objectUrl), 1_000)
+      setStatus('Your recap is ready in Downloads.')
+    } catch (reason) {
+      setStatus(reason instanceof Error ? reason.message : 'The recap could not be saved.')
+    } finally {
+      await discardNativeCapsuleRecapArtifacts(nativeArtifacts).catch(() => undefined)
+      setSaving(false)
+    }
+  }
+
+  const activePhoto = orderedPhotos[index]
+  return createPortal(
+    <div className="capsule-recap-sheet" role="dialog" aria-modal="true" aria-labelledby="capsule-recap-title">
+      <section className="capsule-recap-sheet__panel">
+        <header>
+          <div>
+            <p>Family recap · 0.2 seconds each</p>
+            <h2 id="capsule-recap-title">{capsule.title}</h2>
+          </div>
+          <button type="button" aria-label="Close recap" onClick={onClose}>×</button>
+        </header>
+
+        <div className="capsule-recap-player" aria-live="off">
+          {activePhoto ? (
+            <CapsulePhotoImage source={activePhoto.image} alt={activePhoto.caption || `Photo from ${activePhoto.contributorName}`} />
+          ) : null}
+          <span>{activePhoto?.contributorName}</span>
+        </div>
+
+        <div className="capsule-recap-progress" aria-hidden="true">
+          {orderedPhotos.map((photo, photoIndex) => (
+            <span key={photo.id} data-active={photoIndex === index ? 'true' : 'false'} />
+          ))}
+        </div>
+
+        <button className="ks-primary-button capsule-recap-save" type="button" disabled={saving} onClick={() => void saveRecap()}>
+          {saving ? 'Making video…' : 'Save video'}
+        </button>
+        <p className="capsule-recap-sheet__status" role="status" aria-live="polite">{status}</p>
+      </section>
+    </div>,
+    document.body,
+  )
+}
+
+export function CapsulesPage({
+  now,
+  store: suppliedStore,
+  cacheNamespace,
+}: CapsulesPageProps = {}) {
+  const { user } = useAuth()
+  const subject = user?.id ?? 'signed-out'
+  const storeSubject = cacheNamespace ?? subject
+  const displayName = user?.displayName?.trim() || 'You'
+  const store = useMemo(
+    () => suppliedStore ?? (
+      typeof window === 'undefined'
+        ? createMemoryCapsuleStore()
+        : createDefaultCapsuleStore(storeSubject)
+    ),
+    [storeSubject, suppliedStore],
+  )
+  const [clock, setClock] = useState(() => new Date(now ?? Date.now()))
+  const [capsules, setCapsules] = useState<FamilyCapsule[]>([])
+  const [loading, setLoading] = useState(true)
+  const [creating, setCreating] = useState(false)
+  const [uploadingCapsuleId, setUploadingCapsuleId] = useState('')
+  const [announcement, setAnnouncement] = useState('')
+  const [activeRecapId, setActiveRecapId] = useState('')
+  const [authoritativeWeeklyId, setAuthoritativeWeeklyId] = useState('')
+  const weekKey = toLocalDateInput(startOfCapsuleWeek(clock))
+  const clockRef = useRef(clock)
+  const syncPromiseRef = useRef<Promise<CapsuleSyncResult> | null>(null)
+  const refreshedUnlocksRef = useRef(new Set<string>())
+
+  useEffect(() => {
+    clockRef.current = clock
+  }, [clock])
+
+  const refreshCapsules = useCallback(async () => {
+    if (syncPromiseRef.current) return syncPromiseRef.current
+    const request = synchronizeCapsuleSnapshot({
+      store,
+      displayName,
+      now: clockRef.current,
+      localWeekKey: weekKey,
+    }).then((result) => {
+      setCapsules(result.capsules)
+      setAuthoritativeWeeklyId(result.authoritativeWeeklyId)
+      return result
+    })
+    syncPromiseRef.current = request
+    try {
+      return await request
+    } finally {
+      if (syncPromiseRef.current === request) syncPromiseRef.current = null
+    }
+  }, [displayName, store, weekKey])
+
+  useEffect(() => {
+    if (now) return
+    const timer = window.setInterval(() => setClock(new Date()), 60_000)
+    return () => window.clearInterval(timer)
+  }, [now])
+
+  useEffect(() => {
+    let active = true
+    void refreshCapsules()
+      .then(() => {
+        if (active) setLoading(false)
+      })
+      .catch(() => {
+        if (!active) return
+        setAnnouncement('Capsules could not be opened on this device.')
+        setLoading(false)
+      })
+    return () => {
+      active = false
+    }
+  }, [refreshCapsules])
+
+  useEffect(() => {
+    let active = true
+    let unsubscribe: () => void = () => undefined
+    void subscribeToFamilyCapsules(() => {
+      if (active) void refreshCapsules()
+    })
+      .then((stop) => {
+        if (active) unsubscribe = stop
+        else stop()
+      })
+      .catch(() => undefined)
+    return () => {
+      active = false
+      unsubscribe()
+    }
+  }, [refreshCapsules, storeSubject])
+
+  useEffect(() => {
+    const newlyUnlocked = capsules.filter((capsule) => (
+      capsule.familySynced === true &&
+      isCapsuleUnlocked(capsule.opensAt, clock) &&
+      !refreshedUnlocksRef.current.has(`${capsule.id}:${capsule.opensAt}`)
+    ))
+    if (newlyUnlocked.length === 0) return
+    newlyUnlocked.forEach((capsule) => {
+      refreshedUnlocksRef.current.add(`${capsule.id}:${capsule.opensAt}`)
+    })
+    void refreshCapsules()
+  }, [capsules, clock, refreshCapsules])
+
+  useEffect(() => {
+    let active = true
+    let removeNativeListener: (() => Promise<void>) | undefined
+    const refreshOnResume = () => {
+      setClock(new Date(now ?? Date.now()))
+      void refreshCapsules()
+    }
+    const refreshWhenVisible = () => {
+      if (document.visibilityState === 'visible') refreshOnResume()
+    }
+    window.addEventListener('online', refreshOnResume)
+    document.addEventListener('visibilitychange', refreshWhenVisible)
+    void CapacitorApp.addListener('appStateChange', ({ isActive }) => {
+      if (active && isActive) refreshOnResume()
+    })
+      .then((handle) => {
+        if (active) removeNativeListener = () => handle.remove()
+        else void handle.remove()
+      })
+      .catch(() => undefined)
+    return () => {
+      active = false
+      window.removeEventListener('online', refreshOnResume)
+      document.removeEventListener('visibilitychange', refreshWhenVisible)
+      void removeNativeListener?.()
+    }
+  }, [now, refreshCapsules])
+
+  async function saveCapsule(next: FamilyCapsule) {
+    setCapsules((current) => orderCapsules(current.map((capsule) => capsule.id === next.id ? next : capsule)))
+    await store.save(next)
+  }
+
+  async function addPhoto(event: ChangeEvent<HTMLInputElement>, capsule: FamilyCapsule) {
+    const input = event.currentTarget
+    const file = input.files?.[0]
+    input.value = ''
+    if (!file) return
+    if (isCapsuleUnlocked(capsule.opensAt, clock)) {
+      setAnnouncement('This Capsule is already open, so it can no longer receive photos.')
+      return
+    }
+
+    setUploadingCapsuleId(capsule.id)
+    setAnnouncement('Preparing your photo…')
+    try {
+      const processed = await processCapsuleImage(file)
+      const latestCapsule = capsules.find(({ id }) => id === capsule.id) ?? capsule
+      const capturedAt = new Date().toISOString()
+      const caption = file.name.replace(/\.[^.]+$/, '').replace(/[-_]+/g, ' ').trim()
+      const localPhotoId = createId('photo')
+      const photo: CapsulePhoto = {
+        id: localPhotoId,
+        capsuleId: capsule.id,
+        image: processed.image,
+        thumbnail: processed.thumbnail,
+        width: processed.width,
+        height: processed.height,
+        thumbnailWidth: processed.thumbnailWidth,
+        thumbnailHeight: processed.thumbnailHeight,
+        caption,
+        capturedAt,
+        contributorName: displayName,
+        ownedByCurrentUser: true,
+        syncStatus: 'pending',
+      }
+      await saveCapsule({
+        ...latestCapsule,
+        photos: [...latestCapsule.photos, photo],
+        totalPhotoCount: (latestCapsule.totalPhotoCount ?? latestCapsule.photos.length) + 1,
+      })
+      const refreshed = await refreshCapsules()
+      const synced = refreshed.capsules.some((candidate) => (
+        candidate.photos.some((candidatePhoto) => (
+          candidatePhoto.id === localPhotoId && candidatePhoto.syncStatus === 'synced'
+        ))
+      ))
+      setAnnouncement(
+        synced
+          ? `${file.name} was shared with your family in ${capsule.title}.`
+          : `${file.name} is saved on this device and waiting to share with your family.`,
+      )
+    } catch (reason) {
+      setAnnouncement(reason instanceof Error ? reason.message : 'That photo could not be added.')
+    } finally {
+      setUploadingCapsuleId('')
+    }
+  }
+
+  async function createSpecialCapsule(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    const form = new FormData(event.currentTarget)
+    const title = String(form.get('title') ?? '').trim()
+    const openDate = String(form.get('openDate') ?? '')
+    if (!title || !openDate) return
+
+    const opensAt = new Date(`${openDate}T20:00:00`)
+    if (Number.isNaN(opensAt.getTime())) {
+      setAnnouncement('Choose a valid day for this Capsule to open.')
+      return
+    }
+    const localCapsuleId = createId('capsule')
+    const special: FamilyCapsule = {
+      id: localCapsuleId,
+      kind: 'special',
+      title,
+      createdAt: new Date().toISOString(),
+      closesAt: opensAt.toISOString(),
+      opensAt: opensAt.toISOString(),
+      createdByName: displayName,
+      photos: [],
+      totalPhotoCount: 0,
+      familySynced: false,
+    }
+    setCapsules((current) => orderCapsules([...current, special]))
+    try {
+      await store.save(special)
+      const refreshed = await refreshCapsules()
+      const synced = refreshed.capsules.some((capsule) => (
+        capsule.id === localCapsuleId && capsule.familySynced === true
+      ))
+      setAnnouncement(
+        synced
+          ? `${title} is ready for family photos.`
+          : `${title} is saved on this device and waiting to share with your family.`,
+      )
+    } catch {
+      setAnnouncement('This Capsule could not be saved on this device.')
+    } finally {
+      setCreating(false)
+    }
+  }
+
+  const activeRecap = capsules.find(({ id }) => id === activeRecapId) ?? null
+  const currentWeekly = capsules.find(({ id }) => id === authoritativeWeeklyId) ??
+    capsules.find((capsule) => capsule.kind === 'weekly' && capsule.weekStart === weekKey)
+  const previousWeekly = capsules.filter(
+    (capsule) => capsule.kind === 'weekly' && capsule.id !== currentWeekly?.id,
+  )
+  const specialCapsules = capsules.filter((capsule) => capsule.kind === 'special')
+
+  return (
     <section className="ks-feature capsules-page" aria-labelledby="capsules-title">
-      <header className="ks-feature__header">
+      <header className="ks-feature__header capsule-page-header">
         <div className="ks-feature__header-copy">
-          <h1 id="capsules-title">Capsules</h1>
+          <p className="capsule-page-header__eyebrow">Our family</p>
+          <h1 id="capsules-title">Capsule</h1>
+          <p>Small pieces of the week, opened together.</p>
         </div>
         <button
           className="ks-feature__header-action"
           type="button"
-          aria-label={creating ? 'Close new capsule form' : 'Create a capsule'}
+          aria-label={creating ? 'Close special Capsule form' : 'Create a special Capsule'}
           aria-expanded={creating}
           onClick={() => setCreating((value) => !value)}
         >
-          <svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round">
-            {creating ? <path d="m6 6 12 12M18 6 6 18" /> : <path d="M12 5v14M5 12h14" />}
-          </svg>
+          {creating ? '×' : '+'}
         </button>
       </header>
 
-      <p className="screen-reader-only" aria-live="polite">{announcement}</p>
+      <p className="capsule-page__announcement" role="status" aria-live="polite">{announcement}</p>
 
       {creating ? (
-        <form className="ks-card ks-card--accent capsule-create" onSubmit={createCapsule}>
-          <div className="capsule-create__heading">
-            <h2>New capsule</h2>
-            <button type="button" onClick={() => setCreating(false)}>Done</button>
+        <form className="capsule-special-form" onSubmit={(event) => void createSpecialCapsule(event)}>
+          <div>
+            <p>Special Capsule</p>
+            <h2>Keep one occasion together</h2>
           </div>
           <label className="ks-field">
-            <span>Capsule name</span>
-            <input
-              autoFocus
-              value={title}
-              maxLength={48}
-              placeholder="A message for graduation"
-              onChange={(event) => setTitle(event.target.value)}
-            />
+            <span>Name</span>
+            <input name="title" autoFocus maxLength={64} placeholder="Grandpa’s 60th" required />
           </label>
-          <div className="capsule-create__row">
-            <label className="ks-field">
-              <span>For</span>
-              <select value={recipient} onChange={(event) => setRecipient(event.target.value)}>
-                <option>Sara</option>
-                <option>Hishaam</option>
-                <option value="the family">The family</option>
-              </select>
-            </label>
-            <label className="ks-field">
-              <span>Open on</span>
-              <input type="date" value={openDate} onChange={(event) => setOpenDate(event.target.value)} />
-            </label>
-          </div>
-          <button className="ks-primary-button" type="submit" disabled={!title.trim()}>
-            Create capsule
-          </button>
+          <label className="ks-field">
+            <span>Open after</span>
+            <input name="openDate" type="date" min={toLocalDateInput(addLocalDays(clock, 1))} defaultValue={toLocalDateInput(addLocalDays(clock, 7))} required />
+          </label>
+          <p>Everyone can add ordinary photos until 8:00 PM on this day.</p>
+          <button className="ks-primary-button" type="submit">Create Capsule</button>
         </form>
       ) : null}
 
-      <section className="ks-section" aria-labelledby="capsule-list-title">
-        <div className="ks-section__heading">
-          <h2 id="capsule-list-title">Saved for later</h2>
-        </div>
+      {loading ? <p className="capsule-page__loading">Opening your family Capsule…</p> : null}
 
-        <div className="ks-stack">
-          {capsules.map((capsule) => (
-            <article
-              key={capsule.id}
-              className="ks-card capsule-card"
-            >
-              <span className="capsule-card__lock"><CapsuleLock locked={capsule.locked} /></span>
-              <div className="capsule-card__copy">
-                <h3>{capsule.title}</h3>
-                <p>For {capsule.recipient} · from {capsule.owner === 'You' ? 'you' : capsule.owner}</p>
-              </div>
-              <span className="capsule-card__date">{capsule.locked ? `Opens ${capsule.opens}` : capsule.opens}</span>
-            </article>
-          ))}
+      {currentWeekly ? (
+        <section className="capsule-page__section" aria-labelledby="weekly-capsule-title">
+          <div className="capsule-section-heading">
+            <div>
+              <p>Weekly Capsule</p>
+              <h2 id="weekly-capsule-title">Right now</h2>
+            </div>
+            <span>Photos only · not 360°</span>
+          </div>
+          <CapsuleCard
+            capsule={currentWeekly}
+            now={clock}
+            uploading={uploadingCapsuleId === currentWeekly.id}
+            onChoosePhoto={addPhoto}
+            onOpenRecap={({ id }) => setActiveRecapId(id)}
+          />
+        </section>
+      ) : null}
+
+      <section className="capsule-page__section" aria-labelledby="special-capsules-title">
+        <div className="capsule-section-heading">
+          <div>
+            <p>Birthdays, weddings, reunions</p>
+            <h2 id="special-capsules-title">Special Capsules</h2>
+          </div>
+          <button type="button" onClick={() => setCreating(true)}>New</button>
         </div>
+        {specialCapsules.length > 0 ? specialCapsules.map((capsule) => (
+          <CapsuleCard
+            key={capsule.id}
+            capsule={capsule}
+            now={clock}
+            uploading={uploadingCapsuleId === capsule.id}
+            onChoosePhoto={addPhoto}
+            onOpenRecap={({ id }) => setActiveRecapId(id)}
+          />
+        )) : (
+          <button className="capsule-special-empty" type="button" onClick={() => setCreating(true)}>
+            <span aria-hidden="true">＋</span>
+            <strong>Make a Capsule for the next big day</strong>
+            <small>Grandpa’s 60th, Lea’s wedding, or anything your family calls special.</small>
+          </button>
+        )}
       </section>
+
+      {previousWeekly.length > 0 ? (
+        <section className="capsule-page__section" aria-labelledby="past-capsules-title">
+          <div className="capsule-section-heading">
+            <div>
+              <p>Opened together</p>
+              <h2 id="past-capsules-title">Past weeks</h2>
+            </div>
+          </div>
+          {previousWeekly.map((capsule) => (
+            <CapsuleCard
+              key={capsule.id}
+              capsule={capsule}
+              now={clock}
+              uploading={false}
+              onChoosePhoto={addPhoto}
+              onOpenRecap={({ id }) => setActiveRecapId(id)}
+            />
+          ))}
+        </section>
+      ) : null}
+
+      {activeRecap ? (
+        <RecapSheet
+          capsule={activeRecap}
+          onClose={() => setActiveRecapId('')}
+          onPreparePhotos={async () => {
+            const refreshed = await refreshCapsules()
+            return refreshed.capsules.find(({ id }) => id === activeRecap.id)?.photos ?? []
+          }}
+        />
+      ) : null}
     </section>
   )
 }

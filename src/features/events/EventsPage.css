@@ -12,6 +12,76 @@
     );
 }
 
+.journal-events {
+  display: grid;
+  padding: 0.2rem 0 1.35rem;
+  gap: 0.75rem;
+}
+
+.journal-events__heading {
+  display: flex;
+  padding: 0 0.12rem;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.journal-events__heading h2,
+.journal-events__heading p {
+  margin: 0;
+}
+
+.journal-events__heading p {
+  margin-bottom: 0.22rem;
+  color: rgba(237, 187, 132, 0.74);
+  font-size: 0.6rem;
+  font-weight: 680;
+  letter-spacing: 0.075em;
+  text-transform: uppercase;
+}
+
+.journal-events__heading h2 {
+  color: rgba(255, 255, 255, 0.92);
+  font-size: 1rem;
+  font-weight: 640;
+  letter-spacing: -0.025em;
+}
+
+.journal-events .event-hero__body h3 {
+  margin: 0;
+  font-size: 1.65rem;
+  font-weight: 620;
+  letter-spacing: -0.045em;
+}
+
+.journal-events__upcoming {
+  margin-top: 0.45rem;
+}
+
+.journal-events .ks-section__heading h3 {
+  margin: 0;
+  color: rgba(255, 255, 255, 0.92);
+  font-size: 0.92rem;
+  font-weight: 640;
+  letter-spacing: -0.02em;
+}
+
+.journal-events .event-list-item h4,
+.journal-events .event-list-item p {
+  margin: 0;
+}
+
+.journal-events .event-list-item h4 {
+  color: rgba(255, 255, 255, 0.83);
+  font-size: 0.77rem;
+}
+
+.journal-events .event-list-item p {
+  margin-top: 0.2rem;
+  color: rgba(255, 255, 255, 0.4);
+  font-size: 0.63rem;
+}
+
 .events-header-action {
   display: inline-flex;
   max-width: 8.5rem;

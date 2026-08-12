@@ -15,12 +15,13 @@ vi.mock('../auth', () => ({
   useAuth: () => ({ user: { id: 'user_test' } }),
 }))
 
-import { EventsPage, eventStorageKey } from './EventsPage'
+import { JournalEventsSection } from './JournalEventsSection'
+import { eventStorageKey } from './eventStorage'
 
-function renderEventsPage() {
+function renderJournalEventsSection() {
   return render(
     <MemoryRouter>
-      <EventsPage />
+      <JournalEventsSection />
     </MemoryRouter>,
   )
 }
@@ -41,37 +42,28 @@ beforeEach(() => {
   eventServiceMocks.syncEventReminder.mockResolvedValue(false)
 })
 
-describe('EventsPage', () => {
-  it('updates RSVP and guestbook state locally', async () => {
+describe('JournalEventsSection', () => {
+  it('updates the featured family event RSVP locally', async () => {
     const user = userEvent.setup()
-    renderEventsPage()
+    renderJournalEventsSection()
 
     const rsvp = screen.getByRole('button', { name: 'I’m going' })
     await user.click(rsvp)
     expect(screen.getByRole('button', { name: '✓ Going' })).toHaveAttribute('aria-pressed', 'true')
-
-    await user.type(screen.getByRole('textbox', { name: /add a note/i }), 'Save me a seat!')
-    await user.click(screen.getByRole('button', { name: 'Add guestbook note' }))
-
-    expect(screen.getByText('Save me a seat!')).toBeInTheDocument()
-    expect(screen.getByRole('heading', { name: 'Dinner notes' })).toBeInTheDocument()
-    expect(screen.queryByText(/prototype/i)).not.toBeInTheDocument()
   })
 
-  it('brings family plans and capsules together', () => {
-    renderEventsPage()
+  it('shows family plans without the old capsule previews', () => {
+    renderJournalEventsSection()
 
-    expect(screen.getByRole('heading', { name: 'Together' })).toBeInTheDocument()
-    expect(screen.getByRole('heading', { name: 'Saved for later' })).toBeInTheDocument()
-    expect(screen.getByRole('heading', { name: 'Letters from this summer' })).toBeInTheDocument()
-    expect(screen.getByRole('heading', { name: 'For your first home' })).toBeInTheDocument()
-    expect(screen.getByRole('heading', { name: 'Grandad’s recipe box' })).toBeInTheDocument()
-    expect(screen.getByRole('link', { name: 'See all capsules' })).toHaveAttribute('href', '/capsules')
+    expect(screen.getByRole('heading', { name: 'What’s ahead' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'Family dinner' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'Coming up' })).toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: 'Saved for later' })).not.toBeInTheDocument()
   })
 
   it('creates and saves a family event from the add event sheet', async () => {
     const user = userEvent.setup()
-    renderEventsPage()
+    renderJournalEventsSection()
 
     await user.click(screen.getByRole('button', { name: 'Add event' }))
     expect(screen.getByRole('dialog', { name: 'Add a family event' })).toBeInTheDocument()
@@ -80,7 +72,7 @@ describe('EventsPage', () => {
     await user.type(screen.getByLabelText('Date'), '2099-12-20')
     await user.type(screen.getByLabelText('Time'), '16:30')
     await user.type(screen.getByLabelText('Where?'), 'Creek Park')
-    await user.click(screen.getByRole('button', { name: 'Add to Together' }))
+    await user.click(screen.getByRole('button', { name: 'Add to Journal' }))
 
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
     expect(screen.getByRole('heading', { name: 'Cousins picnic' })).toBeInTheDocument()
@@ -103,7 +95,7 @@ describe('EventsPage', () => {
       requestPermission,
     })
     const user = userEvent.setup()
-    renderEventsPage()
+    renderJournalEventsSection()
 
     expect(requestPermission).not.toHaveBeenCalled()
     await user.click(screen.getByRole('button', { name: 'Remind me about Beach breakfast' }))
@@ -151,7 +143,7 @@ describe('EventsPage', () => {
       },
     )
 
-    renderEventsPage()
+    renderJournalEventsSection()
     expect(
       await screen.findByRole('heading', { name: 'Family hike' }),
     ).toBeInTheDocument()
