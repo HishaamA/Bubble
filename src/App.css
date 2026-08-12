@@ -23,10 +23,11 @@
     calc(var(--native-safe-area-bottom, 0px) + 0.45rem)
   );
   position: relative;
+  top: var(--app-visual-viewport-offset-top, 0px);
   width: min(100%, 31.25rem);
   max-width: 100%;
   height: 100svh;
-  height: 100dvh;
+  height: var(--app-visual-viewport-height, 100dvh);
   margin: 0 auto;
   overflow: hidden;
   isolation: isolate;
@@ -1125,7 +1126,7 @@
 }
 
 @media (min-width: 42rem) and (min-height: 46rem) {
-  .app-viewport {
+  .app-viewport:not([data-keyboard-open='true']) {
     height: min(94svh, 58rem);
     height: min(94dvh, 58rem);
     margin-top: 3svh;

@@ -181,6 +181,7 @@
 
 .ks-field {
   display: grid;
+  min-width: 0;
   gap: 0.4rem;
 }
 
@@ -194,6 +195,8 @@
 .ks-field textarea,
 .ks-field select {
   width: 100%;
+  min-width: 0;
+  max-width: 100%;
   min-height: 2.85rem;
   padding: 0.72rem 0.82rem;
   border: 1px solid rgba(255, 255, 255, 0.11);

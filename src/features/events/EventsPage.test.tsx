@@ -58,7 +58,42 @@ describe('JournalEventsSection', () => {
     expect(screen.getByRole('heading', { name: 'What’s ahead' })).toBeInTheDocument()
     expect(screen.getByRole('heading', { name: 'Family dinner' })).toBeInTheDocument()
     expect(screen.getByRole('heading', { name: 'Coming up' })).toBeInTheDocument()
+    expect(screen.getByText('3 family plans')).toBeInTheDocument()
     expect(screen.queryByRole('heading', { name: 'Saved for later' })).not.toBeInTheDocument()
+  })
+
+  it('keeps only the next plan visible by default and expands accessibly', async () => {
+    const user = userEvent.setup()
+    const { container } = renderJournalEventsSection()
+
+    const expand = screen.getByRole('button', {
+      name: 'Show all 3 upcoming family events',
+    })
+    const controlledListId = expand.getAttribute('aria-controls')
+
+    expect(expand).toHaveAttribute('aria-expanded', 'false')
+    expect(controlledListId).toBeTruthy()
+    expect(document.getElementById(controlledListId ?? '')).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'Beach breakfast' })).toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: 'Sara’s graduation' })).not.toBeInTheDocument()
+    expect(container.querySelectorAll('.journal-events__upcoming-list article')).toHaveLength(1)
+
+    await user.click(expand)
+
+    const collapse = screen.getByRole('button', {
+      name: 'Show only the next upcoming family event',
+    })
+    expect(collapse).toHaveAttribute('aria-expanded', 'true')
+    expect(screen.getByRole('heading', { name: 'Sara’s graduation' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'Grandad’s story night' })).toBeInTheDocument()
+    expect(container.querySelectorAll('.journal-events__upcoming-list article')).toHaveLength(3)
+
+    await user.click(collapse)
+
+    expect(screen.getByRole('button', {
+      name: 'Show all 3 upcoming family events',
+    })).toHaveAttribute('aria-expanded', 'false')
+    expect(container.querySelectorAll('.journal-events__upcoming-list article')).toHaveLength(1)
   })
 
   it('creates and saves a family event from the add event sheet', async () => {
@@ -114,6 +149,7 @@ describe('JournalEventsSection', () => {
   })
 
   it('loads shared family events and refreshes them after a Realtime change', async () => {
+    const user = userEvent.setup()
     const sharedEvents = [
       {
         id: 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeee1',
@@ -144,6 +180,11 @@ describe('JournalEventsSection', () => {
     )
 
     renderJournalEventsSection()
+    await user.click(
+      screen.getByRole('button', {
+        name: /show all \d+ upcoming family events/i,
+      }),
+    )
     expect(
       await screen.findByRole('heading', { name: 'Family hike' }),
     ).toBeInTheDocument()

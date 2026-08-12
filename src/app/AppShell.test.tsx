@@ -1,6 +1,6 @@
 import { Capacitor } from '@capacitor/core'
 import type { ReactNode } from 'react'
-import { render, screen } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter, useLocation, useNavigate } from 'react-router-dom'
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -10,6 +10,12 @@ import {
   type AuthStatus,
 } from '../features/auth/authContext'
 import { AppShell } from './AppShell'
+
+const originalVisualViewport = Object.getOwnPropertyDescriptor(
+  window,
+  'visualViewport',
+)
+const originalInnerHeight = Object.getOwnPropertyDescriptor(window, 'innerHeight')
 
 const signedInUser = {
   id: 'user-1',
@@ -70,6 +76,7 @@ function RouteSwitcher() {
         {location.pathname}
         {location.search}
       </output>
+      <input aria-label="Draft title" />
       {routes.map(([label, path]) => (
         <button key={path} type="button" onClick={() => navigate(path)}>
           {label}
@@ -81,6 +88,16 @@ function RouteSwitcher() {
 
 afterEach(() => {
   vi.restoreAllMocks()
+  if (originalVisualViewport) {
+    Object.defineProperty(window, 'visualViewport', originalVisualViewport)
+  } else {
+    Reflect.deleteProperty(window, 'visualViewport')
+  }
+  if (originalInnerHeight) {
+    Object.defineProperty(window, 'innerHeight', originalInnerHeight)
+  } else {
+    Reflect.deleteProperty(window, 'innerHeight')
+  }
 })
 
 describe('AppShell', () => {
@@ -105,6 +122,47 @@ describe('AppShell', () => {
     }
 
     expect(screen.getByLabelText('Current route')).toHaveTextContent('/')
+  })
+
+  it('uses the visual viewport while the iPhone keyboard is open and restores it', () => {
+    Object.defineProperty(window, 'innerHeight', {
+      configurable: true,
+      value: 844,
+    })
+    const visualViewport = Object.assign(new EventTarget(), {
+      height: 402,
+      offsetTop: 0,
+      scale: 1,
+    }) as unknown as VisualViewport
+    Object.defineProperty(window, 'visualViewport', {
+      configurable: true,
+      value: visualViewport,
+    })
+
+    const { container } = renderShell('/capsule', <RouteSwitcher />)
+    const shell = container.querySelector<HTMLElement>('.app-viewport')
+    expect(shell).toHaveStyle('--app-visual-viewport-height: 402px')
+    expect(shell).toHaveAttribute('data-keyboard-open', 'true')
+
+    Object.assign(visualViewport, { height: 844 })
+    visualViewport.dispatchEvent(new Event('resize'))
+    expect(shell).toHaveStyle('--app-visual-viewport-height: 844px')
+    expect(shell).toHaveAttribute('data-keyboard-open', 'false')
+  })
+
+  it('dismisses a focused field when switching routes', async () => {
+    const { container } = renderShell('/capsule', <RouteSwitcher />)
+    const input = screen.getByRole('textbox', { name: 'Draft title' })
+    input.focus()
+    expect(document.activeElement).toBe(input)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Profile' }))
+
+    await waitFor(() => expect(document.activeElement).not.toBe(input))
+    expect(container.querySelector('.app-viewport')).toHaveAttribute(
+      'data-keyboard-open',
+      'false',
+    )
   })
 
   it('makes the 360 upload entry point available from Memories', async () => {

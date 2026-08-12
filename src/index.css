@@ -52,6 +52,21 @@ a:focus-visible {
   outline-offset: 3px;
 }
 
+/*
+ * Mobile Safari zooms the whole page when a focused text control renders below
+ * 16px. KinSphere keeps browser zoom available for accessibility; only the
+ * control text is raised to the non-auto-zoom threshold on touch devices.
+ */
+@media (hover: none) and (pointer: coarse) {
+  :is(
+    input:not([type='checkbox']):not([type='radio']):not([type='range']):not([type='file']),
+    textarea,
+    select
+  ) {
+    font-size: 16px !important;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,

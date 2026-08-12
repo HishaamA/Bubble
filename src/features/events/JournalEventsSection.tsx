@@ -1,6 +1,7 @@
 import {
   useCallback,
   useEffect,
+  useId,
   useMemo,
   useState,
   type FormEvent,
@@ -67,6 +68,7 @@ const upcomingEvents: FamilyEvent[] = [
  */
 export function JournalEventsSection() {
   const { user } = useAuth()
+  const upcomingListId = useId()
   const storageSubject = user?.id ?? 'signed-out'
   const createdEventsStorageKey = eventStorageKey(
     createdEventsKey,
@@ -77,6 +79,7 @@ export function JournalEventsSection() {
     storageSubject,
   )
   const [isGoing, setIsGoing] = useState(false)
+  const [isUpcomingExpanded, setIsUpcomingExpanded] = useState(false)
   const [showEventSheet, setShowEventSheet] = useState(false)
   const [eventSaving, setEventSaving] = useState(false)
   const [createdEvents, setCreatedEvents] = useState<FamilyEvent[]>(() =>
@@ -188,6 +191,7 @@ export function JournalEventsSection() {
       const nextEvents = [...createdEvents, newEvent]
       setCreatedEvents(nextEvents)
       writeJson(createdEventsStorageKey, nextEvents)
+      setIsUpcomingExpanded(true)
       setShowEventSheet(false)
       if (saved.synced) void refreshFamilyEvents().catch(() => undefined)
       setReminderStatus(
@@ -306,11 +310,43 @@ export function JournalEventsSection() {
         className="ks-section journal-events__upcoming"
         aria-labelledby="upcoming-events-title"
       >
-        <div className="ks-section__heading">
-          <h3 id="upcoming-events-title">Coming up</h3>
+        <div className="ks-section__heading journal-events__upcoming-heading">
+          <div>
+            <h3 id="upcoming-events-title">Coming up</h3>
+            <p>
+              {allUpcomingEvents.length}{' '}
+              {allUpcomingEvents.length === 1 ? 'family plan' : 'family plans'}
+            </p>
+          </div>
+          {allUpcomingEvents.length > 1 ? (
+            <button
+              className="journal-events__upcoming-toggle"
+              type="button"
+              aria-expanded={isUpcomingExpanded}
+              aria-controls={upcomingListId}
+              aria-label={
+                isUpcomingExpanded
+                  ? 'Show only the next upcoming family event'
+                  : `Show all ${allUpcomingEvents.length} upcoming family events`
+              }
+              onClick={() => setIsUpcomingExpanded((expanded) => !expanded)}
+            >
+              <span>{isUpcomingExpanded ? 'Show less' : 'See all'}</span>
+              <svg aria-hidden="true" viewBox="0 0 12 8">
+                <path d="m1 1 5 5 5-5" />
+              </svg>
+            </button>
+          ) : null}
         </div>
-        <div className="event-list">
-          {allUpcomingEvents.map((event) => {
+        <div
+          className="event-list journal-events__upcoming-list"
+          id={upcomingListId}
+          data-expanded={isUpcomingExpanded}
+        >
+          {(isUpcomingExpanded
+            ? allUpcomingEvents
+            : allUpcomingEvents.slice(0, 1)
+          ).map((event, index) => {
             const date = new Date(`${event.date}T12:00:00`)
             const day = new Intl.DateTimeFormat('en', {
               day: '2-digit',
@@ -325,7 +361,12 @@ export function JournalEventsSection() {
             const hasReminder = reminderIds.has(event.id)
 
             return (
-              <article key={event.id} className="ks-card event-list-item">
+              <article
+                key={event.id}
+                className={`ks-card event-list-item${
+                  index > 0 ? ' journal-events__event--revealed' : ''
+                }`}
+              >
                 <div
                   className="event-list-item__date"
                   aria-label={`${month} ${day}`}
