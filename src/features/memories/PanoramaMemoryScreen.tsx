@@ -255,13 +255,16 @@ export function PanoramaMemoryScreen({
     })
   }, [memory.id, navigate, returnTo, routeState?.journalContext])
 
-  const returnFromVrToMoments = useCallback(() => {
+  const returnFromVrToOrigin = useCallback(() => {
     if ('speechSynthesis' in window) window.speechSynthesis.cancel()
-    navigate('/', {
+    navigate(returnTo, {
       replace: true,
-      state: { restoreMemoryId: selectedVrMemoryId },
+      state:
+        returnTo === '/journal'
+          ? { journalContext: routeState?.journalContext }
+          : { restoreMemoryId: selectedVrMemoryId },
     })
-  }, [navigate, selectedVrMemoryId])
+  }, [navigate, returnTo, routeState?.journalContext, selectedVrMemoryId])
 
   const playVoiceNote = useCallback(() => {
     setVoiceMessage(DEMO_VOICE_NOTE)
@@ -508,9 +511,13 @@ export function PanoramaMemoryScreen({
       <section className="fatal-state">
         <p className="eyebrow">Memory unavailable</p>
         <h1>This shared 360 is not on this device.</h1>
-        <p>Return to Memories and choose another family moment.</p>
+        <p>
+          {returnTo === '/journal'
+            ? 'Return to Journal and choose another family moment.'
+            : 'Return to Memories and choose another family moment.'}
+        </p>
         <button type="button" onClick={returnToMemories}>
-          Back to Memories
+          {returnLabel}
         </button>
       </section>
     )
@@ -559,7 +566,7 @@ export function PanoramaMemoryScreen({
             setCommentsOpen(false)
           }
         }}
-        onExit={returnFromVrToMoments}
+        onExit={returnFromVrToOrigin}
       />
 
       <CardboardSetupFlow
@@ -576,7 +583,7 @@ export function PanoramaMemoryScreen({
         onClose={() => {
           if (vrEntering) return
           if (requestedOpenVr) {
-            returnFromVrToMoments()
+            returnFromVrToOrigin()
             return
           }
           setVrSetupOpen(false)

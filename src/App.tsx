@@ -4,6 +4,7 @@ import { AppShell } from './app/AppShell'
 import { ErrorBoundary } from './app/ErrorBoundary'
 import { LegacyRouteRedirect } from './app/LegacyRouteRedirect'
 import {
+  CapsulePhotoRoute,
   CaptureRoute,
   JournalRoute,
   MemoriesRoute,
@@ -60,16 +61,33 @@ function OnboardingRoute() {
   return <OnboardingPage key={user?.id ?? 'signed-out'} />
 }
 
-function CapsuleRoute() {
+function useActiveMemberCacheNamespace() {
   const { user } = useAuth()
   const { snapshot } = useFamilyOnboarding()
   const familyId = snapshot?.kind === 'member'
     ? snapshot.membership.familyId
     : 'no-family'
+  return memberCacheNamespace(user?.id ?? 'signed-out', familyId)
+}
+
+function CapsuleRoute() {
+  const cacheNamespace = useActiveMemberCacheNamespace()
   return (
-    <CapsulesPage
-      cacheNamespace={memberCacheNamespace(user?.id ?? 'signed-out', familyId)}
-    />
+    <CapsulesPage cacheNamespace={cacheNamespace} />
+  )
+}
+
+function JournalMemberRoute() {
+  const cacheNamespace = useActiveMemberCacheNamespace()
+  return (
+    <JournalRoute capsuleCacheNamespace={cacheNamespace} />
+  )
+}
+
+function CapsulePhotoMemberRoute() {
+  const cacheNamespace = useActiveMemberCacheNamespace()
+  return (
+    <CapsulePhotoRoute capsuleCacheNamespace={cacheNamespace} />
   )
 }
 
@@ -97,7 +115,11 @@ function App() {
                 <Route element={<RequireFamilyMembership />}>
                   <Route element={<MemberApplication />}>
                     <Route path="/" element={<MemoriesRoute />} />
-                    <Route path="/journal" element={<JournalRoute />} />
+                    <Route path="/journal" element={<JournalMemberRoute />} />
+                    <Route
+                      path="/journal/photo/:capsuleId/:photoId"
+                      element={<CapsulePhotoMemberRoute />}
+                    />
                     <Route path="/memory/:memoryId" element={<PanoramaRoute />} />
                     <Route path="/capture" element={<CaptureRoute />} />
                     <Route path="/relay" element={<RelayPage />} />

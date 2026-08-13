@@ -5,7 +5,13 @@ import {
   type Capture360Submission,
   type CaptureSource,
 } from '../features/capture'
+import { CapsulePhotoViewer } from '../features/journal/CapsulePhotoViewer'
+import { useJournalCapsuleArchive } from '../features/journal/capsuleJournalArchive'
 import { JournalPage } from '../features/journal'
+import type {
+  CapsuleStore,
+  FamilyCapsule,
+} from '../features/capsules/types'
 import { MemoryConstellation } from '../features/memories/MemoryConstellation'
 import { PanoramaMemoryScreen } from '../features/memories/PanoramaMemoryScreen'
 import {
@@ -34,10 +40,55 @@ export function MemoriesRoute() {
   )
 }
 
-export function JournalRoute({ now }: { now?: Date } = {}) {
-  const { moments } = useSharedMoments()
+type JournalArchiveRouteProps = {
+  now?: Date
+  capsules?: FamilyCapsule[]
+  capsuleStore?: CapsuleStore
+  capsuleCacheNamespace?: string
+}
 
-  return <JournalPage now={now} sharedMoments={moments} />
+export function JournalRoute({
+  now,
+  capsules: suppliedCapsules,
+  capsuleStore,
+  capsuleCacheNamespace = 'signed-out:no-family',
+}: JournalArchiveRouteProps = {}) {
+  const { moments } = useSharedMoments()
+  const archive = useJournalCapsuleArchive({
+    cacheNamespace: capsuleCacheNamespace,
+    enabled: suppliedCapsules === undefined,
+    store: capsuleStore,
+  })
+
+  return (
+    <JournalPage
+      now={now}
+      sharedMoments={moments}
+      capsules={suppliedCapsules ?? archive.capsules}
+      capsuleNow={now ?? archive.clock}
+    />
+  )
+}
+
+export function CapsulePhotoRoute({
+  now,
+  capsules: suppliedCapsules,
+  capsuleStore,
+  capsuleCacheNamespace = 'signed-out:no-family',
+}: JournalArchiveRouteProps = {}) {
+  const archive = useJournalCapsuleArchive({
+    cacheNamespace: capsuleCacheNamespace,
+    enabled: suppliedCapsules === undefined,
+    store: capsuleStore,
+  })
+
+  return (
+    <CapsulePhotoViewer
+      capsules={suppliedCapsules ?? archive.capsules}
+      loading={suppliedCapsules === undefined && archive.loading}
+      now={now ?? archive.clock}
+    />
+  )
 }
 
 export function PanoramaRoute() {

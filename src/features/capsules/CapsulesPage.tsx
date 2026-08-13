@@ -121,13 +121,29 @@ function mergeCapsules(
     ))
     if (!localCapsule) return familyCapsule
     consumedLocalIds.add(localCapsule.id)
-    const familyPhotoIds = new Set(familyCapsule.photos.map(({ id }) => id))
+    const localPhotosById = new Map(
+      localCapsule.photos.map((photo) => [photo.id, photo]),
+    )
+    const durableFamilyPhotos = familyCapsule.photos.map((familyPhoto) => {
+      const localPhoto = localPhotosById.get(familyPhoto.id)
+      if (!localPhoto) return familyPhoto
+      return {
+        ...familyPhoto,
+        image: typeof localPhoto.image === 'string'
+          ? familyPhoto.image
+          : localPhoto.image,
+        thumbnail: typeof localPhoto.thumbnail === 'string'
+          ? familyPhoto.thumbnail
+          : localPhoto.thumbnail,
+      }
+    })
+    const familyPhotoIds = new Set(durableFamilyPhotos.map(({ id }) => id))
     const pendingPhotos = localCapsule.photos
       .filter((photo) => photo.syncStatus === 'pending' && !familyPhotoIds.has(photo.id))
       .map((photo) => ({ ...photo, capsuleId: familyCapsule.id }))
     return {
       ...familyCapsule,
-      photos: [...familyCapsule.photos, ...pendingPhotos]
+      photos: [...durableFamilyPhotos, ...pendingPhotos]
         .sort((left, right) => left.capturedAt.localeCompare(right.capturedAt)),
       totalPhotoCount: (familyCapsule.totalPhotoCount ?? familyCapsule.photos.length) + pendingPhotos.length,
     }
@@ -294,6 +310,17 @@ function formatOpenDate(capsule: FamilyCapsule) {
   }).format(new Date(capsule.opensAt))
 }
 
+function formatExactOpenDate(opensAt: string) {
+  return new Intl.DateTimeFormat('en', {
+    weekday: 'long',
+    month: 'long',
+    day: 'numeric',
+    year: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+  }).format(new Date(opensAt))
+}
+
 function photoCountLabel(count: number) {
   return `${count} ${count === 1 ? 'photo' : 'photos'}`
 }
@@ -323,20 +350,87 @@ function CapsulePhotoImage({
   source: CapsuleImageSource
   alt: string
 }) {
-  const src = useMemo(
-    () => typeof source === 'string' ? source : URL.createObjectURL(source),
-    [source],
-  )
+  const [blobPreview, setBlobPreview] = useState<{
+    source: Blob
+    url: string
+  } | null>(null)
+  const [loadedSource, setLoadedSource] = useState<CapsuleImageSource | null>(null)
+  const [failedSource, setFailedSource] = useState<CapsuleImageSource | null>(null)
 
   useEffect(() => {
-    if (typeof source !== 'string') return () => URL.revokeObjectURL(src)
-  }, [source, src])
+    if (typeof source === 'string' || typeof URL.createObjectURL !== 'function') return
 
-  return src ? <img src={src} alt={alt} draggable="false" /> : null
+    const objectUrl = URL.createObjectURL(source)
+    // oxlint-disable-next-line react/set-state-in-effect -- Blob URLs are external browser resources created and released with this effect.
+    setBlobPreview({ source, url: objectUrl })
+    return () => URL.revokeObjectURL?.(objectUrl)
+  }, [source])
+
+  const legacyObjectUrl = typeof source === 'string' && source.startsWith('blob:')
+  const src = typeof source === 'string'
+    ? legacyObjectUrl ? '' : source
+    : blobPreview?.source === source ? blobPreview.url : ''
+  const failed = legacyObjectUrl || failedSource === source
+  const loaded = loadedSource === source
+
+  if (!src || failed) {
+    return (
+      <span
+        className="capsule-photo-placeholder"
+        role="img"
+        aria-label={`${alt}. Preview unavailable until KinSphere reconnects.`}
+      >
+        <span aria-hidden="true">✦</span>
+      </span>
+    )
+  }
+
+  return (
+    <span className="capsule-photo-media" data-ready={loaded ? 'true' : 'false'}>
+      <img
+        src={src}
+        alt={alt}
+        aria-hidden={loaded ? undefined : 'true'}
+        draggable="false"
+        onLoad={() => setLoadedSource(source)}
+        onError={() => setFailedSource(source)}
+      />
+      {!loaded ? (
+        <span
+          className="capsule-photo-placeholder"
+          role="img"
+          aria-label={`${alt}. Loading preview.`}
+        >
+          <span aria-hidden="true">✦</span>
+        </span>
+      ) : null}
+    </span>
+  )
 }
 
-function PhotoStrip({ photos }: { photos: CapsulePhoto[] }) {
-  if (photos.length === 0) {
+function CapsuleLockIcon() {
+  return (
+    <svg viewBox="0 0 28 28" aria-hidden="true">
+      <path d="M8.25 12.25V9.7a5.75 5.75 0 0 1 11.5 0v2.55" />
+      <rect x="5.75" y="12.25" width="16.5" height="12" rx="5" />
+      <path d="M14 17.1v3.1" />
+    </svg>
+  )
+}
+
+function PhotoStrip({
+  photos,
+  totalPhotoCount,
+  locked,
+  opensAt,
+}: {
+  photos: CapsulePhoto[]
+  totalPhotoCount: number
+  locked: boolean
+  opensAt: string
+}) {
+  const representedPhotoCount = Math.max(photos.length, totalPhotoCount)
+  if (representedPhotoCount === 0) {
     return (
       <div className="capsule-photo-strip capsule-photo-strip--empty">
         <span aria-hidden="true">＋</span>
@@ -345,18 +439,50 @@ function PhotoStrip({ photos }: { photos: CapsulePhoto[] }) {
     )
   }
 
+  const visiblePhotos = photos.slice(0, 6)
+  const concealedSlotCount = Math.max(
+    0,
+    Math.min(6, representedPhotoCount) - visiblePhotos.length,
+  )
+
   return (
-    <ul className="capsule-photo-strip" aria-label={`${photoCountLabel(photos.length)} in this Capsule`}>
-      {photos.slice(0, 6).map((photo) => (
-        <li key={photo.id}>
-          <CapsulePhotoImage
-            source={photo.thumbnail}
-            alt={`${photo.caption || 'Capsule photo'} from ${photo.contributorName}`}
+    <div className="capsule-collection__photos" data-locked={locked ? 'true' : 'false'}>
+      <ul
+        className="capsule-photo-strip"
+        aria-hidden={locked ? 'true' : undefined}
+        aria-label={locked ? undefined : `${photoCountLabel(representedPhotoCount)} in this Capsule`}
+      >
+        {visiblePhotos.map((photo) => (
+          <li key={photo.id}>
+            <CapsulePhotoImage
+              source={photo.thumbnail}
+              alt={`${photo.caption || 'Capsule photo'} from ${photo.contributorName}`}
+            />
+          </li>
+        ))}
+        {Array.from({ length: concealedSlotCount }, (_, index) => (
+          <li
+            className="capsule-photo-strip__concealed"
+            key={`concealed-${index}`}
+            aria-hidden="true"
           />
-        </li>
-      ))}
-      {photos.length > 6 ? <li className="capsule-photo-strip__more">+{photos.length - 6}</li> : null}
-    </ul>
+        ))}
+        {representedPhotoCount > 6 ? (
+          <li className="capsule-photo-strip__more">+{representedPhotoCount - 6}</li>
+        ) : null}
+      </ul>
+      {locked ? (
+        <div
+          className="capsule-locked-cover"
+          role="img"
+          aria-label={`Locked until ${formatExactOpenDate(opensAt)}`}
+        >
+          <span className="capsule-locked-cover__icon"><CapsuleLockIcon /></span>
+          <span>This Capsule unlocks</span>
+          <time dateTime={opensAt}>{formatExactOpenDate(opensAt)}</time>
+        </div>
+      ) : null}
+    </div>
   )
 }
 
@@ -364,14 +490,18 @@ function CapsuleCard({
   capsule,
   now,
   uploading,
+  demoUnlocked,
   onChoosePhoto,
   onOpenRecap,
+  onDemoUnlock,
 }: {
   capsule: FamilyCapsule
   now: Date
   uploading: boolean
+  demoUnlocked: boolean
   onChoosePhoto: (event: ChangeEvent<HTMLInputElement>, capsule: FamilyCapsule) => void
   onOpenRecap: (capsule: FamilyCapsule) => void
+  onDemoUnlock: (capsule: FamilyCapsule) => void
 }) {
   const unlocked = isCapsuleUnlocked(capsule.opensAt, now)
   const canContribute = !unlocked
@@ -380,7 +510,11 @@ function CapsuleCard({
   const recapPhotoCount = capsule.photos.filter(({ syncStatus }) => syncStatus !== 'pending').length
 
   return (
-    <article className="capsule-collection" data-kind={capsule.kind}>
+    <article
+      className="capsule-collection"
+      data-kind={capsule.kind}
+      data-demo-unlocked={demoUnlocked ? 'true' : 'false'}
+    >
       <header className="capsule-collection__header">
         <div>
           <p>{capsule.kind === 'weekly' ? formatWeekRange(capsule) : 'Special Capsule'}</p>
@@ -391,7 +525,12 @@ function CapsuleCard({
         </span>
       </header>
 
-      <PhotoStrip photos={capsule.photos} />
+      <PhotoStrip
+        photos={capsule.photos}
+        totalPhotoCount={totalPhotoCount}
+        locked={!unlocked && !demoUnlocked}
+        opensAt={capsule.opensAt}
+      />
 
       <div className="capsule-collection__details">
         <p>
@@ -426,24 +565,37 @@ function CapsuleCard({
           </button>
         )}
       </div>
+      {!unlocked && capsule.photos.length > 0 ? (
+        <button
+          className="capsule-demo-unlock"
+          type="button"
+          aria-label={`Demo only: Preview ${capsule.title} recap`}
+          onClick={() => onDemoUnlock(capsule)}
+        >
+          <span>Demo only</span>
+          Preview this Capsule recap
+        </button>
+      ) : null}
     </article>
   )
 }
 
 function RecapSheet({
   capsule,
+  demoMode,
   onClose,
   onPreparePhotos,
 }: {
   capsule: FamilyCapsule
+  demoMode: boolean
   onClose: () => void
   onPreparePhotos: () => Promise<CapsulePhoto[]>
 }) {
   const orderedPhotos = useMemo(
     () => capsule.photos
-      .filter(({ syncStatus }) => syncStatus !== 'pending')
+      .filter(({ syncStatus }) => demoMode || syncStatus !== 'pending')
       .sort((left, right) => left.capturedAt.localeCompare(right.capturedAt)),
-    [capsule.photos],
+    [capsule.photos, demoMode],
   )
   const [index, setIndex] = useState(0)
   const [saving, setSaving] = useState(false)
@@ -472,7 +624,7 @@ function RecapSheet({
     const nativeArtifacts: string[] = []
     try {
       const preparedPhotos = (await onPreparePhotos())
-        .filter(({ syncStatus }) => syncStatus !== 'pending')
+        .filter(({ syncStatus }) => demoMode || syncStatus !== 'pending')
         .sort((left, right) => left.capturedAt.localeCompare(right.capturedAt))
       if (preparedPhotos.length === 0) {
         throw new Error('There are no shared photos available for this recap yet.')
@@ -515,7 +667,7 @@ function RecapSheet({
       <section className="capsule-recap-sheet__panel">
         <header>
           <div>
-            <p>Family recap · 0.2 seconds each</p>
+            <p>{demoMode ? 'Demo preview' : 'Family recap'} · 0.2 seconds each</p>
             <h2 id="capsule-recap-title">{capsule.title}</h2>
           </div>
           <button type="button" aria-label="Close recap" onClick={onClose}>×</button>
@@ -525,7 +677,7 @@ function RecapSheet({
           {activePhoto ? (
             <CapsulePhotoImage source={activePhoto.image} alt={activePhoto.caption || `Photo from ${activePhoto.contributorName}`} />
           ) : null}
-          <span>{activePhoto?.contributorName}</span>
+          <span className="capsule-recap-player__credit">{activePhoto?.contributorName}</span>
         </div>
 
         <div className="capsule-recap-progress" aria-hidden="true">
@@ -568,6 +720,7 @@ export function CapsulesPage({
   const [uploadingCapsuleId, setUploadingCapsuleId] = useState('')
   const [announcement, setAnnouncement] = useState('')
   const [activeRecapId, setActiveRecapId] = useState('')
+  const [demoRecapId, setDemoRecapId] = useState('')
   const [authoritativeWeeklyId, setAuthoritativeWeeklyId] = useState('')
   const weekKey = toLocalDateInput(startOfCapsuleWeek(clock))
   const clockRef = useRef(clock)
@@ -783,6 +936,21 @@ export function CapsulesPage({
     }
   }
 
+  function openRecap(capsule: FamilyCapsule) {
+    setDemoRecapId('')
+    setActiveRecapId(capsule.id)
+  }
+
+  function openDemoRecap(capsule: FamilyCapsule) {
+    setDemoRecapId(capsule.id)
+    setActiveRecapId(capsule.id)
+  }
+
+  function closeRecap() {
+    setActiveRecapId('')
+    setDemoRecapId('')
+  }
+
   const activeRecap = capsules.find(({ id }) => id === activeRecapId) ?? null
   const currentWeekly = capsules.find(({ id }) => id === authoritativeWeeklyId) ??
     capsules.find((capsule) => capsule.kind === 'weekly' && capsule.weekStart === weekKey)
@@ -846,8 +1014,10 @@ export function CapsulesPage({
             capsule={currentWeekly}
             now={clock}
             uploading={uploadingCapsuleId === currentWeekly.id}
+            demoUnlocked={demoRecapId === currentWeekly.id}
             onChoosePhoto={addPhoto}
-            onOpenRecap={({ id }) => setActiveRecapId(id)}
+            onOpenRecap={openRecap}
+            onDemoUnlock={openDemoRecap}
           />
         </section>
       ) : null}
@@ -866,8 +1036,10 @@ export function CapsulesPage({
             capsule={capsule}
             now={clock}
             uploading={uploadingCapsuleId === capsule.id}
+            demoUnlocked={demoRecapId === capsule.id}
             onChoosePhoto={addPhoto}
-            onOpenRecap={({ id }) => setActiveRecapId(id)}
+            onOpenRecap={openRecap}
+            onDemoUnlock={openDemoRecap}
           />
         )) : (
           <button className="capsule-special-empty" type="button" onClick={() => setCreating(true)}>
@@ -892,8 +1064,10 @@ export function CapsulesPage({
               capsule={capsule}
               now={clock}
               uploading={false}
+              demoUnlocked={demoRecapId === capsule.id}
               onChoosePhoto={addPhoto}
-              onOpenRecap={({ id }) => setActiveRecapId(id)}
+              onOpenRecap={openRecap}
+              onDemoUnlock={openDemoRecap}
             />
           ))}
         </section>
@@ -902,7 +1076,8 @@ export function CapsulesPage({
       {activeRecap ? (
         <RecapSheet
           capsule={activeRecap}
-          onClose={() => setActiveRecapId('')}
+          demoMode={demoRecapId === activeRecap.id}
+          onClose={closeRecap}
           onPreparePhotos={async () => {
             const refreshed = await refreshCapsules()
             return refreshed.capsules.find(({ id }) => id === activeRecap.id)?.photos ?? []

@@ -131,7 +131,7 @@
 
 .capture-window__copy .eyebrow,
 .capture-manual-panel .eyebrow {
-  color: rgba(255, 255, 255, 0.48);
+  color: var(--app-eyebrow-color);
   font-size: 0.62rem;
 }
 

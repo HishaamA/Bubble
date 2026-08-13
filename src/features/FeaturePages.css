@@ -30,13 +30,13 @@
 }
 
 .ks-feature__header .eyebrow {
-  color: rgba(255, 255, 255, 0.48);
+  color: var(--app-eyebrow-color);
 }
 
 .ks-feature__header h1 {
   margin: 0;
   color: #fff;
-  font-size: clamp(1.8rem, 8vw, 2.35rem);
+  font-size: var(--app-page-title-size);
   font-weight: 640;
   letter-spacing: -0.055em;
   line-height: 1;
@@ -1337,7 +1337,7 @@
   }
 
   .ks-feature__header h1 {
-    font-size: 1.65rem;
+    font-size: var(--app-page-title-size);
   }
 }
 

@@ -55,7 +55,7 @@
 }
 
 .family-sync__eyebrow {
-  color: rgba(255, 255, 255, 0.45);
+  color: var(--app-eyebrow-color);
   font-size: 0.63rem;
   font-weight: 650;
   letter-spacing: 0.075em;

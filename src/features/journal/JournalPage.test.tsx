@@ -2,6 +2,7 @@ import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom'
 import { describe, expect, it, vi } from 'vitest'
+import type { FamilyCapsule } from '../capsules/types'
 import type { PanoramaMoment } from '../memories/shared'
 import { JournalPage } from './JournalPage'
 
@@ -26,6 +27,44 @@ function createSharedMoment(
     height: 2000,
     source: 'manual',
     uploaderDisplayName: 'Maya Ahmed',
+  }
+}
+
+function createCapsule({
+  opensAt,
+  capturedAt,
+  photoId = 'capsule-photo-1',
+}: {
+  opensAt: Date
+  capturedAt: Date
+  photoId?: string
+}): FamilyCapsule {
+  return {
+    id: 'capsule-family-week',
+    kind: 'weekly',
+    title: 'Our family week',
+    createdAt: new Date(2026, 7, 17, 9).toISOString(),
+    closesAt: opensAt.toISOString(),
+    opensAt: opensAt.toISOString(),
+    weekStart: '2026-08-17',
+    createdByName: 'Maya',
+    photos: [
+      {
+        id: photoId,
+        capsuleId: 'capsule-family-week',
+        image: '/assets/capsule/full-family-photo.jpg',
+        thumbnail: '/assets/capsule/family-photo-thumb.jpg',
+        width: 1200,
+        height: 900,
+        thumbnailWidth: 400,
+        thumbnailHeight: 300,
+        caption: 'Kitchen dancing',
+        capturedAt: capturedAt.toISOString(),
+        contributorName: 'Maya',
+        ownedByCurrentUser: false,
+        syncStatus: 'synced',
+      },
+    ],
   }
 }
 
@@ -205,6 +244,98 @@ describe('JournalPage', () => {
       }),
     ).toHaveAttribute('href', '/memory/shared-family-balcony')
     expect(container.querySelectorAll('.journal-memories article')).toHaveLength(6)
+  })
+
+  it('keeps Capsule photos sealed until the authoritative open time', () => {
+    const lockedCapsule = createCapsule({
+      opensAt: new Date(2026, 7, 26, 13),
+      capturedAt: new Date(2026, 7, 26, 9),
+    })
+    render(
+      <MemoryRouter>
+        <JournalPage now={testNow} capsules={[lockedCapsule]} />
+      </MemoryRouter>,
+    )
+
+    expect(
+      screen.getByRole('button', {
+        name: 'Wednesday, August 26, 8 memories',
+      }),
+    ).toHaveAttribute('aria-pressed', 'true')
+    expect(
+      screen.queryByRole('link', {
+        name: 'Open Kitchen dancing, shared by Maya, photo memory',
+      }),
+    ).not.toBeInTheDocument()
+  })
+
+  it('archives an opened Capsule photo on its captured day as an ordinary photo', () => {
+    const openedCapsule = createCapsule({
+      opensAt: new Date(2026, 7, 26, 11),
+      capturedAt: new Date(2026, 7, 26, 9),
+    })
+    render(
+      <MemoryRouter>
+        <JournalPage now={testNow} capsules={[openedCapsule]} />
+      </MemoryRouter>,
+    )
+
+    expect(
+      screen.getByRole('button', {
+        name: 'Wednesday, August 26, 9 memories',
+      }),
+    ).toHaveAttribute('aria-pressed', 'true')
+    expect(
+      screen.getByRole('link', {
+        name: 'Open Kitchen dancing, shared by Maya, photo memory',
+      }),
+    ).toHaveAttribute(
+      'href',
+      '/journal/photo/capsule-family-week/capsule-photo-1',
+    )
+    expect(
+      screen.getByRole('link', {
+        name: 'Open Mountain day at golden hour, shared by Hishaam, panorama memory',
+      }),
+    ).toHaveAttribute('href', '/memory/mountains')
+  })
+
+  it('makes older photos from a newly opened weekly Capsule reachable', async () => {
+    const user = userEvent.setup()
+    const openedCapsule = createCapsule({
+      opensAt: new Date(2026, 7, 26, 11),
+      capturedAt: new Date(2026, 7, 20, 9),
+      photoId: 'older-capsule-photo',
+    })
+    render(
+      <MemoryRouter>
+        <JournalPage now={testNow} capsules={[openedCapsule]} />
+      </MemoryRouter>,
+    )
+
+    expect(
+      screen.queryByRole('link', {
+        name: 'Open Kitchen dancing, shared by Maya, photo memory',
+      }),
+    ).not.toBeInTheDocument()
+
+    await user.click(
+      screen.getByRole('button', { name: 'Show previous seven days' }),
+    )
+    await user.click(
+      screen.getByRole('button', {
+        name: 'Thursday, August 20, 1 memory',
+      }),
+    )
+
+    expect(
+      screen.getByRole('link', {
+        name: 'Open Kitchen dancing, shared by Maya, photo memory',
+      }),
+    ).toHaveAttribute(
+      'href',
+      '/journal/photo/capsule-family-week/older-capsule-photo',
+    )
   })
 
   it('builds the visible week around the supplied local date', () => {

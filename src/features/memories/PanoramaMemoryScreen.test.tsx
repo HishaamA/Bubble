@@ -56,6 +56,36 @@ function MomentsRouteProbe() {
   )
 }
 
+function JournalRouteProbe() {
+  const location = useLocation()
+  const state = location.state as {
+    journalContext?: {
+      selectedDayKey?: string
+      view?: 'grid' | 'list'
+      scrollTop?: number
+      focusMemoryId?: string
+    }
+  } | null
+
+  return (
+    <>
+      <h1>Memory journal</h1>
+      <output aria-label="Restored journal day">
+        {state?.journalContext?.selectedDayKey ?? ''}
+      </output>
+      <output aria-label="Restored journal view">
+        {state?.journalContext?.view ?? ''}
+      </output>
+      <output aria-label="Restored journal scroll">
+        {state?.journalContext?.scrollTop ?? ''}
+      </output>
+      <output aria-label="Restored journal memory">
+        {state?.journalContext?.focusMemoryId ?? ''}
+      </output>
+    </>
+  )
+}
+
 describe('PanoramaMemoryScreen lifecycle', () => {
   beforeEach(() => {
     cancelSpeech.mockClear()
@@ -102,12 +132,21 @@ describe('PanoramaMemoryScreen lifecycle', () => {
         initialEntries={[
           {
             pathname: '/memory/sunset',
-            state: { returnTo: '/journal', sourceMemoryId: 'sunset' },
+            state: {
+              returnTo: '/journal',
+              sourceMemoryId: 'sunset',
+              journalContext: {
+                selectedDayKey: 'sun-23',
+                view: 'grid',
+                scrollTop: 84,
+                focusMemoryId: 'park-picnic',
+              },
+            },
           },
         ]}
       >
         <Routes>
-          <Route path="/journal" element={<p>Memory journal</p>} />
+          <Route path="/journal" element={<JournalRouteProbe />} />
           <Route path="/memory/:memoryId" element={<PanoramaMemoryScreen />} />
         </Routes>
       </MemoryRouter>,
@@ -115,7 +154,21 @@ describe('PanoramaMemoryScreen lifecycle', () => {
 
     await user.click(screen.getByRole('button', { name: 'Back to journal' }))
 
-    expect(screen.getByText('Memory journal')).toBeInTheDocument()
+    expect(
+      screen.getByRole('heading', { name: 'Memory journal' }),
+    ).toBeInTheDocument()
+    expect(screen.getByLabelText('Restored journal day')).toHaveTextContent(
+      'sun-23',
+    )
+    expect(screen.getByLabelText('Restored journal view')).toHaveTextContent(
+      'grid',
+    )
+    expect(screen.getByLabelText('Restored journal scroll')).toHaveTextContent(
+      '84',
+    )
+    expect(screen.getByLabelText('Restored journal memory')).toHaveTextContent(
+      'park-picnic',
+    )
   })
 
   it('opens the memory chooser before making any VR permission request', async () => {
@@ -195,20 +248,74 @@ describe('PanoramaMemoryScreen lifecycle', () => {
     })
   })
 
-  it('returns VR exits to the Moments bubbles even when opened from Journal', async () => {
+  it('returns a Journal-opened VR memory to the Journal with its archive context', async () => {
     const user = userEvent.setup()
     render(
       <MemoryRouter
         initialEntries={[
           {
             pathname: '/memory/dinner',
-            state: { returnTo: '/journal' },
+            state: {
+              returnTo: '/journal',
+              journalContext: {
+                selectedDayKey: 'wed-26',
+                view: 'grid',
+                scrollTop: 132,
+                focusMemoryId: 'golden-hour',
+              },
+            },
           },
         ]}
       >
         <Routes>
           <Route path="/" element={<MomentsRouteProbe />} />
-          <Route path="/journal" element={<h1>Memory journal</h1>} />
+          <Route path="/journal" element={<JournalRouteProbe />} />
+          <Route path="/memory/:memoryId" element={<PanoramaMemoryScreen />} />
+        </Routes>
+      </MemoryRouter>,
+    )
+
+    await user.click(
+      screen.getByRole('button', { name: 'Set up Cardboard VR view' }),
+    )
+    await user.click(
+      screen.getByRole('radio', { name: /beach day, hishaam/i }),
+    )
+    await user.click(
+      screen.getByRole('button', { name: 'Continue with Beach day' }),
+    )
+    const landscapeOverride = screen.queryByRole('button', {
+      name: 'Use split view anyway',
+    })
+    if (landscapeOverride) await user.click(landscapeOverride)
+    await user.click(screen.getByRole('button', { name: 'Go' }))
+    await user.click(
+      await screen.findByRole('button', { name: 'Exit Cardboard view' }),
+    )
+
+    expect(
+      await screen.findByRole('heading', { name: 'Memory journal' }),
+    ).toBeVisible()
+    expect(screen.getByLabelText('Restored journal day')).toHaveTextContent(
+      'wed-26',
+    )
+    expect(screen.getByLabelText('Restored journal view')).toHaveTextContent(
+      'grid',
+    )
+    expect(screen.getByLabelText('Restored journal scroll')).toHaveTextContent(
+      '132',
+    )
+    expect(screen.getByLabelText('Restored journal memory')).toHaveTextContent(
+      'golden-hour',
+    )
+  })
+
+  it('keeps a Moments-opened VR exit returning to the selected bubble', async () => {
+    const user = userEvent.setup()
+    render(
+      <MemoryRouter initialEntries={['/memory/dinner']}>
+        <Routes>
+          <Route path="/" element={<MomentsRouteProbe />} />
           <Route path="/memory/:memoryId" element={<PanoramaMemoryScreen />} />
         </Routes>
       </MemoryRouter>,
@@ -235,9 +342,6 @@ describe('PanoramaMemoryScreen lifecycle', () => {
     expect(
       await screen.findByRole('heading', { name: 'Moments bubbles' }),
     ).toBeVisible()
-    expect(
-      screen.queryByRole('heading', { name: 'Memory journal' }),
-    ).not.toBeInTheDocument()
     expect(screen.getByLabelText('Restored memory')).toHaveTextContent('beach')
   })
 

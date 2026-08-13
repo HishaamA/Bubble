@@ -36,7 +36,10 @@ describe('JournalRoute', () => {
         }}
       >
         <MemoryRouter>
-          <JournalRoute now={new Date(2026, 7, 26, 12)} />
+          <JournalRoute
+            now={new Date(2026, 7, 26, 12)}
+            capsules={[]}
+          />
         </MemoryRouter>
       </SharedMomentsContext.Provider>,
     )

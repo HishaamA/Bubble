@@ -1,6 +1,8 @@
 :root {
   --text-primary: rgba(255, 255, 255, 0.96);
   --text-secondary: rgba(235, 235, 245, 0.6);
+  --app-eyebrow-color: rgba(226, 179, 111, 0.9);
+  --app-page-title-size: clamp(2rem, 9vw, 2.65rem);
   --surface: rgba(28, 28, 30, 0.74);
   --surface-solid: #1c1c1e;
   --separator: rgba(84, 84, 88, 0.62);
@@ -66,7 +68,7 @@
 
 .eyebrow {
   margin: 0 0 0.25rem;
-  color: var(--text-secondary);
+  color: var(--app-eyebrow-color);
   font-size: 0.72rem;
   font-weight: 650;
   letter-spacing: 0.11em;
@@ -96,7 +98,7 @@
 .top-bar h1 {
   margin: 0;
   color: var(--text-primary);
-  font-size: clamp(1.55rem, 7vw, 2rem);
+  font-size: var(--app-page-title-size);
   font-weight: 650;
   letter-spacing: -0.045em;
 }
@@ -555,6 +557,8 @@
 
 .memory-bubble__arc-title {
   fill: rgba(255, 252, 245, 0.86);
+  font-size: 5.8px;
+  letter-spacing: 0.008em;
 }
 
 .memory-bubble__arc-sender {
@@ -586,25 +590,25 @@
   right: 3%;
   bottom: 7%;
   display: inline-flex;
-  min-width: 1.45rem;
-  height: 1.45rem;
-  padding: 0 0.38rem;
+  min-width: 1.08rem;
+  height: 1.08rem;
+  padding: 0 0.26rem;
   align-items: center;
   justify-content: center;
-  gap: 0.08rem;
+  gap: 0.04rem;
   border: 1px solid rgba(255, 229, 180, 0.34);
   border-radius: 999px;
   color: rgba(255, 239, 211, 0.94);
   background: rgba(12, 9, 5, 0.78);
   box-shadow: 0 0.35rem 1rem rgba(0, 0, 0, 0.48);
   backdrop-filter: blur(14px);
-  font-size: 0.52rem;
+  font-size: 0.4rem;
   font-weight: 560;
 }
 
 .memory-bubble__point-count > span {
   color: #e2b36f;
-  font-size: 0.76rem;
+  font-size: 0.58rem;
   font-weight: 350;
   line-height: 1;
 }
@@ -805,7 +809,7 @@
   max-width: 22rem;
   margin: 0;
   color: var(--text-primary);
-  font-size: clamp(2rem, 8vw, 2.8rem);
+  font-size: var(--app-page-title-size);
   font-weight: 620;
   letter-spacing: -0.055em;
   line-height: 1.02;

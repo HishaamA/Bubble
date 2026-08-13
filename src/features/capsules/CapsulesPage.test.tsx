@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { createMemoryCapsuleStore } from './capsuleStore'
@@ -51,6 +51,40 @@ function unlockedCapsule(): FamilyCapsule {
         ownedByCurrentUser: true,
       },
     ],
+  }
+}
+
+function lockedSpecialCapsule(
+  id: string,
+  title: string,
+  totalPhotoCount = 1,
+): FamilyCapsule {
+  const opensAt = new Date(2026, 8, 20, 20).toISOString()
+  return {
+    id,
+    kind: 'special',
+    title,
+    createdAt: new Date(2026, 7, id === 'special-one' ? 27 : 26, 12).toISOString(),
+    closesAt: opensAt,
+    opensAt,
+    createdByName: 'Simreen',
+    photos: [{
+      id: `${id}-photo`,
+      capsuleId: id,
+      image: new Blob([`${id}-full`], { type: 'image/jpeg' }),
+      thumbnail: new Blob([`${id}-thumb`], { type: 'image/jpeg' }),
+      width: 900,
+      height: 1200,
+      thumbnailWidth: 420,
+      thumbnailHeight: 560,
+      caption: `${title} breakfast`,
+      capturedAt: new Date(2026, 7, 28, 8).toISOString(),
+      contributorName: 'Simreen',
+      ownedByCurrentUser: true,
+      syncStatus: 'pending',
+    }],
+    totalPhotoCount,
+    familySynced: false,
   }
 }
 
@@ -160,6 +194,111 @@ describe('CapsulesPage', () => {
     await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
   })
 
+  it('obscures a locked Capsule, exposes its exact open date, and represents hidden family photos', async () => {
+    const capsule = lockedSpecialCapsule('special-one', 'Lea’s wedding', 3)
+    const store = createMemoryCapsuleStore([capsule])
+    render(<CapsulesPage now={testNow} store={store} />)
+
+    const heading = await screen.findByRole('heading', { name: 'Lea’s wedding' })
+    const card = heading.closest('article')!
+    const exactOpenDate = new Intl.DateTimeFormat('en', {
+      weekday: 'long',
+      month: 'long',
+      day: 'numeric',
+      year: 'numeric',
+      hour: 'numeric',
+      minute: '2-digit',
+    }).format(new Date(capsule.opensAt))
+
+    expect(within(card).getByRole('img', {
+      name: `Locked until ${exactOpenDate}`,
+    })).toBeInTheDocument()
+    expect(within(card).getByText('This Capsule unlocks')).toBeInTheDocument()
+    expect(within(card).getByText(exactOpenDate)).toHaveAttribute(
+      'datetime',
+      capsule.opensAt,
+    )
+    expect(card.querySelector('.capsule-photo-strip')).toHaveAttribute('aria-hidden', 'true')
+    expect(card.querySelectorAll('.capsule-photo-strip__concealed')).toHaveLength(2)
+    expect(within(card).queryByRole('img', {
+      name: /Lea’s wedding breakfast from Simreen/i,
+    })).not.toBeInTheDocument()
+    expect(within(card).getByRole('button', {
+      name: 'Demo only: Preview Lea’s wedding recap',
+    })).toBeInTheDocument()
+  })
+
+  it('demo-opens only the selected Capsule and includes its local pending photo', async () => {
+    const user = userEvent.setup()
+    const first = lockedSpecialCapsule('special-one', 'Lea’s wedding')
+    const second = lockedSpecialCapsule('special-two', 'Grandpa’s 60th')
+    const store = createMemoryCapsuleStore([first, second])
+    render(<CapsulesPage now={testNow} store={store} />)
+
+    const firstCard = (await screen.findByRole('heading', {
+      name: first.title,
+    })).closest('article')!
+    const secondCard = screen.getByRole('heading', {
+      name: second.title,
+    }).closest('article')!
+    await user.click(within(firstCard).getByRole('button', {
+      name: `Demo only: Preview ${first.title} recap`,
+    }))
+
+    const dialog = screen.getByRole('dialog', { name: first.title })
+    expect(within(dialog).getByText('Demo preview · 0.2 seconds each')).toBeInTheDocument()
+    expect(within(dialog).getByText('Simreen')).toBeInTheDocument()
+    expect(firstCard).toHaveAttribute('data-demo-unlocked', 'true')
+    expect(secondCard).toHaveAttribute('data-demo-unlocked', 'false')
+    expect(within(secondCard).getByRole('img', { name: /Locked until/ })).toBeInTheDocument()
+    expect((await store.list()).find(({ id }) => id === first.id)?.opensAt).toBe(first.opensAt)
+
+    await user.click(within(dialog).getByRole('button', { name: 'Close recap' }))
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+    expect(firstCard).toHaveAttribute('data-demo-unlocked', 'false')
+    expect(within(firstCard).getByRole('img', { name: /Locked until/ })).toBeInTheDocument()
+  })
+
+  it('uses an intentional placeholder for an unrecoverable legacy object URL', async () => {
+    const staleCapsule = unlockedCapsule()
+    staleCapsule.photos[0] = {
+      ...staleCapsule.photos[0],
+      image: 'blob:from-an-older-app-session',
+      thumbnail: 'blob:from-an-older-app-session-thumb',
+    }
+    const store = createMemoryCapsuleStore([staleCapsule])
+    render(<CapsulesPage now={testNow} store={store} />)
+
+    const card = (await screen.findByRole('heading', {
+      name: staleCapsule.title,
+    })).closest('article')!
+    expect(within(card).getByRole('img', {
+      name: /Preview unavailable until KinSphere reconnects/i,
+    })).toBeInTheDocument()
+    expect(card.querySelector('img')).toBeNull()
+  })
+
+  it('keeps an expired signed thumbnail behind a placeholder instead of a broken icon', async () => {
+    const store = createMemoryCapsuleStore([unlockedCapsule()])
+    render(<CapsulesPage now={testNow} store={store} />)
+
+    const card = (await screen.findByRole('heading', {
+      name: 'Last week',
+    })).closest('article')!
+    const image = card.querySelector('img')
+    expect(image).not.toBeNull()
+    expect(within(card).getByRole('img', {
+      name: /Loading preview/i,
+    })).toBeInTheDocument()
+
+    fireEvent.error(image!)
+
+    expect(card.querySelector('img')).toBeNull()
+    expect(within(card).getByRole('img', {
+      name: /Preview unavailable until KinSphere reconnects/i,
+    })).toBeInTheDocument()
+  })
+
   it('uses the server-authoritative week and retries a durable pending photo', async () => {
     const serverCapsuleId = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'
     const pendingPhotoId = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb'
@@ -239,5 +378,7 @@ describe('CapsulesPage', () => {
         photos: [expect.objectContaining({ id: pendingPhotoId, syncStatus: 'synced' })],
       }),
     ])
+    expect(saved[0].photos[0].image).toBeInstanceOf(Blob)
+    expect(saved[0].photos[0].thumbnail).toBeInstanceOf(Blob)
   })
 })

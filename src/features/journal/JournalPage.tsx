@@ -14,8 +14,14 @@ import {
   startOfLocalDay,
   toLocalIsoDate,
 } from '../../lib/appDate'
+import type {
+  CapsuleImageSource,
+  FamilyCapsule,
+} from '../capsules/types'
 import { JournalEventsSection } from '../events'
 import type { PanoramaMoment } from '../memories/shared'
+import { CapsulePhotoImage } from './CapsulePhotoImage'
+import { unlockedCapsulePhotos } from './capsuleJournalArchive'
 import './JournalPage.css'
 
 type JournalDay = {
@@ -28,27 +34,40 @@ type JournalDay = {
   memoryIds: string[]
 }
 
-type JournalMemory = {
+type JournalMemoryImage =
+  | {
+      kind: 'photo'
+      src: CapsuleImageSource
+    }
+  | {
+      kind: 'contactSheet'
+      src: string
+      column: 0 | 1 | 2
+      row: 0 | 1 | 2
+    }
+  | {
+      kind: 'placeholder'
+    }
+
+type JournalMemoryBase = {
   id: string
-  memoryId: string
   title: string
   author: string
-  image:
-    | {
-        kind: 'photo'
-        src: string
-        position: string
-      }
-    | {
-        kind: 'contactSheet'
-        src: string
-        column: 0 | 1 | 2
-        row: 0 | 1 | 2
-      }
-    | {
-        kind: 'placeholder'
-      }
+  archivedAt?: string
+  image: JournalMemoryImage
 }
+
+type JournalMemory = JournalMemoryBase & (
+  | {
+      kind: 'panorama'
+      memoryId: string
+    }
+  | {
+      kind: 'capsule-photo'
+      capsuleId: string
+      photoId: string
+    }
+)
 
 const familyMemoryGridSrc = '/assets/journal/family-memory-grid-v1.png'
 
@@ -56,6 +75,7 @@ type JournalReturnContext = {
   selectedDayKey: string
   view: 'grid'
   scrollTop: number
+  weekOffset?: number
   focusMemoryId?: string
 }
 
@@ -66,6 +86,7 @@ type JournalLocationState = {
 const journalMemories: JournalMemory[] = [
   {
     id: 'golden-hour',
+    kind: 'panorama',
     memoryId: 'mountains',
     title: 'Mountain day at golden hour',
     author: 'Hishaam',
@@ -78,6 +99,7 @@ const journalMemories: JournalMemory[] = [
   },
   {
     id: 'record-night',
+    kind: 'panorama',
     memoryId: 'dinner',
     title: 'Dinner that lasted all evening',
     author: 'Mum',
@@ -90,6 +112,7 @@ const journalMemories: JournalMemory[] = [
   },
   {
     id: 'park-picnic',
+    kind: 'panorama',
     memoryId: 'beach',
     title: 'Just us and the sea',
     author: 'Hishaam',
@@ -102,6 +125,7 @@ const journalMemories: JournalMemory[] = [
   },
   {
     id: 'breakfast',
+    kind: 'panorama',
     memoryId: 'birthday',
     title: 'One wish, surrounded by family',
     author: 'Maya',
@@ -114,6 +138,7 @@ const journalMemories: JournalMemory[] = [
   },
   {
     id: 'city-sky',
+    kind: 'panorama',
     memoryId: 'wedding',
     title: 'Leena and Omar, finally',
     author: 'Mum',
@@ -126,6 +151,7 @@ const journalMemories: JournalMemory[] = [
   },
   {
     id: 'flowers',
+    kind: 'panorama',
     memoryId: 'graduation',
     title: 'Sara did it',
     author: 'Sara',
@@ -138,6 +164,7 @@ const journalMemories: JournalMemory[] = [
   },
   {
     id: 'sleepy-dog',
+    kind: 'panorama',
     memoryId: 'grandparents',
     title: 'Grandad’s best laugh',
     author: 'Simreen',
@@ -150,6 +177,7 @@ const journalMemories: JournalMemory[] = [
   },
   {
     id: 'quiet-desk',
+    kind: 'panorama',
     memoryId: 'cousins',
     title: 'Cousins causing trouble',
     author: 'Maya',
@@ -176,34 +204,57 @@ function sharedJournalMemoryId(momentId: string) {
 function toSharedJournalMemory(moment: PanoramaMoment): JournalMemory {
   return {
     id: sharedJournalMemoryId(moment.id),
+    kind: 'panorama',
     memoryId: sharedJournalMemoryId(moment.id),
     title: moment.label,
     author: moment.uploaderDisplayName,
+    archivedAt: moment.createdAt,
     image: moment.objectUrl
-      ? { kind: 'photo', src: moment.objectUrl, position: 'center' }
+      ? { kind: 'photo', src: moment.objectUrl }
       : { kind: 'placeholder' },
   }
 }
 
+function toCapsuleJournalMemories(
+  capsules: FamilyCapsule[],
+  now: Date,
+): JournalMemory[] {
+  return unlockedCapsulePhotos(capsules, now).map((photo) => ({
+    id: `capsule-${photo.capsuleId}-${photo.id}`,
+    kind: 'capsule-photo',
+    capsuleId: photo.capsuleId,
+    photoId: photo.id,
+    title: photo.caption.trim() || photo.capsuleTitle,
+    author: photo.contributorName,
+    archivedAt: photo.capturedAt,
+    image: {
+      kind: 'photo',
+      src: photo.thumbnail,
+    },
+  }))
+}
+
 function createJournalWeek(
   today: Date,
-  sharedMoments: PanoramaMoment[],
+  archivedMemories: JournalMemory[],
+  weekOffset = 0,
 ): JournalDay[] {
-  return [-3, -2, -1, 0, 1, 2, 3].map((offset) => {
-    const dateValue = addLocalDays(today, offset)
+  return [-3, -2, -1, 0, 1, 2, 3].map((relativeOffset) => {
+    const dayOffset = weekOffset * 7 + relativeOffset
+    const dateValue = addLocalDays(today, dayOffset)
     const isoDate = toLocalIsoDate(dateValue)
     const shortDay = new Intl.DateTimeFormat('en-US', {
       weekday: 'short',
     }).format(dateValue)
-    const sharedMemoryIds = sharedMoments
-      .filter((moment) => {
-        const createdAt = new Date(moment.createdAt)
+    const archivedMemoryIds = archivedMemories
+      .filter((memory) => {
+        const createdAt = new Date(memory.archivedAt ?? '')
         return (
           !Number.isNaN(createdAt.getTime()) &&
           toLocalIsoDate(createdAt) === isoDate
         )
       })
-      .map(({ id }) => sharedJournalMemoryId(id))
+      .map(({ id }) => id)
 
     return {
       key: `${shortDay.toLowerCase()}-${dateValue.getDate()}`,
@@ -214,9 +265,34 @@ function createJournalWeek(
       fullDate: formatLocalDay(dateValue),
       memoryIds: isAfterLocalDay(dateValue, today)
         ? []
-        : [...(demoMemoryIdsByOffset.get(offset) ?? []), ...sharedMemoryIds],
+        : [
+            ...(demoMemoryIdsByOffset.get(dayOffset) ?? []),
+            ...archivedMemoryIds,
+          ],
     }
   })
+}
+
+function journalDayKey(date: Date) {
+  const shortDay = new Intl.DateTimeFormat('en-US', {
+    weekday: 'short',
+  }).format(date)
+  return `${shortDay.toLowerCase()}-${date.getDate()}`
+}
+
+function journalWeekRange(days: JournalDay[]) {
+  const first = days[0]?.dateValue
+  const last = days.at(-1)?.dateValue
+  if (!first || !last) return 'Journal week'
+  const firstLabel = new Intl.DateTimeFormat('en', {
+    month: 'short',
+    day: 'numeric',
+  }).format(first)
+  const lastLabel = new Intl.DateTimeFormat('en', {
+    month: first.getMonth() === last.getMonth() ? undefined : 'short',
+    day: 'numeric',
+  }).format(last)
+  return `${firstLabel} – ${lastLabel}`
 }
 
 function getMemoryCountLabel(count: number) {
@@ -227,12 +303,10 @@ function JournalMemoryImage({ memory }: { memory: JournalMemory }) {
   if (memory.image.kind === 'photo') {
     return (
       <span className="journal-memory__image-frame" aria-hidden="true">
-        <img
+        <CapsulePhotoImage
           className="journal-memory__image"
-          src={memory.image.src}
+          source={memory.image.src}
           alt=""
-          draggable="false"
-          style={{ objectPosition: memory.image.position }}
         />
       </span>
     )
@@ -273,34 +347,55 @@ function JournalMemoryImage({ memory }: { memory: JournalMemory }) {
 type JournalPageProps = {
   now?: Date
   sharedMoments?: PanoramaMoment[]
+  capsules?: FamilyCapsule[]
+  capsuleNow?: Date
 }
 
 export function JournalPage({
   now = new Date(),
   sharedMoments = [],
+  capsules = [],
+  capsuleNow = now,
 }: JournalPageProps = {}) {
   const location = useLocation()
   const [today] = useState(() => startOfLocalDay(now))
+  const incomingContext = (location.state as JournalLocationState | null)
+    ?.journalContext
+  const initialWeekOffset =
+    typeof incomingContext?.weekOffset === 'number' &&
+    Number.isInteger(incomingContext.weekOffset)
+      ? Math.min(0, incomingContext.weekOffset)
+      : 0
+  const [weekOffset, setWeekOffset] = useState(initialWeekOffset)
   const sharedJournalMemories = useMemo(
     () => sharedMoments.map(toSharedJournalMemory),
     [sharedMoments],
   )
+  const capsuleJournalMemories = useMemo(
+    () => toCapsuleJournalMemories(capsules, capsuleNow),
+    [capsuleNow, capsules],
+  )
+  const archivedJournalMemories = useMemo(
+    () => [...sharedJournalMemories, ...capsuleJournalMemories],
+    [capsuleJournalMemories, sharedJournalMemories],
+  )
   const allJournalMemories = useMemo(
-    () => [...journalMemories, ...sharedJournalMemories],
-    [sharedJournalMemories],
+    () => [...journalMemories, ...archivedJournalMemories],
+    [archivedJournalMemories],
   )
   const journalWeek = useMemo(
-    () => createJournalWeek(today, sharedMoments),
-    [sharedMoments, today],
+    () => createJournalWeek(today, archivedJournalMemories, weekOffset),
+    [archivedJournalMemories, today, weekOffset],
   )
-  const todayJournalDay = journalWeek[3]
-  const incomingContext = (location.state as JournalLocationState | null)
-    ?.journalContext
+  const defaultJournalDay = weekOffset === 0
+    ? journalWeek.find(({ isoDate }) => isoDate === toLocalIsoDate(today))
+      ?? journalWeek[3]
+    : journalWeek[3]
   const initialDayKey = journalWeek.some(
     ({ key }) => key === incomingContext?.selectedDayKey,
   )
-    ? incomingContext?.selectedDayKey ?? todayJournalDay.key
-    : todayJournalDay.key
+    ? incomingContext?.selectedDayKey ?? defaultJournalDay.key
+    : defaultJournalDay.key
   const initialScrollTop =
     typeof incomingContext?.scrollTop === 'number'
       ? Math.max(0, incomingContext.scrollTop)
@@ -310,7 +405,7 @@ export function JournalPage({
   const [scrollTop, setScrollTop] = useState(initialScrollTop)
 
   const selectedDay =
-    journalWeek.find(({ key }) => key === selectedDayKey) ?? todayJournalDay
+    journalWeek.find(({ key }) => key === selectedDayKey) ?? defaultJournalDay
   const isFutureDay = isAfterLocalDay(selectedDay.dateValue, today)
   const selectedMemories = (isFutureDay ? [] : selectedDay.memoryIds)
     .map((memoryId) => allJournalMemories.find(({ id }) => id === memoryId))
@@ -340,6 +435,14 @@ export function JournalPage({
     setSelectedDayKey(dayKey)
   }
 
+  function showWeek(nextWeekOffset: number) {
+    const boundedOffset = Math.min(0, nextWeekOffset)
+    setWeekOffset(boundedOffset)
+    setSelectedDayKey(
+      journalDayKey(addLocalDays(today, boundedOffset * 7)),
+    )
+  }
+
   function rememberScroll(event: UIEvent<HTMLElement>) {
     setScrollTop(event.currentTarget.scrollTop)
   }
@@ -362,6 +465,36 @@ export function JournalPage({
       <JournalEventsSection />
 
       <nav className="journal-week" aria-label="Journal week">
+        <div className="journal-week__toolbar">
+          <button
+            type="button"
+            aria-label="Show previous seven days"
+            onClick={() => showWeek(weekOffset - 1)}
+          >
+            <span aria-hidden="true">‹</span>
+          </button>
+          <button
+            type="button"
+            className="journal-week__range"
+            aria-label={
+              weekOffset === 0
+                ? `Current journal week, ${journalWeekRange(journalWeek)}`
+                : `Return to today from ${journalWeekRange(journalWeek)}`
+            }
+            disabled={weekOffset === 0}
+            onClick={() => showWeek(0)}
+          >
+            {weekOffset === 0 ? 'This week' : journalWeekRange(journalWeek)}
+          </button>
+          <button
+            type="button"
+            aria-label="Show next seven days"
+            disabled={weekOffset === 0}
+            onClick={() => showWeek(weekOffset + 1)}
+          >
+            <span aria-hidden="true">›</span>
+          </button>
+        </div>
         <ol className="journal-week__days">
           {journalWeek.map((day) => {
             const isSelected = selectedDay.key === day.key
@@ -399,30 +532,43 @@ export function JournalPage({
         </header>
 
         <ul className="journal-memories" data-layout="grid">
-          {selectedMemories.map((memory) => (
-            <li key={`${selectedDay.key}-${memory.id}`}>
-              <Link
-                className="journal-memory__link"
-                to={`/memory/${memory.memoryId}`}
-                state={{
-                  returnTo: '/journal',
-                  sourceMemoryId: memory.memoryId,
-                  journalContext: {
-                    selectedDayKey,
-                    view: 'grid',
-                    scrollTop,
-                    focusMemoryId: memory.id,
-                  },
-                }}
-                data-journal-memory-id={memory.id}
-                aria-label={`Open ${memory.title}, shared by ${memory.author}, panorama memory`}
-              >
-                <article className="journal-memory">
-                  <JournalMemoryImage memory={memory} />
-                </article>
-              </Link>
-            </li>
-          ))}
+          {selectedMemories.map((memory) => {
+            const isCapsulePhoto = memory.kind === 'capsule-photo'
+            const sourceMemoryId = isCapsulePhoto
+              ? memory.photoId
+              : memory.memoryId
+            const destination = isCapsulePhoto
+              ? `/journal/photo/${encodeURIComponent(memory.capsuleId)}/${encodeURIComponent(memory.photoId)}`
+              : `/memory/${memory.memoryId}`
+
+            return (
+              <li key={`${selectedDay.key}-${memory.id}`}>
+                <Link
+                  className="journal-memory__link"
+                  to={destination}
+                  state={{
+                    returnTo: '/journal',
+                    sourceMemoryId,
+                    journalContext: {
+                      selectedDayKey,
+                      view: 'grid',
+                      scrollTop,
+                      weekOffset,
+                      focusMemoryId: memory.id,
+                    },
+                  }}
+                  data-journal-memory-id={memory.id}
+                  aria-label={`Open ${memory.title}, shared by ${memory.author}, ${
+                    isCapsulePhoto ? 'photo memory' : 'panorama memory'
+                  }`}
+                >
+                  <article className="journal-memory">
+                    <JournalMemoryImage memory={memory} />
+                  </article>
+                </Link>
+              </li>
+            )
+          })}
         </ul>
 
         {isFutureDay ? (

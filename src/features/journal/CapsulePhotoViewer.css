@@ -1,0 +1,322 @@
+.journal-photo-viewer {
+  position: relative;
+  height: 100%;
+  min-width: 0;
+  padding:
+    max(0.9rem, env(safe-area-inset-top), var(--native-safe-area-top, 0px))
+    max(0.9rem, env(safe-area-inset-right), var(--native-safe-area-right, 0px))
+    calc(7.3rem + max(env(safe-area-inset-bottom), var(--native-safe-area-bottom, 0px)))
+    max(0.9rem, env(safe-area-inset-left), var(--native-safe-area-left, 0px));
+  overflow-x: hidden;
+  overflow-y: auto;
+  color: rgba(255, 250, 245, 0.94);
+  background: #080706;
+  scrollbar-width: none;
+}
+
+.journal-photo-viewer::-webkit-scrollbar {
+  display: none;
+}
+
+.journal-photo-viewer__bar {
+  position: relative;
+  z-index: 2;
+  display: grid;
+  grid-template-columns: 2.75rem minmax(0, 1fr) 2.75rem;
+  width: min(100%, 32rem);
+  min-width: 0;
+  min-height: 3.6rem;
+  margin: 0 auto 0.7rem;
+  align-items: center;
+  gap: 0.65rem;
+}
+
+.journal-photo-viewer__bar > div {
+  min-width: 0;
+  text-align: center;
+}
+
+.journal-photo-viewer__bar p,
+.journal-photo-viewer__bar h1 {
+  margin: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.journal-photo-viewer__bar p {
+  color: rgba(237, 187, 132, 0.72);
+  font-size: 0.56rem;
+  font-weight: 660;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.journal-photo-viewer__bar h1 {
+  margin-top: 0.16rem;
+  color: rgba(255, 255, 255, 0.94);
+  font-size: 0.84rem;
+  font-weight: 630;
+  letter-spacing: -0.02em;
+}
+
+.journal-photo-viewer__back,
+.journal-photo-viewer__close {
+  display: grid;
+  width: 2.75rem;
+  height: 2.75rem;
+  padding: 0;
+  place-items: center;
+  border: 1px solid rgba(255, 255, 255, 0.11);
+  border-radius: 50%;
+  color: rgba(255, 255, 255, 0.82);
+  background: #121110;
+  font: inherit;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.journal-photo-viewer__back svg {
+  transform: rotate(180deg);
+}
+
+.journal-photo-viewer__close {
+  font-size: 1.35rem;
+  font-weight: 280;
+  line-height: 1;
+}
+
+.journal-photo-viewer__back:focus-visible,
+.journal-photo-viewer__close:focus-visible,
+.journal-photo-viewer__pager button:focus-visible {
+  outline: 2px solid rgba(237, 187, 132, 0.78);
+  outline-offset: 0.16rem;
+}
+
+.journal-photo-viewer__feed {
+  width: min(100%, 32rem);
+  min-width: 0;
+  margin-inline: auto;
+}
+
+.journal-photo-post {
+  overflow: hidden;
+  border: 1px solid rgba(255, 245, 235, 0.1);
+  border-radius: 1.1rem;
+  background: #0d0c0b;
+}
+
+.journal-photo-post__person {
+  display: flex;
+  min-width: 0;
+  min-height: 3.7rem;
+  padding: 0.65rem 0.78rem;
+  align-items: center;
+  gap: 0.62rem;
+}
+
+.journal-photo-post__person > span {
+  display: grid;
+  width: 2.25rem;
+  height: 2.25rem;
+  flex: 0 0 2.25rem;
+  place-items: center;
+  border: 1px solid rgba(237, 187, 132, 0.26);
+  border-radius: 50%;
+  color: rgba(255, 229, 200, 0.82);
+  background: #19130e;
+  font-size: 0.64rem;
+  font-weight: 680;
+}
+
+.journal-photo-post__person > div {
+  min-width: 0;
+}
+
+.journal-photo-post__person strong,
+.journal-photo-post__person small {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.journal-photo-post__person strong {
+  font-size: 0.76rem;
+  font-weight: 650;
+}
+
+.journal-photo-post__person small {
+  margin-top: 0.15rem;
+  color: rgba(255, 248, 240, 0.42);
+  font-size: 0.6rem;
+}
+
+.journal-photo-post__figure {
+  display: grid;
+  width: 100%;
+  min-height: min(65dvh, 31rem);
+  margin: 0;
+  overflow: hidden;
+  place-items: center;
+  background: #020202;
+}
+
+.journal-photo-post__image {
+  display: block;
+  width: 100%;
+  height: min(65dvh, 31rem);
+  object-fit: contain;
+  user-select: none;
+  -webkit-touch-callout: none;
+}
+
+.journal-photo-placeholder.journal-photo-post__image {
+  display: grid;
+  place-items: center;
+  color: rgba(237, 187, 132, 0.66);
+  background: #15110d;
+  font-size: 1.4rem;
+}
+
+.journal-photo-post__caption {
+  padding: 0.78rem 0.84rem 0.9rem;
+}
+
+.journal-photo-post__caption p,
+.journal-photo-post__caption span {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.journal-photo-post__caption p {
+  color: rgba(255, 252, 248, 0.78);
+  font-size: 0.72rem;
+  line-height: 1.5;
+}
+
+.journal-photo-post__caption p strong {
+  color: rgba(255, 255, 255, 0.94);
+  font-weight: 680;
+}
+
+.journal-photo-post__caption > span {
+  display: block;
+  margin-top: 0.52rem;
+  color: rgba(237, 187, 132, 0.5);
+  font-size: 0.58rem;
+}
+
+.journal-photo-viewer__pager {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  width: min(100%, 32rem);
+  min-width: 0;
+  margin: 0.8rem auto 0;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.journal-photo-viewer__pager button {
+  min-width: 0;
+  min-height: 2.75rem;
+  padding: 0.45rem 0.72rem;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.11);
+  border-radius: 999px;
+  color: rgba(255, 255, 255, 0.76);
+  background: #11100f;
+  font: inherit;
+  font-size: 0.66rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.journal-photo-viewer__pager button:last-child {
+  justify-self: end;
+}
+
+.journal-photo-viewer__pager button:disabled {
+  color: rgba(255, 255, 255, 0.25);
+  cursor: default;
+}
+
+.journal-photo-viewer__pager > span {
+  color: rgba(255, 255, 255, 0.4);
+  font-size: 0.62rem;
+  white-space: nowrap;
+}
+
+.journal-photo-viewer--status {
+  display: grid;
+  padding-inline: max(1.4rem, env(safe-area-inset-left)) max(1.4rem, env(safe-area-inset-right));
+  align-content: center;
+  justify-items: center;
+  text-align: center;
+}
+
+.journal-photo-viewer--status h1,
+.journal-photo-viewer--status p {
+  max-width: 22rem;
+  margin: 0;
+}
+
+.journal-photo-viewer--status h1 {
+  margin-top: 0.5rem;
+  font-size: 1.5rem;
+  letter-spacing: -0.045em;
+}
+
+.journal-photo-viewer--status > p:not(.journal-photo-viewer__eyebrow) {
+  margin-top: 0.6rem;
+  color: rgba(255, 255, 255, 0.5);
+  font-size: 0.75rem;
+  line-height: 1.5;
+}
+
+.journal-photo-viewer__eyebrow {
+  color: rgba(237, 187, 132, 0.72);
+  font-size: 0.62rem;
+  font-weight: 680;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.journal-photo-viewer--status button {
+  min-height: 2.75rem;
+  margin-top: 1rem;
+  padding: 0.55rem 1rem;
+  border: 0;
+  border-radius: 999px;
+  color: #15100a;
+  background: #edbb84;
+  font: inherit;
+  font-size: 0.72rem;
+  font-weight: 680;
+  cursor: pointer;
+}
+
+@media (max-width: 22rem) {
+  .journal-photo-viewer {
+    padding-inline:
+      max(0.68rem, env(safe-area-inset-left))
+      max(0.68rem, env(safe-area-inset-right));
+  }
+
+  .journal-photo-viewer__bar {
+    gap: 0.4rem;
+  }
+
+  .journal-photo-post__figure,
+  .journal-photo-post__image {
+    min-height: min(58dvh, 25rem);
+    height: min(58dvh, 25rem);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .journal-photo-viewer {
+    scroll-behavior: auto;
+  }
+}
