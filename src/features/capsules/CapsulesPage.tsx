@@ -138,14 +138,28 @@ function mergeCapsules(
       }
     })
     const familyPhotoIds = new Set(durableFamilyPhotos.map(({ id }) => id))
-    const pendingPhotos = localCapsule.photos
-      .filter((photo) => photo.syncStatus === 'pending' && !familyPhotoIds.has(photo.id))
+    const localOnlyPhotos = localCapsule.photos
+      .filter((photo) => (
+        !familyPhotoIds.has(photo.id) && (
+          photo.syncStatus === 'pending' ||
+          typeof photo.image !== 'string' ||
+          typeof photo.thumbnail !== 'string'
+        )
+      ))
       .map((photo) => ({ ...photo, capsuleId: familyCapsule.id }))
+    const pendingPhotoCount = localOnlyPhotos.filter(
+      ({ syncStatus }) => syncStatus === 'pending',
+    ).length
+    const syncedVisiblePhotoCount = durableFamilyPhotos.length +
+      localOnlyPhotos.length - pendingPhotoCount
     return {
       ...familyCapsule,
-      photos: [...durableFamilyPhotos, ...pendingPhotos]
+      photos: [...durableFamilyPhotos, ...localOnlyPhotos]
         .sort((left, right) => left.capturedAt.localeCompare(right.capturedAt)),
-      totalPhotoCount: (familyCapsule.totalPhotoCount ?? familyCapsule.photos.length) + pendingPhotos.length,
+      totalPhotoCount: Math.max(
+        familyCapsule.totalPhotoCount ?? familyCapsule.photos.length,
+        syncedVisiblePhotoCount,
+      ) + pendingPhotoCount,
     }
   })
 
@@ -667,7 +681,7 @@ function RecapSheet({
       <section className="capsule-recap-sheet__panel">
         <header>
           <div>
-            <p>{demoMode ? 'Demo preview' : 'Family recap'} · 0.2 seconds each</p>
+            <p>{demoMode ? 'Demo preview' : 'Family recap'}</p>
             <h2 id="capsule-recap-title">{capsule.title}</h2>
           </div>
           <button type="button" aria-label="Close recap" onClick={onClose}>×</button>

@@ -187,7 +187,8 @@ describe('CapsulesPage', () => {
 
     await user.click(screen.getByRole('button', { name: 'Play recap' }))
     expect(screen.getByRole('dialog', { name: 'Last week' })).toBeInTheDocument()
-    expect(screen.getByText('Family recap · 0.2 seconds each')).toBeInTheDocument()
+    expect(screen.getByText('Family recap')).toBeInTheDocument()
+    expect(screen.queryByText(/0\.2 seconds each/i)).not.toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Save video' })).toBeInTheDocument()
 
     await user.click(screen.getByRole('button', { name: 'Close recap' }))
@@ -246,7 +247,8 @@ describe('CapsulesPage', () => {
     }))
 
     const dialog = screen.getByRole('dialog', { name: first.title })
-    expect(within(dialog).getByText('Demo preview · 0.2 seconds each')).toBeInTheDocument()
+    expect(within(dialog).getByText('Demo preview')).toBeInTheDocument()
+    expect(within(dialog).queryByText(/0\.2 seconds each/i)).not.toBeInTheDocument()
     expect(within(dialog).getByText('Simreen')).toBeInTheDocument()
     expect(firstCard).toHaveAttribute('data-demo-unlocked', 'true')
     expect(secondCard).toHaveAttribute('data-demo-unlocked', 'false')
@@ -380,5 +382,66 @@ describe('CapsulesPage', () => {
     ])
     expect(saved[0].photos[0].image).toBeInstanceOf(Blob)
     expect(saved[0].photos[0].thumbnail).toBeInstanceOf(Blob)
+  })
+
+  it('keeps a restart-restored synced Blob when the server returns only its count', async () => {
+    const capsuleId = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'
+    const photoId = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb'
+    const restoredPhoto = {
+      id: photoId,
+      capsuleId,
+      image: new Blob(['restored-full'], { type: 'image/jpeg' }),
+      thumbnail: new Blob(['restored-thumb'], { type: 'image/jpeg' }),
+      width: 900,
+      height: 1200,
+      thumbnailWidth: 420,
+      thumbnailHeight: 560,
+      caption: 'Saturday pancakes',
+      capturedAt: '2026-08-28T08:00:00.000Z',
+      contributorName: 'Simreen',
+      ownedByCurrentUser: true,
+      syncStatus: 'synced' as const,
+    }
+    const restoredCapsule: FamilyCapsule = {
+      id: capsuleId,
+      kind: 'weekly',
+      title: 'This week',
+      weekStart: '2026-08-24',
+      createdAt: '2026-08-24T00:00:00.000Z',
+      closesAt: '2026-08-31T00:00:00.000Z',
+      opensAt: '2026-08-31T00:00:00.000Z',
+      createdByName: 'Simreen',
+      photos: [restoredPhoto],
+      totalPhotoCount: 1,
+      familySynced: true,
+    }
+    const metadataOnlyServerCapsule: FamilyCapsule = {
+      ...restoredCapsule,
+      photos: [],
+      totalPhotoCount: 1,
+    }
+    const store = createMemoryCapsuleStore([restoredCapsule])
+    capsuleServiceMocks.ensureFamilyWeeklyCapsule.mockResolvedValue({
+      id: capsuleId,
+      weekStart: '2026-08-24',
+    })
+    capsuleServiceMocks.fetchFamilyCapsules.mockResolvedValue([
+      metadataOnlyServerCapsule,
+    ])
+
+    render(<CapsulesPage now={testNow} store={store} />)
+
+    expect(await screen.findByText('1 photo')).toBeInTheDocument()
+    await waitFor(async () => {
+      const [saved] = await store.list()
+      expect(saved.photos).toHaveLength(1)
+      expect(saved.photos[0]).toMatchObject({
+        id: photoId,
+        syncStatus: 'synced',
+      })
+      expect(saved.photos[0].image).toBeInstanceOf(Blob)
+      expect(saved.photos[0].thumbnail).toBeInstanceOf(Blob)
+    })
+    expect(capsuleServiceMocks.uploadFamilyCapsulePhoto).not.toHaveBeenCalled()
   })
 })

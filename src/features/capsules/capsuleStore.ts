@@ -1,12 +1,29 @@
 import type {
   CapsuleImageSource,
+  CapsulePhoto,
   CapsuleStore,
   FamilyCapsule,
 } from './types'
 
 const DATABASE_PREFIX = 'kinsphere-family-capsules'
-const DATABASE_VERSION = 1
+const DATABASE_VERSION = 2
 const STORE_NAME = 'capsules'
+const IMAGE_BYTES_FORMAT = 'kinsphere-capsule-image-bytes-v1'
+
+type PersistedImageBytes = {
+  format: typeof IMAGE_BYTES_FORMAT
+  mimeType: string
+  bytes: ArrayBuffer
+}
+
+type PersistedCapsulePhoto = Omit<CapsulePhoto, 'image' | 'thumbnail'> & {
+  image: CapsuleImageSource | PersistedImageBytes
+  thumbnail: CapsuleImageSource | PersistedImageBytes
+}
+
+type PersistedFamilyCapsule = Omit<FamilyCapsule, 'photos'> & {
+  photos: PersistedCapsulePhoto[]
+}
 
 function cloneCapsule(capsule: FamilyCapsule): FamilyCapsule {
   return {
@@ -44,6 +61,80 @@ async function prepareCapsuleForPersistence(
       const [image, thumbnail] = await Promise.all([
         durableImageSource(photo.image),
         durableImageSource(photo.thumbnail),
+      ])
+      return { ...photo, image, thumbnail }
+    })),
+  }
+}
+
+function isPersistedImageBytes(value: unknown): value is PersistedImageBytes {
+  if (!value || typeof value !== 'object') return false
+  const candidate = value as Partial<PersistedImageBytes>
+  return candidate.format === IMAGE_BYTES_FORMAT &&
+    typeof candidate.mimeType === 'string' &&
+    Object.prototype.toString.call(candidate.bytes) === '[object ArrayBuffer]'
+}
+
+async function serializeImageSource(
+  source: CapsuleImageSource,
+): Promise<CapsuleImageSource | PersistedImageBytes> {
+  const durableSource = await durableImageSource(source)
+  if (typeof durableSource === 'string') return durableSource
+  try {
+    return {
+      format: IMAGE_BYTES_FORMAT,
+      mimeType: durableSource.type,
+      // Persist bytes rather than a file-backed Blob. WebKit can otherwise lose
+      // access to an IndexedDB Blob's backing file after an iOS app restart.
+      bytes: await durableSource.arrayBuffer(),
+    }
+  } catch {
+    // Do not make an otherwise readable Capsule disappear if an older WebKit
+    // Blob has already lost access to its backing file.
+    return durableSource
+  }
+}
+
+async function hydrateImageSource(
+  source: CapsuleImageSource | PersistedImageBytes,
+): Promise<CapsuleImageSource> {
+  if (isPersistedImageBytes(source)) {
+    return new Blob([source.bytes], { type: source.mimeType })
+  }
+  if (typeof source === 'string') return source
+  // Materialize version-1 records into a fresh in-memory Blob. The next save
+  // transparently migrates them to the byte-backed format above.
+  try {
+    return new Blob([await source.arrayBuffer()], { type: source.type })
+  } catch {
+    return source
+  }
+}
+
+export async function serializeCapsuleForIndexedDb(
+  capsule: FamilyCapsule,
+): Promise<PersistedFamilyCapsule> {
+  return {
+    ...capsule,
+    photos: await Promise.all(capsule.photos.map(async (photo) => {
+      const [image, thumbnail] = await Promise.all([
+        serializeImageSource(photo.image),
+        serializeImageSource(photo.thumbnail),
+      ])
+      return { ...photo, image, thumbnail }
+    })),
+  }
+}
+
+export async function hydrateCapsuleFromIndexedDb(
+  capsule: PersistedFamilyCapsule,
+): Promise<FamilyCapsule> {
+  return {
+    ...capsule,
+    photos: await Promise.all(capsule.photos.map(async (photo) => {
+      const [image, thumbnail] = await Promise.all([
+        hydrateImageSource(photo.image),
+        hydrateImageSource(photo.thumbnail),
       ])
       return { ...photo, image, thumbnail }
     })),
@@ -102,9 +193,15 @@ export function createIndexedDbCapsuleStore(
         return await new Promise<FamilyCapsule[]>((resolve, reject) => {
           const transaction = database.transaction(STORE_NAME, 'readonly')
           const request = transaction.objectStore(STORE_NAME).getAll()
-          request.onsuccess = () => resolve(
-            (request.result as FamilyCapsule[]).map(cloneCapsule).sort(newestFirst),
-          )
+          request.onsuccess = () => {
+            void Promise.all(
+              (request.result as PersistedFamilyCapsule[])
+                .map(hydrateCapsuleFromIndexedDb),
+            ).then(
+              (capsules) => resolve(capsules.map(cloneCapsule).sort(newestFirst)),
+              reject,
+            )
+          }
           request.onerror = () => reject(request.error ?? new Error('Could not read Capsules.'))
           transaction.onabort = () => reject(transaction.error ?? new Error('Reading Capsules was interrupted.'))
         })
@@ -115,10 +212,10 @@ export function createIndexedDbCapsuleStore(
     async save(capsule) {
       const database = await openDatabase(indexedDb, databaseName)
       try {
-        const durableCapsule = await prepareCapsuleForPersistence(capsule)
+        const durableCapsule = await serializeCapsuleForIndexedDb(capsule)
         await new Promise<void>((resolve, reject) => {
           const transaction = database.transaction(STORE_NAME, 'readwrite')
-          transaction.objectStore(STORE_NAME).put(cloneCapsule(durableCapsule))
+          transaction.objectStore(STORE_NAME).put(durableCapsule)
           transaction.oncomplete = () => resolve()
           transaction.onerror = () => reject(transaction.error ?? new Error('Could not save the Capsule.'))
           transaction.onabort = () => reject(transaction.error ?? new Error('Saving the Capsule was interrupted.'))
@@ -148,42 +245,78 @@ export function createResilientCapsuleStore(
   primary: CapsuleStore,
   fallback: CapsuleStore = createMemoryCapsuleStore(),
 ): CapsuleStore {
-  let fallbackOnly = false
+  type DirtyOperation =
+    | { kind: 'save'; capsule: FamilyCapsule }
+    | { kind: 'remove' }
+
+  const dirtyOperations = new Map<string, DirtyOperation>()
+
+  async function retryPrimary<T>(operation: () => Promise<T>) {
+    let lastError: unknown
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      try {
+        return await operation()
+      } catch (error) {
+        lastError = error
+      }
+    }
+    throw lastError instanceof Error
+      ? lastError
+      : new Error('Capsule storage is temporarily unavailable.')
+  }
+
+  async function flushDirtyOperations() {
+    for (const [capsuleId, operation] of [...dirtyOperations]) {
+      if (operation.kind === 'save') {
+        await retryPrimary(() => primary.save(operation.capsule))
+      } else {
+        await retryPrimary(() => primary.remove(capsuleId))
+      }
+      if (dirtyOperations.get(capsuleId) === operation) {
+        dirtyOperations.delete(capsuleId)
+      }
+    }
+  }
+
   return {
     async list() {
-      if (fallbackOnly) return fallback.list()
       try {
-        const capsules = await primary.list()
-        await Promise.all(capsules.map((capsule) => fallback.save(capsule)))
+        await flushDirtyOperations()
+        const capsules = await retryPrimary(() => primary.list())
+        const capsuleIds = new Set(capsules.map(({ id }) => id))
+        const fallbackCapsules = await fallback.list()
+        await Promise.all([
+          ...fallbackCapsules
+            .filter(({ id }) => !capsuleIds.has(id))
+            .map(({ id }) => fallback.remove(id)),
+          ...capsules.map((capsule) => fallback.save(capsule)),
+        ])
         return capsules
       } catch {
-        fallbackOnly = true
         return fallback.list()
       }
     },
     async save(capsule) {
-      if (!fallbackOnly) {
-        try {
-          await primary.save(capsule)
-          await fallback.save(capsule)
-          return
-        } catch {
-          fallbackOnly = true
-        }
+      const durableCapsule = await prepareCapsuleForPersistence(capsule)
+      const operation = {
+        kind: 'save' as const,
+        capsule: cloneCapsule(durableCapsule),
       }
-      await fallback.save(capsule)
+      await fallback.save(durableCapsule)
+      dirtyOperations.set(capsule.id, operation)
+      await retryPrimary(() => primary.save(durableCapsule))
+      if (dirtyOperations.get(capsule.id) === operation) {
+        dirtyOperations.delete(capsule.id)
+      }
     },
     async remove(capsuleId) {
-      if (!fallbackOnly) {
-        try {
-          await primary.remove(capsuleId)
-          await fallback.remove(capsuleId)
-          return
-        } catch {
-          fallbackOnly = true
-        }
-      }
+      const operation = { kind: 'remove' as const }
       await fallback.remove(capsuleId)
+      dirtyOperations.set(capsuleId, operation)
+      await retryPrimary(() => primary.remove(capsuleId))
+      if (dirtyOperations.get(capsuleId) === operation) {
+        dirtyOperations.delete(capsuleId)
+      }
     },
   }
 }

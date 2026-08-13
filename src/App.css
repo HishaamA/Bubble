@@ -62,6 +62,10 @@
   padding-bottom: calc(6rem + var(--safe-bottom));
 }
 
+.app-content > :is(.capsules-page, .journal-page) {
+  padding-top: 0;
+}
+
 .app-viewport > .capture-360-shortcut {
   top: calc(var(--app-page-top) + 4.8rem);
 }

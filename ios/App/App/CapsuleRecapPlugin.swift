@@ -495,8 +495,6 @@ public final class CapsuleRecapPlugin: CAPPlugin, CAPBridgedPlugin {
         context.setFillColor(UIColor.black.cgColor)
         context.fill(CGRect(x: 0, y: 0, width: outputWidth, height: outputHeight))
         context.interpolationQuality = .high
-        context.translateBy(x: 0, y: outputHeight)
-        context.scaleBy(x: 1, y: -1)
         context.draw(image, in: drawRect)
         return pixelBuffer
     }

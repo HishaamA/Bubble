@@ -1,16 +1,36 @@
 .capsules-page {
   --capsule-warm: #e6bd82;
   --capsule-line: rgba(255, 244, 230, 0.12);
+  --capsule-gutter-left: max(
+    1rem,
+    env(safe-area-inset-left),
+    var(--native-safe-area-left, 0px)
+  );
+  --capsule-gutter-right: max(
+    1rem,
+    env(safe-area-inset-right),
+    var(--native-safe-area-right, 0px)
+  );
   min-width: 0;
-  padding-inline:
-    max(1rem, env(safe-area-inset-left), var(--native-safe-area-left, 0px))
-    max(1rem, env(safe-area-inset-right), var(--native-safe-area-right, 0px));
+  padding-inline: var(--capsule-gutter-left) var(--capsule-gutter-right);
   background: #050504;
 }
 
 .capsule-page-header {
+  position: sticky;
+  z-index: 20;
+  top: 0;
   min-width: 0;
+  margin-right: calc(0px - var(--capsule-gutter-right));
+  margin-left: calc(0px - var(--capsule-gutter-left));
+  padding:
+    var(--app-page-top)
+    var(--capsule-gutter-right)
+    0.9rem
+    var(--capsule-gutter-left);
   align-items: flex-start;
+  background: #050504;
+  box-shadow: 0 1px rgba(255, 244, 230, 0.06);
 }
 
 .capsule-page-header > *,

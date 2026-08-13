@@ -19,8 +19,17 @@
 }
 
 .journal-page__header {
-  position: relative;
-  z-index: 1;
+  position: sticky;
+  z-index: 20;
+  top: 0;
+  margin-right: calc(0px - var(--journal-page-gutter));
+  margin-left: calc(0px - var(--journal-page-gutter));
+  padding:
+    var(--app-page-top)
+    var(--journal-page-gutter)
+    0;
+  background: var(--journal-canvas);
+  box-shadow: 0 1px rgba(255, 238, 221, 0.06);
 }
 
 .journal-page__heading {
