@@ -1,4 +1,3 @@
-import { Capacitor } from '@capacitor/core'
 import type { AuthUser } from './types'
 import { clerkConfigured } from './config'
 
@@ -8,15 +7,17 @@ const DEVELOPMENT_PREVIEW_STORAGE_KEY =
 export function canUseDevelopmentPreview(
   developmentBuild: boolean,
   hasClerkConfiguration: boolean,
-  nativeApp = false,
+  _nativeApp = false,
 ) {
-  return (developmentBuild || nativeApp) && !hasClerkConfiguration
+  // Native packaging alone must never unlock authentication. Android test
+  // access is separately triple-gated by the debuggable APK, BuildConfig, and
+  // the explicitly enabled DebugAccess plugin.
+  return developmentBuild && !hasClerkConfiguration
 }
 
 export const developmentPreviewAvailable = canUseDevelopmentPreview(
   import.meta.env.DEV,
   clerkConfigured,
-  Capacitor.isNativePlatform(),
 )
 
 export const developmentPreviewUser: AuthUser = {

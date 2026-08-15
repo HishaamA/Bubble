@@ -90,6 +90,18 @@ cleanup for future offline reconciliation.
 
 Up to eight position-bound text or voice annotations are finalized atomically
 with each panorama. Voice clips use the same private family-media boundary.
+After sharing, only the original uploader can replace a ready moment's
+annotation set through `replace_360_moment_annotations`. New or changed voice
+clips use an immutable versioned path and the RPC returns superseded paths for
+best-effort Storage cleanup:
+
+```text
+<circle-id>/voice/<internal-user-id>/<moment-id>-<annotation-id>-<32-lowercase-hex>.<ext>
+```
+
+Unchanged annotation IDs are updated in place so their family replies survive;
+only omitted IDs and their targeted replies are deleted. The caller must still
+be an approved member of the circle and the moment must still be ready.
 Approved family members may then discuss a ready panorama through
 `family_moment_comments`: a null annotation target comments on the whole image,
 while a validated annotation ID replies to that embedded memory point. Comment
@@ -170,6 +182,7 @@ supabase start
 supabase db reset
 supabase test db supabase/tests/rls_membership.sql
 supabase test db supabase/tests/360_moment_mvp.sql
+supabase test db supabase/tests/replace_moment_annotations.sql
 supabase test db supabase/tests/moment_comments.sql
 supabase test db supabase/tests/events_notifications.sql
 supabase test db supabase/tests/clerk_third_party_auth.sql

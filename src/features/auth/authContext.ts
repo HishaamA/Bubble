@@ -13,6 +13,7 @@ export type AuthContextValue = {
   getToken: AuthTokenGetter
   signOut: () => Promise<void>
   isDevelopmentPreview?: boolean
+  isTestAccess?: boolean
   startDevelopmentPreview?: () => void
 }
 

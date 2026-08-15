@@ -15,6 +15,7 @@ import {
   getFamilyDailyCaptureWindow,
   getFamilyMomentConnection,
   publishFamilyMoment,
+  replaceFamilyMomentAnnotations,
   resumePendingFamilyMomentDeletions,
   subscribeToFamilyMoments,
   type FamilyDailyCaptureWindow,
@@ -27,9 +28,77 @@ import {
   type FamilyMomentSyncContextValue,
   type FamilySyncStatus,
 } from './useFamilyMomentSync'
+import type {
+  StoredPanoramaAnnotation,
+  StoredPanoramaMoment,
+} from './types'
+
+function annotationsAreDurablyCached(
+  existing: StoredPanoramaMoment,
+  incoming: Pick<StoredPanoramaMoment, 'annotations'>,
+) {
+  const existingAnnotations = existing.annotations ?? []
+  const incomingAnnotations = incoming.annotations ?? []
+  if (existingAnnotations.length !== incomingAnnotations.length) return false
+
+  return incomingAnnotations.every((incomingAnnotation) => {
+    const cached = existingAnnotations.find(
+      ({ id }) => id === incomingAnnotation.id,
+    )
+    if (!cached || !annotationMetadataMatches(cached, incomingAnnotation)) {
+      return false
+    }
+
+    // A failed private-storage download leaves the annotation metadata in the
+    // cache without its Blob. Do not treat that record as complete: the next
+    // refresh must try the voice object again instead of skipping forever.
+    return cached.kind !== 'voice' || cached.audioBlob instanceof Blob
+  })
+}
+
+function annotationMetadataMatches(
+  cached: StoredPanoramaAnnotation,
+  incoming: StoredPanoramaAnnotation,
+) {
+  return (
+    cached.kind === incoming.kind &&
+    cached.pitch === incoming.pitch &&
+    cached.yaw === incoming.yaw &&
+    cached.message === incoming.message &&
+    cached.audioMimeType === incoming.audioMimeType &&
+    cached.durationMs === incoming.durationMs
+  )
+}
+
+function incomingMomentWouldDiscardCachedVoice(
+  existing: StoredPanoramaMoment,
+  incoming: Pick<StoredPanoramaMoment, 'annotations'>,
+) {
+  const existingAnnotations = existing.annotations ?? []
+  return (incoming.annotations ?? []).some((incomingAnnotation) => {
+    if (
+      incomingAnnotation.kind !== 'voice' ||
+      incomingAnnotation.audioBlob instanceof Blob
+    ) {
+      return false
+    }
+    return existingAnnotations.some(
+      (cached) =>
+        cached.id === incomingAnnotation.id &&
+        cached.kind === 'voice' &&
+        cached.audioBlob instanceof Blob,
+    )
+  })
+}
 
 export function FamilyMomentSyncProvider({ children }: PropsWithChildren) {
-  const { moments, removeMoments, saveMoment } = useSharedMoments()
+  const {
+    loading: momentsLoading,
+    moments,
+    removeMoments,
+    saveMoment,
+  } = useSharedMoments()
+  const [cacheHydrated, setCacheHydrated] = useState(false)
   const [status, setStatus] = useState<FamilySyncStatus>('checking')
   const [dailyWindow, setDailyWindow] =
     useState<FamilyDailyCaptureWindow | null>(null)
@@ -40,6 +109,15 @@ export function FamilyMomentSyncProvider({ children }: PropsWithChildren) {
   const deletedIdsRef = useRef(new Set<string>())
   const refreshRequestedRef = useRef(false)
   const refreshRunRef = useRef<Promise<void> | null>(null)
+
+  useEffect(() => {
+    if (!momentsLoading) {
+      // This is a one-way readiness latch. Later save/refresh operations may
+      // temporarily set loading again but must not tear down family realtime.
+      // oxlint-disable-next-line react/set-state-in-effect -- IndexedDB hydration is an external readiness signal.
+      setCacheHydrated(true)
+    }
+  }, [momentsLoading])
 
   useEffect(() => {
     momentsRef.current = moments
@@ -118,7 +196,15 @@ export function FamilyMomentSyncProvider({ children }: PropsWithChildren) {
           : undefined
         if (
           existing?.familySynced === true &&
-          existing.ownedByCurrentUser === moment.ownedByCurrentUser
+          existing.ownedByCurrentUser === moment.ownedByCurrentUser &&
+          (
+            annotationsAreDurablyCached(existing, moment) ||
+            // Storage may return annotation metadata while a private voice
+            // object temporarily fails to download. Keep the known-good Blob;
+            // fetchFamilyMoments will attempt the remote object again on the
+            // next refresh instead of degrading the local cache.
+            incomingMomentWouldDiscardCachedVoice(existing, moment)
+          )
         ) {
           continue
         }
@@ -164,6 +250,8 @@ export function FamilyMomentSyncProvider({ children }: PropsWithChildren) {
   }, [performFamilyMomentRefresh])
 
   useEffect(() => {
+    if (!cacheHydrated) return
+
     let active = true
     let connectionVersion = 0
     let familySubscription: FamilyMomentSubscription | null = null
@@ -276,7 +364,7 @@ export function FamilyMomentSyncProvider({ children }: PropsWithChildren) {
       window.removeEventListener('focus', reconnect)
       document.removeEventListener('visibilitychange', reconnectWhenVisible)
     }
-  }, [refreshFamilyMoments, removeMoments])
+  }, [cacheHydrated, refreshFamilyMoments, removeMoments])
 
   const shareMoment = useCallback(
     async (
@@ -346,16 +434,64 @@ export function FamilyMomentSyncProvider({ children }: PropsWithChildren) {
     [removeMoments],
   )
 
+  const updateMomentAnnotations = useCallback(
+    async (
+      momentId: string,
+      annotations: StoredPanoramaAnnotation[],
+    ) => {
+      const moment = momentsRef.current.find(({ id }) => id === momentId)
+      if (!moment?.ownedByCurrentUser) {
+        throw new Error('Only the person who shared this moment can edit its memory points.')
+      }
+
+      if (moment.familySynced) {
+        const connection = connectionRef.current
+        if (!connection) {
+          throw new Error(
+            'Reconnect to your family before editing this shared moment.',
+          )
+        }
+        await replaceFamilyMomentAnnotations(connection, moment.id, annotations)
+      }
+
+      await saveMoment({
+        id: moment.id,
+        blob: moment.blob,
+        label: moment.label,
+        caption: moment.caption,
+        createdAt: moment.createdAt,
+        width: moment.width,
+        height: moment.height,
+        source: moment.source,
+        uploaderDisplayName: moment.uploaderDisplayName,
+        isDraft: moment.isDraft,
+        ownedByCurrentUser: true,
+        familySynced: moment.familySynced,
+        annotations,
+      })
+    },
+    [saveMoment],
+  )
+
   const value = useMemo<FamilyMomentSyncContextValue>(
     () => ({
       status,
       dailyWindow,
       error,
       shareMoment,
+      updateMomentAnnotations,
       deleteMoment,
       refreshFamilyMoments,
     }),
-    [dailyWindow, deleteMoment, error, refreshFamilyMoments, shareMoment, status],
+    [
+      dailyWindow,
+      deleteMoment,
+      error,
+      refreshFamilyMoments,
+      shareMoment,
+      status,
+      updateMomentAnnotations,
+    ],
   )
 
   return (

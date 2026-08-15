@@ -26,6 +26,7 @@ import {
   readDevelopmentPreviewSession,
   startDevelopmentPreviewSession,
 } from './developmentPreview'
+import { isNativeTestAccessEnabled } from './nativeTestAccess'
 
 const missingClerkValue: AuthContextValue = {
   status: 'unconfigured',
@@ -34,18 +35,25 @@ const missingClerkValue: AuthContextValue = {
   signOut: async () => undefined,
 }
 
-function DevelopmentPreviewAuthProvider({ children }: PropsWithChildren) {
+function DevelopmentPreviewAuthProvider({
+  children,
+  autoStart = false,
+  testAccess = false,
+}: PropsWithChildren<{ autoStart?: boolean; testAccess?: boolean }>) {
   const [previewActive, setPreviewActive] = useState(
-    readDevelopmentPreviewSession,
+    () => autoStart || readDevelopmentPreviewSession(),
   )
 
   const value = useMemo<AuthContextValue>(() => {
     if (!previewActive) {
       return {
         ...missingClerkValue,
-        startDevelopmentPreview: developmentPreviewAvailable
+        isTestAccess: testAccess,
+        startDevelopmentPreview: developmentPreviewAvailable || testAccess
           ? () => {
-              if (startDevelopmentPreviewSession()) setPreviewActive(true)
+              if (testAccess || startDevelopmentPreviewSession()) {
+                setPreviewActive(true)
+              }
             }
           : undefined,
       }
@@ -56,14 +64,58 @@ function DevelopmentPreviewAuthProvider({ children }: PropsWithChildren) {
       user: developmentPreviewUser,
       getToken: async () => null,
       isDevelopmentPreview: true,
+      isTestAccess: testAccess,
       signOut: async () => {
         clearDevelopmentPreviewSession()
         setPreviewActive(false)
       },
     }
-  }, [previewActive])
+  }, [previewActive, testAccess])
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>
+}
+
+const checkingNativeAccessValue: AuthContextValue = {
+  status: 'loading',
+  user: null,
+  getToken: async () => null,
+  signOut: async () => undefined,
+}
+
+function RuntimeAuthProvider({ children }: PropsWithChildren) {
+  const [testAccess, setTestAccess] = useState<boolean | null>(null)
+
+  useEffect(() => {
+    let mounted = true
+    void isNativeTestAccessEnabled().then((enabled) => {
+      if (mounted) setTestAccess(enabled)
+    })
+    return () => {
+      mounted = false
+    }
+  }, [])
+
+  if (testAccess === null) {
+    return (
+      <AuthContext.Provider value={checkingNativeAccessValue}>
+        {children}
+      </AuthContext.Provider>
+    )
+  }
+
+  if (testAccess) {
+    return (
+      <DevelopmentPreviewAuthProvider autoStart testAccess>
+        {children}
+      </DevelopmentPreviewAuthProvider>
+    )
+  }
+
+  if (!clerkConfigured) {
+    return <DevelopmentPreviewAuthProvider>{children}</DevelopmentPreviewAuthProvider>
+  }
+
+  return <ClerkAuthBridge>{children}</ClerkAuthBridge>
 }
 
 export function ClerkAuthBridge({ children }: PropsWithChildren) {
@@ -181,11 +233,7 @@ export function AuthProvider({
     return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>
   }
 
-  if (!clerkConfigured) {
-    return <DevelopmentPreviewAuthProvider>{children}</DevelopmentPreviewAuthProvider>
-  }
-
-  return <ClerkAuthBridge>{children}</ClerkAuthBridge>
+  return <RuntimeAuthProvider>{children}</RuntimeAuthProvider>
 }
 
 export function RequireAuthentication() {

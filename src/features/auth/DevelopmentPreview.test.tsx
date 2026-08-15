@@ -6,7 +6,7 @@ import {
   Route,
   Routes,
 } from 'react-router-dom'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   FamilyOnboardingProvider,
   RequireFamilyMembership,
@@ -19,6 +19,8 @@ import {
   canUseDevelopmentPreview,
   developmentPreviewAvailable,
 } from './developmentPreview'
+
+vi.mock('./config', () => ({ clerkConfigured: false }))
 
 function PreviewDestination() {
   const { signOut, user } = useAuth()
@@ -63,7 +65,7 @@ describe('development preview authentication', () => {
     expect(canUseDevelopmentPreview(false, true)).toBe(false)
     expect(canUseDevelopmentPreview(true, true)).toBe(false)
     expect(canUseDevelopmentPreview(true, false)).toBe(true)
-    expect(canUseDevelopmentPreview(false, false, true)).toBe(true)
+    expect(canUseDevelopmentPreview(false, false, true)).toBe(false)
     expect(canUseDevelopmentPreview(false, true, true)).toBe(false)
   })
 
@@ -73,7 +75,7 @@ describe('development preview authentication', () => {
     const firstRender = render(<PreviewRoutes />)
 
     const continueButton = await screen.findByRole('button', {
-      name: 'Proceed to app',
+      name: 'Continue to main app',
     })
     await user.click(continueButton)
     expect(
@@ -95,14 +97,14 @@ describe('development preview authentication', () => {
     const user = userEvent.setup()
     render(<PreviewRoutes />)
     await user.click(
-      await screen.findByRole('button', { name: 'Proceed to app' }),
+      await screen.findByRole('button', { name: 'Continue to main app' }),
     )
     await user.click(
       await screen.findByRole('button', { name: 'Sign out of preview' }),
     )
 
     expect(
-      await screen.findByRole('button', { name: 'Proceed to app' }),
+      await screen.findByRole('button', { name: 'Continue to main app' }),
     ).toBeInTheDocument()
   })
 })

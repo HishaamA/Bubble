@@ -63,6 +63,10 @@ type VoiceUpload = {
   contentType: string
 }
 
+type PrepareRemoteAnnotationsOptions = {
+  createVoiceVersion?: () => string
+}
+
 export type FamilyMomentSubscription = {
   ready: Promise<void>
   unsubscribe: () => void
@@ -93,6 +97,7 @@ function prepareRemoteAnnotations(
   connection: FamilyMomentConnection,
   momentId: string,
   annotations: StoredPanoramaAnnotation[],
+  options: PrepareRemoteAnnotationsOptions = {},
 ) {
   if (!UUID_PATTERN.test(momentId)) {
     throw new TypeError('A family moment must have a valid UUID before upload.')
@@ -177,7 +182,8 @@ function prepareRemoteAnnotations(
       throw new TypeError('Voice annotation duration is out of bounds.')
     }
 
-    const path = `${connection.circleId}/voice/${connection.userId}/${momentId}-${annotationId}.${extension}`
+    const version = options.createVoiceVersion?.()
+    const path = `${connection.circleId}/voice/${connection.userId}/${momentId}-${annotationId}${version ? `-${version}` : ''}.${extension}`
     voiceUploads.push({ path, blob: annotation.audioBlob, contentType })
     remoteAnnotations.push({
       id: annotationId,
@@ -192,6 +198,35 @@ function prepareRemoteAnnotations(
   }
 
   return { remoteAnnotations, voiceUploads }
+}
+
+function createVoiceVersion() {
+  const randomBytes = new Uint8Array(16)
+  globalThis.crypto.getRandomValues(randomBytes)
+  return Array.from(randomBytes, (value) => value.toString(16).padStart(2, '0')).join(
+    '',
+  )
+}
+
+function parseStaleAudioPaths(data: unknown): string[] {
+  if (!data) return []
+  if (typeof data === 'string') return data ? [data] : []
+  if (Array.isArray(data)) {
+    return [
+      ...new Set(
+        data.flatMap((value) => parseStaleAudioPaths(value)).filter(Boolean),
+      ),
+    ]
+  }
+  if (typeof data !== 'object') return []
+
+  const record = data as Record<string, unknown>
+  return parseStaleAudioPaths(
+    record.stale_audio_paths ??
+      record.stale_voice_paths ??
+      record.audio_paths ??
+      record.media_paths,
+  )
 }
 
 export async function getFamilyMomentConnection(): Promise<
@@ -313,6 +348,80 @@ export async function publishFamilyMoment(
   }
 
   return processed
+}
+
+/**
+ * Replaces the annotations on an existing uploader-owned family moment.
+ * Voice recordings use immutable object names so devices can never retain a
+ * cached recording after that annotation has been re-recorded.
+ */
+export async function replaceFamilyMomentAnnotations(
+  connection: FamilyMomentConnection,
+  momentId: string,
+  annotations: StoredPanoramaAnnotation[],
+): Promise<void> {
+  const client = getSupabaseClient()
+  if (!client) throw new Error('Family sync is not configured.')
+  const mediaBucket = client.storage.from(FAMILY_MEDIA_BUCKET)
+  const { remoteAnnotations, voiceUploads } = prepareRemoteAnnotations(
+    connection,
+    momentId,
+    annotations,
+    { createVoiceVersion },
+  )
+
+  const uploads = voiceUploads.map(({ path, blob, contentType }) => ({
+    path,
+    request: mediaBucket.upload(path, blob, {
+      cacheControl: '31536000',
+      contentType,
+      upsert: false,
+    }),
+  }))
+  const uploadResults = await Promise.allSettled(
+    uploads.map(({ request }) => request),
+  )
+  const uploadedPaths = uploadResults.flatMap((result, index) =>
+    result.status === 'fulfilled' && !result.value.error
+      ? [uploads[index].path]
+      : [],
+  )
+
+  async function cleanUp(paths: string[]) {
+    if (paths.length === 0) return
+    try {
+      await mediaBucket.remove(paths)
+    } catch {
+      // Annotation replacement has already failed or committed. Storage
+      // cleanup is deliberately best-effort and can be retried independently.
+    }
+  }
+
+  const failedUpload = uploadResults.find(
+    (result) => result.status === 'rejected' || Boolean(result.value.error),
+  )
+  if (failedUpload) {
+    await cleanUp(uploadedPaths)
+    if (failedUpload.status === 'rejected') throw failedUpload.reason
+    throw failedUpload.value.error
+  }
+
+  let staleAudioPaths: string[]
+  try {
+    const { data, error } = await client.rpc('replace_360_moment_annotations', {
+      p_circle_id: connection.circleId,
+      p_moment_id: momentId,
+      p_annotations: remoteAnnotations,
+    })
+    if (error) throw error
+    staleAudioPaths = parseStaleAudioPaths(data)
+  } catch (reason) {
+    await cleanUp(uploadedPaths)
+    throw reason
+  }
+
+  const currentAudioPaths = new Set(uploadedPaths)
+  await cleanUp(staleAudioPaths.filter((path) => !currentAudioPaths.has(path)))
 }
 
 export async function getFamilyDailyCaptureWindow(

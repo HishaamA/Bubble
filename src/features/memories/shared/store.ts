@@ -83,6 +83,7 @@ export function preparePanoramaMoment(
       input.uploaderDisplayName,
       'uploaderDisplayName',
     ),
+    ...(input.isDraft ? { isDraft: true } : {}),
     ownedByCurrentUser: input.ownedByCurrentUser ?? false,
     familySynced: input.familySynced ?? false,
     annotations: (input.annotations ?? []).map(cloneAnnotation),
@@ -270,7 +271,8 @@ export function createDefaultMomentStore(
     return createMemoryMomentStore()
   }
 
-  return createResilientMomentStore(
-    createIndexedDbMomentStore(window.indexedDB, subject),
-  )
+  // A memory fallback can make a save appear successful and then disappear on
+  // restart. Default app storage must surface IndexedDB failures so capture can
+  // retain its native source frames and offer a retry instead.
+  return createIndexedDbMomentStore(window.indexedDB, subject)
 }

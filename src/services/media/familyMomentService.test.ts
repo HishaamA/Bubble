@@ -94,6 +94,7 @@ import {
   fetchFamilyMomentDeletionIds,
   fetchFamilyMoments,
   publishFamilyMoment,
+  replaceFamilyMomentAnnotations,
   resumePendingFamilyMomentDeletions,
   subscribeToFamilyMoments,
   type FamilyMomentConnection,
@@ -125,6 +126,136 @@ beforeEach(() => {
 })
 
 describe('family moment annotation sync', () => {
+  it('replaces annotations with immutable versioned voice objects and removes stale audio', async () => {
+    const voice = new Blob(['new voice'], { type: 'audio/mp4' })
+    const stalePath = `${circleId}/voice/${userId}/${momentId}-${voiceId}-00000000000000000000000000000000.m4a`
+    mocks.client.rpc.mockResolvedValue({
+      data: [{ moment_id: momentId, stale_audio_paths: [stalePath] }],
+      error: null,
+    })
+
+    await replaceFamilyMomentAnnotations(connection, momentId, [
+      {
+        id: textId,
+        kind: 'text',
+        pitch: 12,
+        yaw: -24,
+        message: '  Cake on the table  ',
+      },
+      {
+        id: voiceId,
+        kind: 'voice',
+        pitch: -4,
+        yaw: 31,
+        message: 'Dad describing Sunday dinner',
+        audioBlob: voice,
+        audioMimeType: 'audio/mp4; codecs=mp4a.40.2',
+        durationMs: 8_400,
+      },
+    ])
+
+    const uploadedPath = mocks.storageUpload.mock.calls[0][0] as string
+    expect(uploadedPath).toMatch(
+      new RegExp(
+        `^${circleId}/voice/${userId}/${momentId}-${voiceId}-[0-9a-f]{32}\\.m4a$`,
+      ),
+    )
+    expect(mocks.storageUpload).toHaveBeenCalledWith(uploadedPath, voice, {
+      cacheControl: '31536000',
+      contentType: 'audio/mp4',
+      upsert: false,
+    })
+    expect(mocks.client.rpc).toHaveBeenCalledWith(
+      'replace_360_moment_annotations',
+      {
+        p_circle_id: circleId,
+        p_moment_id: momentId,
+        p_annotations: [
+          {
+            id: textId,
+            kind: 'text',
+            pitch: 12,
+            yaw: -24,
+            message: 'Cake on the table',
+            audio_path: null,
+            audio_mime_type: null,
+            duration_ms: null,
+          },
+          {
+            id: voiceId,
+            kind: 'voice',
+            pitch: -4,
+            yaw: 31,
+            message: 'Dad describing Sunday dinner',
+            audio_path: uploadedPath,
+            audio_mime_type: 'audio/mp4',
+            duration_ms: 8_400,
+          },
+        ],
+      },
+    )
+    expect(mocks.storageRemove).toHaveBeenCalledWith([stalePath])
+  })
+
+  it('removes newly uploaded voice objects when annotation replacement fails', async () => {
+    const replacementError = new Error('replacement rejected')
+    const voice = new Blob(['new voice'], { type: 'audio/webm' })
+    mocks.client.rpc.mockResolvedValue({ data: null, error: replacementError })
+
+    await expect(
+      replaceFamilyMomentAnnotations(connection, momentId, [
+        {
+          id: voiceId,
+          kind: 'voice',
+          pitch: -4,
+          yaw: 31,
+          message: 'Dad describing Sunday dinner',
+          audioBlob: voice,
+          audioMimeType: 'audio/webm',
+        },
+      ]),
+    ).rejects.toBe(replacementError)
+
+    const uploadedPath = mocks.storageUpload.mock.calls[0][0] as string
+    expect(uploadedPath).toMatch(
+      new RegExp(
+        `^${circleId}/voice/${userId}/${momentId}-${voiceId}-[0-9a-f]{32}\\.webm$`,
+      ),
+    )
+    expect(mocks.storageRemove).toHaveBeenCalledWith([uploadedPath])
+  })
+
+  it('does not fail a committed replacement when stale audio cleanup fails', async () => {
+    const stalePath = `${circleId}/voice/${userId}/${momentId}-${voiceId}.m4a`
+    mocks.client.rpc.mockResolvedValue({
+      data: { moment_id: momentId, stale_audio_paths: [stalePath] },
+      error: null,
+    })
+    mocks.storageRemove.mockRejectedValue(new Error('storage is offline'))
+
+    await expect(
+      replaceFamilyMomentAnnotations(connection, momentId, []),
+    ).resolves.toBeUndefined()
+    expect(mocks.storageRemove).toHaveBeenCalledWith([stalePath])
+  })
+
+  it('validates replacement annotations before uploading or calling the backend', async () => {
+    await expect(
+      replaceFamilyMomentAnnotations(connection, momentId, [
+        {
+          id: voiceId,
+          kind: 'voice',
+          pitch: -4,
+          yaw: 31,
+          message: 'Missing recording',
+        },
+      ]),
+    ).rejects.toThrow('Voice annotations must include an audio recording.')
+
+    expect(mocks.storageUpload).not.toHaveBeenCalled()
+    expect(mocks.client.rpc).not.toHaveBeenCalled()
+  })
+
   it('uploads voice blobs to immutable safe paths and atomically finalizes annotations', async () => {
     const viewer = new Blob(['viewer'], { type: 'image/jpeg' })
     const thumbnail = new Blob(['thumbnail'], { type: 'image/jpeg' })

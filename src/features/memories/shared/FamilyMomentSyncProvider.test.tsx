@@ -19,6 +19,7 @@ const familyService = vi.hoisted(() => ({
   getFamilyDailyCaptureWindow: vi.fn(),
   getFamilyMomentConnection: vi.fn(),
   publishFamilyMoment: vi.fn(),
+  replaceFamilyMomentAnnotations: vi.fn(),
   resumePendingFamilyMomentDeletions: vi.fn(),
   subscribeToFamilyMoments: vi.fn(),
 }))
@@ -71,7 +72,12 @@ function createSilentNotifier(): MomentChangeNotifier {
 
 function SyncHarness() {
   const { moments } = useSharedMoments()
-  const { deleteMoment, status, shareMoment } = useFamilyMomentSync()
+  const {
+    deleteMoment,
+    shareMoment,
+    status,
+    updateMomentAnnotations,
+  } = useFamilyMomentSync()
 
   return (
     <div>
@@ -97,9 +103,17 @@ function SyncHarness() {
         Share moment
       </button>
       {moments[0] ? (
-        <button type="button" onClick={() => void deleteMoment(moments[0].id)}>
-          Remove first moment
-        </button>
+        <>
+          <button
+            type="button"
+            onClick={() => void updateMomentAnnotations(moments[0].id, annotations)}
+          >
+            Update first points
+          </button>
+          <button type="button" onClick={() => void deleteMoment(moments[0].id)}>
+            Remove first moment
+          </button>
+        </>
       ) : null}
     </div>
   )
@@ -113,6 +127,7 @@ describe('FamilyMomentSyncProvider', () => {
     familyService.fetchFamilyMoments.mockResolvedValue([])
     familyService.fetchFamilyMomentDeletionIds.mockResolvedValue([])
     familyService.deleteFamilyMoment.mockResolvedValue({ cleanupPending: false })
+    familyService.replaceFamilyMomentAnnotations.mockResolvedValue(undefined)
     familyService.resumePendingFamilyMomentDeletions.mockResolvedValue(undefined)
     familyService.subscribeToFamilyMoments.mockReturnValue({
       ready: Promise.resolve(),
@@ -436,6 +451,176 @@ describe('FamilyMomentSyncProvider', () => {
     await waitFor(() => expect(familyService.fetchFamilyMoments).toHaveBeenCalled())
     expect(screen.getByText('1 shared moments')).toBeInTheDocument()
     await expect(store.list()).resolves.toHaveLength(1)
+  })
+
+  it('replaces a synced owner’s annotations remotely before updating its durable cache', async () => {
+    const user = userEvent.setup()
+    const store = createMemoryMomentStore([syncedOwnedMoment])
+    const connection = {
+      circleId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+      userId: '10000000-0000-4000-8000-000000000001',
+    }
+    familyService.getFamilyMomentConnection.mockResolvedValue(connection)
+    familyService.fetchFamilyMoments.mockResolvedValue([syncedOwnedMoment])
+
+    render(
+      <SharedMomentsProvider
+        store={store}
+        notifierFactory={createSilentNotifier}
+      >
+        <FamilyMomentSyncProvider>
+          <SyncHarness />
+        </FamilyMomentSyncProvider>
+      </SharedMomentsProvider>,
+    )
+
+    expect(await screen.findByText('Sync: connected')).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Update first points' }))
+
+    await waitFor(() =>
+      expect(familyService.replaceFamilyMomentAnnotations).toHaveBeenCalledWith(
+        connection,
+        syncedOwnedMoment.id,
+        annotations,
+      ),
+    )
+    await waitFor(async () => {
+      const [saved] = await store.list()
+      expect(saved?.annotations).toEqual(annotations)
+    })
+  })
+
+  it('updates a locally owned sphere without requiring family connectivity', async () => {
+    const user = userEvent.setup()
+    const localMoment: StoredPanoramaMoment = {
+      ...syncedOwnedMoment,
+      id: '40000000-0000-4000-8000-000000000099',
+      familySynced: false,
+    }
+    const store = createMemoryMomentStore([localMoment])
+
+    render(
+      <SharedMomentsProvider
+        store={store}
+        notifierFactory={createSilentNotifier}
+      >
+        <FamilyMomentSyncProvider>
+          <SyncHarness />
+        </FamilyMomentSyncProvider>
+      </SharedMomentsProvider>,
+    )
+
+    expect(await screen.findByText('Sync: local')).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Update first points' }))
+
+    await waitFor(async () => {
+      const [saved] = await store.list()
+      expect(saved?.annotations).toEqual(annotations)
+    })
+    expect(familyService.replaceFamilyMomentAnnotations).not.toHaveBeenCalled()
+  })
+
+  it('retries an incomplete cached voice-note download on refresh', async () => {
+    const voiceAnnotationWithoutAudio: StoredPanoramaAnnotation = {
+      id: '50000000-0000-4000-8000-000000000099',
+      kind: 'voice',
+      pitch: 4,
+      yaw: 18,
+      message: 'Dad telling the birthday story',
+      audioMimeType: 'audio/mp4',
+      durationMs: 3_200,
+    }
+    const cachedMoment: StoredPanoramaMoment = {
+      ...syncedOwnedMoment,
+      annotations: [voiceAnnotationWithoutAudio],
+    }
+    const downloadedVoice = new Blob(['recovered voice'], {
+      type: 'audio/mp4',
+    })
+    const store = createMemoryMomentStore([cachedMoment])
+    familyService.getFamilyMomentConnection.mockResolvedValue({
+      circleId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+      userId: '10000000-0000-4000-8000-000000000001',
+    })
+    familyService.fetchFamilyMoments.mockResolvedValue([
+      {
+        ...cachedMoment,
+        annotations: [
+          { ...voiceAnnotationWithoutAudio, audioBlob: downloadedVoice },
+        ],
+      },
+    ])
+
+    render(
+      <SharedMomentsProvider
+        store={store}
+        notifierFactory={createSilentNotifier}
+      >
+        <FamilyMomentSyncProvider>
+          <SyncHarness />
+        </FamilyMomentSyncProvider>
+      </SharedMomentsProvider>,
+    )
+
+    expect(await screen.findByText('Sync: connected')).toBeInTheDocument()
+    await waitFor(async () => {
+      const [saved] = await store.list()
+      expect(saved?.annotations?.[0]?.audioBlob).toBe(downloadedVoice)
+    })
+  })
+
+  it('preserves good cached voice audio during a transient remote download failure', async () => {
+    const cachedVoice = new Blob(['known-good voice'], { type: 'audio/mp4' })
+    const voiceAnnotation: StoredPanoramaAnnotation = {
+      id: '50000000-0000-4000-8000-000000000098',
+      kind: 'voice',
+      pitch: -7,
+      yaw: 33,
+      message: 'Mum describing the old family clock',
+      audioBlob: cachedVoice,
+      audioMimeType: 'audio/mp4',
+      durationMs: 4_100,
+    }
+    const cachedMoment: StoredPanoramaMoment = {
+      ...syncedOwnedMoment,
+      annotations: [voiceAnnotation],
+    }
+    const store = createMemoryMomentStore([cachedMoment])
+    familyService.getFamilyMomentConnection.mockResolvedValue({
+      circleId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+      userId: '10000000-0000-4000-8000-000000000001',
+    })
+    familyService.fetchFamilyMoments.mockResolvedValue([
+      {
+        ...cachedMoment,
+        annotations: [
+          {
+            id: voiceAnnotation.id,
+            kind: 'voice',
+            pitch: voiceAnnotation.pitch,
+            yaw: voiceAnnotation.yaw,
+            message: voiceAnnotation.message,
+          },
+        ],
+      },
+    ])
+
+    render(
+      <SharedMomentsProvider
+        store={store}
+        notifierFactory={createSilentNotifier}
+      >
+        <FamilyMomentSyncProvider>
+          <SyncHarness />
+        </FamilyMomentSyncProvider>
+      </SharedMomentsProvider>,
+    )
+
+    expect(await screen.findByText('Sync: connected')).toBeInTheDocument()
+    await waitFor(() => expect(familyService.fetchFamilyMoments).toHaveBeenCalled())
+    const [saved] = await store.list()
+    expect(saved?.annotations?.[0]?.audioBlob).toBe(cachedVoice)
+    expect(saved?.annotations?.[0]?.audioMimeType).toBe('audio/mp4')
   })
 
   it('evicts a tombstoned cache immediately and prevents an in-flight fetch from resurrecting it', async () => {

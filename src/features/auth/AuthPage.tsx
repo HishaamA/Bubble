@@ -79,23 +79,38 @@ function SignedInRedirect({ to }: { to: string }) {
 
 function ClerkConfigurationState({
   onContinue,
+  testingMode,
 }: {
   onContinue?: () => void
+  testingMode?: boolean
 }) {
   return (
     <div className="auth-card__setup" role="status">
-      <strong>Clerk connection required</strong>
-      <p>
-        Add <code>VITE_CLERK_PUBLISHABLE_KEY</code> to a local environment
-        file, then restart the app. Sign-in stays locked until Clerk is
-        connected; production never falls back to an unsecured preview.
-      </p>
+      <strong>
+        {testingMode ? 'Test access enabled' : 'Clerk connection required'}
+      </strong>
+      {testingMode ? (
+        <p>
+          Continue without an account to test the local interface and native
+          capture tools. Cloud family sync stays disabled in this test session.
+        </p>
+      ) : (
+        <p>
+          Add <code>VITE_CLERK_PUBLISHABLE_KEY</code> to a local environment
+          file, then restart the app. Sign-in stays locked until Clerk is
+          connected; production never falls back to an unsecured preview.
+        </p>
+      )}
       {onContinue ? (
         <div className="auth-card__preview">
           <button type="button" onClick={onContinue}>
-            Proceed to app
+            {testingMode ? 'Continue without signing in' : 'Continue to main app'}
           </button>
-          <small>Temporary preview · family sync stays offline</small>
+          <small>
+            {testingMode
+              ? 'Debug APK only · family sync stays offline'
+              : 'Development preview · family sync stays offline'}
+          </small>
         </div>
       ) : null}
     </div>
@@ -103,7 +118,7 @@ function ClerkConfigurationState({
 }
 
 export function AuthPage() {
-  const { startDevelopmentPreview, status, user } = useAuth()
+  const { isTestAccess, startDevelopmentPreview, status, user } = useAuth()
   const location = useLocation()
   const requestedReturnTo = (
     location.state as { returnTo?: unknown } | null
@@ -140,6 +155,7 @@ export function AuthPage() {
 
         {status === 'unconfigured' ? (
           <ClerkConfigurationState
+            testingMode={isTestAccess}
             onContinue={
               startDevelopmentPreview
                 ? () => {

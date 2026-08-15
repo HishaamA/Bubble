@@ -28,6 +28,8 @@ export type StoredPanoramaMoment = {
   height: number
   source: MomentSource
   uploaderDisplayName: string
+  /** True until an autosaved guided capture is finalized by the user. */
+  isDraft?: boolean
   /**
    * Set only when the signed-in account is known to be the uploader. The
    * delete UI must never infer ownership from a display name alone.
@@ -55,6 +57,7 @@ export type SavePanoramaMomentInput = {
   height: number
   source: MomentSource
   uploaderDisplayName: string
+  isDraft?: boolean
   ownedByCurrentUser?: boolean
   familySynced?: boolean
   annotations?: StoredPanoramaAnnotation[]
