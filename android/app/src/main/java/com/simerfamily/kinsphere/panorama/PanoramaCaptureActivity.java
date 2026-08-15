@@ -4,49 +4,51 @@ import android.Manifest;
 import android.app.Activity;
 import android.content.Intent;
 import android.content.pm.PackageManager;
-import android.graphics.Bitmap;
-import android.graphics.BitmapFactory;
 import android.graphics.Color;
-import android.graphics.Matrix;
 import android.graphics.drawable.GradientDrawable;
-import android.hardware.Sensor;
-import android.hardware.SensorEvent;
-import android.hardware.SensorEventListener;
-import android.hardware.SensorManager;
 import android.hardware.camera2.CameraCharacteristics;
+import android.hardware.camera2.CameraManager;
+import android.media.Image;
 import android.net.Uri;
+import android.opengl.GLSurfaceView;
 import android.os.Bundle;
 import android.os.SystemClock;
 import android.util.Log;
 import android.util.Size;
 import android.view.Gravity;
 import android.view.Surface;
-import android.view.View;
 import android.view.WindowManager;
 import android.widget.FrameLayout;
+import android.widget.ProgressBar;
 import android.widget.TextView;
 import androidx.activity.OnBackPressedCallback;
-import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.appcompat.widget.AppCompatButton;
-import androidx.camera.camera2.interop.Camera2CameraInfo;
-import androidx.camera.camera2.interop.ExperimentalCamera2Interop;
-import androidx.camera.core.Camera;
-import androidx.camera.core.CameraSelector;
-import androidx.camera.core.ImageCapture;
-import androidx.camera.core.ImageCaptureException;
-import androidx.camera.core.Preview;
-import androidx.camera.lifecycle.ProcessCameraProvider;
-import androidx.camera.view.PreviewView;
+import androidx.core.app.ActivityCompat;
 import androidx.core.content.ContextCompat;
 import androidx.core.graphics.Insets;
 import androidx.core.view.ViewCompat;
 import androidx.core.view.WindowCompat;
 import androidx.core.view.WindowInsetsCompat;
 import androidx.core.view.WindowInsetsControllerCompat;
-import androidx.exifinterface.media.ExifInterface;
-import com.google.common.util.concurrent.ListenableFuture;
+import com.google.ar.core.ArCoreApk;
+import com.google.ar.core.Camera;
+import com.google.ar.core.CameraConfig;
+import com.google.ar.core.CameraConfigFilter;
+import com.google.ar.core.CameraIntrinsics;
+import com.google.ar.core.Config;
+import com.google.ar.core.Frame;
+import com.google.ar.core.Session;
+import com.google.ar.core.TrackingFailureReason;
+import com.google.ar.core.TrackingState;
+import com.google.ar.core.exceptions.CameraNotAvailableException;
+import com.google.ar.core.exceptions.NotYetAvailableException;
+import com.google.ar.core.exceptions.UnavailableApkTooOldException;
+import com.google.ar.core.exceptions.UnavailableArcoreNotInstalledException;
+import com.google.ar.core.exceptions.UnavailableDeviceNotCompatibleException;
+import com.google.ar.core.exceptions.UnavailableSdkTooOldException;
+import com.google.ar.core.exceptions.UnavailableUserDeclinedInstallationException;
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.FileOutputStream;
@@ -54,7 +56,6 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.Date;
 import java.util.List;
 import java.util.Locale;
@@ -67,13 +68,14 @@ import org.json.JSONException;
 import org.json.JSONObject;
 
 /**
- * Full-screen CameraX capture surface with rotation-vector target guidance.
+ * Android counterpart to {@code PanoramaCaptureViewController.swift}.
  *
- * <p>The tracker supplies orientation only. Translation is intentionally emitted
- * as zero with {@code trackingState: "orientationOnly"}; downstream stitching
- * code must not mistake this for ARCore six-degree-of-freedom tracking.</p>
+ * <p>ARCore owns the preview and supplies a six-degree-of-freedom pose, image
+ * intrinsics, and YUV camera image from one synchronized {@link Frame}. That is
+ * the same contract used by the iOS ARKit implementation; no independent
+ * rotation sensor or CameraX shutter timing is mixed into the result.</p>
  */
-public final class PanoramaCaptureActivity extends AppCompatActivity implements SensorEventListener {
+public final class PanoramaCaptureActivity extends AppCompatActivity implements ArCameraRenderer.Listener {
 
     public static final String EXTRA_OPTIONS_JSON = "panoramaCaptureOptions";
     public static final String EXTRA_RESULT_JSON = "panoramaCaptureResult";
@@ -81,8 +83,11 @@ public final class PanoramaCaptureActivity extends AppCompatActivity implements 
     public static final String EXTRA_ERROR_MESSAGE = "panoramaCaptureErrorMessage";
 
     private static final String TAG = "PanoramaCapture";
-    private static final float MAX_STEADY_ANGULAR_SPEED_DEGREES = 5.5f;
-    private static final long MIN_CAPTURE_GAP_MILLIS = 350L;
+    private static final int CAMERA_PERMISSION_REQUEST = 360;
+    private static final float MAX_STEADY_ANGULAR_SPEED_RADIANS = 0.12f;
+    private static final float MAX_STEADY_LINEAR_SPEED_METERS = 0.08f;
+    private static final long CAPTURE_COOLDOWN_MILLIS = 450L;
+    private static final long GUIDANCE_INTERVAL_NANOS = 50_000_000L;
     private static final float[] IDENTITY_ROTATION = {
         1.0f, 0.0f, 0.0f,
         0.0f, 1.0f, 0.0f,
@@ -90,39 +95,35 @@ public final class PanoramaCaptureActivity extends AppCompatActivity implements 
     };
 
     private final ArrayList<JSONObject> frames = new ArrayList<>();
-    private final float[] rawSensorRotation = new float[9];
-    private final float[] absoluteRotation = new float[9];
-    private final float[] previousAbsoluteRotation = new float[9];
-
     private CaptureOptions options;
     private String sessionId;
     private File capturesRoot;
     private File sessionDirectory;
     private List<PanoramaTarget> targets;
-    private PreviewView previewView;
+    private GLSurfaceView surfaceView;
+    private ArCameraRenderer renderer;
     private PanoramaGuideView guideView;
     private TextView progressLabel;
     private TextView instructionLabel;
-    private AppCompatButton doneButton;
-    private ImageCapture imageCapture;
-    private ProcessCameraProvider cameraProvider;
-    private ExecutorService cameraExecutor;
-    private SensorManager sensorManager;
-    private Sensor rotationSensor;
-    private Sensor gyroscopeSensor;
-    private float[] baselineRotation;
+    private ProgressBar progressBar;
+    private ExecutorService imageExecutor;
+    private Session arSession;
     private PanoramaPose currentPose;
-    private CameraCalibration cameraCalibration = CameraCalibration.unavailable();
-    private long previousRotationTimestampNanos;
+    private PanoramaPose previousPose;
+    private long previousFrameTimestampNanos;
     private long alignedSinceNanos = -1L;
     private long lastCaptureCompletedAtMillis;
+    private long lastGuidancePublishedAtNanos;
     private int alignedTargetIndex = -1;
     private int captureSurfaceRotation = Surface.ROTATION_0;
-    private float angularSpeedDegrees = Float.POSITIVE_INFINITY;
-    private boolean sensorListenersRegistered;
-    private boolean cameraReady;
-    private boolean captureInFlight;
-    private boolean finishingCapture;
+    private int imageRotationDegrees = 90;
+    private float smoothedAngularSpeed = Float.POSITIVE_INFINITY;
+    private float smoothedLinearSpeed = Float.POSITIVE_INFINITY;
+    private boolean installRequested;
+    private boolean sessionResumed;
+    private volatile boolean cameraReady;
+    private volatile boolean captureInFlight;
+    private volatile boolean finishingCapture;
 
     @Override
     protected void onCreate(@Nullable Bundle savedInstanceState) {
@@ -130,10 +131,18 @@ public final class PanoramaCaptureActivity extends AppCompatActivity implements 
         configureFullscreenWindow();
 
         if (ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED) {
-            failCapture("PERMISSION_DENIED", "Camera permission is required for panorama capture.");
+            ActivityCompat.requestPermissions(
+                this,
+                new String[] { Manifest.permission.CAMERA },
+                CAMERA_PERMISSION_REQUEST
+            );
             return;
         }
 
+        initializeCapture();
+    }
+
+    private void initializeCapture() {
         options = CaptureOptions.fromJson(getIntent().getStringExtra(EXTRA_OPTIONS_JSON));
         targets = createTargets(options.mode);
         sessionId = UUID.randomUUID().toString();
@@ -144,18 +153,7 @@ public final class PanoramaCaptureActivity extends AppCompatActivity implements 
             return;
         }
 
-        sensorManager = (SensorManager) getSystemService(SENSOR_SERVICE);
-        rotationSensor = findRotationSensor(sensorManager);
-        gyroscopeSensor = sensorManager == null ? null : sensorManager.getDefaultSensor(Sensor.TYPE_GYROSCOPE);
-        if (rotationSensor == null) {
-            failCapture("NOT_SUPPORTED", "This device does not provide a usable rotation-vector sensor.");
-            return;
-        }
-
-        cameraExecutor = Executors.newSingleThreadExecutor();
-        // The Activity is portrait-locked in AndroidManifest. Freeze the actual
-        // display transform too (important on natural-landscape tablets) so the
-        // CameraX output basis and rotation-vector basis cannot drift apart.
+        imageExecutor = Executors.newSingleThreadExecutor();
         captureSurfaceRotation = getWindowManager().getDefaultDisplay().getRotation();
         buildCaptureInterface();
         guideView.setTargets(targets);
@@ -171,14 +169,32 @@ public final class PanoramaCaptureActivity extends AppCompatActivity implements 
                 }
             }
         );
+    }
 
-        previewView.post(this::startCamera);
+    @Override
+    public void onRequestPermissionsResult(
+        int requestCode,
+        String[] permissions,
+        int[] grantResults
+    ) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults);
+        if (requestCode != CAMERA_PERMISSION_REQUEST) {
+            return;
+        }
+        if (grantResults.length > 0 && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
+            initializeCapture();
+            return;
+        }
+        failCapture("PERMISSION_DENIED", "Camera permission is required for panorama capture.");
     }
 
     private void configureFullscreenWindow() {
         WindowCompat.setDecorFitsSystemWindows(getWindow(), false);
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
-        WindowInsetsControllerCompat controller = WindowCompat.getInsetsController(getWindow(), getWindow().getDecorView());
+        WindowInsetsControllerCompat controller = WindowCompat.getInsetsController(
+            getWindow(),
+            getWindow().getDecorView()
+        );
         controller.setSystemBarsBehavior(WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE);
         controller.hide(WindowInsetsCompat.Type.systemBars());
     }
@@ -188,80 +204,110 @@ public final class PanoramaCaptureActivity extends AppCompatActivity implements 
         FrameLayout root = new FrameLayout(this);
         root.setBackgroundColor(Color.BLACK);
 
-        previewView = new PreviewView(this);
-        previewView.setImplementationMode(PreviewView.ImplementationMode.PERFORMANCE);
-        previewView.setScaleType(PreviewView.ScaleType.FILL_CENTER);
-        root.addView(
-            previewView,
-            new FrameLayout.LayoutParams(
-                FrameLayout.LayoutParams.MATCH_PARENT,
-                FrameLayout.LayoutParams.MATCH_PARENT
-            )
-        );
+        renderer = new ArCameraRenderer(this);
+        renderer.setDisplayRotation(captureSurfaceRotation);
+        surfaceView = new GLSurfaceView(this);
+        surfaceView.setPreserveEGLContextOnPause(true);
+        surfaceView.setEGLContextClientVersion(2);
+        surfaceView.setRenderer(renderer);
+        surfaceView.setRenderMode(GLSurfaceView.RENDERMODE_CONTINUOUSLY);
+        root.addView(surfaceView, matchParentLayout());
 
         guideView = new PanoramaGuideView(this);
-        root.addView(
-            guideView,
-            new FrameLayout.LayoutParams(
-                FrameLayout.LayoutParams.MATCH_PARENT,
-                FrameLayout.LayoutParams.MATCH_PARENT
-            )
-        );
+        root.addView(guideView, matchParentLayout());
 
-        AppCompatButton cancelButton = createPillButton("Cancel", 0xA6000000, Color.WHITE);
+        FrameLayout header = new FrameLayout(this);
+        GradientDrawable headerBackground = new GradientDrawable();
+        headerBackground.setColor(0xA6000000);
+        headerBackground.setCornerRadius(18.0f * density);
+        header.setBackground(headerBackground);
+        FrameLayout.LayoutParams headerParams = new FrameLayout.LayoutParams(
+            FrameLayout.LayoutParams.MATCH_PARENT,
+            Math.round(64.0f * density),
+            Gravity.TOP
+        );
+        headerParams.leftMargin = Math.round(14.0f * density);
+        headerParams.rightMargin = Math.round(14.0f * density);
+        headerParams.topMargin = Math.round(12.0f * density);
+        root.addView(header, headerParams);
+
+        AppCompatButton cancelButton = createHeaderButton("Cancel");
         cancelButton.setContentDescription("Cancel panorama capture");
         cancelButton.setOnClickListener(view -> cancelCapture());
         FrameLayout.LayoutParams cancelParams = new FrameLayout.LayoutParams(
-            FrameLayout.LayoutParams.WRAP_CONTENT,
+            Math.round(82.0f * density),
             Math.round(44.0f * density),
             Gravity.TOP | Gravity.START
         );
-        cancelParams.leftMargin = Math.round(16.0f * density);
-        cancelParams.topMargin = Math.round(16.0f * density);
-        root.addView(cancelButton, cancelParams);
+        cancelParams.leftMargin = Math.round(5.0f * density);
+        cancelParams.topMargin = Math.round(2.0f * density);
+        header.addView(cancelButton, cancelParams);
 
-        doneButton = createPillButton("Done", Color.WHITE, Color.BLACK);
-        doneButton.setContentDescription("Finish panorama capture");
-        doneButton.setEnabled(false);
-        doneButton.setAlpha(0.42f);
-        doneButton.setOnClickListener(view -> finishCaptureSuccessfully());
-        FrameLayout.LayoutParams doneParams = new FrameLayout.LayoutParams(
-            FrameLayout.LayoutParams.WRAP_CONTENT,
-            Math.round(44.0f * density),
-            Gravity.TOP | Gravity.END
-        );
-        doneParams.rightMargin = Math.round(16.0f * density);
-        doneParams.topMargin = Math.round(16.0f * density);
-        root.addView(doneButton, doneParams);
-
-        progressLabel = new TextView(this);
-        progressLabel.setTextColor(Color.WHITE);
-        progressLabel.setTextSize(13.0f);
-        progressLabel.setGravity(Gravity.CENTER);
-        progressLabel.setLetterSpacing(0.08f);
-        progressLabel.setShadowLayer(5.0f, 0.0f, 1.0f, Color.BLACK);
-        FrameLayout.LayoutParams progressParams = new FrameLayout.LayoutParams(
+        TextView titleLabel = new TextView(this);
+        titleLabel.setText(modeDisplayName(options.mode) + " Panorama");
+        titleLabel.setTextColor(Color.WHITE);
+        titleLabel.setTextSize(16.0f);
+        titleLabel.setGravity(Gravity.CENTER);
+        FrameLayout.LayoutParams titleParams = new FrameLayout.LayoutParams(
             FrameLayout.LayoutParams.WRAP_CONTENT,
             Math.round(44.0f * density),
             Gravity.TOP | Gravity.CENTER_HORIZONTAL
         );
-        progressParams.topMargin = Math.round(16.0f * density);
-        root.addView(progressLabel, progressParams);
+        titleParams.topMargin = Math.round(2.0f * density);
+        header.addView(titleLabel, titleParams);
+
+        progressLabel = new TextView(this);
+        progressLabel.setTextColor(Color.WHITE);
+        progressLabel.setTextSize(15.0f);
+        progressLabel.setGravity(Gravity.CENTER_VERTICAL | Gravity.END);
+        FrameLayout.LayoutParams progressParams = new FrameLayout.LayoutParams(
+            Math.round(72.0f * density),
+            Math.round(44.0f * density),
+            Gravity.TOP | Gravity.END
+        );
+        progressParams.rightMargin = Math.round(14.0f * density);
+        progressParams.topMargin = Math.round(2.0f * density);
+        header.addView(progressLabel, progressParams);
+
+        progressBar = new ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal);
+        progressBar.setMax(targets.size());
+        progressBar.setProgressTintList(android.content.res.ColorStateList.valueOf(Color.WHITE));
+        progressBar.setProgressBackgroundTintList(
+            android.content.res.ColorStateList.valueOf(0x48FFFFFF)
+        );
+        FrameLayout.LayoutParams barParams = new FrameLayout.LayoutParams(
+            FrameLayout.LayoutParams.MATCH_PARENT,
+            Math.round(3.0f * density),
+            Gravity.BOTTOM
+        );
+        barParams.leftMargin = Math.round(14.0f * density);
+        barParams.rightMargin = Math.round(14.0f * density);
+        barParams.bottomMargin = Math.round(8.0f * density);
+        header.addView(progressBar, barParams);
 
         instructionLabel = new TextView(this);
         instructionLabel.setTextColor(Color.WHITE);
         instructionLabel.setTextSize(17.0f);
         instructionLabel.setGravity(Gravity.CENTER);
-        instructionLabel.setShadowLayer(6.0f, 0.0f, 1.0f, Color.BLACK);
-        instructionLabel.setText("Starting camera…");
-        FrameLayout.LayoutParams instructionParams = new FrameLayout.LayoutParams(
-            FrameLayout.LayoutParams.MATCH_PARENT,
-            Math.round(64.0f * density),
-            Gravity.BOTTOM
+        instructionLabel.setText("Preparing AR camera…");
+        instructionLabel.setPadding(
+            Math.round(20.0f * density),
+            Math.round(12.0f * density),
+            Math.round(20.0f * density),
+            Math.round(12.0f * density)
         );
-        instructionParams.leftMargin = Math.round(28.0f * density);
-        instructionParams.rightMargin = Math.round(28.0f * density);
-        instructionParams.bottomMargin = Math.round(28.0f * density);
+        GradientDrawable guidanceBackground = new GradientDrawable();
+        guidanceBackground.setColor(0xA6000000);
+        guidanceBackground.setCornerRadius(18.0f * density);
+        instructionLabel.setBackground(guidanceBackground);
+        FrameLayout.LayoutParams instructionParams = new FrameLayout.LayoutParams(
+            FrameLayout.LayoutParams.WRAP_CONTENT,
+            FrameLayout.LayoutParams.WRAP_CONTENT,
+            Gravity.BOTTOM | Gravity.CENTER_HORIZONTAL
+        );
+        instructionParams.leftMargin = Math.round(24.0f * density);
+        instructionParams.rightMargin = Math.round(24.0f * density);
+        instructionParams.bottomMargin = Math.round(22.0f * density);
         root.addView(instructionLabel, instructionParams);
 
         ViewCompat.setOnApplyWindowInsetsListener(
@@ -270,19 +316,14 @@ public final class PanoramaCaptureActivity extends AppCompatActivity implements 
                 Insets safeInsets = windowInsets.getInsets(
                     WindowInsetsCompat.Type.displayCutout() | WindowInsetsCompat.Type.systemBars()
                 );
-                int edge = Math.round(16.0f * density);
-                cancelParams.leftMargin = Math.max(edge, safeInsets.left + edge);
-                cancelParams.topMargin = Math.max(edge, safeInsets.top + Math.round(8.0f * density));
-                doneParams.rightMargin = Math.max(edge, safeInsets.right + edge);
-                doneParams.topMargin = cancelParams.topMargin;
-                progressParams.topMargin = cancelParams.topMargin;
+                headerParams.leftMargin = Math.max(Math.round(14.0f * density), safeInsets.left + Math.round(14.0f * density));
+                headerParams.rightMargin = Math.max(Math.round(14.0f * density), safeInsets.right + Math.round(14.0f * density));
+                headerParams.topMargin = Math.max(Math.round(12.0f * density), safeInsets.top + Math.round(8.0f * density));
                 instructionParams.bottomMargin = Math.max(
-                    Math.round(28.0f * density),
+                    Math.round(22.0f * density),
                     safeInsets.bottom + Math.round(20.0f * density)
                 );
-                cancelButton.setLayoutParams(cancelParams);
-                doneButton.setLayoutParams(doneParams);
-                progressLabel.setLayoutParams(progressParams);
+                header.setLayoutParams(headerParams);
                 instructionLabel.setLayoutParams(instructionParams);
                 return windowInsets;
             }
@@ -292,226 +333,217 @@ public final class PanoramaCaptureActivity extends AppCompatActivity implements 
         ViewCompat.requestApplyInsets(root);
     }
 
-    private AppCompatButton createPillButton(String text, int backgroundColor, int textColor) {
-        float density = getResources().getDisplayMetrics().density;
-        AppCompatButton button = new AppCompatButton(this);
-        button.setText(text);
-        button.setTextColor(textColor);
-        button.setTextSize(15.0f);
-        button.setAllCaps(false);
-        button.setGravity(Gravity.CENTER);
-        button.setMinWidth(Math.round(76.0f * density));
-        button.setMinimumWidth(Math.round(76.0f * density));
-        button.setPadding(Math.round(17.0f * density), 0, Math.round(17.0f * density), 0);
-        GradientDrawable background = new GradientDrawable();
-        background.setColor(backgroundColor);
-        background.setCornerRadius(24.0f * density);
-        button.setBackground(background);
-        return button;
-    }
-
-    private void startCamera() {
-        if (finishingCapture || isFinishing()) {
-            return;
-        }
-
-        ListenableFuture<ProcessCameraProvider> providerFuture = ProcessCameraProvider.getInstance(this);
-        providerFuture.addListener(
-            () -> {
-                try {
-                    cameraProvider = providerFuture.get();
-                    if (!cameraProvider.hasCamera(CameraSelector.DEFAULT_BACK_CAMERA)) {
-                        failCapture("NOT_SUPPORTED", "This device has no back camera available for panorama capture.");
-                        return;
-                    }
-
-                    int targetRotation = captureSurfaceRotation;
-                    Preview preview = new Preview.Builder().setTargetRotation(targetRotation).build();
-                    ImageCapture.Builder captureBuilder = new ImageCapture.Builder()
-                        .setCaptureMode(ImageCapture.CAPTURE_MODE_MINIMIZE_LATENCY)
-                        .setJpegQuality(options.jpegQualityPercent)
-                        .setTargetRotation(targetRotation);
-                    imageCapture = captureBuilder.build();
-
-                    cameraProvider.unbindAll();
-                    Camera camera = cameraProvider.bindToLifecycle(
-                        this,
-                        CameraSelector.DEFAULT_BACK_CAMERA,
-                        preview,
-                        imageCapture
-                    );
-                    preview.setSurfaceProvider(previewView.getSurfaceProvider());
-                    cameraCalibration = readCameraCalibration(camera);
-                    cameraReady = true;
-                    updateGuidance(SystemClock.elapsedRealtimeNanos());
-                } catch (Exception exception) {
-                    Log.e(TAG, "Unable to start CameraX", exception);
-                    failCapture("PRESENTATION_FAILED", "The native camera preview could not be started.");
-                }
-            },
-            ContextCompat.getMainExecutor(this)
+    private static FrameLayout.LayoutParams matchParentLayout() {
+        return new FrameLayout.LayoutParams(
+            FrameLayout.LayoutParams.MATCH_PARENT,
+            FrameLayout.LayoutParams.MATCH_PARENT
         );
     }
 
-    @ExperimentalCamera2Interop
-    private CameraCalibration readCameraCalibration(Camera camera) {
-        try {
-            Camera2CameraInfo cameraInfo = Camera2CameraInfo.from(camera.getCameraInfo());
-            Size pixelArray = cameraInfo.getCameraCharacteristic(CameraCharacteristics.SENSOR_INFO_PIXEL_ARRAY_SIZE);
-            if (pixelArray == null || pixelArray.getWidth() <= 0 || pixelArray.getHeight() <= 0) {
-                return CameraCalibration.unavailable();
-            }
-
-            float[] intrinsic = cameraInfo.getCameraCharacteristic(CameraCharacteristics.LENS_INTRINSIC_CALIBRATION);
-            if (intrinsic != null && intrinsic.length >= 5) {
-                return new CameraCalibration(
-                    intrinsic[0],
-                    intrinsic[1],
-                    intrinsic[2],
-                    intrinsic[3],
-                    intrinsic[4],
-                    pixelArray.getWidth(),
-                    pixelArray.getHeight(),
-                    "cameraCharacteristics"
-                );
-            }
-
-            float[] focalLengths = cameraInfo.getCameraCharacteristic(CameraCharacteristics.LENS_INFO_AVAILABLE_FOCAL_LENGTHS);
-            android.util.SizeF physicalSize = cameraInfo.getCameraCharacteristic(CameraCharacteristics.SENSOR_INFO_PHYSICAL_SIZE);
-            if (
-                focalLengths != null &&
-                focalLengths.length > 0 &&
-                physicalSize != null &&
-                physicalSize.getWidth() > 0.0f &&
-                physicalSize.getHeight() > 0.0f
-            ) {
-                float fx = focalLengths[0] / physicalSize.getWidth() * pixelArray.getWidth();
-                float fy = focalLengths[0] / physicalSize.getHeight() * pixelArray.getHeight();
-                return new CameraCalibration(
-                    fx,
-                    fy,
-                    pixelArray.getWidth() * 0.5f,
-                    pixelArray.getHeight() * 0.5f,
-                    0.0f,
-                    pixelArray.getWidth(),
-                    pixelArray.getHeight(),
-                    "derivedFromSensorGeometry"
-                );
-            }
-        } catch (Exception exception) {
-            Log.w(TAG, "Camera intrinsics are unavailable", exception);
-        }
-        return CameraCalibration.unavailable();
+    private AppCompatButton createHeaderButton(String text) {
+        AppCompatButton button = new AppCompatButton(this);
+        button.setText(text);
+        button.setTextColor(Color.WHITE);
+        button.setTextSize(16.0f);
+        button.setAllCaps(false);
+        button.setGravity(Gravity.CENTER);
+        button.setPadding(0, 0, 0, 0);
+        button.setBackgroundColor(Color.TRANSPARENT);
+        return button;
     }
 
     @Override
     protected void onResume() {
         super.onResume();
-        registerSensorListeners();
+        if (finishingCapture || surfaceView == null || !ensureArSession()) {
+            return;
+        }
+
+        captureSurfaceRotation = getWindowManager().getDefaultDisplay().getRotation();
+        renderer.setDisplayRotation(captureSurfaceRotation);
+        renderer.setSession(arSession);
+        try {
+            arSession.resume();
+            sessionResumed = true;
+            surfaceView.onResume();
+            instructionLabel.setText("Move slowly while tracking starts");
+        } catch (CameraNotAvailableException error) {
+            Log.e(TAG, "ARCore camera is unavailable", error);
+            failCapture("CAPTURE_FAILED", "The AR camera is unavailable. Close other camera apps and try again.");
+        }
     }
 
     @Override
     protected void onPause() {
-        unregisterSensorListeners();
-        resetAlignmentHold();
+        cameraReady = false;
+        resetSteadiness();
+        if (surfaceView != null) {
+            surfaceView.onPause();
+        }
+        if (arSession != null && sessionResumed) {
+            arSession.pause();
+            sessionResumed = false;
+        }
         super.onPause();
     }
 
-    private void registerSensorListeners() {
-        if (sensorManager == null || rotationSensor == null || sensorListenersRegistered) {
-            return;
+    private boolean ensureArSession() {
+        if (arSession != null) {
+            return true;
         }
-        sensorManager.registerListener(this, rotationSensor, SensorManager.SENSOR_DELAY_GAME);
-        if (gyroscopeSensor != null) {
-            sensorManager.registerListener(this, gyroscopeSensor, SensorManager.SENSOR_DELAY_GAME);
+        try {
+            ArCoreApk.InstallStatus installStatus = ArCoreApk.getInstance().requestInstall(
+                this,
+                !installRequested
+            );
+            if (installStatus == ArCoreApk.InstallStatus.INSTALL_REQUESTED) {
+                installRequested = true;
+                instructionLabel.setText("Preparing Google Play Services for AR…");
+                return false;
+            }
+
+            arSession = new Session(this);
+            selectBestCameraConfiguration(arSession);
+            Config configuration = new Config(arSession);
+            configuration.setFocusMode(Config.FocusMode.AUTO);
+            configuration.setPlaneFindingMode(Config.PlaneFindingMode.DISABLED);
+            configuration.setLightEstimationMode(Config.LightEstimationMode.DISABLED);
+            configuration.setUpdateMode(Config.UpdateMode.BLOCKING);
+            arSession.configure(configuration);
+            updateImageRotation(arSession);
+            return true;
+        } catch (UnavailableArcoreNotInstalledException | UnavailableUserDeclinedInstallationException error) {
+            failCapture("NOT_SUPPORTED", "Google Play Services for AR is required for guided panorama capture.");
+        } catch (UnavailableApkTooOldException error) {
+            failCapture("NOT_SUPPORTED", "Update Google Play Services for AR, then try again.");
+        } catch (UnavailableSdkTooOldException error) {
+            failCapture("NOT_SUPPORTED", "This KinSphere build must be updated before AR capture can start.");
+        } catch (UnavailableDeviceNotCompatibleException error) {
+            failCapture("NOT_SUPPORTED", "Guided panorama capture requires an ARCore-capable Android phone.");
+        } catch (Exception error) {
+            Log.e(TAG, "Unable to create ARCore session", error);
+            failCapture("CAPTURE_FAILED", "The AR camera session could not be started.");
         }
-        sensorListenersRegistered = true;
+        return false;
     }
 
-    private void unregisterSensorListeners() {
-        if (sensorManager != null && sensorListenersRegistered) {
-            sensorManager.unregisterListener(this);
+    private void selectBestCameraConfiguration(Session session) {
+        CameraConfigFilter filter = new CameraConfigFilter(session);
+        filter.setFacingDirection(CameraConfig.FacingDirection.BACK);
+        List<CameraConfig> configurations = session.getSupportedCameraConfigs(filter);
+        CameraConfig best = null;
+        long bestPixels = -1L;
+        for (CameraConfig candidate : configurations) {
+            Size imageSize = candidate.getImageSize();
+            long pixels = (long) imageSize.getWidth() * imageSize.getHeight();
+            if (pixels > bestPixels) {
+                best = candidate;
+                bestPixels = pixels;
+            }
         }
-        sensorListenersRegistered = false;
+        if (best != null) {
+            session.setCameraConfig(best);
+            Log.i(TAG, "Selected ARCore CPU image size " + best.getImageSize());
+        }
+    }
+
+    private void updateImageRotation(Session session) {
+        try {
+            CameraManager manager = (CameraManager) getSystemService(CAMERA_SERVICE);
+            CameraCharacteristics characteristics = manager.getCameraCharacteristics(
+                session.getCameraConfig().getCameraId()
+            );
+            Integer sensorOrientation = characteristics.get(CameraCharacteristics.SENSOR_ORIENTATION);
+            if (sensorOrientation == null) {
+                return;
+            }
+            int displayDegrees = surfaceRotationDegrees(captureSurfaceRotation);
+            imageRotationDegrees = (sensorOrientation - displayDegrees + 360) % 360;
+        } catch (Exception error) {
+            Log.w(TAG, "Unable to read AR camera orientation; using portrait default", error);
+            imageRotationDegrees = 90;
+        }
     }
 
     @Override
-    public void onSensorChanged(SensorEvent event) {
+    public void onFrame(Frame frame, Camera camera, float[] cameraToWorld, float[] projection) {
         if (finishingCapture) {
             return;
         }
-
-        if (event.sensor.getType() == Sensor.TYPE_GYROSCOPE) {
-            float magnitudeRadians = (float) Math.sqrt(
-                event.values[0] * event.values[0] +
-                event.values[1] * event.values[1] +
-                event.values[2] * event.values[2]
-            );
-            float measuredDegrees = (float) Math.toDegrees(magnitudeRadians);
-            angularSpeedDegrees = Float.isFinite(angularSpeedDegrees)
-                ? angularSpeedDegrees * 0.72f + measuredDegrees * 0.28f
-                : measuredDegrees;
+        if (camera.getTrackingState() != TrackingState.TRACKING) {
+            cameraReady = false;
+            resetSteadiness();
+            publishTrackingState(camera, projection);
             return;
         }
 
-        if (!isRotationSensor(event.sensor)) {
-            return;
-        }
-
-        SensorManager.getRotationMatrixFromVector(rawSensorRotation, event.values);
-        remapRotationToLockedDisplay(rawSensorRotation, absoluteRotation);
-        if (baselineRotation == null) {
-            baselineRotation = Arrays.copyOf(absoluteRotation, absoluteRotation.length);
-            System.arraycopy(absoluteRotation, 0, previousAbsoluteRotation, 0, 9);
-            previousRotationTimestampNanos = event.timestamp;
-            angularSpeedDegrees = gyroscopeSensor == null ? Float.POSITIVE_INFINITY : angularSpeedDegrees;
-            currentPose = PanoramaPose.fromRelativeRotation(IDENTITY_ROTATION, event.timestamp);
-            updateGuidance(event.timestamp);
-            return;
-        }
-
-        if (gyroscopeSensor == null) {
-            updateFallbackAngularSpeed(event.timestamp);
-        }
-
-        float[] relativeRotation = transposeMultiply(baselineRotation, absoluteRotation);
-        currentPose = PanoramaPose.fromRelativeRotation(relativeRotation, event.timestamp);
-        System.arraycopy(absoluteRotation, 0, previousAbsoluteRotation, 0, 9);
-        previousRotationTimestampNanos = event.timestamp;
-        updateGuidance(event.timestamp);
+        cameraReady = true;
+        PanoramaPose pose = PanoramaPose.fromCameraTransform(cameraToWorld, frame.getTimestamp());
+        currentPose = pose;
+        boolean steady = updateMotion(pose, frame.getTimestamp());
+        updateGuidance(frame, camera, pose, projection, steady);
     }
 
-    private void updateFallbackAngularSpeed(long timestampNanos) {
-        long elapsedNanos = timestampNanos - previousRotationTimestampNanos;
-        if (elapsedNanos <= 0L) {
-            return;
-        }
-        float[] delta = transposeMultiply(previousAbsoluteRotation, absoluteRotation);
-        double cosine = (delta[0] + delta[4] + delta[8] - 1.0) * 0.5;
-        cosine = Math.max(-1.0, Math.min(1.0, cosine));
-        float measured = (float) (Math.toDegrees(Math.acos(cosine)) / (elapsedNanos / 1_000_000_000.0));
-        angularSpeedDegrees = Float.isFinite(angularSpeedDegrees)
-            ? angularSpeedDegrees * 0.65f + measured * 0.35f
-            : measured;
+    @Override
+    public void onFailure(Exception error) {
+        runOnUiThread(() -> {
+            if (!finishingCapture) {
+                failCapture("CAPTURE_FAILED", "The AR capture session stopped. Reopen the camera and try again.");
+            }
+        });
     }
 
-    private void updateGuidance(long timestampNanos) {
-        if (guideView == null || currentPose == null) {
-            return;
+    private boolean updateMotion(PanoramaPose pose, long timestampNanos) {
+        PanoramaPose previous = previousPose;
+        long previousTimestamp = previousFrameTimestampNanos;
+        previousPose = pose;
+        previousFrameTimestampNanos = timestampNanos;
+        if (previous == null || previousTimestamp == 0L) {
+            return false;
         }
 
-        PanoramaTarget activeTarget = findNearestUncapturedTarget(currentPose);
+        double elapsed = (timestampNanos - previousTimestamp) / 1_000_000_000.0;
+        if (elapsed <= 0.0001 || elapsed >= 0.25) {
+            smoothedAngularSpeed = Float.POSITIVE_INFINITY;
+            smoothedLinearSpeed = Float.POSITIVE_INFINITY;
+            return false;
+        }
+        double quaternionDot = Math.abs(
+            previous.quaternion[0] * pose.quaternion[0] +
+            previous.quaternion[1] * pose.quaternion[1] +
+            previous.quaternion[2] * pose.quaternion[2] +
+            previous.quaternion[3] * pose.quaternion[3]
+        );
+        quaternionDot = Math.max(0.0, Math.min(1.0, quaternionDot));
+        float angularSpeed = (float) (2.0 * Math.acos(quaternionDot) / elapsed);
+        double deltaX = pose.position[0] - previous.position[0];
+        double deltaY = pose.position[1] - previous.position[1];
+        double deltaZ = pose.position[2] - previous.position[2];
+        float linearSpeed = (float) (Math.sqrt(deltaX * deltaX + deltaY * deltaY + deltaZ * deltaZ) / elapsed);
+
+        if (Float.isFinite(smoothedAngularSpeed)) {
+            smoothedAngularSpeed = 0.78f * smoothedAngularSpeed + 0.22f * angularSpeed;
+            smoothedLinearSpeed = 0.78f * smoothedLinearSpeed + 0.22f * linearSpeed;
+        } else {
+            smoothedAngularSpeed = angularSpeed;
+            smoothedLinearSpeed = linearSpeed;
+        }
+        return smoothedAngularSpeed < MAX_STEADY_ANGULAR_SPEED_RADIANS &&
+            smoothedLinearSpeed < MAX_STEADY_LINEAR_SPEED_METERS;
+    }
+
+    private void updateGuidance(Frame frame, Camera camera, PanoramaPose pose, float[] projection, boolean steady) {
+        PanoramaTarget activeTarget = findNearestUncapturedTarget(pose);
         if (activeTarget == null) {
-            guideView.updatePose(currentPose.rotation, -1, 0.0f, false, true, captureInFlight);
+            publishGuide(pose, projection, -1, 0.0f, false, true, captureInFlight, "Capture complete");
             if (!captureInFlight && !frames.isEmpty()) {
-                finishCaptureSuccessfully();
+                runOnUiThread(this::finishCaptureSuccessfully);
             }
             return;
         }
 
-        float angularDistance = currentPose.angularDistanceDegrees(activeTarget);
+        float angularDistance = pose.angularDistanceDegrees(activeTarget);
         boolean aligned = angularDistance <= options.alignmentDegrees;
-        boolean steady = Float.isFinite(angularSpeedDegrees) && angularSpeedDegrees <= MAX_STEADY_ANGULAR_SPEED_DEGREES;
         if (activeTarget.index != alignedTargetIndex) {
             alignedTargetIndex = activeTarget.index;
             alignedSinceNanos = -1L;
@@ -520,96 +552,280 @@ public final class PanoramaCaptureActivity extends AppCompatActivity implements 
         float holdProgress = 0.0f;
         if (cameraReady && aligned && steady && !captureInFlight) {
             if (alignedSinceNanos < 0L) {
-                alignedSinceNanos = timestampNanos;
+                alignedSinceNanos = frame.getTimestamp();
             }
-            long heldMillis = Math.max(0L, (timestampNanos - alignedSinceNanos) / 1_000_000L);
+            long heldMillis = Math.max(0L, (frame.getTimestamp() - alignedSinceNanos) / 1_000_000L);
             holdProgress = Math.min(1.0f, heldMillis / (float) options.steadyDurationMillis);
             if (
                 holdProgress >= 1.0f &&
-                SystemClock.uptimeMillis() - lastCaptureCompletedAtMillis >= MIN_CAPTURE_GAP_MILLIS
+                SystemClock.uptimeMillis() - lastCaptureCompletedAtMillis >= CAPTURE_COOLDOWN_MILLIS
             ) {
-                captureFrame(activeTarget, currentPose);
-                holdProgress = 1.0f;
+                captureFrame(frame, camera, activeTarget, pose);
+                holdProgress = 0.0f;
             }
         } else {
             alignedSinceNanos = -1L;
         }
 
-        guideView.updatePose(
-            currentPose.rotation,
+        String instruction;
+        if (captureInFlight) {
+            instruction = "Capturing…";
+        } else if (!aligned) {
+            instruction = "Move a dot into the circle";
+        } else if (holdProgress > 0.0f) {
+            instruction = "Hold still";
+        } else {
+            instruction = "Steady your Android phone";
+        }
+        publishGuide(
+            pose,
+            projection,
             activeTarget.index,
             holdProgress,
             aligned,
             steady,
-            captureInFlight
+            captureInFlight,
+            instruction
         );
-        updateInstruction(aligned, steady);
     }
 
-    private void updateInstruction(boolean aligned, boolean steady) {
-        if (instructionLabel == null) {
-            return;
-        }
-        if (!cameraReady) {
-            instructionLabel.setText("Starting camera…");
-        } else if (captureInFlight) {
-            instructionLabel.setText("Capturing…");
-        } else if (aligned && !steady) {
-            instructionLabel.setText("Hold still");
-        } else if (aligned) {
-            instructionLabel.setText("Keep holding…");
+    private void publishTrackingState(Camera camera, float[] projection) {
+        String message;
+        TrackingFailureReason reason = camera.getTrackingFailureReason();
+        if (reason == TrackingFailureReason.INSUFFICIENT_LIGHT) {
+            message = "Move somewhere with more light";
+        } else if (reason == TrackingFailureReason.EXCESSIVE_MOTION) {
+            message = "Move the phone more slowly";
+        } else if (reason == TrackingFailureReason.INSUFFICIENT_FEATURES) {
+            message = "Point at a detailed part of the room";
         } else {
-            instructionLabel.setText("Move a dot to the center");
+            message = "Move slowly while tracking starts";
         }
-    }
-
-    private void captureFrame(PanoramaTarget target, PanoramaPose pose) {
-        if (imageCapture == null || captureInFlight || target.captured || finishingCapture) {
+        long now = SystemClock.elapsedRealtimeNanos();
+        if (now - lastGuidancePublishedAtNanos < GUIDANCE_INTERVAL_NANOS) {
             return;
         }
+        lastGuidancePublishedAtNanos = now;
+        PanoramaPose pose = currentPose;
+        float[] rotationCopy = (pose == null ? IDENTITY_ROTATION : pose.rotation).clone();
+        float[] projectionCopy = projection.clone();
+        runOnUiThread(() -> {
+            guideView.updatePose(rotationCopy, projectionCopy, -1, 0.0f, false, false, false);
+            instructionLabel.setText(message);
+        });
+    }
+
+    private void publishGuide(
+        PanoramaPose pose,
+        float[] projection,
+        int targetIndex,
+        float holdProgress,
+        boolean aligned,
+        boolean steady,
+        boolean capturing,
+        String instruction
+    ) {
+        long now = SystemClock.elapsedRealtimeNanos();
+        if (now - lastGuidancePublishedAtNanos < GUIDANCE_INTERVAL_NANOS) {
+            return;
+        }
+        lastGuidancePublishedAtNanos = now;
+        float[] rotationCopy = pose.rotation.clone();
+        float[] projectionCopy = projection.clone();
+        runOnUiThread(() -> {
+            if (finishingCapture) {
+                return;
+            }
+            guideView.updatePose(
+                rotationCopy,
+                projectionCopy,
+                targetIndex,
+                holdProgress,
+                aligned,
+                steady,
+                capturing
+            );
+            instructionLabel.setText(instruction);
+        });
+    }
+
+    private void captureFrame(Frame frame, Camera camera, PanoramaTarget target, PanoramaPose pose) {
+        if (captureInFlight || target.captured || finishingCapture) {
+            return;
+        }
+
+        final ArCapturedImage capturedImage;
+        try (Image image = frame.acquireCameraImage()) {
+            capturedImage = ArCapturedImage.copyOf(image);
+        } catch (NotYetAvailableException unavailable) {
+            return;
+        } catch (Exception error) {
+            Log.e(TAG, "Unable to copy synchronized AR camera frame", error);
+            publishCaptureRetry("Couldn't read that camera frame. Keep holding still.");
+            return;
+        }
+
+        CameraIntrinsics intrinsics = camera.getImageIntrinsics();
+        CaptureSnapshot snapshot = new CaptureSnapshot(
+            frames.size(),
+            target,
+            pose,
+            capturedImage,
+            intrinsics.getFocalLength(),
+            intrinsics.getPrincipalPoint(),
+            intrinsics.getImageDimensions(),
+            frame.getTimestamp(),
+            System.currentTimeMillis(),
+            imageRotationDegrees
+        );
 
         captureInFlight = true;
         alignedSinceNanos = -1L;
-        final int frameIndex = frames.size();
-        final long capturedAtMillis = System.currentTimeMillis();
-        final PanoramaPose capturedPose = pose;
-        final File pendingFile = new File(sessionDirectory, String.format(Locale.US, ".frame_%03d_pending.jpg", frameIndex));
-        final File finalFile = new File(sessionDirectory, String.format(Locale.US, "frame_%03d.jpg", frameIndex));
+        imageExecutor.execute(() -> encodeCapturedFrame(snapshot));
+    }
 
-        ImageCapture.OutputFileOptions outputOptions = new ImageCapture.OutputFileOptions.Builder(pendingFile).build();
-        imageCapture.takePicture(
-            outputOptions,
-            cameraExecutor,
-            new ImageCapture.OnImageSavedCallback() {
-                @Override
-                public void onImageSaved(@NonNull ImageCapture.OutputFileResults outputFileResults) {
-                    try {
-                        ProcessedFrame processed = finalizeCapturedImage(pendingFile, finalFile);
-                        JSONObject metadata = buildFrameMetadata(
-                            frameIndex,
-                            target,
-                            capturedPose,
-                            capturedAtMillis,
-                            processed
-                        );
-                        runOnUiThread(() -> acceptCapturedFrame(target, metadata));
-                    } catch (Exception exception) {
-                        Log.e(TAG, "Unable to finalize captured panorama frame", exception);
-                        deleteFileQuietly(pendingFile);
-                        deleteFileQuietly(finalFile);
-                        runOnUiThread(() -> recoverFromFrameFailure("Couldn't save that frame. Hold the target and try again."));
-                    }
-                }
-
-                @Override
-                public void onError(@NonNull ImageCaptureException exception) {
-                    Log.e(TAG, "CameraX image capture failed", exception);
-                    deleteFileQuietly(pendingFile);
-                    runOnUiThread(() -> recoverFromFrameFailure("Couldn't capture that frame. Hold the target and try again."));
-                }
-            }
+    private void encodeCapturedFrame(CaptureSnapshot snapshot) {
+        File output = new File(
+            sessionDirectory,
+            String.format(Locale.US, "frame_%03d.jpg", snapshot.frameIndex)
         );
-        updateInstruction(true, true);
+        try {
+            ArCapturedImage.EncodedFrame encoded = snapshot.image.encode(
+                output,
+                snapshot.rotationDegrees,
+                options.outputWidth,
+                options.jpegQualityPercent
+            );
+            JSONObject metadata = buildFrameMetadata(snapshot, encoded);
+            runOnUiThread(() -> acceptCapturedFrame(snapshot.target, metadata));
+        } catch (Exception error) {
+            Log.e(TAG, "Unable to encode synchronized AR panorama frame", error);
+            deleteFileQuietly(output);
+            runOnUiThread(() -> recoverFromFrameFailure(
+                "Couldn't save that frame. Hold the target and try again."
+            ));
+        }
+    }
+
+    private JSONObject buildFrameMetadata(CaptureSnapshot snapshot, ArCapturedImage.EncodedFrame encoded) throws JSONException {
+        double[] uprightIntrinsics = adjustedIntrinsics(
+            snapshot.focalLength,
+            snapshot.principalPoint,
+            snapshot.intrinsicDimensions,
+            encoded.sourceWidth,
+            encoded.sourceHeight,
+            encoded.sourceRotationDegrees,
+            encoded.width,
+            encoded.height
+        );
+        PanoramaPose pose = snapshot.pose;
+        PanoramaTarget target = snapshot.target;
+        JSONObject frame = new JSONObject();
+        frame.put("index", snapshot.frameIndex);
+        frame.put("targetIndex", target.index);
+        frame.put("uri", Uri.fromFile(encoded.file).toString());
+        frame.put("path", encoded.file.getAbsolutePath());
+        frame.put("width", encoded.width);
+        frame.put("height", encoded.height);
+        frame.put("timestamp", snapshot.capturedAtMillis);
+        frame.put("capturedAt", iso8601(snapshot.capturedAtMillis));
+        frame.put("frameTimestamp", snapshot.frameTimestampNanos / 1_000_000_000.0);
+        frame.put("yaw", pose.yawDegrees);
+        frame.put("pitch", pose.pitchDegrees);
+        frame.put("roll", pose.rollDegrees);
+        frame.put("yawDegrees", pose.yawDegrees);
+        frame.put("pitchDegrees", pose.pitchDegrees);
+        frame.put("rollDegrees", pose.rollDegrees);
+        frame.put("targetYaw", target.yawDegrees);
+        frame.put("targetPitch", target.pitchDegrees);
+        frame.put("targetYawDegrees", target.yawDegrees);
+        frame.put("targetPitchDegrees", target.pitchDegrees);
+        frame.put("position", vectorJson(pose.position));
+        frame.put("quaternion", quaternionJson(pose.quaternion));
+        frame.put("transform", floatArrayToJson(pose.transform));
+        frame.put("intrinsics", doubleArrayToJson(uprightIntrinsics));
+        frame.put("intrinsicsSource", "arcoreImageIntrinsics+uprightRotation");
+        frame.put("horizontalFovDegrees", fieldOfViewDegrees(uprightIntrinsics[0], uprightIntrinsics[2], encoded.width));
+        frame.put("verticalFovDegrees", fieldOfViewDegrees(uprightIntrinsics[4], uprightIntrinsics[5], encoded.height));
+        frame.put("imageOrientation", "up");
+        frame.put("rotationDegrees", 0);
+        frame.put("sourceRotationDegrees", encoded.sourceRotationDegrees);
+        frame.put("sourceWidth", encoded.sourceWidth);
+        frame.put("sourceHeight", encoded.sourceHeight);
+        frame.put("captureInterfaceOrientation", "portrait");
+        frame.put("trackingState", "normal");
+        frame.put("poseSource", "arcoreDisplayOrientedPose");
+        frame.put("translationAvailable", true);
+        frame.put("poseTimestamp", snapshot.frameTimestampNanos / 1_000_000_000.0);
+        return frame;
+    }
+
+    static double[] adjustedIntrinsics(
+        float[] focalLength,
+        float[] principalPoint,
+        int[] intrinsicDimensions,
+        int sourceWidth,
+        int sourceHeight,
+        int rotationDegrees,
+        int outputWidth,
+        int outputHeight
+    ) {
+        double referenceWidth = Math.max(1, intrinsicDimensions[0]);
+        double referenceHeight = Math.max(1, intrinsicDimensions[1]);
+        double rawFx = focalLength[0] * sourceWidth / referenceWidth;
+        double rawFy = focalLength[1] * sourceHeight / referenceHeight;
+        double rawCx = principalPoint[0] * sourceWidth / referenceWidth;
+        double rawCy = principalPoint[1] * sourceHeight / referenceHeight;
+        double fx;
+        double fy;
+        double cx;
+        double cy;
+        int uprightWidth;
+        int uprightHeight;
+
+        if (rotationDegrees == 90) {
+            fx = rawFy;
+            fy = rawFx;
+            cx = sourceHeight - 1.0 - rawCy;
+            cy = rawCx;
+            uprightWidth = sourceHeight;
+            uprightHeight = sourceWidth;
+        } else if (rotationDegrees == 180) {
+            fx = rawFx;
+            fy = rawFy;
+            cx = sourceWidth - 1.0 - rawCx;
+            cy = sourceHeight - 1.0 - rawCy;
+            uprightWidth = sourceWidth;
+            uprightHeight = sourceHeight;
+        } else if (rotationDegrees == 270) {
+            fx = rawFy;
+            fy = rawFx;
+            cx = rawCy;
+            cy = sourceWidth - 1.0 - rawCx;
+            uprightWidth = sourceHeight;
+            uprightHeight = sourceWidth;
+        } else {
+            fx = rawFx;
+            fy = rawFy;
+            cx = rawCx;
+            cy = rawCy;
+            uprightWidth = sourceWidth;
+            uprightHeight = sourceHeight;
+        }
+
+        double outputScaleX = outputWidth / (double) Math.max(1, uprightWidth);
+        double outputScaleY = outputHeight / (double) Math.max(1, uprightHeight);
+        return new double[] {
+            fx * outputScaleX,
+            0.0,
+            cx * outputScaleX,
+            0.0,
+            fy * outputScaleY,
+            cy * outputScaleY,
+            0.0,
+            0.0,
+            1.0,
+        };
     }
 
     private void acceptCapturedFrame(PanoramaTarget target, JSONObject metadata) {
@@ -623,21 +839,20 @@ public final class PanoramaCaptureActivity extends AppCompatActivity implements 
         alignedTargetIndex = -1;
         guideView.pulseCapture();
         guideView.setContentDescription(
-            String.format(
-                Locale.US,
-                "Guided panorama capture, %d of %d frames captured",
-                frames.size(),
-                targets.size()
-            )
+            String.format(Locale.US, "Guided panorama capture, %d of %d frames captured", frames.size(), targets.size())
         );
         updateProgressInterface();
         writeMetadataSnapshot(frames.size() == targets.size() ? "complete" : "inProgress");
-
         if (frames.size() == targets.size()) {
             finishCaptureSuccessfully();
-        } else {
-            updateGuidance(SystemClock.elapsedRealtimeNanos());
         }
+    }
+
+    private void publishCaptureRetry(String message) {
+        runOnUiThread(() -> {
+            alignedSinceNanos = -1L;
+            instructionLabel.setText(message);
+        });
     }
 
     private void recoverFromFrameFailure(String message) {
@@ -648,238 +863,22 @@ public final class PanoramaCaptureActivity extends AppCompatActivity implements 
         alignedTargetIndex = -1;
         alignedSinceNanos = -1L;
         instructionLabel.setText(message);
-        guideView.updatePose(
-            currentPose == null ? IDENTITY_ROTATION : currentPose.rotation,
-            -1,
-            0.0f,
-            false,
-            false,
-            false
-        );
-    }
-
-    private ProcessedFrame finalizeCapturedImage(File pendingFile, File finalFile) throws IOException {
-        BitmapFactory.Options bounds = new BitmapFactory.Options();
-        bounds.inJustDecodeBounds = true;
-        BitmapFactory.decodeFile(pendingFile.getAbsolutePath(), bounds);
-        if (bounds.outWidth <= 0 || bounds.outHeight <= 0) {
-            throw new IOException("CameraX produced an unreadable JPEG.");
-        }
-
-        ExifInterface pendingExif = new ExifInterface(pendingFile);
-        int exifOrientation = pendingExif.getAttributeInt(
-            ExifInterface.TAG_ORIENTATION,
-            ExifInterface.ORIENTATION_NORMAL
-        );
-        int sourceRotationDegrees = pendingExif.getRotationDegrees();
-        boolean sourceFlipped = pendingExif.isFlipped();
-        boolean swapsDimensions = sourceRotationDegrees == 90 || sourceRotationDegrees == 270;
-        int uprightSourceWidth = swapsDimensions ? bounds.outHeight : bounds.outWidth;
-        int uprightSourceHeight = swapsDimensions ? bounds.outWidth : bounds.outHeight;
-        int width = options.outputWidth > 0
-            ? Math.min(options.outputWidth, uprightSourceWidth)
-            : uprightSourceWidth;
-        int height = Math.max(1, Math.round(uprightSourceHeight * (width / (float) uprightSourceWidth)));
-
-        normalizeJpeg(
-            pendingFile,
-            finalFile,
-            uprightSourceWidth,
-            width,
-            height,
-            sourceRotationDegrees,
-            sourceFlipped
-        );
-        deleteFileQuietly(pendingFile);
-
-        return new ProcessedFrame(
-            finalFile,
-            width,
-            height,
-            ExifInterface.ORIENTATION_NORMAL,
-            0,
-            "up",
-            bounds.outWidth,
-            bounds.outHeight,
-            exifOrientation,
-            sourceRotationDegrees,
-            sourceFlipped
-        );
-    }
-
-    private void normalizeJpeg(
-        File source,
-        File destination,
-        int uprightSourceWidth,
-        int targetWidth,
-        int targetHeight,
-        int sourceRotationDegrees,
-        boolean sourceFlipped
-    ) throws IOException {
-        BitmapFactory.Options decodeOptions = new BitmapFactory.Options();
-        decodeOptions.inPreferredConfig = Bitmap.Config.ARGB_8888;
-        int sampleSize = 1;
-        while (uprightSourceWidth / (sampleSize * 2) >= targetWidth) {
-            sampleSize *= 2;
-        }
-        decodeOptions.inSampleSize = sampleSize;
-        int sampledUprightWidth = Math.max(1, uprightSourceWidth / sampleSize);
-        if (sampledUprightWidth > targetWidth) {
-            // Ask BitmapFactory to perform the non-power-of-two portion of the
-            // downscale while decoding, which avoids holding two full-size
-            // camera bitmaps in the heap for the common outputWidth=2048 path.
-            decodeOptions.inScaled = true;
-            decodeOptions.inDensity = sampledUprightWidth;
-            decodeOptions.inTargetDensity = targetWidth;
-        }
-        Bitmap decoded = BitmapFactory.decodeFile(source.getAbsolutePath(), decodeOptions);
-        if (decoded == null) {
-            throw new IOException("The captured JPEG could not be decoded for orientation normalization.");
-        }
-
-        Bitmap upright = decoded;
-        Bitmap scaled = decoded;
-        try {
-            if (sourceFlipped || sourceRotationDegrees != 0) {
-                Matrix orientation = new Matrix();
-                if (sourceFlipped) {
-                    // ExifInterface defines the rotation as occurring after a
-                    // horizontal flip, so apply transforms in that order.
-                    orientation.postScale(-1.0f, 1.0f);
-                }
-                if (sourceRotationDegrees != 0) {
-                    orientation.postRotate(sourceRotationDegrees);
-                }
-                upright = Bitmap.createBitmap(
-                    decoded,
-                    0,
-                    0,
-                    decoded.getWidth(),
-                    decoded.getHeight(),
-                    orientation,
-                    true
-                );
-            }
-            scaled = upright;
-            if (upright.getWidth() != targetWidth || upright.getHeight() != targetHeight) {
-                scaled = Bitmap.createScaledBitmap(upright, targetWidth, targetHeight, true);
-            }
-            try (FileOutputStream output = new FileOutputStream(destination)) {
-                if (!scaled.compress(Bitmap.CompressFormat.JPEG, options.jpegQualityPercent, output)) {
-                    throw new IOException("The normalized JPEG could not be encoded.");
-                }
-            }
-            ExifInterface destinationExif = new ExifInterface(destination);
-            destinationExif.setAttribute(
-                ExifInterface.TAG_ORIENTATION,
-                Integer.toString(ExifInterface.ORIENTATION_NORMAL)
-            );
-            destinationExif.saveAttributes();
-        } finally {
-            if (scaled != upright && scaled != decoded) {
-                scaled.recycle();
-            }
-            if (upright != decoded) {
-                upright.recycle();
-            }
-            decoded.recycle();
-        }
-    }
-
-    private JSONObject buildFrameMetadata(
-        int frameIndex,
-        PanoramaTarget target,
-        PanoramaPose pose,
-        long capturedAtMillis,
-        ProcessedFrame processed
-    ) throws JSONException {
-        JSONObject frame = new JSONObject();
-        frame.put("index", frameIndex);
-        frame.put("targetIndex", target.index);
-        frame.put("uri", Uri.fromFile(processed.file).toString());
-        frame.put("path", processed.file.getAbsolutePath());
-        frame.put("width", processed.width);
-        frame.put("height", processed.height);
-        frame.put("timestamp", capturedAtMillis);
-        frame.put("capturedAt", iso8601(capturedAtMillis));
-        frame.put("yaw", pose.yawDegrees);
-        frame.put("pitch", pose.pitchDegrees);
-        frame.put("roll", pose.rollDegrees);
-        frame.put("targetYaw", target.yawDegrees);
-        frame.put("targetPitch", target.pitchDegrees);
-        frame.put("yawDegrees", pose.yawDegrees);
-        frame.put("pitchDegrees", pose.pitchDegrees);
-        frame.put("rollDegrees", pose.rollDegrees);
-        frame.put("targetYawDegrees", target.yawDegrees);
-        frame.put("targetPitchDegrees", target.pitchDegrees);
-
-        JSONObject position = new JSONObject();
-        position.put("x", 0.0);
-        position.put("y", 0.0);
-        position.put("z", 0.0);
-        frame.put("position", position);
-
-        JSONObject quaternion = new JSONObject();
-        quaternion.put("x", pose.quaternion[0]);
-        quaternion.put("y", pose.quaternion[1]);
-        quaternion.put("z", pose.quaternion[2]);
-        quaternion.put("w", pose.quaternion[3]);
-        frame.put("quaternion", quaternion);
-        frame.put("transform", floatArrayToJson(pose.transform));
-        double[] uprightIntrinsics = cameraCalibration.uprightIntrinsics(processed);
-        if (uprightIntrinsics != null) {
-            frame.put("intrinsics", doubleArrayToJson(uprightIntrinsics));
-            frame.put("intrinsicsSource", cameraCalibration.source + "+uprightExifTransform");
-            if (uprightIntrinsics[0] > 0.0 && uprightIntrinsics[4] > 0.0) {
-                frame.put(
-                    "horizontalFovDegrees",
-                    Math.toDegrees(2.0 * Math.atan(processed.width / (2.0 * uprightIntrinsics[0])))
-                );
-                frame.put(
-                    "verticalFovDegrees",
-                    Math.toDegrees(2.0 * Math.atan(processed.height / (2.0 * uprightIntrinsics[4])))
-                );
-            }
-        } else {
-            frame.put("intrinsicsSource", "unavailable");
-        }
-        frame.put("imageOrientation", processed.imageOrientation);
-        frame.put("rotationDegrees", processed.rotationDegrees);
-        frame.put("exifOrientation", processed.exifOrientation);
-        frame.put("sourceExifOrientation", processed.sourceExifOrientation);
-        frame.put("sourceRotationDegrees", processed.sourceRotationDegrees);
-        frame.put("trackingState", "orientationOnly");
-        frame.put("poseSource", "androidRotationVector");
-        frame.put("translationAvailable", false);
-        frame.put("poseTimestamp", pose.sensorTimestampNanos / 1_000_000_000.0);
-        return frame;
     }
 
     private void updateProgressInterface() {
         if (progressLabel == null) {
             return;
         }
-        progressLabel.setText(
-            String.format(
-                Locale.US,
-                "%d / %d  ·  %s",
-                frames.size(),
-                targets.size(),
-                options.mode.toUpperCase(Locale.US)
-            )
-        );
-        boolean complete = frames.size() == targets.size() && !captureInFlight;
-        doneButton.setEnabled(complete);
-        doneButton.setAlpha(complete ? 1.0f : 0.42f);
+        progressLabel.setText(String.format(Locale.US, "%d / %d", frames.size(), targets.size()));
+        progressBar.setMax(targets.size());
+        progressBar.setProgress(frames.size(), true);
     }
 
     private PanoramaTarget findNearestUncapturedTarget(PanoramaPose pose) {
         PanoramaTarget nearest = null;
         float nearestDistance = Float.POSITIVE_INFINITY;
         for (PanoramaTarget target : targets) {
-            if (target.captured) {
-                continue;
-            }
+            if (target.captured) continue;
             float distance = pose.angularDistanceDegrees(target);
             if (distance < nearestDistance) {
                 nearest = target;
@@ -889,7 +888,11 @@ public final class PanoramaCaptureActivity extends AppCompatActivity implements 
         return nearest;
     }
 
-    private void resetAlignmentHold() {
+    private void resetSteadiness() {
+        previousPose = null;
+        previousFrameTimestampNanos = 0L;
+        smoothedAngularSpeed = Float.POSITIVE_INFINITY;
+        smoothedLinearSpeed = Float.POSITIVE_INFINITY;
         alignedSinceNanos = -1L;
         alignedTargetIndex = -1;
     }
@@ -906,8 +909,8 @@ public final class PanoramaCaptureActivity extends AppCompatActivity implements 
             data.putExtra(EXTRA_RESULT_JSON, result.toString());
             setResult(Activity.RESULT_OK, data);
             finish();
-        } catch (Exception exception) {
-            Log.e(TAG, "Unable to return panorama capture metadata", exception);
+        } catch (Exception error) {
+            Log.e(TAG, "Unable to return panorama capture metadata", error);
             finishingCapture = false;
             failCapture("CAPTURE_FAILED", "The panorama metadata could not be saved.");
         }
@@ -920,22 +923,19 @@ public final class PanoramaCaptureActivity extends AppCompatActivity implements 
         result.put("directoryUrl", Uri.fromFile(sessionDirectory).toString());
         result.put("targetCount", targets.size());
         result.put("capturedCount", frames.size());
+        result.put("requiresStitching", true);
         JSONArray frameArray = new JSONArray();
-        for (JSONObject frame : frames) {
-            frameArray.put(frame);
-        }
+        for (JSONObject frame : frames) frameArray.put(frame);
         result.put("frames", frameArray);
         return result;
     }
 
     private void writeMetadataSnapshot(String state) {
-        if (sessionDirectory == null || !sessionDirectory.exists()) {
-            return;
-        }
+        if (sessionDirectory == null || !sessionDirectory.exists()) return;
         try {
             writeMetadata(buildResultJson(), state);
-        } catch (Exception exception) {
-            Log.w(TAG, "Unable to update panorama metadata.json", exception);
+        } catch (Exception error) {
+            Log.w(TAG, "Unable to update panorama metadata.json", error);
         }
     }
 
@@ -944,8 +944,8 @@ public final class PanoramaCaptureActivity extends AppCompatActivity implements 
         manifest.put("state", state);
         manifest.put("captureType", "sourceFrames");
         manifest.put("stitchingPerformed", false);
-        manifest.put("poseSource", "androidRotationVector");
-        manifest.put("translationAvailable", false);
+        manifest.put("poseSource", "arcoreDisplayOrientedPose");
+        manifest.put("translationAvailable", true);
         manifest.put("outputWidth", options.outputWidth);
         manifest.put("jpegQuality", options.jpegQuality);
         manifest.put("alignmentDegrees", options.alignmentDegrees);
@@ -977,9 +977,7 @@ public final class PanoramaCaptureActivity extends AppCompatActivity implements 
     }
 
     private void cancelCapture() {
-        if (finishingCapture) {
-            return;
-        }
+        if (finishingCapture) return;
         finishingCapture = true;
         cleanupCancelledSession();
         Intent data = new Intent();
@@ -990,9 +988,7 @@ public final class PanoramaCaptureActivity extends AppCompatActivity implements 
     }
 
     private void failCapture(String code, String message) {
-        if (finishingCapture && isFinishing()) {
-            return;
-        }
+        if (finishingCapture && isFinishing()) return;
         finishingCapture = true;
         cleanupCancelledSession();
         Intent data = new Intent();
@@ -1003,86 +999,19 @@ public final class PanoramaCaptureActivity extends AppCompatActivity implements 
     }
 
     private void cleanupCancelledSession() {
-        if (
-            sessionDirectory != null &&
-            capturesRoot != null &&
-            capturesRoot.equals(sessionDirectory.getParentFile())
-        ) {
+        if (sessionDirectory != null && capturesRoot != null && capturesRoot.equals(sessionDirectory.getParentFile())) {
             deleteRecursively(sessionDirectory);
         }
     }
 
     @Override
     protected void onDestroy() {
-        unregisterSensorListeners();
-        if (cameraProvider != null) {
-            cameraProvider.unbindAll();
+        if (arSession != null) {
+            arSession.close();
+            arSession = null;
         }
-        if (cameraExecutor != null) {
-            cameraExecutor.shutdown();
-        }
+        if (imageExecutor != null) imageExecutor.shutdown();
         super.onDestroy();
-    }
-
-    @Override
-    public void onAccuracyChanged(Sensor sensor, int accuracy) {
-        // Sensor-fusion accuracy changes do not require resetting the relative session origin.
-    }
-
-    private static Sensor findRotationSensor(@Nullable SensorManager manager) {
-        if (manager == null) {
-            return null;
-        }
-        Sensor sensor = manager.getDefaultSensor(Sensor.TYPE_ROTATION_VECTOR);
-        if (sensor == null) {
-            sensor = manager.getDefaultSensor(Sensor.TYPE_GAME_ROTATION_VECTOR);
-        }
-        if (sensor == null) {
-            sensor = manager.getDefaultSensor(Sensor.TYPE_GEOMAGNETIC_ROTATION_VECTOR);
-        }
-        return sensor;
-    }
-
-    private static boolean isRotationSensor(Sensor sensor) {
-        int type = sensor.getType();
-        return (
-            type == Sensor.TYPE_ROTATION_VECTOR ||
-            type == Sensor.TYPE_GAME_ROTATION_VECTOR ||
-            type == Sensor.TYPE_GEOMAGNETIC_ROTATION_VECTOR
-        );
-    }
-
-    private static float[] transposeMultiply(float[] left, float[] right) {
-        float[] result = new float[9];
-        for (int row = 0; row < 3; row++) {
-            for (int column = 0; column < 3; column++) {
-                float value = 0.0f;
-                for (int index = 0; index < 3; index++) {
-                    value += left[index * 3 + row] * right[index * 3 + column];
-                }
-                result[row * 3 + column] = value;
-            }
-        }
-        return result;
-    }
-
-    private void remapRotationToLockedDisplay(float[] sensorRotation, float[] displayRotation) {
-        int surfaceRotation = captureSurfaceRotation;
-        int displayXAxis = SensorManager.AXIS_X;
-        int displayYAxis = SensorManager.AXIS_Y;
-        if (surfaceRotation == Surface.ROTATION_90) {
-            displayXAxis = SensorManager.AXIS_Y;
-            displayYAxis = SensorManager.AXIS_MINUS_X;
-        } else if (surfaceRotation == Surface.ROTATION_180) {
-            displayXAxis = SensorManager.AXIS_MINUS_X;
-            displayYAxis = SensorManager.AXIS_MINUS_Y;
-        } else if (surfaceRotation == Surface.ROTATION_270) {
-            displayXAxis = SensorManager.AXIS_MINUS_Y;
-            displayYAxis = SensorManager.AXIS_X;
-        }
-        if (!SensorManager.remapCoordinateSystem(sensorRotation, displayXAxis, displayYAxis, displayRotation)) {
-            System.arraycopy(sensorRotation, 0, displayRotation, 0, 9);
-        }
     }
 
     static List<PanoramaTarget> createTargets(String mode) {
@@ -1113,13 +1042,7 @@ public final class PanoramaCaptureActivity extends AppCompatActivity implements 
         return targets;
     }
 
-    private static void addRing(
-        List<PanoramaTarget> targets,
-        double pitch,
-        int count,
-        double firstYaw,
-        double yawStep
-    ) {
+    private static void addRing(List<PanoramaTarget> targets, double pitch, int count, double firstYaw, double yawStep) {
         for (int index = 0; index < count; index++) {
             addTarget(targets, firstYaw + index * yawStep, pitch);
         }
@@ -1129,20 +1052,50 @@ public final class PanoramaCaptureActivity extends AppCompatActivity implements 
         targets.add(new PanoramaTarget(targets.size(), yaw, pitch));
     }
 
+    private static JSONObject vectorJson(float[] vector) throws JSONException {
+        JSONObject json = new JSONObject();
+        json.put("x", vector[0]);
+        json.put("y", vector[1]);
+        json.put("z", vector[2]);
+        return json;
+    }
+
+    private static JSONObject quaternionJson(float[] quaternion) throws JSONException {
+        JSONObject json = vectorJson(quaternion);
+        json.put("w", quaternion[3]);
+        return json;
+    }
+
     private static JSONArray floatArrayToJson(float[] values) throws JSONException {
         JSONArray array = new JSONArray();
-        for (float value : values) {
-            array.put(value);
-        }
+        for (float value : values) array.put(value);
         return array;
     }
 
     private static JSONArray doubleArrayToJson(double[] values) throws JSONException {
         JSONArray array = new JSONArray();
-        for (double value : values) {
-            array.put(value);
-        }
+        for (double value : values) array.put(value);
         return array;
+    }
+
+    private static double fieldOfViewDegrees(double focalLength, double principalPoint, int pixelCount) {
+        if (focalLength <= 0.0 || pixelCount <= 1) return 0.0;
+        double negativeExtent = Math.max(0.0, principalPoint);
+        double positiveExtent = Math.max(0.0, pixelCount - 1.0 - principalPoint);
+        return Math.toDegrees(Math.atan(negativeExtent / focalLength) + Math.atan(positiveExtent / focalLength));
+    }
+
+    private static int surfaceRotationDegrees(int rotation) {
+        if (rotation == Surface.ROTATION_90) return 90;
+        if (rotation == Surface.ROTATION_180) return 180;
+        if (rotation == Surface.ROTATION_270) return 270;
+        return 0;
+    }
+
+    private static String modeDisplayName(String mode) {
+        if ("quick".equals(mode)) return "Quick";
+        if ("detailed".equals(mode)) return "Detailed";
+        return "Standard";
     }
 
     private static String iso8601(long timestampMillis) {
@@ -1151,39 +1104,11 @@ public final class PanoramaCaptureActivity extends AppCompatActivity implements 
         return formatter.format(new Date(timestampMillis));
     }
 
-    private static int rotationDegreesForExif(int exifOrientation) {
-        if (exifOrientation == ExifInterface.ORIENTATION_ROTATE_90) {
-            return 90;
-        }
-        if (exifOrientation == ExifInterface.ORIENTATION_ROTATE_180) {
-            return 180;
-        }
-        if (exifOrientation == ExifInterface.ORIENTATION_ROTATE_270) {
-            return 270;
-        }
-        return 0;
-    }
-
-    private static String imageOrientationForExif(int exifOrientation) {
-        if (exifOrientation == ExifInterface.ORIENTATION_ROTATE_90) {
-            return "sensorLandscapeRight";
-        }
-        if (exifOrientation == ExifInterface.ORIENTATION_ROTATE_180) {
-            return "down";
-        }
-        if (exifOrientation == ExifInterface.ORIENTATION_ROTATE_270) {
-            return "sensorLandscapeLeft";
-        }
-        return "up";
-    }
-
     private static void copyFile(File source, File destination) throws IOException {
         byte[] buffer = new byte[32 * 1024];
         try (FileInputStream input = new FileInputStream(source); FileOutputStream output = new FileOutputStream(destination)) {
             int read;
-            while ((read = input.read(buffer)) != -1) {
-                output.write(buffer, 0, read);
-            }
+            while ((read = input.read(buffer)) != -1) output.write(buffer, 0, read);
         }
     }
 
@@ -1191,9 +1116,7 @@ public final class PanoramaCaptureActivity extends AppCompatActivity implements 
         if (file.isDirectory()) {
             File[] children = file.listFiles();
             if (children != null) {
-                for (File child : children) {
-                    deleteRecursively(child);
-                }
+                for (File child : children) deleteRecursively(child);
             }
         }
         deleteFileQuietly(file);
@@ -1205,8 +1128,44 @@ public final class PanoramaCaptureActivity extends AppCompatActivity implements 
         }
     }
 
-    private static final class CaptureOptions {
+    private static final class CaptureSnapshot {
+        final int frameIndex;
+        final PanoramaTarget target;
+        final PanoramaPose pose;
+        final ArCapturedImage image;
+        final float[] focalLength;
+        final float[] principalPoint;
+        final int[] intrinsicDimensions;
+        final long frameTimestampNanos;
+        final long capturedAtMillis;
+        final int rotationDegrees;
 
+        CaptureSnapshot(
+            int frameIndex,
+            PanoramaTarget target,
+            PanoramaPose pose,
+            ArCapturedImage image,
+            float[] focalLength,
+            float[] principalPoint,
+            int[] intrinsicDimensions,
+            long frameTimestampNanos,
+            long capturedAtMillis,
+            int rotationDegrees
+        ) {
+            this.frameIndex = frameIndex;
+            this.target = target;
+            this.pose = pose;
+            this.image = image;
+            this.focalLength = focalLength.clone();
+            this.principalPoint = principalPoint.clone();
+            this.intrinsicDimensions = intrinsicDimensions.clone();
+            this.frameTimestampNanos = frameTimestampNanos;
+            this.capturedAtMillis = capturedAtMillis;
+            this.rotationDegrees = rotationDegrees;
+        }
+    }
+
+    private static final class CaptureOptions {
         final String mode;
         final int outputWidth;
         final double jpegQuality;
@@ -1214,13 +1173,7 @@ public final class PanoramaCaptureActivity extends AppCompatActivity implements 
         final float alignmentDegrees;
         final long steadyDurationMillis;
 
-        private CaptureOptions(
-            String mode,
-            int outputWidth,
-            double jpegQuality,
-            float alignmentDegrees,
-            long steadyDurationMillis
-        ) {
+        private CaptureOptions(String mode, int outputWidth, double jpegQuality, float alignmentDegrees, long steadyDurationMillis) {
             this.mode = mode;
             this.outputWidth = outputWidth;
             this.jpegQuality = jpegQuality;
@@ -1236,17 +1189,13 @@ public final class PanoramaCaptureActivity extends AppCompatActivity implements 
             } catch (JSONException ignored) {
                 object = new JSONObject();
             }
-
             String mode = object.optString("mode", "standard").toLowerCase(Locale.US);
-            if (!"quick".equals(mode) && !"standard".equals(mode) && !"detailed".equals(mode)) {
-                mode = "standard";
-            }
-
+            if (!"quick".equals(mode) && !"standard".equals(mode) && !"detailed".equals(mode)) mode = "standard";
             int requestedWidth = object.optInt("outputWidth", 0);
             int outputWidth = requestedWidth <= 0 ? 0 : clamp(requestedWidth, 640, 4096);
-            double jpegQuality = clamp(object.optDouble("jpegQuality", 0.92), 0.10, 1.0);
+            double jpegQuality = clamp(object.optDouble("jpegQuality", 0.92), 0.5, 1.0);
             float alignment = (float) clamp(object.optDouble("alignmentDegrees", 4.5), 2.0, 12.0);
-            long steadyDuration = Math.round(clamp(object.optDouble("steadyDurationMs", 650.0), 250.0, 2000.0));
+            long steadyDuration = Math.round(clamp(object.optDouble("steadyDurationMs", 650.0), 300.0, 2000.0));
             return new CaptureOptions(mode, outputWidth, jpegQuality, alignment, steadyDuration);
         }
 
@@ -1256,155 +1205,6 @@ public final class PanoramaCaptureActivity extends AppCompatActivity implements 
 
         private static double clamp(double value, double minimum, double maximum) {
             return Math.max(minimum, Math.min(maximum, value));
-        }
-    }
-
-    private static final class ProcessedFrame {
-
-        final File file;
-        final int width;
-        final int height;
-        final int exifOrientation;
-        final int rotationDegrees;
-        final String imageOrientation;
-        final int sourceWidth;
-        final int sourceHeight;
-        final int sourceExifOrientation;
-        final int sourceRotationDegrees;
-        final boolean sourceFlipped;
-
-        ProcessedFrame(
-            File file,
-            int width,
-            int height,
-            int exifOrientation,
-            int rotationDegrees,
-            String imageOrientation,
-            int sourceWidth,
-            int sourceHeight,
-            int sourceExifOrientation,
-            int sourceRotationDegrees,
-            boolean sourceFlipped
-        ) {
-            this.file = file;
-            this.width = width;
-            this.height = height;
-            this.exifOrientation = exifOrientation;
-            this.rotationDegrees = rotationDegrees;
-            this.imageOrientation = imageOrientation;
-            this.sourceWidth = sourceWidth;
-            this.sourceHeight = sourceHeight;
-            this.sourceExifOrientation = sourceExifOrientation;
-            this.sourceRotationDegrees = sourceRotationDegrees;
-            this.sourceFlipped = sourceFlipped;
-        }
-    }
-
-    private static final class CameraCalibration {
-
-        final float fx;
-        final float fy;
-        final float cx;
-        final float cy;
-        final float skew;
-        final int referenceWidth;
-        final int referenceHeight;
-        final String source;
-
-        CameraCalibration(
-            float fx,
-            float fy,
-            float cx,
-            float cy,
-            float skew,
-            int referenceWidth,
-            int referenceHeight,
-            String source
-        ) {
-            this.fx = fx;
-            this.fy = fy;
-            this.cx = cx;
-            this.cy = cy;
-            this.skew = skew;
-            this.referenceWidth = referenceWidth;
-            this.referenceHeight = referenceHeight;
-            this.source = source;
-        }
-
-        static CameraCalibration unavailable() {
-            return new CameraCalibration(0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0, 0, "unavailable");
-        }
-
-        @Nullable
-        double[] uprightIntrinsics(ProcessedFrame frame) {
-            if (
-                referenceWidth <= 0 ||
-                referenceHeight <= 0 ||
-                fx <= 0.0f ||
-                fy <= 0.0f ||
-                frame.sourceWidth <= 0 ||
-                frame.sourceHeight <= 0 ||
-                frame.sourceFlipped
-            ) {
-                return null;
-            }
-
-            double rawScaleX = frame.sourceWidth / (double) referenceWidth;
-            double rawScaleY = frame.sourceHeight / (double) referenceHeight;
-            double rawFx = fx * rawScaleX;
-            double rawFy = fy * rawScaleY;
-            double rawCx = cx * rawScaleX;
-            double rawCy = cy * rawScaleY;
-            double uprightFx;
-            double uprightFy;
-            double uprightCx;
-            double uprightCy;
-            int uprightSourceWidth;
-            int uprightSourceHeight;
-
-            if (frame.sourceRotationDegrees == 90) {
-                uprightFx = rawFy;
-                uprightFy = rawFx;
-                uprightCx = frame.sourceHeight - 1.0 - rawCy;
-                uprightCy = rawCx;
-                uprightSourceWidth = frame.sourceHeight;
-                uprightSourceHeight = frame.sourceWidth;
-            } else if (frame.sourceRotationDegrees == 180) {
-                uprightFx = rawFx;
-                uprightFy = rawFy;
-                uprightCx = frame.sourceWidth - 1.0 - rawCx;
-                uprightCy = frame.sourceHeight - 1.0 - rawCy;
-                uprightSourceWidth = frame.sourceWidth;
-                uprightSourceHeight = frame.sourceHeight;
-            } else if (frame.sourceRotationDegrees == 270) {
-                uprightFx = rawFy;
-                uprightFy = rawFx;
-                uprightCx = rawCy;
-                uprightCy = frame.sourceWidth - 1.0 - rawCx;
-                uprightSourceWidth = frame.sourceHeight;
-                uprightSourceHeight = frame.sourceWidth;
-            } else {
-                uprightFx = rawFx;
-                uprightFy = rawFy;
-                uprightCx = rawCx;
-                uprightCy = rawCy;
-                uprightSourceWidth = frame.sourceWidth;
-                uprightSourceHeight = frame.sourceHeight;
-            }
-
-            double outputScaleX = frame.width / (double) uprightSourceWidth;
-            double outputScaleY = frame.height / (double) uprightSourceHeight;
-            return new double[] {
-                uprightFx * outputScaleX,
-                0.0,
-                uprightCx * outputScaleX,
-                0.0,
-                uprightFy * outputScaleY,
-                uprightCy * outputScaleY,
-                0.0,
-                0.0,
-                1.0,
-            };
         }
     }
 }

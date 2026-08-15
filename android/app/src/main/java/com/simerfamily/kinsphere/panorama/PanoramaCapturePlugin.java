@@ -10,11 +10,11 @@ import com.getcapacitor.JSObject;
 import com.getcapacitor.PermissionState;
 import com.getcapacitor.Plugin;
 import com.getcapacitor.PluginCall;
+import com.getcapacitor.PluginMethod;
 import com.getcapacitor.annotation.ActivityCallback;
 import com.getcapacitor.annotation.CapacitorPlugin;
 import com.getcapacitor.annotation.Permission;
 import com.getcapacitor.annotation.PermissionCallback;
-import com.getcapacitor.annotation.PluginMethod;
 import java.io.File;
 import java.io.IOException;
 import java.nio.file.Files;
@@ -24,8 +24,8 @@ import org.json.JSONException;
 /**
  * Capacitor bridge for the native, guided source-frame panorama capture flow.
  *
- * <p>This plugin deliberately returns source frames and orientation metadata. It
- * does not claim to stitch those frames into a panorama.</p>
+ * <p>This plugin deliberately returns synchronized source frames, camera pose,
+ * and intrinsics. The shared web layer assembles those frames into a panorama.</p>
  */
 @CapacitorPlugin(
     name = "PanoramaCapture",
@@ -99,12 +99,7 @@ public final class PanoramaCapturePlugin extends Plugin {
             }
 
             JSObject result = new JSObject();
-            try {
-                result.put("discarded", existed);
-            } catch (JSONException exception) {
-                call.reject("The panorama discard result could not be encoded.", "DISCARD_FAILED", exception);
-                return;
-            }
+            result.put("discarded", existed);
             call.resolve(result);
         } catch (IOException exception) {
             call.reject("The panorama session path could not be validated.", "INVALID_DIRECTORY", exception);

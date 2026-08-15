@@ -30,6 +30,7 @@ final class PanoramaGuideView extends View {
     private final float density;
     private List<PanoramaTarget> targets = Collections.emptyList();
     private float[] cameraToWorld = IDENTITY_ROTATION.clone();
+    private float[] projection = identityProjection();
     private int activeTargetIndex = -1;
     private float holdProgress;
     private boolean aligned;
@@ -58,6 +59,7 @@ final class PanoramaGuideView extends View {
 
     void updatePose(
         float[] cameraToWorld,
+        float[] projection,
         int activeTargetIndex,
         float holdProgress,
         boolean aligned,
@@ -65,6 +67,9 @@ final class PanoramaGuideView extends View {
         boolean capturing
     ) {
         System.arraycopy(cameraToWorld, 0, this.cameraToWorld, 0, 9);
+        if (projection != null && projection.length == 16) {
+            System.arraycopy(projection, 0, this.projection, 0, 16);
+        }
         this.activeTargetIndex = activeTargetIndex;
         this.holdProgress = Math.max(0.0f, Math.min(1.0f, holdProgress));
         this.aligned = aligned;
@@ -135,15 +140,35 @@ final class PanoramaGuideView extends View {
     }
 
     private boolean drawProjectedTarget(Canvas canvas, PanoramaTarget target) {
+        if (target.captured) {
+            return false;
+        }
         float[] device = worldToDevice(target.direction);
         float depth = -device[2];
         if (depth <= 0.12f) {
             return false;
         }
 
-        float focalPixels = getWidth() * 1.32f;
-        float x = getWidth() * 0.5f + focalPixels * device[0] / depth;
-        float y = getHeight() * 0.5f - focalPixels * device[1] / depth;
+        float clipX =
+            projection[0] * device[0] +
+            projection[4] * device[1] +
+            projection[8] * device[2] +
+            projection[12];
+        float clipY =
+            projection[1] * device[0] +
+            projection[5] * device[1] +
+            projection[9] * device[2] +
+            projection[13];
+        float clipW =
+            projection[3] * device[0] +
+            projection[7] * device[1] +
+            projection[11] * device[2] +
+            projection[15];
+        if (clipW <= 0.0001f) {
+            return false;
+        }
+        float x = (clipX / clipW * 0.5f + 0.5f) * getWidth();
+        float y = (0.5f - clipY / clipW * 0.5f) * getHeight();
         float margin = dp(32.0f);
         if (x < margin || x > getWidth() - margin || y < margin || y > getHeight() - margin) {
             return false;
@@ -151,15 +176,15 @@ final class PanoramaGuideView extends View {
 
         boolean active = target.index == activeTargetIndex;
         float radius = dp(active ? 8.0f : 5.0f);
-        paint.setStyle(target.captured ? Paint.Style.STROKE : Paint.Style.FILL);
-        paint.setStrokeWidth(dp(target.captured ? 1.5f : 1.0f));
+        paint.setStyle(Paint.Style.FILL);
+        paint.setStrokeWidth(dp(1.0f));
         paint.setColor(Color.WHITE);
-        paint.setAlpha(target.captured ? 78 : (active ? 255 : 178));
+        paint.setAlpha(active ? 255 : 178);
         paint.setShadowLayer(dp(active ? 5.0f : 3.0f), 0.0f, dp(1.0f), 0x8A000000);
         canvas.drawCircle(x, y, radius, paint);
         paint.clearShadowLayer();
 
-        if (active && !target.captured) {
+        if (active) {
             paint.setStyle(Paint.Style.STROKE);
             paint.setStrokeWidth(dp(1.5f));
             paint.setAlpha(190);
@@ -281,5 +306,14 @@ final class PanoramaGuideView extends View {
 
     private float dp(float value) {
         return value * density;
+    }
+
+    private static float[] identityProjection() {
+        return new float[] {
+            2.4f, 0.0f, 0.0f, 0.0f,
+            0.0f, 2.4f, 0.0f, 0.0f,
+            0.0f, 0.0f, -1.0f, -1.0f,
+            0.0f, 0.0f, -0.2f, 0.0f,
+        };
     }
 }

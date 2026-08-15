@@ -2,13 +2,14 @@ package com.simerfamily.kinsphere.panorama;
 
 import java.util.Arrays;
 
-/** A camera-to-session-world pose derived from the Android rotation vector. */
+/** A display-oriented camera-to-world pose captured from one ARCore frame. */
 final class PanoramaPose {
 
     final long sensorTimestampNanos;
     final float[] rotation;
     final float[] transform;
     final float[] quaternion;
+    final float[] position;
     final double yawDegrees;
     final double pitchDegrees;
     final double rollDegrees;
@@ -18,6 +19,7 @@ final class PanoramaPose {
         float[] rotation,
         float[] transform,
         float[] quaternion,
+        float[] position,
         double yawDegrees,
         double pitchDegrees,
         double rollDegrees
@@ -26,6 +28,7 @@ final class PanoramaPose {
         this.rotation = rotation;
         this.transform = transform;
         this.quaternion = quaternion;
+        this.position = position;
         this.yawDegrees = yawDegrees;
         this.pitchDegrees = pitchDegrees;
         this.rollDegrees = rollDegrees;
@@ -46,9 +49,50 @@ final class PanoramaPose {
             copy,
             toColumnMajorTransform(copy),
             quaternionFromRotation(copy),
+            new float[] { 0.0f, 0.0f, 0.0f },
             yaw,
             pitch,
             roll
+        );
+    }
+
+    static PanoramaPose fromCameraTransform(float[] transform, long frameTimestampNanos) {
+        if (transform.length != 16) {
+            throw new IllegalArgumentException("Camera transform must contain 16 values.");
+        }
+        float[] copy = Arrays.copyOf(transform, transform.length);
+        float[] rotation = new float[] {
+            copy[0], copy[4], copy[8],
+            copy[1], copy[5], copy[9],
+            copy[2], copy[6], copy[10],
+        };
+        float forwardX = -copy[8];
+        float forwardY = -copy[9];
+        float forwardZ = -copy[10];
+        double yawRadians = Math.atan2(forwardX, -forwardZ);
+        double pitchRadians = Math.asin(clamp(forwardY, -1.0f, 1.0f));
+        float rightX = copy[0];
+        float rightY = copy[1];
+        float rightZ = copy[2];
+        double levelRightX = Math.cos(yawRadians);
+        double levelRightZ = Math.sin(yawRadians);
+        double levelUpX = -Math.sin(pitchRadians) * Math.sin(yawRadians);
+        double levelUpY = Math.cos(pitchRadians);
+        double levelUpZ = Math.sin(pitchRadians) * Math.cos(yawRadians);
+        double rollRadians = Math.atan2(
+            rightX * levelUpX + rightY * levelUpY + rightZ * levelUpZ,
+            rightX * levelRightX + rightZ * levelRightZ
+        );
+
+        return new PanoramaPose(
+            frameTimestampNanos,
+            rotation,
+            copy,
+            quaternionFromRotation(rotation),
+            new float[] { copy[12], copy[13], copy[14] },
+            Math.toDegrees(yawRadians),
+            Math.toDegrees(pitchRadians),
+            Math.toDegrees(rollRadians)
         );
     }
 

@@ -10,6 +10,10 @@
         android:supportsRtl="true"
         android:theme="@style/AppTheme">
 
+        <!-- The app remains installable without ARCore, just like iOS remains
+             usable on devices that cannot start the guided AR capture. -->
+        <meta-data android:name="com.google.ar.core" android:value="optional" />
+
         <activity
             android:configChanges="orientation|keyboardHidden|keyboard|screenSize|locale|smallestScreenSize|screenLayout|uiMode|navigation|density"
             android:name=".MainActivity"
@@ -46,6 +50,9 @@
 
     <uses-permission android:name="android.permission.CAMERA" />
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <!-- Capacitor's WebChromeClient grants WebView audio capture only when
+         both permissions requested by the WebView are declared. -->
+    <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
     <uses-permission android:name="android.permission.INTERNET" />
     <!-- Required on Android 12+ for an exact one-hour local reminder. When the
          user declines, KinSphere schedules an inexact fallback instead. -->
@@ -54,5 +61,7 @@
     <!-- Panorama capture checks these capabilities at runtime so devices without
          them can still install the app and receive a NOT_SUPPORTED result. -->
     <uses-feature android:name="android.hardware.camera.any" android:required="false" />
+    <uses-feature android:name="android.hardware.camera.ar" android:required="false" />
+    <uses-feature android:name="android.hardware.microphone" android:required="false" />
     <uses-feature android:name="android.hardware.sensor.gyroscope" android:required="false" />
 </manifest>

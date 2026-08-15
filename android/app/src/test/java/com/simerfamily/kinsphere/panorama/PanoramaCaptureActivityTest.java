@@ -27,6 +27,44 @@ public final class PanoramaCaptureActivityTest {
         assertEquals(0.0, firstYawAtPitch(targets, -55.0), 0.0001);
     }
 
+    @Test
+    public void arCoreDisplayPoseUsesTheSameForwardAxisAsArKit() {
+        float[] cameraLookingRight = {
+            0.0f, 0.0f, 1.0f, 0.0f,
+            0.0f, 1.0f, 0.0f, 0.0f,
+            -1.0f, 0.0f, 0.0f, 0.0f,
+            1.25f, -0.5f, 2.0f, 1.0f,
+        };
+
+        PanoramaPose pose = PanoramaPose.fromCameraTransform(cameraLookingRight, 123L);
+
+        assertEquals(90.0, pose.yawDegrees, 0.0001);
+        assertEquals(0.0, pose.pitchDegrees, 0.0001);
+        assertEquals(0.0, pose.rollDegrees, 0.0001);
+        assertEquals(1.25, pose.position[0], 0.0001);
+        assertEquals(-0.5, pose.position[1], 0.0001);
+        assertEquals(2.0, pose.position[2], 0.0001);
+    }
+
+    @Test
+    public void portraitRotationAdjustsArCoreImageIntrinsicsLikeIos() {
+        double[] intrinsics = PanoramaCaptureActivity.adjustedIntrinsics(
+            new float[] { 500.0f, 510.0f },
+            new float[] { 320.0f, 240.0f },
+            new int[] { 640, 480 },
+            640,
+            480,
+            90,
+            240,
+            320
+        );
+
+        assertEquals(255.0, intrinsics[0], 0.0001);
+        assertEquals(119.5, intrinsics[2], 0.0001);
+        assertEquals(250.0, intrinsics[4], 0.0001);
+        assertEquals(160.0, intrinsics[5], 0.0001);
+    }
+
     private static int countPitch(List<PanoramaTarget> targets, double pitch) {
         int count = 0;
         for (PanoramaTarget target : targets) {
