@@ -636,6 +636,7 @@ function RecapSheet({
     setSaving(true)
     setStatus('Making your video…')
     const nativeArtifacts: string[] = []
+    let nativeFailure: unknown
     try {
       const preparedPhotos = (await onPreparePhotos())
         .filter(({ syncStatus }) => demoMode || syncStatus !== 'pending')
@@ -644,22 +645,44 @@ function RecapSheet({
         throw new Error('There are no shared photos available for this recap yet.')
       }
       if (isNativeCapsuleRecapAvailable()) {
-        const imagePaths: string[] = []
-        for (const photo of preparedPhotos) {
-          const blob = await imageSourceToBlob(photo.image)
-          const dataUrl = await blobToDataUrl(blob)
-          const staged = await stageNativeCapsuleRecapImage({ dataUrl })
-          imagePaths.push(staged.path)
-          nativeArtifacts.push(staged.path)
+        try {
+          const imagePaths: string[] = []
+          for (const photo of preparedPhotos) {
+            const blob = await imageSourceToBlob(photo.image)
+            const dataUrl = await blobToDataUrl(blob)
+            const staged = await stageNativeCapsuleRecapImage({ dataUrl })
+            imagePaths.push(staged.path)
+            nativeArtifacts.push(staged.path)
+          }
+          const video = await renderNativeCapsuleRecap({ imagePaths })
+          nativeArtifacts.push(video.fileUri)
+          const share = await shareNativeCapsuleRecap(video.fileUri)
+          setStatus(share.completed ? 'Your recap is ready to save or share.' : 'Your recap is ready whenever you are.')
+          return
+        } catch (reason) {
+          nativeFailure = reason
+          // A device codec or share service can occasionally be unavailable.
+          // Release private native artifacts before attempting the existing
+          // browser renderer rather than leaving the feature at a dead end.
+          await discardNativeCapsuleRecapArtifacts(nativeArtifacts).catch(() => undefined)
+          nativeArtifacts.length = 0
+          setStatus('Native video export was unavailable. Trying the compatible fallback…')
         }
-        const video = await renderNativeCapsuleRecap({ imagePaths })
-        nativeArtifacts.push(video.fileUri)
-        const share = await shareNativeCapsuleRecap(video.fileUri)
-        setStatus(share.completed ? 'Your recap is ready to save or share.' : 'Your recap is ready whenever you are.')
-        return
       }
 
-      const video = await renderBrowserCapsuleRecap(preparedPhotos)
+      let video: Blob
+      try {
+        video = await renderBrowserCapsuleRecap(preparedPhotos)
+      } catch (fallbackFailure) {
+        if (!nativeFailure) throw fallbackFailure
+        const nativeMessage = nativeFailure instanceof Error
+          ? nativeFailure.message
+          : 'Native video export failed.'
+        const fallbackMessage = fallbackFailure instanceof Error
+          ? fallbackFailure.message
+          : 'The compatible video fallback failed.'
+        throw new Error(`${nativeMessage} ${fallbackMessage}`)
+      }
       const objectUrl = URL.createObjectURL(video)
       const link = document.createElement('a')
       link.href = objectUrl

@@ -47,9 +47,10 @@ const CapsuleRecap = pluginRegistry.__kinsphereCapsuleRecap ??=
   registerPlugin<CapsuleRecapPlugin>('CapsuleRecap')
 
 export function isNativeCapsuleRecapAvailable(): boolean {
+  const platform = Capacitor.getPlatform()
   return (
     Capacitor.isNativePlatform() &&
-    Capacitor.getPlatform() === 'ios' &&
+    (platform === 'ios' || platform === 'android') &&
     Capacitor.isPluginAvailable('CapsuleRecap')
   )
 }
@@ -104,7 +105,7 @@ export async function renderNativeCapsuleRecap(options: {
   return CapsuleRecap.renderRecap({ imagePaths })
 }
 
-/** Opens the native iOS share sheet, including Save Video and AirDrop. */
+/** Opens the platform share sheet, including native save/share destinations. */
 export async function shareNativeCapsuleRecap(
   fileUri: string,
 ): Promise<NativeCapsuleRecapShareResult> {

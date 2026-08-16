@@ -11,21 +11,34 @@ vi.mock('../../viewer', () => ({
   PanoramaViewer: ({
     scenes,
     additionalControls,
+    pointSelectionEnabled,
+    onPointSelect,
   }: {
     scenes: readonly PanoramaScene[]
     additionalControls?: ReactNode
+    pointSelectionEnabled?: boolean
+    onPointSelect?: (point: { pitch: number; yaw: number }) => void
   }) => (
     <div>
       <button
         type="button"
         data-panorama={scenes[0]?.panorama}
         data-scene-title={scenes[0]?.title}
+        data-hotspot-label={scenes[0]?.hotSpots?.[0]?.label}
         onClick={() =>
           scenes[0]?.hotSpots?.[0]?.onActivate?.(new MouseEvent('click'))
         }
       >
         Trigger voice hotspot
       </button>
+      {pointSelectionEnabled ? (
+        <button
+          type="button"
+          onClick={() => onPointSelect?.({ pitch: 14, yaw: -27 })}
+        >
+          Place saved-scene point
+        </button>
+      ) : null}
       {additionalControls}
     </div>
   ),
@@ -520,6 +533,215 @@ describe('PanoramaMemoryScreen lifecycle', () => {
     expect(cancelSpeech).toHaveBeenCalledTimes(4)
   })
 
+  it('lets the owner reopen a saved sphere and enter memory-point editing', async () => {
+    const user = userEvent.setup()
+    render(
+      <MemoryRouter initialEntries={['/memory/shared-owned-sphere']}>
+        <Routes>
+          <Route
+            path="/memory/:memoryId"
+            element={(
+              <PanoramaMemoryScreen
+                onUpdateMomentAnnotations={vi.fn().mockResolvedValue(undefined)}
+                sharedMoments={[
+                  {
+                    id: 'owned-sphere',
+                    blob: new Blob(['panorama'], { type: 'image/jpeg' }),
+                    objectUrl: 'blob:owned-sphere',
+                    label: 'My saved sphere',
+                    caption: '',
+                    createdAt: new Date().toISOString(),
+                    width: 4000,
+                    height: 2000,
+                    source: 'manual',
+                    uploaderDisplayName: 'You',
+                    ownedByCurrentUser: true,
+                    familySynced: true,
+                    annotations: [],
+                  },
+                ]}
+              />
+            )}
+          />
+        </Routes>
+      </MemoryRouter>,
+    )
+
+    await user.click(
+      screen.getByRole('button', { name: 'Add memory point' }),
+    )
+
+    expect(
+      screen.getByRole('button', { name: 'Add a memory point' }),
+    ).toBeVisible()
+  })
+
+  it('saves a new point back to the same owned sphere', async () => {
+    const user = userEvent.setup()
+    const onUpdateMomentAnnotations = vi.fn().mockResolvedValue(undefined)
+    render(
+      <MemoryRouter initialEntries={['/memory/shared-owned-save']}>
+        <Routes>
+          <Route
+            path="/memory/:memoryId"
+            element={(
+              <PanoramaMemoryScreen
+                onUpdateMomentAnnotations={onUpdateMomentAnnotations}
+                sharedMoments={[
+                  {
+                    id: 'owned-save',
+                    blob: new Blob(['panorama'], { type: 'image/jpeg' }),
+                    objectUrl: 'blob:owned-save',
+                    label: 'My saved sphere',
+                    caption: '',
+                    createdAt: '2026-08-29T08:00:00.000Z',
+                    width: 4000,
+                    height: 2000,
+                    source: 'manual',
+                    uploaderDisplayName: 'You',
+                    ownedByCurrentUser: true,
+                    familySynced: false,
+                    annotations: [],
+                  },
+                ]}
+              />
+            )}
+          />
+        </Routes>
+      </MemoryRouter>,
+    )
+
+    await user.click(screen.getByRole('button', { name: 'Add memory point' }))
+    await user.click(screen.getByRole('button', { name: 'Add a memory point' }))
+    await user.click(screen.getByRole('button', { name: 'Place saved-scene point' }))
+    await user.click(screen.getByRole('button', { name: /^Message/ }))
+    await user.type(
+      screen.getByRole('textbox', { name: 'Message' }),
+      'The place we always sit',
+    )
+    await user.click(screen.getByRole('button', { name: 'Save message' }))
+    await waitFor(() => expect(onUpdateMomentAnnotations).toHaveBeenCalledOnce())
+    const done = screen.getByRole('button', { name: 'Done' })
+    await waitFor(() => expect(done).toBeEnabled())
+    await user.click(done)
+    expect(onUpdateMomentAnnotations.mock.calls[0]?.[0]).toMatchObject({
+      id: 'owned-save',
+      blob: expect.any(Blob),
+    })
+    expect(onUpdateMomentAnnotations.mock.calls[0]?.[1]).toEqual([
+      expect.objectContaining({
+        kind: 'text',
+        pitch: 14,
+        yaw: -27,
+        message: 'The place we always sit',
+      }),
+    ])
+  })
+
+  it('keeps an autosaved point available for retry when persistence fails', async () => {
+    const user = userEvent.setup()
+    const onUpdateMomentAnnotations = vi.fn()
+      .mockRejectedValueOnce(new Error('Temporary family sync problem'))
+      .mockResolvedValueOnce(undefined)
+    render(
+      <MemoryRouter initialEntries={['/memory/shared-owned-retry']}>
+        <Routes>
+          <Route
+            path="/memory/:memoryId"
+            element={(
+              <PanoramaMemoryScreen
+                onUpdateMomentAnnotations={onUpdateMomentAnnotations}
+                sharedMoments={[
+                  {
+                    id: 'owned-retry',
+                    blob: new Blob(['panorama'], { type: 'image/jpeg' }),
+                    objectUrl: 'blob:owned-retry',
+                    label: 'Retry sphere',
+                    caption: '',
+                    createdAt: '2026-08-29T08:00:00.000Z',
+                    width: 4000,
+                    height: 2000,
+                    source: 'manual',
+                    uploaderDisplayName: 'You',
+                    ownedByCurrentUser: true,
+                    familySynced: true,
+                    annotations: [],
+                  },
+                ]}
+              />
+            )}
+          />
+        </Routes>
+      </MemoryRouter>,
+    )
+
+    await user.click(screen.getByRole('button', { name: 'Add memory point' }))
+    await user.click(screen.getByRole('button', { name: 'Add a memory point' }))
+    await user.click(screen.getByRole('button', { name: 'Place saved-scene point' }))
+    await user.click(screen.getByRole('button', { name: /^Message/ }))
+    await user.type(
+      screen.getByRole('textbox', { name: 'Message' }),
+      'Keep this point while retrying',
+    )
+    await user.click(screen.getByRole('button', { name: 'Save message' }))
+
+    const retry = await screen.findByRole('button', { name: 'Retry save' })
+    expect(screen.getByText('Temporary family sync problem')).toBeVisible()
+    await user.click(retry)
+
+    await waitFor(() => expect(onUpdateMomentAnnotations).toHaveBeenCalledTimes(2))
+    expect(onUpdateMomentAnnotations.mock.calls[1]?.[1]).toEqual(
+      onUpdateMomentAnnotations.mock.calls[0]?.[1],
+    )
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: 'Done' })).toBeEnabled(),
+    )
+  })
+
+  it('keeps a received sphere read-only for memory points', async () => {
+    render(
+      <MemoryRouter initialEntries={['/memory/shared-received-sphere']}>
+        <Routes>
+          <Route
+            path="/memory/:memoryId"
+            element={(
+              <PanoramaMemoryScreen
+                sharedMoments={[
+                  {
+                    id: 'received-sphere',
+                    blob: new Blob(['panorama'], { type: 'image/jpeg' }),
+                    objectUrl: 'blob:received-sphere',
+                    label: 'Maya’s sphere',
+                    caption: '',
+                    createdAt: new Date().toISOString(),
+                    width: 4000,
+                    height: 2000,
+                    source: 'manual',
+                    uploaderDisplayName: 'Maya',
+                    ownedByCurrentUser: false,
+                    annotations: [],
+                  },
+                ]}
+              />
+            )}
+          />
+        </Routes>
+      </MemoryRouter>,
+    )
+
+    expect(
+      screen.queryByRole('button', { name: 'Add memory point' }),
+    ).not.toBeInTheDocument()
+    expect(
+      screen.queryByRole('button', { name: 'Add a memory point' }),
+    ).not.toBeInTheDocument()
+    expect(
+      screen.getByRole('button', {
+        name: 'Open family comments, 0 comments',
+      }),
+    ).toBeVisible()
+  })
+
   it('opens a received family upload as the actual panorama scene', async () => {
     const user = userEvent.setup()
     render(
@@ -644,16 +866,78 @@ describe('PanoramaMemoryScreen lifecycle', () => {
       </MemoryRouter>,
     )
 
-    await user.click(
-      await screen.findByRole('button', { name: 'Trigger voice hotspot' }),
+    const voiceHotspot = await screen.findByRole('button', {
+      name: 'Trigger voice hotspot',
+    })
+    expect(voiceHotspot).toHaveAttribute(
+      'data-hotspot-label',
+      'Play voice note: Dad explains the old recipe.',
     )
+    await user.click(voiceHotspot)
     expect(screen.getByRole('dialog', { name: 'Memory point' })).toHaveTextContent(
       'Dad explains the old recipe.',
     )
-    expect(screen.getByLabelText('Voice note playback')).toHaveAttribute(
+    expect(screen.getByLabelText(
+      'Voice note playback: Dad explains the old recipe.',
+    )).toHaveAttribute(
       'src',
       'blob:dad-voice-note',
     )
+  })
+
+  it('explains how to retry when received voice audio is unavailable', async () => {
+    const user = userEvent.setup()
+    render(
+      <MemoryRouter initialEntries={['/memory/shared-missing-voice']}>
+        <Routes>
+          <Route
+            path="/memory/:memoryId"
+            element={(
+              <PanoramaMemoryScreen
+                sharedMoments={[
+                  {
+                    id: 'missing-voice',
+                    blob: new Blob(['panorama'], { type: 'image/jpeg' }),
+                    objectUrl: 'blob:missing-voice-panorama',
+                    label: 'Family garden',
+                    caption: 'A windy afternoon.',
+                    createdAt: new Date().toISOString(),
+                    width: 4000,
+                    height: 2000,
+                    source: 'manual',
+                    uploaderDisplayName: 'Maya',
+                    annotations: [
+                      {
+                        id: 'garden-story',
+                        kind: 'voice',
+                        pitch: 8,
+                        yaw: 12,
+                        message: 'Maya tells the story of the lemon tree.',
+                        audioUrl: null,
+                      },
+                    ],
+                  },
+                ]}
+              />
+            )}
+          />
+        </Routes>
+      </MemoryRouter>,
+    )
+
+    const voiceHotspot = await screen.findByRole('button', {
+      name: 'Trigger voice hotspot',
+    })
+    expect(voiceHotspot).toHaveAttribute(
+      'data-hotspot-label',
+      'Voice note unavailable: Maya tells the story of the lemon tree.',
+    )
+    await user.click(voiceHotspot)
+
+    expect(screen.getByText(
+      /audio is unavailable.*check your connection/i,
+    )).toHaveAttribute('role', 'status')
+    expect(screen.queryByLabelText(/voice note playback/i)).not.toBeInTheDocument()
   })
 
   it('lets the family comment on the panorama and reply to an embedded point', async () => {
@@ -680,11 +964,13 @@ describe('PanoramaMemoryScreen lifecycle', () => {
                     annotations: [
                       {
                         id: 'hallway-note',
-                        kind: 'text',
+                        kind: 'voice',
                         pitch: 2,
                         yaw: 14,
-                        message: 'This is where Grandma’s clock will go.',
-                        audioUrl: null,
+                        message: 'Grandma describes where her clock will go.',
+                        audioBlob: new Blob(['voice'], { type: 'audio/mp4' }),
+                        audioMimeType: 'audio/mp4',
+                        audioUrl: 'blob:grandma-clock-note',
                       },
                     ],
                   },
@@ -716,16 +1002,18 @@ describe('PanoramaMemoryScreen lifecycle', () => {
     await user.click(screen.getByRole('button', { name: 'Trigger voice hotspot' }))
     await user.click(screen.getByRole('button', { name: 'Reply' }))
     expect(screen.getByText(/comment on/i)).toHaveTextContent(
-      'This is where Grandma’s clock…',
+      /Voice: Grandma describes where/i,
     )
     await user.type(
-      screen.getByRole('textbox', { name: /comment on this is where grandma/i }),
+      screen.getByRole('textbox', {
+        name: /comment on voice: grandma describes where/i,
+      }),
       'I remember that clock!',
     )
     await user.click(screen.getByRole('button', { name: 'Post' }))
 
     expect(await screen.findByText('I remember that clock!')).toBeVisible()
-    expect(screen.getByText(/reply to this is where grandma/i)).toBeVisible()
+    expect(screen.getByText(/reply to voice: grandma describes where/i)).toBeVisible()
     expect(screen.getByText('2 thoughts together')).toBeVisible()
   })
 })

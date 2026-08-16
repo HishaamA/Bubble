@@ -6,6 +6,8 @@ import {
   useRef,
   useState,
 } from 'react'
+import { App as CapacitorApp } from '@capacitor/app'
+import { Capacitor } from '@capacitor/core'
 import { useLocation, useNavigate, useParams } from 'react-router-dom'
 import { Icon } from '../../components/Icon'
 import {
@@ -14,6 +16,7 @@ import {
   subscribeToFamilyMomentComments,
   type FamilyMomentComment,
 } from '../../services/media/familyMomentCommentService'
+import { GuidedPanoramaReview } from '../capture/GuidedPanoramaReview'
 import { PanoramaViewer, type PanoramaScene } from '../../viewer'
 import { FamilyCommentsPanel } from './FamilyCommentsPanel'
 import {
@@ -24,7 +27,11 @@ import {
   type CardboardViewerHandle,
 } from './cardboard'
 import { memories } from './memories'
-import type { PanoramaAnnotation, PanoramaMoment } from './shared'
+import type {
+  PanoramaAnnotation,
+  PanoramaMoment,
+  StoredPanoramaAnnotation,
+} from './shared'
 
 const DEMO_VOICE_NOTE =
   'Sunday dinner always sounds like this: everyone talking, everyone laughing, and nobody ready to leave.'
@@ -37,6 +44,32 @@ function CommentsIcon() {
       <path d="M7.5 10h9M7.5 13h6" />
     </svg>
   )
+}
+
+function MemoryPointIcon() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M12 5v14M5 12h14" />
+    </svg>
+  )
+}
+
+function annotationDescription(annotation: PanoramaAnnotation) {
+  const message = annotation.message.trim()
+  if (message) return message
+  return annotation.kind === 'voice'
+    ? 'A voice note from this moment'
+    : 'A note from this moment'
+}
+
+function annotationHotSpotLabel(annotation: PanoramaAnnotation) {
+  const description = annotationDescription(annotation)
+  if (annotation.kind === 'voice') {
+    return annotation.audioUrl
+      ? `Play voice note: ${description}`
+      : `Voice note unavailable: ${description}`
+  }
+  return `Read note: ${description}`
 }
 
 function isSameLocalDay(value: string, reference: Date): boolean {
@@ -52,11 +85,16 @@ function isSameLocalDay(value: string, reference: Date): boolean {
 type PanoramaMemoryScreenProps = {
   sharedMoments?: PanoramaMoment[]
   sharedMomentsLoading?: boolean
+  onUpdateMomentAnnotations?: (
+    moment: PanoramaMoment,
+    annotations: StoredPanoramaAnnotation[],
+  ) => Promise<void>
 }
 
 export function PanoramaMemoryScreen({
   sharedMoments = [],
   sharedMomentsLoading = false,
+  onUpdateMomentAnnotations,
 }: PanoramaMemoryScreenProps = {}) {
   const navigate = useNavigate()
   const location = useLocation()
@@ -89,6 +127,13 @@ export function PanoramaMemoryScreen({
   const [commentTargetAnnotationId, setCommentTargetAnnotationId] = useState<
     string | null
   >(null)
+  const [pointEditorOpen, setPointEditorOpen] = useState(false)
+  const [pointDraft, setPointDraft] = useState<StoredPanoramaAnnotation[]>([])
+  const [pointEditorSaving, setPointEditorSaving] = useState(false)
+  const [pointEditorError, setPointEditorError] = useState<string | null>(null)
+  const [pointEditorSaved, setPointEditorSaved] = useState(false)
+  const pointSaveQueueRef = useRef<Promise<void>>(Promise.resolve())
+  const pointSaveRevisionRef = useRef(0)
   const titleRef = useRef<HTMLHeadingElement>(null)
   const vrButtonRef = useRef<HTMLButtonElement>(null)
   const commentsButtonRef = useRef<HTMLButtonElement>(null)
@@ -116,6 +161,112 @@ export function PanoramaMemoryScreen({
     returnTo === '/journal' ? 'Back to journal' : 'Back to memories'
   const isDinnerMemory = !sharedMoment && memory.id === 'dinner'
   const sharedMemoryMissing = Boolean(sharedMomentId && !sharedMoment)
+  const canEditMemoryPoints = Boolean(
+    sharedMoment?.ownedByCurrentUser === true &&
+    sharedMoment.objectUrl &&
+    onUpdateMomentAnnotations,
+  )
+
+  const openPointEditor = useCallback(() => {
+    if (!sharedMoment || !canEditMemoryPoints) return
+    setCommentsOpen(false)
+    setActiveAnnotation(null)
+    setPointEditorError(null)
+    setPointEditorSaved(false)
+    pointSaveRevisionRef.current += 1
+    setPointDraft(
+      (sharedMoment.annotations ?? []).map(
+        ({ audioUrl: _audioUrl, ...annotation }) => ({ ...annotation }),
+      ),
+    )
+    setPointEditorOpen(true)
+  }, [canEditMemoryPoints, sharedMoment])
+
+  const savePointDraft = useCallback((next: StoredPanoramaAnnotation[]) => {
+    if (
+      !sharedMoment ||
+      !canEditMemoryPoints ||
+      !onUpdateMomentAnnotations
+    ) {
+      return
+    }
+
+    setPointDraft(next)
+    setPointEditorSaved(false)
+    setPointEditorSaving(true)
+    setPointEditorError(null)
+    const revision = pointSaveRevisionRef.current + 1
+    pointSaveRevisionRef.current = revision
+    const save = pointSaveQueueRef.current
+      .catch(() => undefined)
+      .then(() => onUpdateMomentAnnotations(sharedMoment, next))
+    pointSaveQueueRef.current = save
+
+    void save.then(() => {
+      if (pointSaveRevisionRef.current !== revision) return
+      setPointEditorSaving(false)
+      setPointEditorError(null)
+      setPointEditorSaved(true)
+    }).catch((reason) => {
+      if (pointSaveRevisionRef.current !== revision) return
+      setPointEditorSaving(false)
+      setPointEditorSaved(false)
+      setPointEditorError(
+        reason instanceof Error
+          ? reason.message
+          : 'Your memory points could not be saved. Please try again.',
+      )
+    })
+  }, [
+    canEditMemoryPoints,
+    onUpdateMomentAnnotations,
+    sharedMoment,
+  ])
+
+  const closePointEditor = useCallback(() => {
+    if (pointEditorSaving || pointEditorError) return
+    setPointEditorOpen(false)
+    setPointEditorSaved(false)
+  }, [pointEditorError, pointEditorSaving])
+
+  const discardPointEditor = useCallback(() => {
+    if (pointEditorSaving) return
+    pointSaveRevisionRef.current += 1
+    setPointEditorOpen(false)
+    setPointEditorError(null)
+    setPointEditorSaved(false)
+  }, [pointEditorSaving])
+
+  useEffect(() => {
+    if (!pointEditorOpen) return
+
+    const closeFromKeyboard = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape' || pointEditorSaving || pointEditorError) return
+      event.preventDefault()
+      closePointEditor()
+    }
+    window.addEventListener('keydown', closeFromKeyboard)
+
+    let active = true
+    let backListener: { remove: () => Promise<void> } | undefined
+    if (Capacitor.isNativePlatform()) {
+      void CapacitorApp.addListener('backButton', () => {
+        if (!pointEditorSaving && !pointEditorError) closePointEditor()
+      }).then((listener) => {
+        if (!active) {
+          void listener.remove()
+          return
+        }
+        backListener = listener
+      })
+    }
+
+    return () => {
+      active = false
+      window.removeEventListener('keydown', closeFromKeyboard)
+      void backListener?.remove()
+    }
+  }, [closePointEditor, pointEditorError, pointEditorOpen, pointEditorSaving])
 
   useEffect(() => {
     let active = true
@@ -363,10 +514,7 @@ export function PanoramaMemoryScreen({
             kind: annotation.kind === 'voice' ? 'audio' : 'info',
             pitch: annotation.pitch,
             yaw: annotation.yaw,
-            label:
-              annotation.kind === 'voice'
-                ? `Play voice note${annotation.message ? `: ${annotation.message}` : ''}`
-                : `Read note: ${annotation.message}`,
+            label: annotationHotSpotLabel(annotation),
             onActivate: () => openAnnotation(annotation),
           })),
           pitch: 0,
@@ -417,10 +565,7 @@ export function PanoramaMemoryScreen({
               kind: annotation.kind === 'voice' ? 'audio' : 'info',
               pitch: annotation.pitch,
               yaw: annotation.yaw,
-              label:
-                annotation.kind === 'voice'
-                  ? `Play voice note${annotation.message ? `: ${annotation.message}` : ''}`
-                  : `Read note: ${annotation.message}`,
+              label: annotationHotSpotLabel(annotation),
               onActivate: () => openAnnotation(annotation),
             })),
             pitch: 0,
@@ -496,6 +641,9 @@ export function PanoramaMemoryScreen({
     : ({
         viewTransitionName: `memory-${memory.id}`,
       } as CSSProperties)
+  const activeAnnotationDescription = activeAnnotation
+    ? annotationDescription(activeAnnotation)
+    : ''
 
   if (sharedMemoryMissing && sharedMomentsLoading) {
     return (
@@ -526,28 +674,30 @@ export function PanoramaMemoryScreen({
   return (
     <section className="panorama-screen" aria-labelledby="panorama-memory-title">
       <div className="panorama-transition-surface" style={transitionStyle}>
-        {!cardboardActive && !requestedOpenVr ? (
+        {!cardboardActive && !requestedOpenVr && !pointEditorOpen ? (
           <PanoramaViewer
             scenes={scenes}
             initialSceneId={initialSceneId}
             ariaLabel={`${memory.label} panoramic memory`}
             additionalControls={sharedMoment ? (
-              <button
-                ref={commentsButtonRef}
-                type="button"
-                className={commentsOpen ? 'is-active ks-panorama__comments-button' : 'ks-panorama__comments-button'}
-                onClick={() => openComments(null)}
-                aria-label={`Open family comments, ${comments.length} ${comments.length === 1 ? 'comment' : 'comments'}`}
-                aria-expanded={commentsOpen}
-                aria-controls="family-comments-panel"
-              >
-                <CommentsIcon />
-                {comments.length > 0 ? (
-                  <span className="ks-panorama__comment-count" aria-hidden="true">
-                    {comments.length > 99 ? '99+' : comments.length}
-                  </span>
-                ) : null}
-              </button>
+              <>
+                <button
+                  ref={commentsButtonRef}
+                  type="button"
+                  className={commentsOpen ? 'is-active ks-panorama__comments-button' : 'ks-panorama__comments-button'}
+                  onClick={() => openComments(null)}
+                  aria-label={`Open family comments, ${comments.length} ${comments.length === 1 ? 'comment' : 'comments'}`}
+                  aria-expanded={commentsOpen}
+                  aria-controls="family-comments-panel"
+                >
+                  <CommentsIcon />
+                  {comments.length > 0 ? (
+                    <span className="ks-panorama__comment-count" aria-hidden="true">
+                      {comments.length > 99 ? '99+' : comments.length}
+                    </span>
+                  ) : null}
+                </button>
+              </>
             ) : undefined}
           />
         ) : null}
@@ -594,7 +744,22 @@ export function PanoramaMemoryScreen({
         }}
       />
 
-      {!requestedOpenVr ? (
+      {canEditMemoryPoints && !requestedOpenVr && !cardboardActive && !pointEditorOpen ? (
+        <button
+          type="button"
+          className="panorama-memory-points-cta"
+          onClick={openPointEditor}
+        >
+          <MemoryPointIcon />
+          <span>
+            {(sharedMoment?.annotations?.length ?? 0) > 0
+              ? `Edit ${sharedMoment?.annotations?.length} memory ${sharedMoment?.annotations?.length === 1 ? 'point' : 'points'}`
+              : 'Add memory point'}
+          </span>
+        </button>
+      ) : null}
+
+      {!requestedOpenVr && !pointEditorOpen ? (
         <header className="panorama-top-bar">
           <button type="button" onClick={returnToMemories} aria-label={returnLabel}>
             <Icon name="arrow" size={24} />
@@ -646,12 +811,7 @@ export function PanoramaMemoryScreen({
             <span aria-hidden="true">
               {activeAnnotation.kind === 'voice' ? '◉' : '✦'}
             </span>
-            <p>
-              {activeAnnotation.message ||
-                (activeAnnotation.kind === 'voice'
-                  ? 'A voice note from this moment'
-                  : 'A note from this moment')}
-            </p>
+            <p>{activeAnnotationDescription}</p>
           </div>
           {activeAnnotation.kind === 'voice' && activeAnnotation.audioUrl ? (
             <audio
@@ -659,8 +819,14 @@ export function PanoramaMemoryScreen({
               src={activeAnnotation.audioUrl}
               controls
               autoPlay
-              aria-label="Voice note playback"
+              aria-label={`Voice note playback: ${activeAnnotationDescription}`}
             />
+          ) : null}
+          {activeAnnotation.kind === 'voice' && !activeAnnotation.audioUrl ? (
+            <p className="memory-point-card__audio-unavailable" role="status">
+              This voice note’s audio is unavailable on this device. Check your
+              connection, then close and reopen the moment to try again.
+            </p>
           ) : null}
           <div className="memory-point-card__actions">
             {sharedMoment ? (
@@ -697,6 +863,27 @@ export function PanoramaMemoryScreen({
         onTargetChange={setCommentTargetAnnotationId}
         onSubmit={submitComment}
       />
+
+      {pointEditorOpen && sharedMoment?.objectUrl ? (
+        <GuidedPanoramaReview
+          panoramaUrl={sharedMoment.objectUrl}
+          annotations={pointDraft}
+          onAnnotationsChange={savePointDraft}
+          onContinue={pointEditorError
+            ? () => savePointDraft(pointDraft)
+            : closePointEditor}
+          onRetake={discardPointEditor}
+          title="Memory points"
+          subtitle="Tap +, then tap a place in the scene"
+          retakeLabel="Discard"
+          continueLabel={pointEditorError ? 'Retry save' : 'Done'}
+          busy={pointEditorSaving}
+          actionError={pointEditorError}
+          actionMessage={pointEditorSaved ? 'Memory points saved.' : null}
+          hideRetake={!pointEditorError}
+          modal
+        />
+      ) : null}
     </section>
   )
 }

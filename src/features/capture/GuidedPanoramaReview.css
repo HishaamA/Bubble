@@ -27,6 +27,10 @@
   background: #000;
 }
 
+.guided-panorama-review[tabindex='-1']:focus {
+  outline: none;
+}
+
 .guided-panorama-review::before,
 .guided-panorama-review::after {
   position: absolute;

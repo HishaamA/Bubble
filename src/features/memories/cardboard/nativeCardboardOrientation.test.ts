@@ -30,15 +30,27 @@ describe('native Cardboard orientation', () => {
     orientationPlugin.restoreAppOrientation.mockReset().mockResolvedValue(undefined)
   })
 
-  it('uses the custom orientation bridge in the native iOS app', async () => {
+  it.each(['ios', 'android'])('uses the custom orientation bridge in the native %s app', async (platform) => {
     capacitor.isNativePlatform.mockReturnValue(true)
-    capacitor.getPlatform.mockReturnValue('ios')
+    capacitor.getPlatform.mockReturnValue(platform)
 
     expect(nativeCardboardOrientationAvailable()).toBe(true)
     await expect(requestNativeCardboardLandscape()).resolves.toBe(true)
     await expect(restoreNativeAppOrientation()).resolves.toBe(true)
     expect(orientationPlugin.requestLandscape).toHaveBeenCalledOnce()
     expect(orientationPlugin.restoreAppOrientation).toHaveBeenCalledOnce()
+  })
+
+  it('does not invoke an unavailable Android bridge', async () => {
+    capacitor.isNativePlatform.mockReturnValue(true)
+    capacitor.getPlatform.mockReturnValue('android')
+    capacitor.isPluginAvailable.mockReturnValue(false)
+
+    expect(nativeCardboardOrientationAvailable()).toBe(false)
+    await expect(requestNativeCardboardLandscape()).resolves.toBe(false)
+    await expect(restoreNativeAppOrientation()).resolves.toBe(false)
+    expect(orientationPlugin.requestLandscape).not.toHaveBeenCalled()
+    expect(orientationPlugin.restoreAppOrientation).not.toHaveBeenCalled()
   })
 
   it('does not invoke the native plugin from the web app', async () => {

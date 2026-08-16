@@ -61,6 +61,7 @@ type Capture360PageProps = {
   connectedFamilySync?: boolean
   onClose?: () => void
   onViewMemories?: () => void
+  onSaveDraft?: (submission: Capture360Submission) => void | Promise<void>
   onShare?: (submission: Capture360Submission) => void | Promise<void>
   readDimensions?: (file: File) => Promise<ImageDimensions>
   processPanorama?: (file: File) => Promise<ProcessedPanorama>
@@ -75,11 +76,15 @@ type Capture360PageProps = {
 }
 
 type CaptureDraft = {
+  id: string
+  createdAt: Date
   file: File
   dimensions: ImageDimensions
   previewUrl: string
   source: CaptureSource
   origin: 'guided' | 'upload'
+  savedLocally: boolean
+  nativeCaptureResult?: NativePanoramaCaptureResult
   picker?: 'camera' | 'library'
   warning?: string
 }
@@ -157,6 +162,7 @@ export function Capture360Page({
   connectedFamilySync = false,
   onClose,
   onViewMemories,
+  onSaveDraft,
   onShare,
   readDimensions = readImageDimensions,
   processPanorama = processPanoramaForSharing,
@@ -174,6 +180,7 @@ export function Capture360Page({
   const [reviewingPanorama, setReviewingPanorama] = useState(false)
   const [error, setError] = useState('')
   const [checking, setChecking] = useState(false)
+  const [savingDraft, setSavingDraft] = useState(false)
   const [sharing, setSharing] = useState(false)
   const [shared, setShared] = useState(false)
   const [completedDaily, setCompletedDaily] = useState(false)
@@ -189,6 +196,9 @@ export function Capture360Page({
   const sourceRef = useRef<CaptureSource>(initialMode)
   const pickerRef = useRef<'camera' | 'library'>('library')
   const previewUrlRef = useRef<string | null>(null)
+  const draftSaveQueueRef = useRef<Promise<void>>(Promise.resolve())
+  const draftSaveVersionRef = useRef(0)
+  const draftSaveUiRequestRef = useRef(0)
 
   useEffect(() => {
     if (now) return
@@ -250,6 +260,7 @@ export function Capture360Page({
   const isSuccess = shared
 
   function clearDraft() {
+    const nativeCaptureResult = draft?.nativeCaptureResult
     if (previewUrlRef.current) {
       URL.revokeObjectURL(previewUrlRef.current)
       previewUrlRef.current = null
@@ -261,6 +272,9 @@ export function Capture360Page({
     setError('')
     if (cameraInputRef.current) cameraInputRef.current.value = ''
     if (libraryInputRef.current) libraryInputRef.current.value = ''
+    if (nativeCaptureResult) {
+      void discardGuidedCapture(nativeCaptureResult).catch(() => undefined)
+    }
   }
 
   function openPicker(
@@ -283,22 +297,164 @@ export function Capture360Page({
     selectedSource: CaptureSource,
     origin: CaptureDraft['origin'],
     warning?: string,
+    nativeCaptureResult?: NativePanoramaCaptureResult,
   ) {
     if (previewUrlRef.current) URL.revokeObjectURL(previewUrlRef.current)
     const previewUrl = URL.createObjectURL(file)
     previewUrlRef.current = previewUrl
     setSource(selectedSource)
-    setDraft({
+    const nextDraft: CaptureDraft = {
+      id: makeSubmissionId(),
+      createdAt: new Date(),
       file,
       dimensions,
       previewUrl,
       source: selectedSource,
       origin,
+      savedLocally: false,
+      nativeCaptureResult,
       picker: origin === 'upload' ? pickerRef.current : undefined,
       warning,
-    })
+    }
+    setDraft(nextDraft)
     setAnnotations([])
     setReviewingPanorama(true)
+    return nextDraft
+  }
+
+  function draftSubmission(
+    selectedDraft: CaptureDraft,
+    nextCaption = '',
+    nextAnnotations: StoredPanoramaAnnotation[] = [],
+  ): Capture360Submission {
+    return {
+      id: selectedDraft.id,
+      file: selectedDraft.file,
+      caption: nextCaption,
+      source: selectedDraft.source,
+      width: selectedDraft.dimensions.width,
+      height: selectedDraft.dimensions.height,
+      createdAt: selectedDraft.createdAt,
+      annotations: nextAnnotations,
+    }
+  }
+
+  async function saveDraftLocally(
+    selectedDraft: CaptureDraft,
+    nextCaption = '',
+    nextAnnotations: StoredPanoramaAnnotation[] = [],
+  ) {
+    if (!onSaveDraft) return
+
+    const saveVersion = ++draftSaveVersionRef.current
+    const submission = draftSubmission(
+      selectedDraft,
+      nextCaption,
+      nextAnnotations,
+    )
+    const saveOperation = draftSaveQueueRef.current
+      .catch(() => undefined)
+      .then(() => onSaveDraft(submission))
+    draftSaveQueueRef.current = saveOperation
+
+    try {
+      await saveOperation
+      if (selectedDraft.nativeCaptureResult) {
+        try {
+          await discardGuidedCapture(selectedDraft.nativeCaptureResult)
+        } catch {
+          // The assembled panorama is durable now. Stale cache cleanup can be
+          // retried by the OS without putting the saved moment at risk.
+        }
+      }
+      setDraft((currentDraft) =>
+        currentDraft?.id === selectedDraft.id
+          ? {
+              ...currentDraft,
+              savedLocally:
+                saveVersion === draftSaveVersionRef.current
+                  ? true
+                  : currentDraft.savedLocally,
+              nativeCaptureResult: undefined,
+            }
+          : currentDraft,
+      )
+    } catch (reason) {
+      if (saveVersion === draftSaveVersionRef.current) {
+        setDraft((currentDraft) =>
+          currentDraft?.id === selectedDraft.id
+            ? { ...currentDraft, savedLocally: false }
+            : currentDraft,
+        )
+      }
+      throw reason
+    }
+  }
+
+  async function retryDraftSave() {
+    if (!draft || !onSaveDraft || savingDraft) return
+
+    const uiRequest = ++draftSaveUiRequestRef.current
+    setSavingDraft(true)
+    setError('')
+    try {
+      await saveDraftLocally(draft, caption.trim(), annotations)
+      setAnnouncement('Your assembled 360° sphere is saved safely in Memories.')
+    } catch {
+      const message = 'Your sphere is still here, but it could not be saved yet. Check free space, then try again.'
+      setError(message)
+      setAnnouncement(message)
+    } finally {
+      if (uiRequest === draftSaveUiRequestRef.current) setSavingDraft(false)
+    }
+  }
+
+  function updateAnnotations(nextAnnotations: StoredPanoramaAnnotation[]) {
+    setAnnotations(nextAnnotations)
+    if (!draft || !onSaveDraft) return
+
+    const uiRequest = ++draftSaveUiRequestRef.current
+    setSavingDraft(true)
+    setError('')
+    void saveDraftLocally(draft, caption.trim(), nextAnnotations)
+      .then(() => {
+        if (uiRequest !== draftSaveUiRequestRef.current) return
+        setError('')
+        setAnnouncement('Your latest memory points are saved on this device.')
+      })
+      .catch(() => {
+        if (uiRequest !== draftSaveUiRequestRef.current) return
+        const message = 'Your sphere is still here, but its latest memory points could not be saved. Try saving again.'
+        setError(message)
+        setAnnouncement(message)
+      })
+      .finally(() => {
+        if (uiRequest === draftSaveUiRequestRef.current) setSavingDraft(false)
+      })
+  }
+
+  async function finishPanoramaReview() {
+    if (onSaveDraft) {
+      const uiRequest = ++draftSaveUiRequestRef.current
+      setSavingDraft(true)
+      try {
+        await draftSaveQueueRef.current
+      } catch {
+        const message = 'Save the latest memory points before continuing.'
+        setError(message)
+        setAnnouncement(message)
+        if (uiRequest === draftSaveUiRequestRef.current) setSavingDraft(false)
+        return
+      }
+      if (uiRequest === draftSaveUiRequestRef.current) setSavingDraft(false)
+    }
+
+    setReviewingPanorama(false)
+    setAnnouncement(
+      annotations.length > 0
+        ? `${annotations.length} memory ${annotations.length === 1 ? 'point is' : 'points are'} saved and ready to share.`
+        : 'Your 360° review is complete. Add a title, then share it.',
+    )
   }
 
   async function beginGuidedCapture(nextSource: CaptureSource) {
@@ -317,6 +473,7 @@ export function Capture360Page({
     setGuidedCaptureRunning(true)
     setGuidedCaptureStatus('Opening the camera guide…')
     let captureResult: NativePanoramaCaptureResult | undefined
+    let keepNativeCapture = false
     try {
       const result = await startGuidedCapture()
       captureResult = result
@@ -342,14 +499,29 @@ export function Capture360Page({
         `kinsphere-${new Date().toISOString().replace(/[:.]/g, '-')}-360.jpg`,
         { type: 'image/jpeg', lastModified: Date.now() },
       )
-      installDraft(
+      const assembledDraft = installDraft(
         file,
         { width: processed.viewerWidth, height: processed.viewerHeight },
         nextSource,
         'guided',
         `Built from ${result.capturedCount} overlapping views around you.`,
+        result,
       )
-      setAnnouncement('Your guided 360° moment is ready to review.')
+      if (onSaveDraft) {
+        setGuidedCaptureStatus('Saving your assembled sphere…')
+        try {
+          await saveDraftLocally(assembledDraft)
+        } catch {
+          keepNativeCapture = true
+          throw new Error('Your sphere was assembled, but it could not be saved yet. The preview and source pictures are still here—try saving again.')
+        }
+        captureResult = undefined
+      }
+      setAnnouncement(
+        onSaveDraft
+          ? 'Your assembled 360° sphere is saved in Memories and ready to review.'
+          : 'Your guided 360° moment is ready to review.',
+      )
     } catch (captureError) {
       if (!isNativeCaptureCancellation(captureError)) {
         const message = captureError instanceof Error
@@ -359,7 +531,7 @@ export function Capture360Page({
         setAnnouncement(message)
       }
     } finally {
-      if (captureResult) {
+      if (captureResult && !keepNativeCapture) {
         try {
           await discardGuidedCapture(captureResult)
         } catch {
@@ -419,17 +591,30 @@ export function Capture360Page({
         }
       }
 
-      installDraft(
+      const uploadedDraft = installDraft(
         preparedFile,
         preparedDimensions,
         selectedSource,
         'upload',
         validation.warning,
       )
+      let savedOnDevice = false
+      let saveFailureMessage = ''
+      if (onSaveDraft) {
+        try {
+          await saveDraftLocally(uploadedDraft)
+          savedOnDevice = true
+        } catch {
+          saveFailureMessage = 'This panorama is ready to review, but it could not be saved yet. Check free space, then try saving again.'
+          setError(saveFailureMessage)
+        }
+      }
       setAnnouncement(
-        validation.needsNormalization
-          ? `${file.name} was fitted to a 360-degree frame and is ready to share.`
-          : `${file.name} is ready to preview and share.`,
+        saveFailureMessage || (savedOnDevice
+          ? `${file.name} is saved in Memories and ready to review.`
+          : validation.needsNormalization
+            ? `${file.name} was fitted to a 360-degree frame and is ready to share.`
+            : `${file.name} is ready to preview and share.`),
       )
     } catch {
       const message = 'We could not open this image. Try another 360° panorama.'
@@ -449,16 +634,38 @@ export function Capture360Page({
     setSharing(true)
     setError('')
     try {
+      try {
+        await draftSaveQueueRef.current
+      } catch {
+        // Final sharing below writes the complete current draft again, so it
+        // safely recovers a failed background annotation autosave.
+      }
       await onShare?.({
-        id: makeSubmissionId(),
+        id: draft.id,
         file: draft.file,
         caption: caption.trim(),
         source: draft.source,
         width: draft.dimensions.width,
         height: draft.dimensions.height,
-        createdAt: new Date(),
+        createdAt: draft.createdAt,
         annotations,
       })
+      if (draft.nativeCaptureResult) {
+        try {
+          await discardGuidedCapture(draft.nativeCaptureResult)
+        } catch {
+          // Sharing already made the assembled panorama durable.
+        }
+        setDraft((currentDraft) =>
+          currentDraft?.id === draft.id
+            ? {
+                ...currentDraft,
+                savedLocally: true,
+                nativeCaptureResult: undefined,
+              }
+            : currentDraft,
+        )
+      }
       if (draft.source === 'daily') setCompletedDaily(true)
       setShared(true)
       setAnnouncement(successMessage ?? (onShare
@@ -525,31 +732,50 @@ export function Capture360Page({
           </div>
         </section>
       ) : draft && reviewingPanorama ? (
-        <GuidedPanoramaReview
-          panoramaUrl={draft.previewUrl}
-          annotations={annotations}
-          onAnnotationsChange={setAnnotations}
-          onContinue={() => {
-            setReviewingPanorama(false)
-            setAnnouncement(
-              annotations.length > 0
-                ? `${annotations.length} memory ${annotations.length === 1 ? 'point is' : 'points are'} ready to share.`
-                : 'Your 360° review is complete. Add a title, then share it.',
-            )
-          }}
-          onRetake={() => {
-            const captureSource = draft.source
-            const captureOrigin = draft.origin
-            const capturePicker = draft.picker ?? 'library'
-            clearDraft()
-            if (captureOrigin === 'guided') {
-              void beginGuidedCapture(captureSource)
-            } else {
-              openPicker(captureSource, capturePicker)
-            }
-          }}
-          retakeLabel={draft.origin === 'upload' ? 'Choose another' : 'Retake'}
-        />
+        <>
+          {savingDraft ? (
+            <p className="capture-quality-note" role="status">
+              Saving your latest changes…
+            </p>
+          ) : draft.savedLocally ? (
+            <p className="capture-quality-note" role="status">
+              Saved safely to Memories on this device.
+            </p>
+          ) : null}
+          {error ? (
+            <div className="capture-draft-save-error">
+              <p className="capture-error" role="alert">{error}</p>
+              {onSaveDraft ? (
+                <button
+                  className="ks-secondary-button"
+                  type="button"
+                  disabled={savingDraft}
+                  onClick={() => void retryDraftSave()}
+                >
+                  {savingDraft ? 'Saving…' : 'Try saving again'}
+                </button>
+              ) : null}
+            </div>
+          ) : null}
+          <GuidedPanoramaReview
+            panoramaUrl={draft.previewUrl}
+            annotations={annotations}
+            onAnnotationsChange={updateAnnotations}
+            onContinue={() => void finishPanoramaReview()}
+            onRetake={() => {
+              const captureSource = draft.source
+              const captureOrigin = draft.origin
+              const capturePicker = draft.picker ?? 'library'
+              clearDraft()
+              if (captureOrigin === 'guided') {
+                void beginGuidedCapture(captureSource)
+              } else {
+                openPicker(captureSource, capturePicker)
+              }
+            }}
+            retakeLabel={draft.origin === 'upload' ? 'Choose another' : 'Retake'}
+          />
+        </>
       ) : draft ? (
         <form className="capture-editor" onSubmit={shareCapture}>
           <div className="capture-preview">

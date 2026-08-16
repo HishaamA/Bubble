@@ -1,7 +1,10 @@
 import { act, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { Capture360Page } from './Capture360Page'
+import {
+  Capture360Page,
+  type Capture360Submission,
+} from './Capture360Page'
 import type { NativePanoramaCaptureResult } from './nativePanoramaCapture'
 import type { ProcessedPanorama } from '../../services/media/processPanorama'
 
@@ -319,5 +322,95 @@ describe('Capture360Page', () => {
     await user.click(screen.getByRole('button', { name: 'Share another' }))
     await user.click(screen.getByRole('button', { name: 'Go to today’s moment' }))
     expect(screen.getByText('Today’s moment is shared')).toBeInTheDocument()
+  })
+
+  it('saves an assembled guided sphere before cleaning up its native frames and reuses its id when sharing', async () => {
+    const user = userEvent.setup()
+    const pendingSave = makeDeferred<void>()
+    const onSaveDraft = vi.fn<
+      (submission: Capture360Submission) => Promise<void>
+    >(() => pendingSave.promise)
+    const onShare = vi.fn<
+      (submission: Capture360Submission) => Promise<void>
+    >().mockResolvedValue(undefined)
+    const discardGuidedCapture = vi.fn().mockResolvedValue(undefined)
+
+    render(
+      <Capture360Page
+        now={new Date('2026-08-26T12:05:00')}
+        dailyWindow={upcomingWindow}
+        guidedCaptureAvailable
+        startGuidedCapture={vi.fn().mockResolvedValue(makeGuidedCaptureResult())}
+        composeGuidedCapture={vi.fn().mockResolvedValue(makeProcessedPanorama())}
+        discardGuidedCapture={discardGuidedCapture}
+        onSaveDraft={onSaveDraft}
+        onShare={onShare}
+      />,
+    )
+
+    await user.click(screen.getByRole('button', { name: 'Capture today in 360°' }))
+    expect(await screen.findByRole('heading', { name: 'Review your 360°' })).toBeInTheDocument()
+    await waitFor(() => expect(onSaveDraft).toHaveBeenCalledTimes(1))
+
+    const savedDraft = onSaveDraft.mock.calls[0]![0]
+    expect(savedDraft).toMatchObject({
+      caption: '',
+      source: 'daily',
+      width: 2048,
+      height: 1024,
+      annotations: [],
+    })
+    expect(savedDraft.id).toEqual(expect.any(String))
+    expect(savedDraft.file).toBeInstanceOf(File)
+    expect(discardGuidedCapture).not.toHaveBeenCalled()
+
+    await act(async () => pendingSave.resolve(undefined))
+    await waitFor(() => expect(discardGuidedCapture).toHaveBeenCalledTimes(1))
+
+    await user.click(screen.getByRole('button', { name: 'Continue' }))
+    await user.type(screen.getByRole('textbox', { name: /moment title/i }), 'Saved sphere')
+    await user.click(screen.getByRole('button', { name: 'Share with family' }))
+
+    await waitFor(() => expect(onShare).toHaveBeenCalledTimes(1))
+    expect(onShare.mock.calls[0]?.[0]).toMatchObject({
+      id: savedDraft.id,
+      caption: 'Saved sphere',
+      createdAt: savedDraft.createdAt,
+      file: savedDraft.file,
+    })
+  })
+
+  it('keeps the assembled review and native frames available when automatic saving fails', async () => {
+    const user = userEvent.setup()
+    const onSaveDraft = vi.fn<
+      (submission: Capture360Submission) => Promise<void>
+    >()
+      .mockRejectedValueOnce(new Error('storage unavailable'))
+      .mockResolvedValue(undefined)
+    const discardGuidedCapture = vi.fn().mockResolvedValue(undefined)
+
+    render(
+      <Capture360Page
+        initialMode="manual"
+        guidedCaptureAvailable
+        startGuidedCapture={vi.fn().mockResolvedValue(makeGuidedCaptureResult())}
+        composeGuidedCapture={vi.fn().mockResolvedValue(makeProcessedPanorama())}
+        discardGuidedCapture={discardGuidedCapture}
+        onSaveDraft={onSaveDraft}
+      />,
+    )
+
+    await user.click(screen.getByRole('button', { name: 'Start guided 360 capture' }))
+
+    expect(await screen.findByRole('heading', { name: 'Review your 360°' })).toBeInTheDocument()
+    expect(await screen.findByRole('alert')).toHaveTextContent(/could not be saved/i)
+    expect(screen.getByRole('button', { name: 'Continue' })).toBeEnabled()
+    expect(URL.revokeObjectURL).not.toHaveBeenCalledWith('blob:panorama-preview')
+    expect(discardGuidedCapture).not.toHaveBeenCalled()
+
+    await user.click(screen.getByRole('button', { name: 'Try saving again' }))
+    expect(await screen.findByText(/saved safely to memories/i)).toBeInTheDocument()
+    expect(onSaveDraft).toHaveBeenCalledTimes(2)
+    expect(discardGuidedCapture).toHaveBeenCalledTimes(1)
   })
 })

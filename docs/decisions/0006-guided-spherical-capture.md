@@ -23,10 +23,10 @@ Capacitor app, private media path, and Moments contribution flow.
 - Add an app-local Capacitor plugin named `PanoramaCapture`. It presents a
   full-screen native guide and returns temporary local frame URLs with explicit
   target and measured orientation metadata.
-- On iOS, use ARKit tracking and `ARFrame.capturedImage`. On Android, the first
-  device MVP uses CameraX with the rotation-vector/gyroscope sensors. ARCore
-  Shared Camera remains an Android quality upgrade rather than a requirement
-  for devices where orientation tracking is already stable.
+- On iOS, use ARKit tracking and `ARFrame.capturedImage`. On Android, use
+  ARCore's display-oriented camera pose, CPU camera image, and image intrinsics
+  from the same `Frame`. This keeps the two native capture contracts equivalent
+  and avoids mixing CameraX shutter timing with an independent motion sensor.
 - Place overlapping targets in several horizontal rings plus zenith and nadir.
   Capture automatically only when a target is aligned, tracking is usable, and
   the phone remains steady for the configured hold interval.
@@ -47,9 +47,9 @@ Capacitor app, private media path, and Moments contribution flow.
 
 - Guided capture requires an installed iOS or Android build. The LAN-hosted web
   app can demonstrate the interaction but cannot invoke the native plugin.
-- The first Android implementation tracks rotation, not translation. Users must
-  rotate around one point; parallax from walking or orbiting remains a quality
-  limitation on both platforms.
+- Both native implementations track rotation and translation. Users should
+  still rotate around one point because translating the camera changes which
+  surfaces are visible and can create parallax in any single-view panorama.
 - Pose-only composition is materially better than stretching an uncaptured
   horizontal band, but difficult interiors can still show seams. OpenCV-based
   feature alignment and repeated physical-device tuning are required before a

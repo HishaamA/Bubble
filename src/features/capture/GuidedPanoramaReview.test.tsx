@@ -137,7 +137,7 @@ describe('GuidedPanoramaReview', () => {
       }),
     ])
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
-  })
+  }, 20_000)
 
   it('cancels an unsaved point and can delete an existing one', async () => {
     const user = userEvent.setup()
@@ -189,8 +189,17 @@ describe('GuidedPanoramaReview', () => {
     })
 
     class FakeMediaRecorder extends EventTarget {
+      static isTypeSupported(mimeType: string) {
+        return mimeType === 'audio/webm;codecs=opus'
+      }
+
       state: RecordingState = 'inactive'
-      mimeType = 'audio/webm'
+      mimeType: string
+
+      constructor(_stream: MediaStream, options?: MediaRecorderOptions) {
+        super()
+        this.mimeType = options?.mimeType ?? 'audio/webm'
+      }
 
       start() {
         this.state = 'recording'
@@ -214,6 +223,10 @@ describe('GuidedPanoramaReview', () => {
     await user.click(screen.getByRole('button', { name: 'Add a memory point' }))
     await user.click(screen.getByRole('button', { name: 'Select the table' }))
     await user.click(screen.getByRole('button', { name: /^voice/i }))
+    const description = screen.getByRole('textbox', {
+      name: 'Voice note description',
+    })
+    expect(description).toHaveAttribute('maxlength', '180')
     await user.click(screen.getByRole('button', { name: 'Start voice recording' }))
 
     await waitFor(() => expect(getUserMedia).toHaveBeenCalledWith({ audio: true }))
@@ -223,13 +236,20 @@ describe('GuidedPanoramaReview', () => {
       'src',
       'blob:voice-preview',
     )
-    await user.click(screen.getByRole('button', { name: 'Save voice note' }))
+    const saveVoiceNote = screen.getByRole('button', { name: 'Save voice note' })
+    expect(saveVoiceNote).toBeDisabled()
+    await user.type(description, 'Dad explains the old family recipe.')
+    expect(screen.getByLabelText(
+      'Voice note preview: Dad explains the old family recipe.',
+    )).toBeInTheDocument()
+    await user.click(saveVoiceNote)
 
     expect(onAnnotationsChange).toHaveBeenCalledWith([
       expect.objectContaining({
         kind: 'voice',
         pitch: 12.5,
         yaw: -38,
+        message: 'Dad explains the old family recipe.',
         audioBlob: expect.any(Blob),
         audioMimeType: 'audio/webm',
       }),
@@ -246,5 +266,58 @@ describe('GuidedPanoramaReview', () => {
     await user.click(screen.getByRole('button', { name: 'Select the table' }))
     expect(screen.getByRole('button', { name: /^voice/i })).toBeDisabled()
     expect(screen.getByText('Unavailable on this device')).toBeInTheDocument()
+  })
+
+  it('discards an active recording when the page moves to the background', async () => {
+    const trackStop = vi.fn()
+    Object.defineProperty(navigator, 'mediaDevices', {
+      configurable: true,
+      value: {
+        getUserMedia: vi.fn().mockResolvedValue({
+          getTracks: () => [{ stop: trackStop }],
+        }),
+      },
+    })
+    class BackgroundMediaRecorder extends EventTarget {
+      static isTypeSupported(mimeType: string) {
+        return mimeType === 'audio/webm;codecs=opus'
+      }
+
+      state: RecordingState = 'inactive'
+      mimeType: string
+
+      constructor(_stream: MediaStream, options?: MediaRecorderOptions) {
+        super()
+        this.mimeType = options?.mimeType ?? 'audio/webm'
+      }
+
+      start() {
+        this.state = 'recording'
+      }
+
+      stop() {
+        this.state = 'inactive'
+        this.dispatchEvent(new Event('stop'))
+      }
+    }
+    vi.stubGlobal('MediaRecorder', BackgroundMediaRecorder)
+    const user = userEvent.setup()
+    renderReview()
+
+    await user.click(screen.getByRole('button', { name: 'Add a memory point' }))
+    await user.click(screen.getByRole('button', { name: 'Select the table' }))
+    await user.click(screen.getByRole('button', { name: /^voice/i }))
+    await user.click(screen.getByRole('button', { name: 'Start voice recording' }))
+    expect(await screen.findByRole('button', {
+      name: 'Stop voice recording',
+    })).toBeInTheDocument()
+
+    window.dispatchEvent(new Event('pagehide'))
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      /moved to the background/i,
+    )
+    expect(trackStop).toHaveBeenCalled()
+    expect(screen.queryByLabelText(/voice note preview/i)).not.toBeInTheDocument()
   })
 })

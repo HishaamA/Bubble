@@ -48,6 +48,13 @@ describe('native capsule recap bridge', () => {
     recapPlugin.discardArtifacts.mockReset().mockResolvedValue({ removedCount: 1 })
   })
 
+  it.each(['ios', 'android'])('recognizes the native bridge on %s', (platform) => {
+    capacitor.getPlatform.mockReturnValue(platform)
+
+    expect(isNativeCapsuleRecapAvailable()).toBe(true)
+    expect(capacitor.isPluginAvailable).toHaveBeenCalledWith('CapsuleRecap')
+  })
+
   it('stages images one data URL at a time before rendering ordered paths', async () => {
     const first = await stageNativeCapsuleRecapImage({
       dataUrl: 'data:image/jpeg;base64,Zmlyc3Q=',

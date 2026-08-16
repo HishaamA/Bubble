@@ -93,11 +93,14 @@ export function CapsulePhotoRoute({
 
 export function PanoramaRoute() {
   const { loading, moments } = useSharedMoments()
+  const { updateMomentAnnotations } = useFamilyMomentSync()
 
   return (
     <PanoramaMemoryScreen
       sharedMoments={moments}
       sharedMomentsLoading={loading}
+      onUpdateMomentAnnotations={(moment, annotations) =>
+        updateMomentAnnotations(moment.id, annotations)}
     />
   )
 }
@@ -105,7 +108,7 @@ export function PanoramaRoute() {
 export function CaptureRoute() {
   const location = useLocation()
   const navigate = useNavigate()
-  const { moments } = useSharedMoments()
+  const { moments, saveMoment } = useSharedMoments()
   const { dailyWindow, shareMoment, status } = useFamilyMomentSync()
   const [delivery, setDelivery] = useState<'local' | 'family' | null>(null)
   const requestedMode = new URLSearchParams(location.search).get('mode')
@@ -115,6 +118,7 @@ export function CaptureRoute() {
   const dailyCaptureCompleted = moments.some(
     (moment) =>
       moment.source === 'daily' &&
+      moment.isDraft !== true &&
       moment.uploaderDisplayName === 'You' &&
       isSameLocalDay(moment.createdAt, today),
   )
@@ -122,6 +126,24 @@ export function CaptureRoute() {
   async function saveCapture(submission: Capture360Submission) {
     const result = await shareMoment(submission)
     setDelivery(result.delivery)
+  }
+
+  async function saveCaptureDraft(submission: Capture360Submission) {
+    await saveMoment({
+      id: submission.id,
+      blob: submission.file,
+      label: 'Autosaved 360 sphere',
+      caption: '',
+      createdAt: submission.createdAt,
+      width: submission.width,
+      height: submission.height,
+      source: submission.source,
+      uploaderDisplayName: 'You',
+      ownedByCurrentUser: true,
+      familySynced: false,
+      annotations: submission.annotations,
+      isDraft: true,
+    })
   }
 
   return (
@@ -137,6 +159,7 @@ export function CaptureRoute() {
           : navigate(-1)
       }
       onViewMemories={() => navigate('/', { viewTransition: true })}
+      onSaveDraft={saveCaptureDraft}
       onShare={saveCapture}
       successMessage={
         delivery === 'family'

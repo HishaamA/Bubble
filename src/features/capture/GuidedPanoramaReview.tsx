@@ -36,7 +36,15 @@ export type GuidedPanoramaReviewProps = {
   onAnnotationsChange: (next: StoredPanoramaAnnotation[]) => void
   onContinue: () => void
   onRetake: () => void
+  title?: string
+  subtitle?: string
   retakeLabel?: string
+  continueLabel?: string
+  busy?: boolean
+  actionError?: string | null
+  actionMessage?: string | null
+  hideRetake?: boolean
+  modal?: boolean
 }
 
 function makePointId() {
@@ -51,10 +59,25 @@ function formatDuration(durationMs: number) {
   return `0:${seconds.toString().padStart(2, '0')}`
 }
 
+function meaningfulVoiceDescription(value: string) {
+  const description = value.trim()
+  if (/^(?:a )?voice note\.?$/i.test(description)) return ''
+  return description
+}
+
+function shortenedPointMessage(message: string) {
+  return message.length > 32 ? `${message.slice(0, 31)}…` : message
+}
+
 function pointLabel(annotation: StoredPanoramaAnnotation) {
-  if (annotation.kind === 'voice') return 'Voice note'
   const message = annotation.message.trim()
-  return message.length > 32 ? `${message.slice(0, 31)}…` : message || 'Message'
+  if (annotation.kind === 'voice') {
+    const description = meaningfulVoiceDescription(message)
+    return description
+      ? `Voice: ${shortenedPointMessage(description)}`
+      : 'Voice note'
+  }
+  return shortenedPointMessage(message) || 'Message'
 }
 
 function ReviewIcon({ name }: { name: 'plus' | 'message' | 'voice' | 'stop' }) {
@@ -86,7 +109,15 @@ export function GuidedPanoramaReview({
   onAnnotationsChange,
   onContinue,
   onRetake,
+  title = 'Review your 360°',
+  subtitle = 'Drag to look around',
   retakeLabel = 'Retake',
+  continueLabel = 'Continue',
+  busy = false,
+  actionError = null,
+  actionMessage = null,
+  hideRetake = false,
+  modal = false,
 }: GuidedPanoramaReviewProps) {
   const [placingPoint, setPlacingPoint] = useState(false)
   const [selectedPoint, setSelectedPoint] = useState<SelectedPoint | null>(null)
@@ -104,6 +135,7 @@ export function GuidedPanoramaReview({
   const recordingRequestRef = useRef(0)
   const voicePreviewUrlRef = useRef<string | null>(null)
   const sheetRef = useRef<HTMLElement | null>(null)
+  const reviewRef = useRef<HTMLElement | null>(null)
   const editorWasOpenRef = useRef(false)
   const previousFocusRef = useRef<HTMLElement | null>(null)
 
@@ -166,6 +198,54 @@ export function GuidedPanoramaReview({
   }, [])
 
   useEffect(() => {
+    if (!modal) return
+    const previousFocus = document.activeElement instanceof HTMLElement
+      ? document.activeElement
+      : null
+    const frame = window.requestAnimationFrame(() => reviewRef.current?.focus())
+
+    return () => {
+      window.cancelAnimationFrame(frame)
+      previousFocus?.focus({ preventScroll: true })
+    }
+  }, [modal])
+
+  useEffect(() => {
+    const interruptRecording = () => {
+      if (
+        !requestingMicrophone &&
+        !recording &&
+        !recordingSessionRef.current
+      ) {
+        return
+      }
+      discardActiveRecording()
+      releaseVoicePreview()
+      setVoiceClip(null)
+      setVoiceError(
+        'Recording stopped when the app moved to the background. Record the voice note again.',
+      )
+    }
+    const interruptWhenHidden = () => {
+      if (document.visibilityState === 'hidden') interruptRecording()
+    }
+
+    document.addEventListener('visibilitychange', interruptWhenHidden)
+    window.addEventListener('pagehide', interruptRecording)
+    window.addEventListener('freeze', interruptRecording)
+    return () => {
+      document.removeEventListener('visibilitychange', interruptWhenHidden)
+      window.removeEventListener('pagehide', interruptRecording)
+      window.removeEventListener('freeze', interruptRecording)
+    }
+  }, [
+    discardActiveRecording,
+    recording,
+    releaseVoicePreview,
+    requestingMicrophone,
+  ])
+
+  useEffect(() => {
     const editorOpen = editorStep !== null
     if (editorOpen && !editorWasOpenRef.current) {
       previousFocusRef.current = document.activeElement instanceof HTMLElement
@@ -185,14 +265,23 @@ export function GuidedPanoramaReview({
   }, [editorStep])
 
   const openAnnotation = useCallback((annotation: StoredPanoramaAnnotation) => {
+    if (busy) return
     discardActiveRecording()
     releaseVoicePreview()
     setPlacingPoint(false)
     setSelectedPoint({ pitch: annotation.pitch, yaw: annotation.yaw })
     setEditingId(annotation.id)
     setEditorStep(annotation.kind === 'voice' ? 'voice' : 'message')
-    setMessage(annotation.kind === 'text' ? annotation.message : '')
-    setVoiceError('')
+    setMessage(
+      annotation.kind === 'voice'
+        ? meaningfulVoiceDescription(annotation.message)
+        : annotation.message,
+    )
+    setVoiceError(
+      annotation.kind === 'voice' && !annotation.audioBlob
+        ? 'This voice note audio is unavailable. Record it again before saving this point.'
+        : '',
+    )
 
     if (annotation.kind === 'voice' && annotation.audioBlob) {
       const clip = {
@@ -205,7 +294,7 @@ export function GuidedPanoramaReview({
     } else {
       setVoiceClip(null)
     }
-  }, [discardActiveRecording, installVoicePreview, releaseVoicePreview])
+  }, [busy, discardActiveRecording, installVoicePreview, releaseVoicePreview])
 
   const hotSpots = useMemo<PanoramaHotSpot[]>(() =>
     annotations.map((annotation) => ({
@@ -292,11 +381,15 @@ export function GuidedPanoramaReview({
           Math.min(MAX_VOICE_NOTE_DURATION_MS, Date.now() - startedAt),
         )
       }, 250)
-    } catch {
+    } catch (reason) {
       if (recordingRequestRef.current !== requestId) return
       setRequestingMicrophone(false)
       setRecording(false)
-      setVoiceError('Microphone access was not allowed. Check your device settings and try again.')
+      setVoiceError(
+        reason instanceof Error && /compatible audio format/i.test(reason.message)
+          ? reason.message
+          : 'Microphone access was not allowed. Check your device settings and try again.',
+      )
     }
   }
 
@@ -321,14 +414,17 @@ export function GuidedPanoramaReview({
         message: cleanMessage,
       }
     } else {
-      if (!voiceClip) return
+      const description = meaningfulVoiceDescription(message)
+      if (
+        !voiceClip ||
+        !description ||
+        description.length > MAX_MESSAGE_LENGTH
+      ) return
       nextAnnotation = {
         id: existing?.id ?? makePointId(),
         kind: 'voice',
         ...selectedPoint,
-        message: existing?.kind === 'voice' && existing.message
-          ? existing.message
-          : 'Voice note',
+        message: description,
         audioBlob: voiceClip.blob,
         audioMimeType: voiceClip.mimeType,
         durationMs: voiceClip.durationMs,
@@ -352,25 +448,32 @@ export function GuidedPanoramaReview({
   }
 
   const handleRetake = () => {
+    if (busy) return
     resetEditor()
     setPlacingPoint(false)
     onRetake()
   }
 
   const handleContinue = () => {
+    if (busy) return
     resetEditor()
     setPlacingPoint(false)
     onContinue()
   }
 
   const voiceSupported = isVoiceNoteRecordingSupported()
+  const voiceDescription = meaningfulVoiceDescription(message)
   const pointLimitReached = annotations.length >= MAX_POINTS
-  const controlsLocked = editorStep !== null
+  const controlsLocked = editorStep !== null || busy
 
   return (
     <section
+      ref={reviewRef}
       className={`guided-panorama-review${placingPoint ? ' is-placing-point' : ''}`}
       aria-labelledby="guided-panorama-review-title"
+      aria-modal={modal || undefined}
+      role={modal ? 'dialog' : undefined}
+      tabIndex={modal ? -1 : undefined}
     >
       <PanoramaViewer
         className="guided-panorama-review__viewer"
@@ -385,8 +488,8 @@ export function GuidedPanoramaReview({
 
       <div className="guided-panorama-review__topbar">
         <div>
-          <h1 id="guided-panorama-review-title">Review your 360°</h1>
-          <p>Drag to look around</p>
+          <h1 id="guided-panorama-review-title">{title}</h1>
+          <p>{subtitle}</p>
         </div>
         <span aria-label={`${annotations.length} of ${MAX_POINTS} memory points`}>
           {annotations.length}/{MAX_POINTS} points
@@ -398,11 +501,17 @@ export function GuidedPanoramaReview({
         role="status"
         aria-live="polite"
       >
-        {placingPoint
-          ? 'Tap the object where you want to leave a memory point.'
-          : pointLimitReached
-            ? 'All 8 memory points are placed.'
-            : 'Add a message or voice note to anything in the moment.'}
+        {actionError
+          ? actionError
+          : busy
+            ? 'Saving your memory points…'
+            : actionMessage
+              ? actionMessage
+              : placingPoint
+                ? 'Tap the object where you want to leave a memory point.'
+                : pointLimitReached
+                  ? 'All 8 memory points are placed.'
+                  : 'Add a message or voice note to anything in the moment.'}
       </p>
 
       <div
@@ -410,14 +519,16 @@ export function GuidedPanoramaReview({
         role="group"
         aria-label="Review actions"
       >
-        <button
-          className="guided-panorama-review__side-action"
-          type="button"
-          onClick={handleRetake}
-          disabled={controlsLocked || placingPoint}
-        >
-          {retakeLabel}
-        </button>
+        {hideRetake ? <span aria-hidden="true" /> : (
+          <button
+            className="guided-panorama-review__side-action"
+            type="button"
+            onClick={handleRetake}
+            disabled={controlsLocked || placingPoint}
+          >
+            {retakeLabel}
+          </button>
+        )}
         <button
           className="guided-panorama-review__add"
           type="button"
@@ -434,7 +545,7 @@ export function GuidedPanoramaReview({
           onClick={handleContinue}
           disabled={controlsLocked || placingPoint}
         >
-          Continue
+          {busy ? 'Saving…' : continueLabel}
         </button>
       </div>
 
@@ -521,6 +632,26 @@ export function GuidedPanoramaReview({
 
             {editorStep === 'voice' ? (
               <div className="guided-panorama-review__editor guided-panorama-review__voice-editor">
+                <label htmlFor="guided-point-voice-description">
+                  Voice note description
+                </label>
+                <textarea
+                  id="guided-point-voice-description"
+                  autoFocus
+                  maxLength={MAX_MESSAGE_LENGTH}
+                  value={message}
+                  placeholder="What will your family hear in this recording?"
+                  aria-describedby="guided-point-voice-description-help"
+                  onChange={(event) => setMessage(event.target.value)}
+                />
+                <div
+                  id="guided-point-voice-description-help"
+                  className="guided-panorama-review__editor-meta"
+                >
+                  <span>Required as an accessible description</span>
+                  <span aria-live="polite">{message.length}/{MAX_MESSAGE_LENGTH}</span>
+                </div>
+
                 {!voiceSupported ? (
                   <p className="guided-panorama-review__voice-error" role="status">
                     Voice recording is not available on this device. Add a message instead.
@@ -540,7 +671,9 @@ export function GuidedPanoramaReview({
                     className="guided-panorama-review__audio"
                     controls
                     src={voicePreviewUrl}
-                    aria-label="Voice note preview"
+                    aria-label={voiceDescription
+                      ? `Voice note preview: ${voiceDescription}`
+                      : 'Voice note preview'}
                   />
                 ) : null}
 
@@ -575,7 +708,13 @@ export function GuidedPanoramaReview({
                 <button
                   className="guided-panorama-review__save"
                   type="button"
-                  disabled={!voiceClip || recording || requestingMicrophone}
+                  disabled={
+                    !voiceClip ||
+                    !voiceDescription ||
+                    voiceDescription.length > MAX_MESSAGE_LENGTH ||
+                    recording ||
+                    requestingMicrophone
+                  }
                   onClick={() => saveAnnotation('voice')}
                 >
                   Save voice note

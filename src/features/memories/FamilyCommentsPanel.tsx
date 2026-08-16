@@ -43,10 +43,14 @@ function CommentsIcon() {
 }
 
 function annotationLabel(annotation: PanoramaAnnotation, index: number) {
-  if (annotation.kind === 'voice') return `Voice note ${index + 1}`
   const message = annotation.message.trim()
-  if (!message) return `Memory point ${index + 1}`
-  return message.length > 30 ? `${message.slice(0, 29)}…` : message
+  if (!message) {
+    return annotation.kind === 'voice'
+      ? `Voice note ${index + 1}`
+      : `Memory point ${index + 1}`
+  }
+  const shortened = message.length > 30 ? `${message.slice(0, 29)}…` : message
+  return annotation.kind === 'voice' ? `Voice: ${shortened}` : shortened
 }
 
 function formatCommentTime(value: string) {

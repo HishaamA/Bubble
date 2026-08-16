@@ -10,9 +10,10 @@ const CardboardOrientation = registerPlugin<CardboardOrientationPlugin>(
 )
 
 export function nativeCardboardOrientationAvailable(): boolean {
+  const platform = Capacitor.getPlatform()
   return (
     Capacitor.isNativePlatform() &&
-    Capacitor.getPlatform() === 'ios' &&
+    (platform === 'ios' || platform === 'android') &&
     Capacitor.isPluginAvailable('CardboardOrientation')
   )
 }
