@@ -31,6 +31,15 @@ function safeReturnTo(value: unknown) {
   }
 }
 
+function safeDemoReturnTo(value: unknown) {
+  const safeValue = safeReturnTo(value)
+  const target = new URL(safeValue, INTERNAL_RETURN_TO_ORIGIN)
+  return target.pathname === '/onboarding' ||
+    target.pathname.startsWith('/onboarding/')
+    ? '/'
+    : safeValue
+}
+
 function storedReturnTo() {
   if (typeof window === 'undefined') return undefined
   try {
@@ -97,19 +106,19 @@ function ClerkConfigurationState({
       ) : (
         <p>
           Add <code>VITE_CLERK_PUBLISHABLE_KEY</code> to a local environment
-          file, then restart the app. Sign-in stays locked until Clerk is
-          connected; production never falls back to an unsecured preview.
+          file, then restart the app for account access. Until then, use the
+          local demo below; cloud family sync remains off in demo mode.
         </p>
       )}
       {onContinue ? (
         <div className="auth-card__preview">
           <button type="button" onClick={onContinue}>
-            {testingMode ? 'Continue without signing in' : 'Continue to main app'}
+            {testingMode ? 'Continue without signing in' : 'Continue to demo'}
           </button>
           <small>
             {testingMode
               ? 'Debug APK only · family sync stays offline'
-              : 'Development preview · family sync stays offline'}
+              : 'Demo mode · family sync stays offline'}
           </small>
         </div>
       ) : null}
@@ -117,16 +126,47 @@ function ClerkConfigurationState({
   )
 }
 
+function DemoLoginAction({ onContinue }: { onContinue: () => void }) {
+  return (
+    <div className="auth-card__demo">
+      <div className="auth-card__demo-divider" aria-hidden="true">
+        <span />
+        <small>or</small>
+        <span />
+      </div>
+      <button type="button" onClick={onContinue}>
+        Continue to demo
+      </button>
+      <small>Explore the full app · cloud family sync stays offline</small>
+    </div>
+  )
+}
+
 export function AuthPage() {
-  const { isTestAccess, startDevelopmentPreview, status, user } = useAuth()
+  const {
+    isDevelopmentPreview,
+    isTestAccess,
+    startDevelopmentPreview,
+    status,
+    user,
+  } = useAuth()
   const location = useLocation()
   const requestedReturnTo = (
     location.state as { returnTo?: unknown } | null
   )?.returnTo
   const returnTo = safeReturnTo(requestedReturnTo ?? storedReturnTo())
+  const demoReturnTo = safeDemoReturnTo(returnTo)
+  const continueToDemo = startDevelopmentPreview
+    ? () => {
+        rememberReturnTo(demoReturnTo)
+        startDevelopmentPreview()
+      }
+    : undefined
 
   if (status === 'signed-in' && user) {
-    return <SignedInRedirect to={returnTo} />
+    return (
+      <SignedInRedirect to={isDevelopmentPreview ? demoReturnTo : returnTo} />
+    )
   }
 
   return (
@@ -156,14 +196,7 @@ export function AuthPage() {
         {status === 'unconfigured' ? (
           <ClerkConfigurationState
             testingMode={isTestAccess}
-            onContinue={
-              startDevelopmentPreview
-                ? () => {
-                    rememberReturnTo(returnTo)
-                    startDevelopmentPreview()
-                  }
-                : undefined
-            }
+            onContinue={continueToDemo}
           />
         ) : null}
 
@@ -189,6 +222,10 @@ export function AuthPage() {
             </SignUpButton>
             <p>Continue securely with Google, Apple, or your phone.</p>
           </div>
+        ) : null}
+
+        {continueToDemo && status !== 'unconfigured' ? (
+          <DemoLoginAction onContinue={continueToDemo} />
         ) : null}
       </div>
 

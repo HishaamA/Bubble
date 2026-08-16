@@ -93,6 +93,65 @@ describe('AuthPage', () => {
     )
   })
 
+  it('offers explicit demo access while Clerk is signed out', async () => {
+    const user = userEvent.setup()
+    const startDevelopmentPreview = vi.fn()
+
+    render(
+      <AuthProvider
+        value={{
+          ...authValue('signed-out'),
+          startDevelopmentPreview,
+        }}
+      >
+        <MemoryRouter
+          initialEntries={[
+            { pathname: '/login', state: { returnTo: '/capsule' } },
+          ]}
+        >
+          <AuthPage />
+        </MemoryRouter>
+      </AuthProvider>,
+    )
+
+    await user.click(
+      screen.getByRole('button', { name: 'Continue to demo' }),
+    )
+
+    expect(startDevelopmentPreview).toHaveBeenCalledOnce()
+    expect(window.sessionStorage.getItem('kinsphere.auth.returnTo')).toBe(
+      '/capsule',
+    )
+  })
+
+  it('sends demo access to home instead of a stale onboarding route', async () => {
+    const user = userEvent.setup()
+    const startDevelopmentPreview = vi.fn()
+
+    render(
+      <AuthProvider
+        value={{
+          ...authValue('signed-out'),
+          startDevelopmentPreview,
+        }}
+      >
+        <MemoryRouter
+          initialEntries={[
+            { pathname: '/login', state: { returnTo: '/onboarding' } },
+          ]}
+        >
+          <AuthPage />
+        </MemoryRouter>
+      </AuthProvider>,
+    )
+
+    await user.click(
+      screen.getByRole('button', { name: 'Continue to demo' }),
+    )
+
+    expect(window.sessionStorage.getItem('kinsphere.auth.returnTo')).toBe('/')
+  })
+
   it('restores and clears the return route after Clerk signs in', async () => {
     window.sessionStorage.setItem('kinsphere.auth.returnTo', '/journal')
     render(
@@ -127,6 +186,29 @@ describe('AuthPage', () => {
     )
 
     expect(await screen.findByText('Safe home')).toBeInTheDocument()
+  })
+
+  it('redirects an active demo session away from onboarding', async () => {
+    window.sessionStorage.setItem('kinsphere.auth.returnTo', '/onboarding')
+    render(
+      <AuthProvider
+        value={{
+          ...authValue('signed-in', signedInUser),
+          isDevelopmentPreview: true,
+        }}
+      >
+        <MemoryRouter initialEntries={['/login']}>
+          <Routes>
+            <Route path="/login" element={<AuthPage />} />
+            <Route path="/" element={<p>Demo home</p>} />
+            <Route path="/onboarding" element={<p>Onboarding trap</p>} />
+          </Routes>
+        </MemoryRouter>
+      </AuthProvider>,
+    )
+
+    expect(await screen.findByText('Demo home')).toBeInTheDocument()
+    expect(screen.queryByText('Onboarding trap')).not.toBeInTheDocument()
   })
 
   it.each(['signed-out', 'unconfigured'] as const)(

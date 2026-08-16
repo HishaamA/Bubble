@@ -26,6 +26,12 @@ import {
   readDevelopmentPreviewSession,
   startDevelopmentPreviewSession,
 } from './developmentPreview'
+import {
+  clearDemoLoginSession,
+  demoLoginAvailable,
+  readDemoLoginSession,
+  startDemoLoginSession,
+} from './demoLogin'
 import { isNativeTestAccessEnabled } from './nativeTestAccess'
 
 const missingClerkValue: AuthContextValue = {
@@ -39,7 +45,12 @@ function DevelopmentPreviewAuthProvider({
   children,
   autoStart = false,
   testAccess = false,
-}: PropsWithChildren<{ autoStart?: boolean; testAccess?: boolean }>) {
+  startDemo,
+}: PropsWithChildren<{
+  autoStart?: boolean
+  testAccess?: boolean
+  startDemo?: () => void
+}>) {
   const [previewActive, setPreviewActive] = useState(
     () => autoStart || readDevelopmentPreviewSession(),
   )
@@ -49,13 +60,14 @@ function DevelopmentPreviewAuthProvider({
       return {
         ...missingClerkValue,
         isTestAccess: testAccess,
-        startDevelopmentPreview: developmentPreviewAvailable || testAccess
-          ? () => {
-              if (testAccess || startDevelopmentPreviewSession()) {
-                setPreviewActive(true)
+        startDevelopmentPreview:
+          developmentPreviewAvailable || testAccess
+            ? () => {
+                if (testAccess || startDevelopmentPreviewSession()) {
+                  setPreviewActive(true)
+                }
               }
-            }
-          : undefined,
+            : startDemo,
       }
     }
 
@@ -70,7 +82,26 @@ function DevelopmentPreviewAuthProvider({
         setPreviewActive(false)
       },
     }
-  }, [previewActive, testAccess])
+  }, [previewActive, startDemo, testAccess])
+
+  return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>
+}
+
+function DemoLoginAuthProvider({
+  children,
+  onSignOut,
+}: PropsWithChildren<{ onSignOut: () => void }>) {
+  const value = useMemo<AuthContextValue>(() => ({
+    status: 'signed-in',
+    user: developmentPreviewUser,
+    getToken: async () => null,
+    isDevelopmentPreview: true,
+    signOut: async () => {
+      clearDemoLoginSession()
+      clearDevelopmentPreviewSession()
+      onSignOut()
+    },
+  }), [onSignOut])
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>
 }
@@ -84,6 +115,12 @@ const checkingNativeAccessValue: AuthContextValue = {
 
 function RuntimeAuthProvider({ children }: PropsWithChildren) {
   const [testAccess, setTestAccess] = useState<boolean | null>(null)
+  const [demoActive, setDemoActive] = useState(readDemoLoginSession)
+
+  const startDemo = useCallback(() => {
+    if (startDemoLoginSession()) setDemoActive(true)
+  }, [])
+  const leaveDemo = useCallback(() => setDemoActive(false), [])
 
   useEffect(() => {
     let mounted = true
@@ -103,6 +140,14 @@ function RuntimeAuthProvider({ children }: PropsWithChildren) {
     )
   }
 
+  if (demoActive) {
+    return (
+      <DemoLoginAuthProvider onSignOut={leaveDemo}>
+        {children}
+      </DemoLoginAuthProvider>
+    )
+  }
+
   if (testAccess) {
     return (
       <DevelopmentPreviewAuthProvider autoStart testAccess>
@@ -112,13 +157,28 @@ function RuntimeAuthProvider({ children }: PropsWithChildren) {
   }
 
   if (!clerkConfigured) {
-    return <DevelopmentPreviewAuthProvider>{children}</DevelopmentPreviewAuthProvider>
+    return (
+      <DevelopmentPreviewAuthProvider
+        startDemo={demoLoginAvailable ? startDemo : undefined}
+      >
+        {children}
+      </DevelopmentPreviewAuthProvider>
+    )
   }
 
-  return <ClerkAuthBridge>{children}</ClerkAuthBridge>
+  return (
+    <ClerkAuthBridge
+      startDevelopmentPreview={demoLoginAvailable ? startDemo : undefined}
+    >
+      {children}
+    </ClerkAuthBridge>
+  )
 }
 
-export function ClerkAuthBridge({ children }: PropsWithChildren) {
+export function ClerkAuthBridge({
+  children,
+  startDevelopmentPreview,
+}: PropsWithChildren<{ startDevelopmentPreview?: () => void }>) {
   const {
     getToken: getClerkToken,
     isLoaded,
@@ -199,11 +259,23 @@ export function ClerkAuthBridge({ children }: PropsWithChildren) {
       !isLoaded ||
       (isSignedIn && connectedSession !== expectedSession)
     ) {
-      return { status: 'loading', user: null, getToken, signOut }
+      return {
+        status: 'loading',
+        user: null,
+        getToken,
+        signOut,
+        startDevelopmentPreview,
+      }
     }
 
     if (!isSignedIn || !authUser) {
-      return { status: 'signed-out', user: null, getToken, signOut }
+      return {
+        status: 'signed-out',
+        user: null,
+        getToken,
+        signOut,
+        startDevelopmentPreview,
+      }
     }
 
     return {
@@ -220,6 +292,7 @@ export function ClerkAuthBridge({ children }: PropsWithChildren) {
     isLoaded,
     isSignedIn,
     signOut,
+    startDevelopmentPreview,
   ])
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>

@@ -75,7 +75,7 @@ describe('development preview authentication', () => {
     const firstRender = render(<PreviewRoutes />)
 
     const continueButton = await screen.findByRole('button', {
-      name: 'Continue to main app',
+      name: 'Continue to demo',
     })
     await user.click(continueButton)
     expect(
@@ -97,14 +97,14 @@ describe('development preview authentication', () => {
     const user = userEvent.setup()
     render(<PreviewRoutes />)
     await user.click(
-      await screen.findByRole('button', { name: 'Continue to main app' }),
+      await screen.findByRole('button', { name: 'Continue to demo' }),
     )
     await user.click(
       await screen.findByRole('button', { name: 'Sign out of preview' }),
     )
 
     expect(
-      await screen.findByRole('button', { name: 'Continue to main app' }),
+      await screen.findByRole('button', { name: 'Continue to demo' }),
     ).toBeInTheDocument()
   })
 })
