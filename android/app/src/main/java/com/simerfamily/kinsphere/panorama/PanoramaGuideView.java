@@ -5,6 +5,7 @@ import android.graphics.Canvas;
 import android.graphics.Color;
 import android.graphics.LinearGradient;
 import android.graphics.Paint;
+import android.graphics.Path;
 import android.graphics.RectF;
 import android.graphics.Shader;
 import android.os.SystemClock;
@@ -27,6 +28,7 @@ final class PanoramaGuideView extends View {
     private final Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Paint scrimPaint = new Paint();
     private final RectF progressBounds = new RectF();
+    private final Path chevronPath = new Path();
     private final float density;
     private List<PanoramaTarget> targets = Collections.emptyList();
     private float[] cameraToWorld = IDENTITY_ROTATION.clone();
@@ -120,8 +122,13 @@ final class PanoramaGuideView extends View {
             }
         }
 
-        if (!activeWasDrawn) {
-            drawActiveEdgeMarker(canvas);
+        boolean showCompletionChevron =
+            PanoramaCapturePolicy.shouldShowCompletionChevron(remainingTargetCount());
+        if (!activeWasDrawn || showCompletionChevron) {
+            drawActiveEdgeMarker(
+                canvas,
+                showCompletionChevron
+            );
         }
         drawCenterReticle(canvas);
         drawCaptureFlash(canvas);
@@ -194,7 +201,7 @@ final class PanoramaGuideView extends View {
         return true;
     }
 
-    private void drawActiveEdgeMarker(Canvas canvas) {
+    private void drawActiveEdgeMarker(Canvas canvas, boolean showCompletionChevron) {
         PanoramaTarget target = findActiveTarget();
         if (target == null || target.captured) {
             return;
@@ -209,13 +216,39 @@ final class PanoramaGuideView extends View {
             directionX = 1.0f;
         }
 
-        float availableX = getWidth() * 0.5f - dp(34.0f);
-        float availableY = getHeight() * 0.5f - dp(104.0f);
+        if (showCompletionChevron && aligned) {
+            drawCompletionChevron(
+                canvas,
+                getWidth() * 0.5f,
+                getHeight() * 0.5f - dp(58.0f),
+                0.0f,
+                1.0f
+            );
+            return;
+        }
+
+        // Keep the marker clear of the header and bottom guidance in portrait
+        // and landscape, including compact-height displays.
+        float horizontalInset = Math.min(
+            dp(showCompletionChevron ? 42.0f : 34.0f),
+            getWidth() * 0.22f
+        );
+        float verticalInset = Math.min(
+            dp(showCompletionChevron ? 112.0f : 104.0f),
+            getHeight() * 0.34f
+        );
+        float availableX = Math.max(dp(12.0f), getWidth() * 0.5f - horizontalInset);
+        float availableY = Math.max(dp(12.0f), getHeight() * 0.5f - verticalInset);
         float scaleX = Math.abs(directionX) < 0.001f ? Float.MAX_VALUE : availableX / Math.abs(directionX);
         float scaleY = Math.abs(directionY) < 0.001f ? Float.MAX_VALUE : availableY / Math.abs(directionY);
         float scale = Math.min(scaleX, scaleY);
         float x = getWidth() * 0.5f + directionX * scale;
         float y = getHeight() * 0.5f + directionY * scale;
+
+        if (showCompletionChevron) {
+            drawCompletionChevron(canvas, x, y, directionX, directionY);
+            return;
+        }
 
         paint.setStyle(Paint.Style.FILL);
         paint.setColor(Color.WHITE);
@@ -228,6 +261,47 @@ final class PanoramaGuideView extends View {
         paint.setAlpha(150);
         canvas.drawCircle(x, y, dp(14.0f), paint);
         paint.setAlpha(255);
+    }
+
+    private void drawCompletionChevron(
+        Canvas canvas,
+        float x,
+        float y,
+        float directionX,
+        float directionY
+    ) {
+        float radius = dp(22.0f);
+        paint.setStyle(Paint.Style.FILL);
+        paint.setColor(0xE0000000);
+        paint.setAlpha(255);
+        paint.setShadowLayer(dp(6.0f), 0.0f, dp(2.0f), 0xA6000000);
+        canvas.drawCircle(x, y, radius, paint);
+        paint.clearShadowLayer();
+
+        paint.setStyle(Paint.Style.STROKE);
+        paint.setStrokeWidth(dp(1.0f));
+        paint.setColor(Color.WHITE);
+        paint.setAlpha(105);
+        canvas.drawCircle(x, y, radius, paint);
+
+        float angleDegrees = (float) Math.toDegrees(Math.atan2(directionY, directionX));
+        canvas.save();
+        canvas.translate(x, y);
+        canvas.rotate(angleDegrees);
+        chevronPath.reset();
+        chevronPath.moveTo(dp(-6.0f), dp(-9.0f));
+        chevronPath.lineTo(dp(5.0f), 0.0f);
+        chevronPath.lineTo(dp(-6.0f), dp(9.0f));
+        paint.setStyle(Paint.Style.STROKE);
+        paint.setStrokeWidth(dp(4.0f));
+        paint.setStrokeCap(Paint.Cap.ROUND);
+        paint.setStrokeJoin(Paint.Join.ROUND);
+        paint.setColor(Color.WHITE);
+        paint.setAlpha(255);
+        canvas.drawPath(chevronPath, paint);
+        canvas.restore();
+        paint.setStrokeCap(Paint.Cap.BUTT);
+        paint.setStrokeJoin(Paint.Join.MITER);
     }
 
     private void drawCenterReticle(Canvas canvas) {
@@ -294,6 +368,14 @@ final class PanoramaGuideView extends View {
             }
         }
         return null;
+    }
+
+    private int remainingTargetCount() {
+        int remaining = 0;
+        for (PanoramaTarget target : targets) {
+            if (!target.captured) remaining += 1;
+        }
+        return remaining;
     }
 
     private float[] worldToDevice(float[] world) {

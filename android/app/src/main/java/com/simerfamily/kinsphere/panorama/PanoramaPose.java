@@ -107,6 +107,23 @@ final class PanoramaPose {
         return (float) Math.toDegrees(Math.acos(clamp(dot, -1.0, 1.0)));
     }
 
+    float angularDistanceDegrees(PanoramaPose other) {
+        double quaternionDot = Math.abs(
+            quaternion[0] * other.quaternion[0] +
+            quaternion[1] * other.quaternion[1] +
+            quaternion[2] * other.quaternion[2] +
+            quaternion[3] * other.quaternion[3]
+        );
+        return (float) Math.toDegrees(2.0 * Math.acos(clamp(quaternionDot, 0.0, 1.0)));
+    }
+
+    float linearDistanceMeters(PanoramaPose other) {
+        double deltaX = position[0] - other.position[0];
+        double deltaY = position[1] - other.position[1];
+        double deltaZ = position[2] - other.position[2];
+        return (float) Math.sqrt(deltaX * deltaX + deltaY * deltaY + deltaZ * deltaZ);
+    }
+
     private static float[] toColumnMajorTransform(float[] rotation) {
         return new float[] {
             rotation[0], rotation[3], rotation[6], 0.0f,

@@ -84,8 +84,6 @@ public final class PanoramaCaptureActivity extends AppCompatActivity implements 
 
     private static final String TAG = "PanoramaCapture";
     private static final int CAMERA_PERMISSION_REQUEST = 360;
-    private static final float MAX_STEADY_ANGULAR_SPEED_RADIANS = 0.12f;
-    private static final float MAX_STEADY_LINEAR_SPEED_METERS = 0.08f;
     private static final long CAPTURE_COOLDOWN_MILLIS = 450L;
     private static final long GUIDANCE_INTERVAL_NANOS = 50_000_000L;
     private static final float[] IDENTITY_ROTATION = {
@@ -112,6 +110,7 @@ public final class PanoramaCaptureActivity extends AppCompatActivity implements 
     private PanoramaPose previousPose;
     private long previousFrameTimestampNanos;
     private long alignedSinceNanos = -1L;
+    private PanoramaPose holdStartPose;
     private long lastCaptureCompletedAtMillis;
     private long lastGuidancePublishedAtNanos;
     private int alignedTargetIndex = -1;
@@ -528,8 +527,12 @@ public final class PanoramaCaptureActivity extends AppCompatActivity implements 
             smoothedAngularSpeed = angularSpeed;
             smoothedLinearSpeed = linearSpeed;
         }
-        return smoothedAngularSpeed < MAX_STEADY_ANGULAR_SPEED_RADIANS &&
-            smoothedLinearSpeed < MAX_STEADY_LINEAR_SPEED_METERS;
+        return PanoramaCapturePolicy.isMotionSteady(
+            angularSpeed,
+            linearSpeed,
+            smoothedAngularSpeed,
+            smoothedLinearSpeed
+        );
     }
 
     private void updateGuidance(Frame frame, Camera camera, PanoramaPose pose, float[] projection, boolean steady) {
@@ -546,13 +549,18 @@ public final class PanoramaCaptureActivity extends AppCompatActivity implements 
         boolean aligned = angularDistance <= options.alignmentDegrees;
         if (activeTarget.index != alignedTargetIndex) {
             alignedTargetIndex = activeTarget.index;
-            alignedSinceNanos = -1L;
+            resetHoldWindow();
         }
 
         float holdProgress = 0.0f;
         if (cameraReady && aligned && steady && !captureInFlight) {
-            if (alignedSinceNanos < 0L) {
-                alignedSinceNanos = frame.getTimestamp();
+            if (alignedSinceNanos < 0L || holdStartPose == null) {
+                startHoldWindow(pose, frame.getTimestamp());
+            } else if (!PanoramaCapturePolicy.isWithinHoldDrift(
+                holdStartPose.angularDistanceDegrees(pose),
+                holdStartPose.linearDistanceMeters(pose)
+            )) {
+                startHoldWindow(pose, frame.getTimestamp());
             }
             long heldMillis = Math.max(0L, (frame.getTimestamp() - alignedSinceNanos) / 1_000_000L);
             holdProgress = Math.min(1.0f, heldMillis / (float) options.steadyDurationMillis);
@@ -564,14 +572,16 @@ public final class PanoramaCaptureActivity extends AppCompatActivity implements 
                 holdProgress = 0.0f;
             }
         } else {
-            alignedSinceNanos = -1L;
+            resetHoldWindow();
         }
 
         String instruction;
         if (captureInFlight) {
             instruction = "Capturing…";
         } else if (!aligned) {
-            instruction = "Move a dot into the circle";
+            instruction = PanoramaCapturePolicy.shouldShowCompletionChevron(remainingTargetCount())
+                ? "Follow the arrow to a remaining dot"
+                : "Move a dot into the circle";
         } else if (holdProgress > 0.0f) {
             instruction = "Hold still";
         } else {
@@ -680,7 +690,7 @@ public final class PanoramaCaptureActivity extends AppCompatActivity implements 
         );
 
         captureInFlight = true;
-        alignedSinceNanos = -1L;
+        resetHoldWindow();
         imageExecutor.execute(() -> encodeCapturedFrame(snapshot));
     }
 
@@ -850,7 +860,7 @@ public final class PanoramaCaptureActivity extends AppCompatActivity implements 
 
     private void publishCaptureRetry(String message) {
         runOnUiThread(() -> {
-            alignedSinceNanos = -1L;
+            resetHoldWindow();
             instructionLabel.setText(message);
         });
     }
@@ -861,7 +871,7 @@ public final class PanoramaCaptureActivity extends AppCompatActivity implements 
         }
         captureInFlight = false;
         alignedTargetIndex = -1;
-        alignedSinceNanos = -1L;
+        resetHoldWindow();
         instructionLabel.setText(message);
     }
 
@@ -888,12 +898,30 @@ public final class PanoramaCaptureActivity extends AppCompatActivity implements 
         return nearest;
     }
 
+    private int remainingTargetCount() {
+        int remaining = 0;
+        for (PanoramaTarget target : targets) {
+            if (!target.captured) remaining += 1;
+        }
+        return remaining;
+    }
+
+    private void startHoldWindow(PanoramaPose pose, long timestampNanos) {
+        holdStartPose = pose;
+        alignedSinceNanos = timestampNanos;
+    }
+
+    private void resetHoldWindow() {
+        holdStartPose = null;
+        alignedSinceNanos = -1L;
+    }
+
     private void resetSteadiness() {
         previousPose = null;
         previousFrameTimestampNanos = 0L;
         smoothedAngularSpeed = Float.POSITIVE_INFINITY;
         smoothedLinearSpeed = Float.POSITIVE_INFINITY;
-        alignedSinceNanos = -1L;
+        resetHoldWindow();
         alignedTargetIndex = -1;
     }
 
