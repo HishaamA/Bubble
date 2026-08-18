@@ -4,12 +4,14 @@ type LegacyRouteRedirectProps = {
   fromBase: string
   toBase: string
   preservePathSuffix?: boolean
+  mapState?: (state: unknown) => unknown
 }
 
 export function LegacyRouteRedirect({
   fromBase,
   toBase,
   preservePathSuffix = false,
+  mapState,
 }: LegacyRouteRedirectProps) {
   const location = useLocation()
   const pathSuffix = preservePathSuffix
@@ -24,7 +26,7 @@ export function LegacyRouteRedirect({
         search: location.search,
         hash: location.hash,
       }}
-      state={location.state}
+      state={mapState ? mapState(location.state) : location.state}
     />
   )
 }

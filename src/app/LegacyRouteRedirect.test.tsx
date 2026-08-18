@@ -69,7 +69,10 @@ describe('LegacyRouteRedirect', () => {
           {
             pathname: '/events/family-dinner',
             search: '?view=week',
-            state: { selectedEvent: 'family-dinner' },
+            state: {
+              selectedEvent: 'family-dinner',
+              journalContext: { focusMemoryId: 'legacy-event-card' },
+            },
           },
         ]}
       >
@@ -77,7 +80,20 @@ describe('LegacyRouteRedirect', () => {
           <Route
             path="/events/*"
             element={
-              <LegacyRouteRedirect fromBase="/events" toBase="/journal" />
+              <LegacyRouteRedirect
+                fromBase="/events"
+                toBase="/journal"
+                mapState={(state) => {
+                  const routeState = state as Record<string, unknown>
+                  return {
+                    ...routeState,
+                    journalContext: {
+                      ...(routeState.journalContext as Record<string, unknown>),
+                      section: 'plans',
+                    },
+                  }
+                }}
+              />
             }
           />
           <Route path="/journal" element={<LocationProbe />} />
@@ -89,7 +105,7 @@ describe('LegacyRouteRedirect', () => {
       '/journal?view=week',
     )
     expect(screen.getByLabelText('Route state')).toHaveTextContent(
-      '{"selectedEvent":"family-dinner"}',
+      '{"selectedEvent":"family-dinner","journalContext":{"focusMemoryId":"legacy-event-card","section":"plans"}}',
     )
   })
 })

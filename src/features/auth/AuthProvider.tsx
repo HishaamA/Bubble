@@ -2,6 +2,7 @@ import {
   useCallback,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type PropsWithChildren,
 } from 'react'
@@ -33,6 +34,7 @@ import {
   startDemoLoginSession,
 } from './demoLogin'
 import { isNativeTestAccessEnabled } from './nativeTestAccess'
+import { cancelActiveSubjectFlightNotifications } from '../flights/flightNotifications'
 
 const missingClerkValue: AuthContextValue = {
   status: 'unconfigured',
@@ -78,6 +80,7 @@ function DevelopmentPreviewAuthProvider({
       isDevelopmentPreview: true,
       isTestAccess: testAccess,
       signOut: async () => {
+        await cancelActiveSubjectFlightNotifications()
         clearDevelopmentPreviewSession()
         setPreviewActive(false)
       },
@@ -188,12 +191,14 @@ export function ClerkAuthBridge({
   const { user } = useUser()
   const { signOut: clerkSignOut } = useClerk()
   const [connectedSession, setConnectedSession] = useState<string | null>(null)
+  const previousSignedInSessionRef = useRef<string | null>(null)
 
   const getToken = useCallback(
     (options?: { template?: string }) => getClerkToken(options),
     [getClerkToken],
   )
   const signOut = useCallback(async () => {
+    await cancelActiveSubjectFlightNotifications()
     await clerkSignOut()
   }, [clerkSignOut])
 
@@ -226,6 +231,16 @@ export function ClerkAuthBridge({
     isLoaded && isSignedIn && sessionId && authUser
       ? `${sessionId}:${authUser.id}`
       : null
+
+  useEffect(() => {
+    if (expectedSession) {
+      previousSignedInSessionRef.current = expectedSession
+      return
+    }
+    if (!isLoaded || isSignedIn || !previousSignedInSessionRef.current) return
+    previousSignedInSessionRef.current = null
+    void cancelActiveSubjectFlightNotifications()
+  }, [expectedSession, isLoaded, isSignedIn])
 
   useEffect(() => {
     if (!expectedSession || !authUser) {
@@ -303,10 +318,25 @@ export function AuthProvider({
   value,
 }: PropsWithChildren<{ value?: AuthContextValue }>) {
   if (value) {
-    return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>
+    return <ProvidedAuthProvider value={value}>{children}</ProvidedAuthProvider>
   }
 
   return <RuntimeAuthProvider>{children}</RuntimeAuthProvider>
+}
+
+function ProvidedAuthProvider({
+  children,
+  value,
+}: PropsWithChildren<{ value: AuthContextValue }>) {
+  const signOut = useCallback(async () => {
+    await cancelActiveSubjectFlightNotifications()
+    await value.signOut()
+  }, [value])
+  const safeValue = useMemo(
+    () => ({ ...value, signOut }),
+    [signOut, value],
+  )
+  return <AuthContext.Provider value={safeValue}>{children}</AuthContext.Provider>
 }
 
 export function RequireAuthentication() {

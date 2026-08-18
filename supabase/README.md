@@ -173,6 +173,113 @@ Supabase Cron invocation calls
 `dispatch_due_event_reminders`; it writes the authorized in-app notification
 before any generic APNs/FCM nudge is attempted.
 
+## Family flight tracking
+
+`family_flights` stores only an airline flight number, travel date, traveler
+display name, and the normalized status returned by the server-side tracker.
+It deliberately has no ticket-number field. A 13-digit ticket number cannot be
+resolved by public flight-status services and is rejected before local or
+server persistence. Approved circle members can read the family's flights and
+refresh their shared status; only the creator or circle owner can remove one.
+Direct table writes and authenticated snapshot RPC execution remain revoked.
+The authenticated Edge Function performs the provider lookup first, then uses
+its service role to persist only the normalized result after rechecking the
+approved circle and stored flight identity. Client-supplied JSON never becomes
+`status_snapshot`.
+
+Live status is proxied through `supabase/functions/flight-status`. The function
+uses AeroDataBox through RapidAPI over HTTPS and keeps the marketplace key
+server-side. Clerk uses third-party RS256 session tokens, so the legacy Edge
+gateway JWT check is disabled in `config.toml`; the handler authenticates that
+token through PostgREST and requires an approved family membership before any
+provider lookup. Configure and deploy it with:
+
+```sh
+supabase secrets set AERODATABOX_RAPIDAPI_KEY=your_server_only_key
+supabase secrets set APP_ALLOWED_ORIGINS=https://your-production-origin.example
+supabase functions deploy flight-status --no-verify-jwt
+```
+
+`AERODATABOX_RAPIDAPI_KEY` is a server-only secret. Never put it in a `VITE_`
+variable, the web bundle, or a native APK. The proxy calls only the fixed HTTPS
+`https://aerodatabox.p.rapidapi.com` host. Its normal lookup is the single-day
+flight-status endpoint with `dateLocalRole=Both` and `withLocation=true`, so a
+date copied from either an origin departure board or destination arrival board
+works;
+the same provider's airport endpoint is used only when embedded route geometry
+is incomplete. The key is sent only from the Edge Function. AeroDataBox's
+RapidAPI Basic plan currently provides 600 units per month; a Tier-2 status
+lookup costs two units, or roughly 300 lookups before cache savings. Future and
+historical availability remains subject to the selected plan and provider data
+coverage. Confirm current limits in the official [AeroDataBox pricing](https://aerodatabox.com/pricing/)
+and [OpenAPI documentation](https://doc.aerodatabox.com/).
+
+The Android WebView origin is `https://localhost`; iOS uses
+`capacitor://localhost`. Both exact native origins are built into the function's
+CORS allowlist. `APP_ALLOWED_ORIGINS` is only needed for additional hosted web
+origins. A real Clerk session and approved family membership are required;
+debug/test-auth preview builds intentionally cannot spend provider quota.
+
+Use a modern Supabase publishable key in the APK. It is sent only as `apikey`;
+the Clerk session token is the only Bearer credential. The function prefers the
+hosted runtime's modern publishable/secret key variables and retains legacy
+environment fallbacks for local Supabase compatibility.
+
+The mobile client derives the default URL from `VITE_SUPABASE_URL`. A separately
+hosted compatible proxy can instead be selected with the client-safe
+`VITE_FLIGHT_TRACKER_ENDPOINT`; that URL is public, but provider credentials
+must never be placed in any `VITE_` variable. The proxy requires a valid Clerk /
+Supabase session and an approved Family Circle membership, constrains requests
+to one normalized flight number and date, caches brief duplicate lookups, and
+calls only fixed AeroDataBox HTTPS endpoints. Set `APP_ALLOWED_ORIGINS` to a
+comma-separated production allowlist; Capacitor and local-development origins
+are included by default.
+
+AeroDataBox flight results must match the selected departure or arrival date.
+Equivalent IATA/ICAO airline prefixes and leading-zero formats are normalized;
+a different flight number is accepted only when the number-scoped lookup returns
+one unambiguous operating codeshare. Airport coordinates and IANA time zones are
+normalized server-side. Live ADS-B position is optional: when it is unavailable
+or stale, the client labels the airplane as an estimated or scheduled timeline
+position rather than live GPS. Legacy saved snapshots with provider
+`flightaware` remain valid, while all new provider responses use
+`aerodatabox`. Durable database buckets permit twelve lookups per approved
+member and thirty per family circle every five minutes; bounded in-memory
+caching and request coalescing reduce duplicate provider calls within an Edge
+isolate.
+
+To preserve the free AeroDataBox allowance, each phone persists an automatic
+refresh budget of at most two lookups per six hours. Nearby flights become
+eligible after one hour and distant flights after one day; an explicit
+`Refresh status` remains available. Mobile requests time out after twenty
+seconds and every add, refresh, or delete sheet can be closed without trapping
+the user. Ambiguous create retries reuse the same server row ID.
+
+Each phone opts into its own departure and arrival alerts. The installed iPhone
+or Android app uses Capacitor Local Notifications. Browser alerts are explicitly
+best-effort and work only while the tab remains open. Local notifications are
+rescheduled from the latest saved ETA whenever KinSphere refreshes; they are not
+airline push alerts and cannot learn about a new delay while the app is killed.
+
+## Family Journal photo library
+
+`family_journal_photos` is the immediate ordinary-photo source for Journal →
+People. It is deliberately separate from Capsules and 360 moments: a photo is
+visible as soon as it is added, while Capsule unlock rules remain unchanged.
+The mobile client first re-encodes each selected image as a metadata-free JPEG,
+saves the processed full image and thumbnail in account/family-scoped IndexedDB,
+and then retries private family sharing in the background. Face portraits,
+embeddings, detections, and recognition results never enter this table or
+Storage; matching remains device-local.
+
+The finalizer accepts only canonical UUID `.jpg` paths owned by the current
+approved member, verifies JPEG Storage metadata and bounded full/thumbnail
+sizes, and applies family/member/daily limits. Storage staging is limited to
+twenty currently unfinalized Journal objects per member so a compromised client
+cannot accumulate an unbounded private upload queue. Approved members can read
+only finalized photos in their current circle; short-lived signed URLs are used
+by the client.
+
 ## Local commands
 
 With Docker and the Supabase CLI installed:
@@ -187,6 +294,8 @@ supabase test db supabase/tests/moment_comments.sql
 supabase test db supabase/tests/events_notifications.sql
 supabase test db supabase/tests/clerk_third_party_auth.sql
 supabase test db supabase/tests/family_capsules.sql
+supabase test db supabase/tests/family_journal_photos.sql
+supabase test db supabase/tests/family_flights.sql
 ```
 
 ## Assumptions and current limits
@@ -205,8 +314,9 @@ supabase test db supabase/tests/family_capsules.sql
   processing worker should decode pixels, strip unsafe metadata, and generate a
   trusted thumbnail before a production launch.
 - An approved uploader can delete their own exact, unreferenced failed-upload
-  objects. There is no automated abandoned-upload cleanup, reservation, or
-  quota yet; those require a trusted worker before production launch.
+  objects. Journal photo staging and finalization have bounded quotas, but there
+  is no automated abandoned-upload cleanup yet; that still requires a trusted
+  worker before production launch.
 - Capsule, event, and notification tables reuse the approved-membership
   boundary. Scheduled-job dispatch remains restricted to the service role.
 - Weekly and special Capsule unlocks are server authoritative. The local

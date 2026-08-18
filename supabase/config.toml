@@ -30,13 +30,20 @@ additional_redirect_urls = [
   "http://localhost/**",
 ]
 
-# Native Clerk third-party auth for local Supabase development. Copy the exact
-# domain shown by Clerk's Supabase integration setup; it is project-specific.
-# Do not enable this placeholder or use the deprecated Supabase JWT template.
-# [auth.third_party.clerk]
-# enabled = true
-# domain = "your-instance.clerk.accounts.dev"
+# Native Clerk third-party auth. This public issuer domain comes from the
+# project's Clerk publishable key; no Clerk or Supabase secret is stored here.
+[auth.third_party.clerk]
+enabled = true
+domain = "well-guppy-1961.clerk.accounts.dev"
 
 [storage]
 enabled = true
-file_size_limit = "25MiB"
+# Match the hosted project's default. Feature migrations enforce their own
+# lower per-object limits before finalization.
+file_size_limit = "50MiB"
+
+[functions.flight-status]
+# Clerk issues a third-party RS256 token, so the legacy Edge gateway check is
+# disabled. The handler still rejects requests unless that token authenticates
+# through PostgREST and resolves to an approved family membership.
+verify_jwt = false

@@ -23,6 +23,10 @@ const clerk = vi.hoisted(() => ({
   cleanups: [] as Array<ReturnType<typeof vi.fn>>,
 }))
 
+const flightNotifications = vi.hoisted(() => ({
+  cancelActiveSubjectFlightNotifications: vi.fn(async () => undefined),
+}))
+
 vi.mock('@clerk/react', () => ({
   useAuth: () => ({
     getToken: clerk.getToken,
@@ -37,6 +41,7 @@ vi.mock('@clerk/react', () => ({
 vi.mock('../../lib/supabase', () => ({
   configureClerkSupabaseSession: clerk.configure,
 }))
+vi.mock('../flights/flightNotifications', () => flightNotifications)
 
 import { ClerkAuthBridge } from './AuthProvider'
 import { useAuth } from './authContext'
@@ -103,7 +108,33 @@ describe('ClerkAuthBridge', () => {
     })
     await expect(session.accessToken()).resolves.toBe('clerk-token')
     await session.signOut()
+    expect(flightNotifications.cancelActiveSubjectFlightNotifications)
+      .toHaveBeenCalledTimes(1)
     expect(clerk.signOut).toHaveBeenCalledTimes(1)
+  })
+
+  it('clears active-subject flight alerts when Clerk signs out externally', async () => {
+    const observations: string[] = []
+    const view = render(
+      <ClerkAuthBridge>
+        <AuthProbe observations={observations} />
+      </ClerkAuthBridge>,
+    )
+    await screen.findByText('signed-in:user_A')
+    flightNotifications.cancelActiveSubjectFlightNotifications.mockClear()
+
+    clerk.isSignedIn = false
+    clerk.sessionId = null as unknown as string
+    clerk.user = null
+    view.rerender(
+      <ClerkAuthBridge>
+        <AuthProbe observations={observations} />
+      </ClerkAuthBridge>,
+    )
+
+    await waitFor(() => expect(
+      flightNotifications.cancelActiveSubjectFlightNotifications,
+    ).toHaveBeenCalledTimes(1))
   })
 
   it('returns to loading while replacing account A with account B', async () => {

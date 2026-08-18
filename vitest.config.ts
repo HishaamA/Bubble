@@ -7,5 +7,8 @@ export default defineConfig({
     environment: 'jsdom',
     setupFiles: ['./src/test/setup.ts'],
     css: true,
+    // The full mobile UI suite is memory-heavy under jsdom. Bounding workers
+    // prevents otherwise healthy interaction tests from starving and timing out.
+    maxWorkers: 4,
   },
 })
