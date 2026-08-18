@@ -24,10 +24,56 @@ function expectMatricesClose(actual: Float32Array, expected: Float32Array) {
 
 describe('stereo panorama geometry', () => {
   it('uses equal viewports with symmetric inward optical centers', () => {
-    expect(resolveStereoViewports(844, 0.055)).toEqual([
-      { x: 0, width: 422, opticalCenter: 0.11 },
-      { x: 422, width: 422, opticalCenter: -0.11 },
+    expect(resolveStereoViewports(844, 390, 0.055)).toEqual([
+      {
+        x: 51,
+        y: 19,
+        width: 320,
+        height: 351,
+        opticalCenter: 0.11,
+      },
+      {
+        x: 473,
+        y: 19,
+        width: 320,
+        height: 351,
+        opticalCenter: -0.11,
+      },
     ])
+  })
+
+  it('keeps the two optical centers at the physical screen quarter points', () => {
+    const [left, right] = resolveStereoViewports(1170, 540, 0)
+    expect(left.width).toBe(right.width)
+    expect(Math.abs(left.x + left.width / 2 - 1170 * 0.25)).toBeLessThanOrEqual(0.5)
+    expect(Math.abs(right.x + right.width / 2 - 1170 * 0.75)).toBeLessThanOrEqual(0.5)
+    expect(right.x - (left.x + left.width)).toBeGreaterThan(0)
+    expect(right.x + right.width).toBe(1170 - left.x)
+  })
+
+  it('keeps tiny buffers valid and symmetric', () => {
+    expect(resolveStereoViewports(2, 1, 0)).toEqual([
+      { x: 0, y: 0, width: 1, height: 1, opticalCenter: 0 },
+      { x: 1, y: 0, width: 1, height: 1, opticalCenter: -0 },
+    ])
+  })
+
+  it.each([
+    [667, 375],
+    [844, 390],
+    [852, 393],
+    [932, 430],
+  ])('keeps black surround and a center rail at %sx%s', (width, height) => {
+    const [left, right] = resolveStereoViewports(width, height, 0)
+    const outerLeft = left.x
+    const outerRight = width - (right.x + right.width)
+    const centerRail = right.x - (left.x + left.width)
+
+    expect(outerLeft).toBe(outerRight)
+    expect(outerLeft).toBeGreaterThan(0)
+    expect(centerRail).toBeGreaterThanOrEqual(44)
+    expect(left.y).toBeGreaterThan(0)
+    expect(height - (left.y + left.height)).toBeGreaterThan(0)
   })
 
   it('makes the drawing buffer even', () => {

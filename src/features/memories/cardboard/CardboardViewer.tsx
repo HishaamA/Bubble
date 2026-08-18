@@ -687,6 +687,7 @@ export const CardboardViewer = forwardRef<
       aria-label={ariaLabel}
       aria-hidden={!active}
       inert={!active ? true : undefined}
+      data-view-mode="dual-lens"
     >
       {active ? (
         <>
@@ -723,6 +724,8 @@ export const CardboardViewer = forwardRef<
               </div>
               <span className="ks-cardboard__reticle" aria-hidden="true" />
             </div>
+
+            <span className="ks-cardboard__nose-bridge" aria-hidden="true" />
           </div>
 
           <button
@@ -737,13 +740,29 @@ export const CardboardViewer = forwardRef<
           </button>
 
           {motionFallbackMessage || !fullscreenAvailable ? (
-            <div className="ks-cardboard__status-panel">
-              {motionFallbackMessage ? (
-                <p role="status" aria-live="polite">{motionFallbackMessage}</p>
-              ) : null}
-              {!fullscreenAvailable ? (
-                <small>Fullscreen is unavailable, so the immersive overlay is being used.</small>
-              ) : null}
+            <div className="ks-cardboard__status-pair">
+              {[false, true].map((visualClone) => (
+                <div
+                  key={visualClone ? 'right' : 'left'}
+                  className="ks-cardboard__status-panel"
+                  aria-hidden={visualClone ? true : undefined}
+                >
+                  {motionFallbackMessage ? (
+                    <p
+                      role={visualClone ? undefined : 'status'}
+                      aria-live={visualClone ? undefined : 'polite'}
+                    >
+                      {motionFallbackMessage}
+                    </p>
+                  ) : null}
+                  {!fullscreenAvailable ? (
+                    <small>
+                      Fullscreen is unavailable, so the immersive overlay is
+                      being used.
+                    </small>
+                  ) : null}
+                </div>
+              ))}
             </div>
           ) : null}
 

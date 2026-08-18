@@ -31,6 +31,7 @@ final class PanoramaCaptureViewController: UIViewController, ARSessionDelegate {
         let pitch: Float
         let roll: Float
         let interfaceOrientation: UIInterfaceOrientation
+        let sharpnessScore: Float
     }
 
     private enum CaptureFileError: LocalizedError {
@@ -65,6 +66,8 @@ final class PanoramaCaptureViewController: UIViewController, ARSessionDelegate {
     private let steadyProgressLayer = CAShapeLayer()
     private let guidanceMaterial = UIVisualEffectView(effect: UIBlurEffect(style: .systemUltraThinMaterialDark))
     private let guidanceLabel = UILabel()
+    private let directionArrowMaterial = UIVisualEffectView(effect: UIBlurEffect(style: .systemChromeMaterialDark))
+    private let directionArrowImageView = UIImageView()
 
     private var targets: [CaptureTarget] = []
     private var targetNodes: [SCNNode] = []
@@ -77,6 +80,14 @@ final class PanoramaCaptureViewController: UIViewController, ARSessionDelegate {
     private var previousFrameTimestamp: TimeInterval?
     private var smoothedAngularSpeed = Float.greatestFiniteMagnitude
     private var smoothedLinearSpeed = Float.greatestFiniteMagnitude
+    private var instantaneousAngularSpeed = Float.greatestFiniteMagnitude
+    private var instantaneousLinearSpeed = Float.greatestFiniteMagnitude
+    private var consecutiveUnsteadyFrames = 0
+    private var steadyAnchorTransform: simd_float4x4?
+    private var bestStableSnapshot: FrameSnapshot?
+    private var bestStableSharpness = -Float.greatestFiniteMagnitude
+    private var captureOriginPosition: SIMD3<Float>?
+    private var lastGuidanceDirection: SIMD2<Float>?
     private var lastGuidanceTimestamp: TimeInterval = 0
     private var didEnd = false
     private var didStartSession = false
@@ -88,6 +99,7 @@ final class PanoramaCaptureViewController: UIViewController, ARSessionDelegate {
     // Main-thread-only presentation state.
     private var displayedTargetIndex: Int?
     private var capturedTargetIndices = Set<Int>()
+    private var displayedGuidanceDirection: CGVector?
 
     override var prefersStatusBarHidden: Bool { true }
     override var prefersHomeIndicatorAutoHidden: Bool { true }
@@ -171,6 +183,7 @@ final class PanoramaCaptureViewController: UIViewController, ARSessionDelegate {
         steadyTrackLayer.path = path
         steadyProgressLayer.frame = reticleView.bounds
         steadyProgressLayer.path = path
+        positionDirectionArrow()
     }
 
     deinit {
@@ -267,6 +280,33 @@ final class PanoramaCaptureViewController: UIViewController, ARSessionDelegate {
         guidanceLabel.numberOfLines = 2
         guidanceMaterial.contentView.addSubview(guidanceLabel)
 
+        directionArrowMaterial.frame = CGRect(x: 0, y: 0, width: 56, height: 56)
+        directionArrowMaterial.layer.cornerRadius = 28
+        directionArrowMaterial.layer.cornerCurve = .continuous
+        directionArrowMaterial.layer.borderWidth = 1
+        directionArrowMaterial.layer.borderColor = UIColor.white.withAlphaComponent(0.24).cgColor
+        directionArrowMaterial.clipsToBounds = true
+        directionArrowMaterial.isUserInteractionEnabled = false
+        directionArrowMaterial.isAccessibilityElement = false
+        directionArrowMaterial.accessibilityElementsHidden = true
+        directionArrowMaterial.alpha = 0
+        directionArrowMaterial.isHidden = true
+        view.addSubview(directionArrowMaterial)
+
+        directionArrowImageView.translatesAutoresizingMaskIntoConstraints = false
+        directionArrowImageView.image = UIImage(
+            systemName: "arrow.up",
+            withConfiguration: UIImage.SymbolConfiguration(pointSize: 24, weight: .semibold)
+        )
+        directionArrowImageView.tintColor = UIColor(
+            red: 0.88,
+            green: 0.71,
+            blue: 0.47,
+            alpha: 1
+        )
+        directionArrowImageView.contentMode = .center
+        directionArrowMaterial.contentView.addSubview(directionArrowImageView)
+
         NSLayoutConstraint.activate([
             headerMaterial.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 12),
             headerMaterial.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 14),
@@ -311,7 +351,12 @@ final class PanoramaCaptureViewController: UIViewController, ARSessionDelegate {
             guidanceLabel.leadingAnchor.constraint(equalTo: guidanceMaterial.contentView.leadingAnchor, constant: 20),
             guidanceLabel.trailingAnchor.constraint(equalTo: guidanceMaterial.contentView.trailingAnchor, constant: -20),
             guidanceLabel.bottomAnchor.constraint(equalTo: guidanceMaterial.contentView.bottomAnchor, constant: -13),
-            guidanceLabel.widthAnchor.constraint(lessThanOrEqualToConstant: 330)
+            guidanceLabel.widthAnchor.constraint(lessThanOrEqualToConstant: 330),
+
+            directionArrowImageView.centerXAnchor.constraint(equalTo: directionArrowMaterial.contentView.centerXAnchor),
+            directionArrowImageView.centerYAnchor.constraint(equalTo: directionArrowMaterial.contentView.centerYAnchor),
+            directionArrowImageView.widthAnchor.constraint(equalToConstant: 32),
+            directionArrowImageView.heightAnchor.constraint(equalTo: directionArrowImageView.widthAnchor)
         ])
     }
 
@@ -328,7 +373,7 @@ final class PanoramaCaptureViewController: UIViewController, ARSessionDelegate {
                 -cos(yaw) * cosPitch
             )
 
-            let sphere = SCNSphere(radius: 0.09)
+            let sphere = SCNSphere(radius: 0.11)
             sphere.segmentCount = 24
             let material = SCNMaterial()
             material.lightingModel = .constant
@@ -337,8 +382,22 @@ final class PanoramaCaptureViewController: UIViewController, ARSessionDelegate {
             sphere.materials = [material]
 
             let node = SCNNode(geometry: sphere)
-            node.simdPosition = direction * radius
+            node.simdPosition = direction * (radius - 0.05)
             node.opacity = 0.78
+
+            // A dark outer shell sits slightly behind the white target. This
+            // reads as a crisp halo against both bright windows and dark rooms.
+            let haloSphere = SCNSphere(radius: 0.18)
+            haloSphere.segmentCount = 24
+            let haloMaterial = SCNMaterial()
+            haloMaterial.lightingModel = .constant
+            haloMaterial.diffuse.contents = UIColor.black.withAlphaComponent(0.82)
+            haloMaterial.emission.contents = UIColor.black.withAlphaComponent(0.64)
+            haloSphere.materials = [haloMaterial]
+            let haloNode = SCNNode(geometry: haloSphere)
+            haloNode.simdPosition = direction * 0.08
+            node.addChildNode(haloNode)
+
             targetFieldNode.addChildNode(node)
             targetNodes.append(node)
 
@@ -423,10 +482,12 @@ final class PanoramaCaptureViewController: UIViewController, ARSessionDelegate {
         let transform = simd_inverse(frame.camera.viewMatrix(for: orientationState.orientation))
         anchorTargetFieldIfNeeded(to: transform)
         let motionIsSteady = updateMotion(transform: transform, timestamp: frame.timestamp)
+        let pivotDistance = distanceFromCaptureOrigin(to: transform)
         let trackingMessage = trackingMessage(for: frame.camera.trackingState)
         let trackingIsNormal: Bool
         if case .normal = frame.camera.trackingState {
             trackingIsNormal = true
+            anchorCaptureOriginIfNeeded(to: transform)
         } else {
             trackingIsNormal = false
         }
@@ -438,36 +499,74 @@ final class PanoramaCaptureViewController: UIViewController, ARSessionDelegate {
                 angularDistance: 0,
                 steadyProgress: 0,
                 trackingMessage: trackingMessage,
-                trackingIsNormal: trackingIsNormal
+                trackingIsNormal: trackingIsNormal,
+                direction: nil,
+                pivotDistance: pivotDistance
             )
             return
         }
 
         var steadyProgress: Float = 0
         let isAligned = candidate.angle <= options.alignmentRadians
+        let remainingTargetCount = targets.reduce(into: 0) { count, target in
+            if !target.isCaptured { count += 1 }
+        }
+        let direction = remainingTargetCount <= 6 &&
+            !isAligned &&
+            !orientationState.isTransitioning
+            ? guidanceDirection(
+                to: targets[candidate.index].direction,
+                cameraTransform: transform
+            )
+            : nil
+        if motionIsSteady {
+            consecutiveUnsteadyFrames = 0
+        } else {
+            consecutiveUnsteadyFrames += 1
+        }
+        let canGraceBriefTremor = steadyStartTimestamp != nil &&
+            consecutiveUnsteadyFrames <= 2
         let canCapture = trackingIsNormal &&
             isAligned &&
-            motionIsSteady &&
+            (motionIsSteady || canGraceBriefTremor) &&
             !isSavingFrame &&
             !orientationState.isTransitioning &&
             frame.timestamp >= captureCooldownUntil
 
         if canCapture {
-            if alignedTargetIndex != candidate.index {
-                alignedTargetIndex = candidate.index
-                steadyStartTimestamp = frame.timestamp
-            } else if steadyStartTimestamp == nil {
-                steadyStartTimestamp = frame.timestamp
+            if alignedTargetIndex != candidate.index || steadyStartTimestamp == nil {
+                startStableWindow(
+                    targetIndex: candidate.index,
+                    transform: transform,
+                    timestamp: frame.timestamp
+                )
+            } else if motionIsSteady && !steadyWindowIsWithinBounds(transform) {
+                // Slow drift can look "steady" frame-to-frame while still
+                // creating parallax. Start a fresh hold around the new pose.
+                startStableWindow(
+                    targetIndex: candidate.index,
+                    transform: transform,
+                    timestamp: frame.timestamp
+                )
+            }
+
+            if motionIsSteady {
+                considerStableFrame(
+                    frame: frame,
+                    cameraTransform: transform,
+                    interfaceOrientation: orientationState.orientation,
+                    targetIndex: candidate.index
+                )
             }
 
             if let steadyStartTimestamp {
                 let elapsed = max(0, frame.timestamp - steadyStartTimestamp)
                 steadyProgress = min(1, Float(elapsed / options.steadyDuration))
-                if elapsed >= options.steadyDuration {
+                if motionIsSteady,
+                   elapsed >= options.steadyDuration,
+                   let snapshot = bestStableSnapshot {
                     beginCapture(
-                        frame: frame,
-                        cameraTransform: transform,
-                        interfaceOrientation: orientationState.orientation,
+                        snapshot: snapshot,
                         targetIndex: candidate.index
                     )
                     steadyProgress = 0
@@ -476,6 +575,10 @@ final class PanoramaCaptureViewController: UIViewController, ARSessionDelegate {
         } else {
             alignedTargetIndex = isAligned ? candidate.index : nil
             steadyStartTimestamp = nil
+            steadyAnchorTransform = nil
+            bestStableSnapshot = nil
+            bestStableSharpness = -Float.greatestFiniteMagnitude
+            consecutiveUnsteadyFrames = 0
         }
 
         publishGuidance(
@@ -484,7 +587,9 @@ final class PanoramaCaptureViewController: UIViewController, ARSessionDelegate {
             angularDistance: candidate.angle,
             steadyProgress: steadyProgress,
             trackingMessage: trackingMessage,
-            trackingIsNormal: trackingIsNormal
+            trackingIsNormal: trackingIsNormal,
+            direction: direction,
+            pivotDistance: pivotDistance
         )
     }
 
@@ -501,11 +606,13 @@ final class PanoramaCaptureViewController: UIViewController, ARSessionDelegate {
         DispatchQueue.main.async { [weak self] in
             self?.guidanceLabel.text = "Capture paused"
             self?.steadyProgressLayer.strokeEnd = 0
+            self?.updateDirectionArrow(nil, isVisible: false)
         }
     }
 
     func sessionInterruptionEnded(_ session: ARSession) {
         targetFieldIsAnchored = false
+        captureOriginPosition = nil
         resetSteadiness()
 
         DispatchQueue.main.async { [weak self] in
@@ -523,11 +630,19 @@ final class PanoramaCaptureViewController: UIViewController, ARSessionDelegate {
             cameraTransform.columns.3.y,
             cameraTransform.columns.3.z
         )
-
         DispatchQueue.main.async { [weak self] in
             guard let self, !self.hasEnded else { return }
             self.targetFieldNode.simdPosition = cameraPosition
         }
+    }
+
+    private func anchorCaptureOriginIfNeeded(to cameraTransform: simd_float4x4) {
+        guard captureOriginPosition == nil else { return }
+        captureOriginPosition = SIMD3<Float>(
+            cameraTransform.columns.3.x,
+            cameraTransform.columns.3.y,
+            cameraTransform.columns.3.z
+        )
     }
 
     private func closestUncapturedTarget(to cameraTransform: simd_float4x4) -> (index: Int, angle: Float)? {
@@ -568,6 +683,8 @@ final class PanoramaCaptureViewController: UIViewController, ARSessionDelegate {
         guard deltaTime > 0.000_1, deltaTime < 0.25 else {
             smoothedAngularSpeed = .greatestFiniteMagnitude
             smoothedLinearSpeed = .greatestFiniteMagnitude
+            instantaneousAngularSpeed = .greatestFiniteMagnitude
+            instantaneousLinearSpeed = .greatestFiniteMagnitude
             return false
         }
 
@@ -588,31 +705,136 @@ final class PanoramaCaptureViewController: UIViewController, ARSessionDelegate {
             transform.columns.3.z
         )
         let linearSpeed = simd_distance(previousPosition, currentPosition) / Float(deltaTime)
+        instantaneousAngularSpeed = angularSpeed
+        instantaneousLinearSpeed = linearSpeed
 
-        if smoothedAngularSpeed.isFinite {
-            smoothedAngularSpeed = 0.78 * smoothedAngularSpeed + 0.22 * angularSpeed
-            smoothedLinearSpeed = 0.78 * smoothedLinearSpeed + 0.22 * linearSpeed
-        } else {
-            smoothedAngularSpeed = angularSpeed
-            smoothedLinearSpeed = linearSpeed
+        let hasHardSpike = angularSpeed >= 0.18 || linearSpeed >= 0.12
+        if !hasHardSpike {
+            if smoothedAngularSpeed.isFinite {
+                smoothedAngularSpeed = 0.78 * smoothedAngularSpeed + 0.22 * angularSpeed
+                smoothedLinearSpeed = 0.78 * smoothedLinearSpeed + 0.22 * linearSpeed
+            } else {
+                smoothedAngularSpeed = angularSpeed
+                smoothedLinearSpeed = linearSpeed
+            }
         }
 
-        return smoothedAngularSpeed < 0.12 && smoothedLinearSpeed < 0.08
+        // A raw ceiling catches shutter jolts without letting one noisy pose
+        // poison the moving average. The session gives two frames of grace so
+        // ordinary hand tremor does not restart the whole hold.
+        return !hasHardSpike &&
+            instantaneousAngularSpeed < 0.11 &&
+            instantaneousLinearSpeed < 0.065 &&
+            smoothedAngularSpeed < 0.12 &&
+            smoothedLinearSpeed < 0.08
     }
 
-    private func beginCapture(
+    private func distanceFromCaptureOrigin(to transform: simd_float4x4) -> Float {
+        guard let captureOriginPosition else { return 0 }
+        let currentPosition = SIMD3<Float>(
+            transform.columns.3.x,
+            transform.columns.3.y,
+            transform.columns.3.z
+        )
+        return simd_distance(captureOriginPosition, currentPosition)
+    }
+
+    private func guidanceDirection(
+        to targetDirection: SIMD3<Float>,
+        cameraTransform: simd_float4x4
+    ) -> SIMD2<Float> {
+        let cameraRight = simd_normalize(SIMD3<Float>(
+            cameraTransform.columns.0.x,
+            cameraTransform.columns.0.y,
+            cameraTransform.columns.0.z
+        ))
+        let cameraUp = simd_normalize(SIMD3<Float>(
+            cameraTransform.columns.1.x,
+            cameraTransform.columns.1.y,
+            cameraTransform.columns.1.z
+        ))
+        let cameraForward = simd_normalize(SIMD3<Float>(
+            -cameraTransform.columns.2.x,
+            -cameraTransform.columns.2.y,
+            -cameraTransform.columns.2.z
+        ))
+
+        let right = simd_dot(targetDirection, cameraRight)
+        let up = simd_dot(targetDirection, cameraUp)
+        let forward = simd_dot(targetDirection, cameraForward)
+        let horizontalBearing = atan2(right, forward)
+        let verticalBearing = atan2(up, hypot(right, forward))
+        var screenDirection = SIMD2<Float>(horizontalBearing, -verticalBearing)
+
+        if simd_length_squared(screenDirection) < 0.000_001 {
+            screenDirection = lastGuidanceDirection ?? SIMD2<Float>(1, 0)
+        } else {
+            screenDirection = simd_normalize(screenDirection)
+        }
+        lastGuidanceDirection = screenDirection
+        return screenDirection
+    }
+
+    private func startStableWindow(
+        targetIndex: Int,
+        transform: simd_float4x4,
+        timestamp: TimeInterval
+    ) {
+        alignedTargetIndex = targetIndex
+        steadyStartTimestamp = timestamp
+        steadyAnchorTransform = transform
+        bestStableSnapshot = nil
+        bestStableSharpness = -Float.greatestFiniteMagnitude
+    }
+
+    private func steadyWindowIsWithinBounds(_ transform: simd_float4x4) -> Bool {
+        guard let steadyAnchorTransform else { return true }
+        let anchorRotation = rotationQuaternion(from: steadyAnchorTransform)
+        let currentRotation = rotationQuaternion(from: transform)
+        let quaternionDot = min(
+            max(abs(simd_dot(anchorRotation.vector, currentRotation.vector)), 0),
+            1
+        )
+        let angularDrift = Float(2 * acos(Double(quaternionDot)))
+        let anchorPosition = SIMD3<Float>(
+            steadyAnchorTransform.columns.3.x,
+            steadyAnchorTransform.columns.3.y,
+            steadyAnchorTransform.columns.3.z
+        )
+        let currentPosition = SIMD3<Float>(
+            transform.columns.3.x,
+            transform.columns.3.y,
+            transform.columns.3.z
+        )
+        let linearDrift = simd_distance(anchorPosition, currentPosition)
+        return angularDrift <= 0.052 && linearDrift <= 0.03
+    }
+
+    private func considerStableFrame(
         frame: ARFrame,
         cameraTransform: simd_float4x4,
         interfaceOrientation: UIInterfaceOrientation,
         targetIndex: Int
     ) {
-        guard !isSavingFrame, !targets[targetIndex].isCaptured else { return }
+        let sharpness = lumaSharpnessScore(frame.capturedImage)
+        guard sharpness > bestStableSharpness else { return }
+        bestStableSharpness = sharpness
+        bestStableSnapshot = makeSnapshot(
+            frame: frame,
+            cameraTransform: cameraTransform,
+            interfaceOrientation: interfaceOrientation,
+            targetIndex: targetIndex,
+            sharpnessScore: sharpness
+        )
+    }
 
-        isSavingFrame = true
-        steadyStartTimestamp = nil
-        alignedTargetIndex = nil
-        captureCooldownUntil = frame.timestamp + 0.45
-
+    private func makeSnapshot(
+        frame: ARFrame,
+        cameraTransform: simd_float4x4,
+        interfaceOrientation: UIInterfaceOrientation,
+        targetIndex: Int,
+        sharpnessScore: Float
+    ) -> FrameSnapshot {
         let forward = simd_normalize(SIMD3<Float>(
             -cameraTransform.columns.2.x,
             -cameraTransform.columns.2.y,
@@ -627,7 +849,7 @@ final class PanoramaCaptureViewController: UIViewController, ARSessionDelegate {
         )
         let target = targets[targetIndex]
 
-        let snapshot = FrameSnapshot(
+        return FrameSnapshot(
             captureIndex: capturedFrames.count,
             targetIndex: targetIndex,
             targetYaw: target.yaw,
@@ -641,8 +863,61 @@ final class PanoramaCaptureViewController: UIViewController, ARSessionDelegate {
             yaw: yaw,
             pitch: pitch,
             roll: roll,
-            interfaceOrientation: interfaceOrientation
+            interfaceOrientation: interfaceOrientation,
+            sharpnessScore: sharpnessScore
         )
+    }
+
+    private func lumaSharpnessScore(_ pixelBuffer: CVPixelBuffer) -> Float {
+        guard CVPixelBufferLockBaseAddress(pixelBuffer, .readOnly) == kCVReturnSuccess else {
+            return 0
+        }
+        defer { CVPixelBufferUnlockBaseAddress(pixelBuffer, .readOnly) }
+
+        let planeCount = CVPixelBufferGetPlaneCount(pixelBuffer)
+        guard planeCount > 0,
+              let baseAddress = CVPixelBufferGetBaseAddressOfPlane(pixelBuffer, 0) else {
+            return 0
+        }
+
+        let width = CVPixelBufferGetWidthOfPlane(pixelBuffer, 0)
+        let height = CVPixelBufferGetHeightOfPlane(pixelBuffer, 0)
+        let bytesPerRow = CVPixelBufferGetBytesPerRowOfPlane(pixelBuffer, 0)
+        let step = max(4, min(width, height) / 180)
+        guard width > step * 2, height > step * 2 else { return 0 }
+
+        let bytes = baseAddress.assumingMemoryBound(to: UInt8.self)
+        var edgeEnergy: UInt64 = 0
+        var sampleCount: UInt64 = 0
+        for y in stride(from: step, to: height - step, by: step) {
+            let row = bytes.advanced(by: y * bytesPerRow)
+            let upper = bytes.advanced(by: (y - 1) * bytesPerRow)
+            let lower = bytes.advanced(by: (y + 1) * bytesPerRow)
+            for x in stride(from: step, to: width - step, by: step) {
+                let centre = Int(row[x])
+                let horizontal = abs(centre * 2 - Int(row[x - 1]) - Int(row[x + 1]))
+                let vertical = abs(centre * 2 - Int(upper[x]) - Int(lower[x]))
+                edgeEnergy += UInt64(horizontal + vertical)
+                sampleCount += 1
+            }
+        }
+        guard sampleCount > 0 else { return 0 }
+        return Float(edgeEnergy) / Float(sampleCount)
+    }
+
+    private func beginCapture(
+        snapshot: FrameSnapshot,
+        targetIndex: Int
+    ) {
+        guard !isSavingFrame, !targets[targetIndex].isCaptured else { return }
+
+        isSavingFrame = true
+        steadyStartTimestamp = nil
+        alignedTargetIndex = nil
+        captureCooldownUntil = snapshot.frameTimestamp + 0.45
+        steadyAnchorTransform = nil
+        bestStableSnapshot = nil
+        bestStableSharpness = -Float.greatestFiniteMagnitude
 
         imageQueue.async { [weak self] in
             guard let self, !self.hasEnded else { return }
@@ -822,7 +1097,8 @@ final class PanoramaCaptureViewController: UIViewController, ARSessionDelegate {
             ],
             "imageOrientation": "up",
             "captureInterfaceOrientation": interfaceOrientationName(snapshot.interfaceOrientation),
-            "trackingState": "normal"
+            "trackingState": "normal",
+            "sharpnessScore": Double(snapshot.sharpnessScore)
         ]
     }
 
@@ -832,7 +1108,9 @@ final class PanoramaCaptureViewController: UIViewController, ARSessionDelegate {
         angularDistance: Float,
         steadyProgress: Float,
         trackingMessage: String,
-        trackingIsNormal: Bool
+        trackingIsNormal: Bool,
+        direction: SIMD2<Float>?,
+        pivotDistance: Float
     ) {
         guard timestamp - lastGuidanceTimestamp >= 1.0 / 20.0 else { return }
         lastGuidanceTimestamp = timestamp
@@ -842,19 +1120,125 @@ final class PanoramaCaptureViewController: UIViewController, ARSessionDelegate {
             let isAligned = angularDistance <= self.options.alignmentRadians
             self.updateDisplayedTarget(targetIndex, isAligned: isAligned)
             self.steadyProgressLayer.strokeEnd = CGFloat(steadyProgress)
+            self.updateDirectionArrow(
+                direction,
+                isVisible: trackingIsNormal && !isAligned && direction != nil
+            )
 
             if !trackingIsNormal {
                 self.guidanceLabel.text = trackingMessage
             } else if targetIndex == nil {
                 self.guidanceLabel.text = "Capture complete"
+            } else if pivotDistance > 0.35 {
+                // Advisory only: a hard session-wide pivot gate can deadlock
+                // normal ceiling and floor capture for less-steady users.
+                self.guidanceLabel.text = "Keep the iPhone near one spot"
             } else if !isAligned {
-                self.guidanceLabel.text = "Move a dot into the circle"
+                self.guidanceLabel.text = direction == nil
+                    ? "Move a dot into the circle"
+                    : "Follow the arrow to the next dot"
             } else if steadyProgress > 0 {
                 self.guidanceLabel.text = "Hold still"
             } else {
                 self.guidanceLabel.text = "Steady your iPhone"
             }
         }
+    }
+
+    private func updateDirectionArrow(
+        _ direction: SIMD2<Float>?,
+        isVisible: Bool
+    ) {
+        dispatchPrecondition(condition: .onQueue(.main))
+
+        guard isVisible, let direction else {
+            displayedGuidanceDirection = nil
+            directionArrowMaterial.layer.removeAllAnimations()
+            guard !directionArrowMaterial.isHidden else { return }
+            UIView.animate(
+                withDuration: 0.14,
+                delay: 0,
+                options: [.beginFromCurrentState, .allowUserInteraction]
+            ) { [weak self] in
+                self?.directionArrowMaterial.alpha = 0
+            } completion: { [weak self] _ in
+                guard let self, self.displayedGuidanceDirection == nil else { return }
+                self.directionArrowMaterial.isHidden = true
+            }
+            return
+        }
+
+        displayedGuidanceDirection = CGVector(
+            dx: CGFloat(direction.x),
+            dy: CGFloat(direction.y)
+        )
+        positionDirectionArrow()
+        directionArrowMaterial.layer.removeAllAnimations()
+        if directionArrowMaterial.isHidden {
+            directionArrowMaterial.isHidden = false
+            directionArrowMaterial.alpha = 0
+        }
+        UIView.animate(
+            withDuration: 0.14,
+            delay: 0,
+            options: [.beginFromCurrentState, .allowUserInteraction]
+        ) { [weak self] in
+            self?.directionArrowMaterial.alpha = 1
+        }
+    }
+
+    private func positionDirectionArrow() {
+        dispatchPrecondition(condition: .onQueue(.main))
+        guard let direction = displayedGuidanceDirection,
+              view.bounds.width > 0,
+              view.bounds.height > 0 else { return }
+
+        let length = max(0.000_1, hypot(direction.dx, direction.dy))
+        let dx = direction.dx / length
+        let dy = direction.dy / length
+        let arrowRadius: CGFloat = 28
+        let spacing: CGFloat = 14
+        let safeFrame = view.safeAreaLayoutGuide.layoutFrame
+        var minX = safeFrame.minX + arrowRadius + spacing
+        var maxX = safeFrame.maxX - arrowRadius - spacing
+        var minY = max(
+            safeFrame.minY + arrowRadius + spacing,
+            headerMaterial.frame.maxY + arrowRadius + 10
+        )
+        var maxY = min(
+            safeFrame.maxY - arrowRadius - spacing,
+            guidanceMaterial.frame.minY - arrowRadius - 10
+        )
+
+        if maxX <= minX {
+            minX = view.bounds.minX + arrowRadius + 8
+            maxX = view.bounds.maxX - arrowRadius - 8
+        }
+        if maxY <= minY {
+            minY = safeFrame.minY + arrowRadius + 8
+            maxY = safeFrame.maxY - arrowRadius - 8
+        }
+
+        let origin = reticleView.center
+        var intersections: [CGFloat] = []
+        if dx > 0.000_1 {
+            intersections.append((maxX - origin.x) / dx)
+        } else if dx < -0.000_1 {
+            intersections.append((minX - origin.x) / dx)
+        }
+        if dy > 0.000_1 {
+            intersections.append((maxY - origin.y) / dy)
+        } else if dy < -0.000_1 {
+            intersections.append((minY - origin.y) / dy)
+        }
+        let distance = intersections.filter { $0 > 0 }.min() ?? 0
+        directionArrowMaterial.center = CGPoint(
+            x: min(max(origin.x + dx * distance, minX), maxX),
+            y: min(max(origin.y + dy * distance, minY), maxY)
+        )
+        directionArrowImageView.transform = CGAffineTransform(
+            rotationAngle: atan2(dy, dx) + .pi / 2
+        )
     }
 
     private func updateDisplayedTarget(_ index: Int?, isAligned: Bool) {
@@ -914,8 +1298,15 @@ final class PanoramaCaptureViewController: UIViewController, ARSessionDelegate {
         previousFrameTimestamp = nil
         smoothedAngularSpeed = .greatestFiniteMagnitude
         smoothedLinearSpeed = .greatestFiniteMagnitude
+        instantaneousAngularSpeed = .greatestFiniteMagnitude
+        instantaneousLinearSpeed = .greatestFiniteMagnitude
+        consecutiveUnsteadyFrames = 0
         alignedTargetIndex = nil
         steadyStartTimestamp = nil
+        steadyAnchorTransform = nil
+        bestStableSnapshot = nil
+        bestStableSharpness = -Float.greatestFiniteMagnitude
+        lastGuidanceDirection = nil
     }
 
     private func updateCaptureOrientation(

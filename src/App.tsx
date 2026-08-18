@@ -57,7 +57,8 @@ export function AccountScopedData({ children }: { children: ReactNode }) {
 }
 
 function OnboardingRoute() {
-  const { user } = useAuth()
+  const { isDevelopmentPreview, user } = useAuth()
+  if (isDevelopmentPreview) return <Navigate to="/" replace />
   return <OnboardingPage key={user?.id ?? 'signed-out'} />
 }
 

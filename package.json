@@ -10,11 +10,13 @@
   "scripts": {
     "dev": "vite",
     "build": "pnpm typecheck && vite build",
+    "build:demo": "pnpm typecheck && vite build --mode demo",
     "typecheck": "tsc -b",
     "lint": "oxlint --ignore-pattern 'public/vendor/**'",
     "test": "vitest run",
     "test:watch": "vitest",
     "cap:sync": "pnpm build && cap sync",
+    "cap:sync:demo": "pnpm build:demo && cap sync",
     "cap:android": "pnpm cap:sync && cap open android",
     "cap:ios": "pnpm cap:sync && cap open ios",
     "supabase:start": "supabase start",

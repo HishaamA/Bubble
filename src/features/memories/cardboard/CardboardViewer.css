@@ -34,30 +34,43 @@
   inset: 0;
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  inline-size: 100%;
-  block-size: 100%;
+  gap: 0;
+  overflow: visible;
 }
 
 .ks-cardboard__eye {
   position: relative;
   z-index: 2;
+  inline-size: 76%;
+  block-size: 90%;
   min-inline-size: 0;
   min-block-size: 0;
+  place-self: center;
   overflow: hidden;
+  border-radius: 22% / 15%;
   background: transparent;
   pointer-events: none;
 }
 
-.ks-cardboard__eye--left {
-  border-inline-end: 1px solid rgb(255 255 255 / 13%);
-}
-
-.ks-cardboard__eye--right {
-  border-inline-start: 1px solid rgb(0 0 0 / 72%);
-}
-
 .ks-cardboard__eyes .ks-stereo-panorama {
   z-index: 1;
+}
+
+.ks-cardboard__nose-bridge {
+  position: absolute;
+  z-index: 9;
+  inset-inline-start: 50%;
+  inset-block-end: 0;
+  inline-size: 1px;
+  block-size: 27%;
+  background: linear-gradient(
+    to bottom,
+    transparent,
+    rgb(255 255 255 / 72%) 30%,
+    rgb(255 255 255 / 72%)
+  );
+  transform: translateX(-0.5px);
+  pointer-events: none;
 }
 
 .ks-cardboard__eye .ks-panorama {
@@ -154,20 +167,18 @@
     calc(env(safe-area-inset-top) + 0.65rem),
     calc(var(--native-safe-area-top, 0px) + 0.65rem)
   );
-  inset-inline-end: max(
-    1.5rem,
-    calc(env(safe-area-inset-right) + 0.75rem),
-    calc(var(--native-safe-area-right, 0px) + 0.75rem)
-  );
+  inset-inline-start: 50%;
+  inset-inline-end: auto;
   display: flex;
+  inline-size: 44px;
   min-block-size: 44px;
-  padding: 0 0.78rem;
-  gap: 0.35rem;
+  padding: 0;
   align-items: center;
   justify-content: center;
   color: #fff;
-  border-radius: 999px;
+  border-radius: 50%;
   font: 650 0.72rem/1 system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+  transform: translateX(-50%);
   cursor: pointer;
 }
 
@@ -180,7 +191,7 @@
 }
 
 .ks-cardboard__exit:active {
-  transform: scale(0.96);
+  transform: translateX(-50%) scale(0.96);
 }
 
 .ks-cardboard__exit svg {
@@ -191,11 +202,37 @@
   stroke-width: 1.7;
 }
 
+.ks-cardboard__exit > span {
+  position: absolute;
+  inline-size: 1px;
+  block-size: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.ks-cardboard__status-pair {
+  position: absolute;
+  z-index: 20;
+  inset: 0;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  pointer-events: none;
+}
+
 .ks-cardboard__status-panel {
-  inset-inline-start: max(0.75rem, env(safe-area-inset-left));
-  inset-block-end: max(0.75rem, env(safe-area-inset-bottom));
+  position: relative;
+  place-self: end center;
+  inline-size: 76%;
+  margin-block-end: max(
+    1.2rem,
+    calc(env(safe-area-inset-bottom) + 0.55rem),
+    calc(var(--native-safe-area-bottom, 0px) + 0.55rem)
+  );
   display: flex;
-  max-inline-size: min(21rem, calc(50% - 1.5rem));
   min-block-size: 2.45rem;
   padding: 0.48rem 0.7rem;
   gap: 0.55rem;
@@ -315,11 +352,11 @@
 @media (max-height: 28rem) and (orientation: landscape) {
   .ks-cardboard__status-panel {
     transform: scale(0.88);
-    transform-origin: left center;
+    transform-origin: center bottom;
   }
 
   .ks-cardboard__exit {
-    transform-origin: right center;
+    transform-origin: center;
   }
 }
 

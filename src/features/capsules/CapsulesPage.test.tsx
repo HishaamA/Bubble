@@ -14,9 +14,17 @@ const capsuleServiceMocks = vi.hoisted(() => ({
   subscribeToFamilyCapsules: vi.fn(),
   uploadFamilyCapsulePhoto: vi.fn(),
 }))
+const nativeRecapMocks = vi.hoisted(() => ({
+  discardNativeCapsuleRecapArtifacts: vi.fn(),
+  isNativeCapsuleRecapAvailable: vi.fn(),
+  renderNativeCapsuleRecap: vi.fn(),
+  shareNativeCapsuleRecap: vi.fn(),
+  stageNativeCapsuleRecapImage: vi.fn(),
+}))
 
 vi.mock('./processCapsuleImage', () => capsuleImageMocks)
 vi.mock('./capsuleService', () => capsuleServiceMocks)
+vi.mock('./recap/nativeCapsuleRecap', () => nativeRecapMocks)
 vi.mock('../auth', () => ({
   useAuth: () => ({
     user: { id: 'user_simreen', displayName: 'Simreen' },
@@ -103,6 +111,21 @@ beforeEach(() => {
     thumbnailWidth: 420,
     thumbnailHeight: 560,
   })
+  nativeRecapMocks.isNativeCapsuleRecapAvailable.mockReturnValue(false)
+  nativeRecapMocks.stageNativeCapsuleRecapImage.mockResolvedValue({
+    path: 'file:///tmp/CapsuleRecapStaging/photo.jpg',
+  })
+  nativeRecapMocks.renderNativeCapsuleRecap.mockResolvedValue({
+    fileUri: 'file:///tmp/CapsuleRecaps/recap.mp4',
+    width: 1080,
+    height: 1920,
+    frameRate: 30,
+    framesPerImage: 6,
+    durationMs: 200,
+    imageCount: 1,
+  })
+  nativeRecapMocks.shareNativeCapsuleRecap.mockResolvedValue({ completed: true })
+  nativeRecapMocks.discardNativeCapsuleRecapArtifacts.mockResolvedValue(undefined)
 })
 
 describe('CapsulesPage', () => {
@@ -193,6 +216,78 @@ describe('CapsulesPage', () => {
 
     await user.click(screen.getByRole('button', { name: 'Close recap' }))
     await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+  })
+
+  it('opens and saves every on-device pending photo after its Capsule unlocks', async () => {
+    const user = userEvent.setup()
+    const capsule = unlockedCapsule()
+    const originalPhoto = capsule.photos[0]
+    capsule.photos = [4, 2, 0, 3, 1].map((index) => ({
+      ...originalPhoto,
+      id: `local-photo-${index}`,
+      image: new Blob([`full local photo ${index}`], { type: 'image/jpeg' }),
+      thumbnail: new Blob([`local thumbnail ${index}`], { type: 'image/jpeg' }),
+      caption: `Local photo ${index}`,
+      capturedAt: `2026-08-21T18:00:0${index}.000Z`,
+      syncStatus: 'pending' as const,
+    }))
+    capsule.totalPhotoCount = capsule.photos.length
+    const store = createMemoryCapsuleStore([capsule])
+    const stagedPaths = Array.from(
+      { length: 5 },
+      (_, index) => `file:///tmp/CapsuleRecapStaging/photo-${index}.jpg`,
+    )
+    nativeRecapMocks.isNativeCapsuleRecapAvailable.mockReturnValue(true)
+    nativeRecapMocks.stageNativeCapsuleRecapImage.mockImplementation(async () => ({
+      path: stagedPaths[nativeRecapMocks.stageNativeCapsuleRecapImage.mock.calls.length - 1],
+    }))
+    render(<CapsulesPage now={testNow} store={store} />)
+
+    const card = (await screen.findByRole('heading', {
+      name: capsule.title,
+    })).closest('article')!
+    const playButton = within(card).getByRole('button', { name: 'Play recap' })
+    expect(playButton).toBeEnabled()
+    expect(card).toHaveTextContent('5 photos saved on this phone')
+
+    await user.click(playButton)
+    const dialog = screen.getByRole('dialog', { name: capsule.title })
+    await user.click(within(dialog).getByRole('button', { name: 'Save video' }))
+
+    await waitFor(() => {
+      expect(nativeRecapMocks.stageNativeCapsuleRecapImage).toHaveBeenCalledTimes(5)
+      expect(nativeRecapMocks.stageNativeCapsuleRecapImage).toHaveBeenCalledWith(
+        { dataUrl: expect.stringMatching(/^data:image\/jpeg;base64,/) },
+      )
+      expect(nativeRecapMocks.renderNativeCapsuleRecap).toHaveBeenCalledWith({
+        imagePaths: stagedPaths,
+      })
+      expect(nativeRecapMocks.shareNativeCapsuleRecap).toHaveBeenCalledWith(
+        'file:///tmp/CapsuleRecaps/recap.mp4',
+      )
+    })
+    expect(within(dialog).getByRole('status')).toHaveTextContent(
+      'Your recap is ready to save or share.',
+    )
+  })
+
+  it('does not offer a recap for an unrecoverable legacy object URL', async () => {
+    const capsule = unlockedCapsule()
+    capsule.photos[0] = {
+      ...capsule.photos[0],
+      image: 'blob:from-an-older-app-session',
+      thumbnail: 'blob:from-an-older-app-session-thumb',
+      syncStatus: 'pending',
+    }
+    const store = createMemoryCapsuleStore([capsule])
+    render(<CapsulesPage now={testNow} store={store} />)
+
+    const card = (await screen.findByRole('heading', {
+      name: capsule.title,
+    })).closest('article')!
+    expect(within(card).getByRole('button', {
+      name: 'Photos unavailable on this phone',
+    })).toBeDisabled()
   })
 
   it('obscures a locked Capsule, exposes its exact open date, and represents hidden family photos', async () => {

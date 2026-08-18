@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   createCameraBasis,
   directionToEquirectangular,
+  resolveFrameCalibration,
   resolveFrameCameraBasis,
   resolveFrameOrientation,
 } from './composeGuidedPanorama'
@@ -83,5 +84,43 @@ describe('guided panorama geometry', () => {
     expect(basis.forward[2]).toBeCloseTo(0)
     expect(basis.right[2]).toBeCloseTo(-1)
     expect(basis.up[1]).toBeCloseTo(1)
+  })
+
+  it('keeps the calibrated optical centre when frames are sampled down', () => {
+    expect(resolveFrameCalibration({
+      width: 2000,
+      height: 1000,
+      intrinsics: [1200, 0, 1080, 0, 1180, 460, 0, 0, 1],
+    }, 1000, 500)).toEqual({
+      fx: 600,
+      fy: 590,
+      cx: 540,
+      cy: 230,
+    })
+  })
+
+  it('falls back to the image centre when old frames have no intrinsics', () => {
+    expect(resolveFrameCalibration({
+      width: 1920,
+      height: 1080,
+      horizontalFovDegrees: 68,
+    }, 720, 405)).toMatchObject({
+      cx: 359.5,
+      cy: 202,
+    })
+  })
+
+  it('rotates an off-centre calibration with a legacy quarter-turn frame', () => {
+    expect(resolveFrameCalibration({
+      width: 2000,
+      height: 1000,
+      rotationDegrees: 90,
+      intrinsics: [1200, 0, 1080, 0, 1180, 460, 0, 0, 1],
+    }, 500, 1000)).toEqual({
+      fx: 590,
+      fy: 600,
+      cx: 269.5,
+      cy: 540,
+    })
   })
 })

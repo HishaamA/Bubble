@@ -181,31 +181,70 @@ function getCanvasContext(canvas: HTMLCanvasElement) {
   return context
 }
 
-function frameFocalLength(
+export type GuidedFrameCalibration = {
+  fx: number
+  fy: number
+  cx: number
+  cy: number
+}
+
+export function resolveFrameCalibration(
   frame: NativePanoramaFrame,
   sampleWidth: number,
   sampleHeight: number,
-) {
+): GuidedFrameCalibration {
   const intrinsicFx = frame.intrinsics?.[0]
   const intrinsicFy = frame.intrinsics?.[4]
-  if (
+  const intrinsicCx = frame.intrinsics?.[2]
+  const intrinsicCy = frame.intrinsics?.[5]
+  const hasFocalLength =
     Number.isFinite(intrinsicFx) &&
     Number.isFinite(intrinsicFy) &&
     (intrinsicFx as number) > 0 &&
-    (intrinsicFy as number) > 0 &&
+    (intrinsicFy as number) > 0
+  if (
+    hasFocalLength &&
     frame.width > 0 &&
     frame.height > 0
   ) {
-    const quarterTurn = Math.abs(Math.round(frame.rotationDegrees ?? 0) % 180) === 90
-    if (quarterTurn) {
+    const sourceCx = Number.isFinite(intrinsicCx)
+      ? (intrinsicCx as number)
+      : (frame.width - 1) / 2
+    const sourceCy = Number.isFinite(intrinsicCy)
+      ? (intrinsicCy as number)
+      : (frame.height - 1) / 2
+    const rotation = (
+      (Math.round(frame.rotationDegrees ?? 0) % 360) + 360
+    ) % 360
+    if (rotation === 90) {
       return {
         fx: (intrinsicFy as number) * (sampleWidth / frame.height),
         fy: (intrinsicFx as number) * (sampleHeight / frame.width),
+        cx: (frame.height - 1 - sourceCy) * (sampleWidth / frame.height),
+        cy: sourceCx * (sampleHeight / frame.width),
+      }
+    }
+    if (rotation === 180) {
+      return {
+        fx: (intrinsicFx as number) * (sampleWidth / frame.width),
+        fy: (intrinsicFy as number) * (sampleHeight / frame.height),
+        cx: (frame.width - 1 - sourceCx) * (sampleWidth / frame.width),
+        cy: (frame.height - 1 - sourceCy) * (sampleHeight / frame.height),
+      }
+    }
+    if (rotation === 270) {
+      return {
+        fx: (intrinsicFy as number) * (sampleWidth / frame.height),
+        fy: (intrinsicFx as number) * (sampleHeight / frame.width),
+        cx: sourceCy * (sampleWidth / frame.height),
+        cy: (frame.width - 1 - sourceCx) * (sampleHeight / frame.width),
       }
     }
     return {
       fx: (intrinsicFx as number) * (sampleWidth / frame.width),
       fy: (intrinsicFy as number) * (sampleHeight / frame.height),
+      cx: sourceCx * (sampleWidth / frame.width),
+      cy: sourceCy * (sampleHeight / frame.height),
     }
   }
 
@@ -218,7 +257,12 @@ function frameFocalLength(
   const fy = verticalFov
     ? sampleHeight / (2 * Math.tan((verticalFov * Math.PI) / 360))
     : fx
-  return { fx, fy }
+  return {
+    fx,
+    fy,
+    cx: (sampleWidth - 1) / 2,
+    cy: (sampleHeight - 1) / 2,
+  }
 }
 
 function calculateAverageLuma(data: Uint8ClampedArray) {
@@ -316,7 +360,10 @@ function nextPaint() {
 /**
  * Creates an equirectangular sphere from pose-tagged native frames. This is a
  * bounded on-device compositor: the native capture targets provide geometric
- * alignment and overlapping samples are exposure-balanced and feathered.
+ * alignment and overlapping samples are exposure-balanced. Each panorama
+ * pixel prefers the source closest to its optical centre; averaging every
+ * overlap creates transparent duplicate people and objects whenever there is
+ * handheld parallax or movement in the room.
  * A native OpenCV stitcher can replace this implementation behind the same
  * capture contract without changing the Moments upload flow.
  */
@@ -338,10 +385,10 @@ export async function composeGuidedPanorama(
   const safeOutputWidth = Math.min(4096, Math.round(outputWidth / 2) * 2)
   const outputHeight = safeOutputWidth / 2
   const outputPixels = safeOutputWidth * outputHeight
-  const red = new Uint32Array(outputPixels)
-  const green = new Uint32Array(outputPixels)
-  const blue = new Uint32Array(outputPixels)
-  const weights = new Uint32Array(outputPixels)
+  const red = new Uint8ClampedArray(outputPixels)
+  const green = new Uint8ClampedArray(outputPixels)
+  const blue = new Uint8ClampedArray(outputPixels)
+  const dominance = new Uint16Array(outputPixels)
   const sampleCanvas = document.createElement('canvas')
   const sampleContext = getCanvasContext(sampleCanvas)
   let referenceLuma: number | undefined
@@ -368,9 +415,15 @@ export async function composeGuidedPanorama(
       referenceLuma ??= luma
       const exposure = Math.max(0.72, Math.min(1.38, referenceLuma / Math.max(1, luma)))
       const basis = resolveFrameCameraBasis(frame)
-      const { fx, fy } = frameFocalLength(frame, sampleWidth, sampleHeight)
-      const centerX = (sampleWidth - 1) / 2
-      const centerY = (sampleHeight - 1) / 2
+      const { fx, fy, cx, cy } = resolveFrameCalibration(
+        frame,
+        sampleWidth,
+        sampleHeight,
+      )
+      const leftRadius = Math.max(1, cx)
+      const rightRadius = Math.max(1, sampleWidth - 1 - cx)
+      const topRadius = Math.max(1, cy)
+      const bottomRadius = Math.max(1, sampleHeight - 1 - cy)
 
       onProgress?.({
         phase: 'projecting',
@@ -379,11 +432,15 @@ export async function composeGuidedPanorama(
       })
 
       for (let y = 0; y < sampleHeight; y += 1) {
-        const cameraY = -(y - centerY) / fy
-        const normalizedY = Math.abs((y - centerY) / Math.max(1, centerY))
+        const cameraY = -(y - cy) / fy
+        const normalizedY = Math.abs(
+          (y - cy) / (y < cy ? topRadius : bottomRadius),
+        )
         for (let x = 0; x < sampleWidth; x += 1) {
-          const cameraX = (x - centerX) / fx
-          const normalizedX = Math.abs((x - centerX) / Math.max(1, centerX))
+          const cameraX = (x - cx) / fx
+          const normalizedX = Math.abs(
+            (x - cx) / (x < cx ? leftRadius : rightRadius),
+          )
           const edgeDistance = Math.max(normalizedX, normalizedY)
           if (edgeDistance > 0.985) continue
           const direction = addScaled(
@@ -405,11 +462,25 @@ export async function composeGuidedPanorama(
           )
           const destinationIndex = destinationY * safeOutputWidth + destinationX
           const sourceIndex = (y * sampleWidth + x) * 4
-          const feather = Math.max(1, Math.round((1 - edgeDistance) ** 2 * 64))
-          red[destinationIndex] += Math.min(255, imageData.data[sourceIndex] * exposure) * feather
-          green[destinationIndex] += Math.min(255, imageData.data[sourceIndex + 1] * exposure) * feather
-          blue[destinationIndex] += Math.min(255, imageData.data[sourceIndex + 2] * exposure) * feather
-          weights[destinationIndex] += feather
+          const candidateDominance = Math.max(
+            1,
+            Math.round((1 - edgeDistance) ** 2 * 65_535),
+          )
+          if (candidateDominance <= dominance[destinationIndex]) continue
+
+          dominance[destinationIndex] = candidateDominance
+          red[destinationIndex] = Math.min(
+            255,
+            Math.round(imageData.data[sourceIndex] * exposure),
+          )
+          green[destinationIndex] = Math.min(
+            255,
+            Math.round(imageData.data[sourceIndex + 1] * exposure),
+          )
+          blue[destinationIndex] = Math.min(
+            255,
+            Math.round(imageData.data[sourceIndex + 2] * exposure),
+          )
         }
       }
     } finally {
@@ -427,11 +498,10 @@ export async function composeGuidedPanorama(
   let coveredPixels = 0
   for (let index = 0; index < outputPixels; index += 1) {
     const colorIndex = index * 4
-    const weight = weights[index]
-    if (weight) {
-      outputImage.data[colorIndex] = red[index] / weight
-      outputImage.data[colorIndex + 1] = green[index] / weight
-      outputImage.data[colorIndex + 2] = blue[index] / weight
+    if (dominance[index]) {
+      outputImage.data[colorIndex] = red[index]
+      outputImage.data[colorIndex + 1] = green[index]
+      outputImage.data[colorIndex + 2] = blue[index]
       coverage[index] = 1
       coveredPixels += 1
     }

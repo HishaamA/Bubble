@@ -250,7 +250,12 @@ describe('CardboardViewer', () => {
     ).toHaveLength(1)
     expect(stereoMocks.lastProps?.scene.id).toBe('dinner')
     expect(stereoMocks.lastProps?.opticalCenterShift).toBe(0)
+    expect(document.querySelectorAll('.ks-cardboard__eye')).toHaveLength(2)
     expect(document.querySelectorAll('.ks-cardboard__reticle')).toHaveLength(2)
+    expect(document.querySelector('.ks-cardboard__nose-bridge')).not.toBeNull()
+    expect(
+      screen.getByRole('dialog', { name: 'Cardboard panoramic memory' }),
+    ).toHaveAttribute('data-view-mode', 'dual-lens')
     expect(screen.getAllByText('Sunday dinner')).toHaveLength(2)
     expect(screen.getAllByText('Simreen')).toHaveLength(2)
   })
@@ -283,7 +288,8 @@ describe('CardboardViewer', () => {
 
     await enterViewer(ref)
 
-    expect(screen.getByText(/motion access is off/i)).toBeVisible()
+    expect(screen.getByRole('status')).toHaveTextContent(/motion access is off/i)
+    expect(document.querySelectorAll('.ks-cardboard__status-panel')).toHaveLength(2)
     expect(stereoMocks.startOrientation).not.toHaveBeenCalled()
     expect(
       screen.queryByRole('button', { name: /enable motion/i }),

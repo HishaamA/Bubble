@@ -4,9 +4,14 @@ export type Quaternion = readonly [number, number, number, number]
 
 export interface StereoViewport {
   x: number
+  y: number
   width: number
+  height: number
   opticalCenter: number
 }
+
+export const STEREO_LENS_WIDTH_FRACTION = 0.38
+export const STEREO_LENS_HEIGHT_FRACTION = 0.90
 
 export function clampOpticalCenterShift(shift: number): number {
   if (!Number.isFinite(shift)) return 0
@@ -15,13 +20,38 @@ export function clampOpticalCenterShift(shift: number): number {
 
 export function resolveStereoViewports(
   canvasWidth: number,
+  canvasHeight: number,
   opticalCenterShift: number,
 ): readonly [StereoViewport, StereoViewport] {
-  const eyeWidth = Math.max(1, Math.floor(canvasWidth / 2))
+  const width = Math.max(2, Math.floor(canvasWidth))
+  const height = Math.max(1, Math.floor(canvasHeight))
+  const eyeWidth = Math.max(
+    1,
+    Math.floor(width * STEREO_LENS_WIDTH_FRACTION),
+  )
+  const eyeHeight = Math.max(
+    1,
+    Math.floor(height * STEREO_LENS_HEIGHT_FRACTION),
+  )
+  const leftEyeX = Math.max(0, Math.round(width * 0.25 - eyeWidth / 2))
+  const rightEyeX = width - leftEyeX - eyeWidth
+  const eyeY = Math.max(0, Math.floor((height - eyeHeight) / 2))
   const shiftNdc = clampOpticalCenterShift(opticalCenterShift) * 2
   return [
-    { x: 0, width: eyeWidth, opticalCenter: shiftNdc },
-    { x: eyeWidth, width: eyeWidth, opticalCenter: -shiftNdc },
+    {
+      x: leftEyeX,
+      y: eyeY,
+      width: eyeWidth,
+      height: eyeHeight,
+      opticalCenter: shiftNdc,
+    },
+    {
+      x: rightEyeX,
+      y: eyeY,
+      width: eyeWidth,
+      height: eyeHeight,
+      opticalCenter: -shiftNdc,
+    },
   ]
 }
 

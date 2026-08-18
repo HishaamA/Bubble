@@ -22,13 +22,18 @@
 .ks-stereo-panorama__fallback {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0;
+  place-items: center;
+  background: #000;
 }
 
 .ks-stereo-panorama__fallback img {
-  inline-size: 100%;
-  block-size: 100%;
+  inline-size: 76%;
+  block-size: 90%;
   min-inline-size: 0;
   object-fit: cover;
+  border-radius: 22% / 15%;
+  box-shadow: inset 0 0 2rem rgb(0 0 0 / 42%);
 }
 
 .ks-stereo-panorama__status {

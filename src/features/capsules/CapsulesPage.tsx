@@ -339,6 +339,19 @@ function photoCountLabel(count: number) {
   return `${count} ${count === 1 ? 'photo' : 'photos'}`
 }
 
+function capsuleRecapPhotos(photos: CapsulePhoto[]) {
+  return photos.filter(({ image }) => {
+    if (typeof image !== 'string') return image.size > 0
+
+    const source = image.trim()
+    // Object URLs belong to one WebView session. An older URL can still be in
+    // the Capsule metadata after a legacy app restart, but it cannot be opened
+    // or rendered into a recap. Pending IndexedDB Blobs, on the other hand,
+    // are fully usable on this phone even before family sync succeeds.
+    return source.length > 0 && !source.startsWith('blob:')
+  })
+}
+
 async function imageSourceToBlob(source: CapsuleImageSource) {
   if (typeof source !== 'string') return source
   const response = await fetch(source)
@@ -521,7 +534,7 @@ function CapsuleCard({
   const canContribute = !unlocked
   const totalPhotoCount = capsule.totalPhotoCount ?? capsule.photos.length
   const pendingPhotoCount = capsule.photos.filter(({ syncStatus }) => syncStatus === 'pending').length
-  const recapPhotoCount = capsule.photos.filter(({ syncStatus }) => syncStatus !== 'pending').length
+  const recapPhotoCount = capsuleRecapPhotos(capsule.photos).length
 
   return (
     <article
@@ -551,7 +564,9 @@ function CapsuleCard({
           <strong>{photoCountLabel(totalPhotoCount)}</strong>
           <span>
             {pendingPhotoCount > 0
-              ? `${photoCountLabel(pendingPhotoCount)} waiting to share`
+              ? unlocked
+                ? `${photoCountLabel(pendingPhotoCount)} saved on this phone`
+                : `${photoCountLabel(pendingPhotoCount)} waiting to share`
               : unlocked
                 ? 'ready for your family recap'
                 : `opens ${formatOpenDate(capsule)}`}
@@ -575,7 +590,7 @@ function CapsuleCard({
             disabled={recapPhotoCount === 0}
             onClick={() => onOpenRecap(capsule)}
           >
-            {recapPhotoCount > 0 ? 'Play recap' : 'No shared photos this time'}
+            {recapPhotoCount > 0 ? 'Play recap' : 'Photos unavailable on this phone'}
           </button>
         )}
       </div>
@@ -606,10 +621,9 @@ function RecapSheet({
   onPreparePhotos: () => Promise<CapsulePhoto[]>
 }) {
   const orderedPhotos = useMemo(
-    () => capsule.photos
-      .filter(({ syncStatus }) => demoMode || syncStatus !== 'pending')
+    () => capsuleRecapPhotos(capsule.photos)
       .sort((left, right) => left.capturedAt.localeCompare(right.capturedAt)),
-    [capsule.photos, demoMode],
+    [capsule.photos],
   )
   const [index, setIndex] = useState(0)
   const [saving, setSaving] = useState(false)
@@ -638,11 +652,10 @@ function RecapSheet({
     const nativeArtifacts: string[] = []
     let nativeFailure: unknown
     try {
-      const preparedPhotos = (await onPreparePhotos())
-        .filter(({ syncStatus }) => demoMode || syncStatus !== 'pending')
+      const preparedPhotos = capsuleRecapPhotos(await onPreparePhotos())
         .sort((left, right) => left.capturedAt.localeCompare(right.capturedAt))
       if (preparedPhotos.length === 0) {
-        throw new Error('There are no shared photos available for this recap yet.')
+        throw new Error('These Capsule photos are not available on this phone yet.')
       }
       if (isNativeCapsuleRecapAvailable()) {
         try {

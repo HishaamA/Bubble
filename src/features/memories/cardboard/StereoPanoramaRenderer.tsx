@@ -58,6 +58,11 @@ uniform float uTanHalfHorizontalFov;
 uniform float uOpticalCenter;
 const float PI = 3.1415926535897932384626433832795;
 void main() {
+  // A fourth-power superellipse gives each half the soft rectangular lens
+  // silhouette used by Cardboard viewers while preserving a generous field of
+  // view. The single shader/canvas still drives both eyes in the same frame.
+  float lensDistance = pow(abs(vPosition.x), 4.0) + pow(abs(vPosition.y), 4.0);
+  float lensMask = 1.0 - smoothstep(0.985, 1.015, lensDistance);
   vec2 centered = vec2(vPosition.x - uOpticalCenter, vPosition.y);
   vec3 cameraRay = normalize(vec3(
     centered.x * uTanHalfHorizontalFov,
@@ -68,7 +73,9 @@ void main() {
   float yaw = atan(worldRay.x, -worldRay.z);
   float pitch = asin(clamp(worldRay.y, -1.0, 1.0));
   vec2 uv = vec2(fract(0.5 + yaw / (2.0 * PI)), 0.5 - pitch / PI);
-  gl_FragColor = texture2D(uPanorama, uv);
+  vec4 panorama = texture2D(uPanorama, uv);
+  float edgeShade = 1.0 - 0.38 * smoothstep(0.80, 1.0, lensDistance);
+  gl_FragColor = vec4(panorama.rgb * edgeShade * lensMask, 1.0);
 }`
 
 interface ShaderLocations {
@@ -193,8 +200,12 @@ export class StereoWebGlPanoramaRenderer {
     // never force layout from the animation loop once the buffer has dimensions.
     if (this.canvas.width < 2 || this.canvas.height < 1) this.resize()
     const { gl, canvas } = this
-    const eyes = resolveStereoViewports(canvas.width, opticalCenterShift)
-    const eyeAspect = eyes[0].width / Math.max(canvas.height, 1)
+    const eyes = resolveStereoViewports(
+      canvas.width,
+      canvas.height,
+      opticalCenterShift,
+    )
+    const eyeAspect = eyes[0].width / Math.max(eyes[0].height, 1)
     const hfov = Math.max(55, Math.min(110, horizontalFovDegrees))
     gl.useProgram(this.program)
     gl.bindBuffer(gl.ARRAY_BUFFER, this.quadBuffer)
@@ -205,7 +216,7 @@ export class StereoWebGlPanoramaRenderer {
     gl.uniform1f(this.locations.tanHalfHorizontalFov, Math.tan((hfov * Math.PI) / 360))
     gl.clear(gl.COLOR_BUFFER_BIT)
     eyes.forEach((eye) => {
-      gl.viewport(eye.x, 0, eye.width, canvas.height)
+      gl.viewport(eye.x, eye.y, eye.width, eye.height)
       gl.uniform1f(this.locations.opticalCenter, eye.opticalCenter)
       gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4)
     })
@@ -443,6 +454,7 @@ export const StereoPanoramaRenderer = forwardRef<
       data-panorama={scene.panorama}
       data-scene-title={scene.title}
       data-renderer="single-canvas-stereo"
+      data-lens-shape="superellipse"
     >
       <canvas
         ref={canvasRef}

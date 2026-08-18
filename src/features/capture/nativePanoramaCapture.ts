@@ -30,6 +30,7 @@ export type NativePanoramaFrame = {
   imageOrientation?: string
   intrinsics?: number[]
   transform?: number[]
+  sharpnessScore?: number
 }
 
 export type NativePanoramaCaptureResult = {
