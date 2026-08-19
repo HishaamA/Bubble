@@ -43,6 +43,7 @@ import {
   subscribeToFamilyCapsules,
   uploadFamilyCapsulePhoto,
 } from './capsuleService'
+import { getCapsulePhotoCapturedAt } from './capsulePhotoDate'
 import { processCapsuleImage } from './processCapsuleImage'
 import type {
   CapsuleImageSource,
@@ -899,9 +900,9 @@ export function CapsulesPage({
     setUploadingCapsuleId(capsule.id)
     setAnnouncement('Preparing your photo…')
     try {
+      const capturedAt = await getCapsulePhotoCapturedAt(file)
       const processed = await processCapsuleImage(file)
       const latestCapsule = capsules.find(({ id }) => id === capsule.id) ?? capsule
-      const capturedAt = new Date().toISOString()
       const caption = file.name.replace(/\.[^.]+$/, '').replace(/[-_]+/g, ' ').trim()
       const localPhotoId = createId('photo')
       const photo: CapsulePhoto = {

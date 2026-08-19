@@ -36,6 +36,26 @@ export function memberCacheNamespace(userId: string, familyId: string) {
   return `${userId}:${familyId}`
 }
 
+function openPlansFromLegacyEventRoute(state: unknown) {
+  const routeState = state && typeof state === 'object' && !Array.isArray(state)
+    ? state as Record<string, unknown>
+    : {}
+  const existingContext = routeState.journalContext
+  const journalContext = existingContext
+    && typeof existingContext === 'object'
+    && !Array.isArray(existingContext)
+    ? existingContext as Record<string, unknown>
+    : {}
+
+  return {
+    ...routeState,
+    journalContext: {
+      ...journalContext,
+      section: 'plans',
+    },
+  }
+}
+
 export function AccountScopedData({ children }: { children: ReactNode }) {
   const { status, user } = useAuth()
   const { snapshot } = useFamilyOnboarding()
@@ -106,8 +126,8 @@ function App() {
   return (
     <ErrorBoundary>
       <AuthProvider>
-        <EventReminderCoordinator />
         <FamilyOnboardingProvider>
+          <EventReminderCoordinator />
           <HashRouter>
             <Routes>
               <Route path="/login" element={<AuthPage />} />
@@ -119,6 +139,10 @@ function App() {
                     <Route path="/journal" element={<JournalMemberRoute />} />
                     <Route
                       path="/journal/photo/:capsuleId/:photoId"
+                      element={<CapsulePhotoMemberRoute />}
+                    />
+                    <Route
+                      path="/journal/library/:photoId"
                       element={<CapsulePhotoMemberRoute />}
                     />
                     <Route path="/memory/:memoryId" element={<PanoramaRoute />} />
@@ -141,6 +165,7 @@ function App() {
                         <LegacyRouteRedirect
                           fromBase="/events"
                           toBase="/journal"
+                          mapState={openPlansFromLegacyEventRoute}
                         />
                       }
                     />

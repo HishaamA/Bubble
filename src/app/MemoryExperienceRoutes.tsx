@@ -7,6 +7,11 @@ import {
 } from '../features/capture'
 import { CapsulePhotoViewer } from '../features/journal/CapsulePhotoViewer'
 import { useJournalCapsuleArchive } from '../features/journal/capsuleJournalArchive'
+import { useJournalPhotoLibrary } from '../features/journal/journalPhotoLibrary'
+import type {
+  JournalPhoto,
+  JournalPhotoStore,
+} from '../features/journal/journalPhotoTypes'
 import { JournalPage } from '../features/journal'
 import type {
   CapsuleStore,
@@ -18,6 +23,7 @@ import {
   useFamilyMomentSync,
   useSharedMoments,
 } from '../features/memories/shared'
+import { useAuth } from '../features/auth'
 
 function isSameLocalDay(first: string | Date, second: Date) {
   const date = first instanceof Date ? first : new Date(first)
@@ -45,6 +51,8 @@ type JournalArchiveRouteProps = {
   capsules?: FamilyCapsule[]
   capsuleStore?: CapsuleStore
   capsuleCacheNamespace?: string
+  journalPhotos?: JournalPhoto[]
+  journalPhotoStore?: JournalPhotoStore
 }
 
 export function JournalRoute({
@@ -52,20 +60,31 @@ export function JournalRoute({
   capsules: suppliedCapsules,
   capsuleStore,
   capsuleCacheNamespace = 'signed-out:no-family',
+  journalPhotos: suppliedJournalPhotos,
+  journalPhotoStore,
 }: JournalArchiveRouteProps = {}) {
-  const { moments } = useSharedMoments()
+  const { user } = useAuth()
   const archive = useJournalCapsuleArchive({
     cacheNamespace: capsuleCacheNamespace,
     enabled: suppliedCapsules === undefined,
     store: capsuleStore,
   })
+  const photoLibrary = useJournalPhotoLibrary({
+    cacheNamespace: capsuleCacheNamespace,
+    contributorName: user?.displayName?.trim() || 'You',
+    enabled: suppliedJournalPhotos === undefined,
+    store: journalPhotoStore,
+  })
 
   return (
     <JournalPage
       now={now}
-      sharedMoments={moments}
       capsules={suppliedCapsules ?? archive.capsules}
       capsuleNow={now ?? archive.clock}
+      capsuleCacheNamespace={capsuleCacheNamespace}
+      journalPhotos={suppliedJournalPhotos ?? photoLibrary.photos}
+      onUploadJournalPhotos={photoLibrary.importPhotos}
+      journalPhotoImportProgress={photoLibrary.importProgress}
     />
   )
 }
@@ -75,18 +94,31 @@ export function CapsulePhotoRoute({
   capsules: suppliedCapsules,
   capsuleStore,
   capsuleCacheNamespace = 'signed-out:no-family',
+  journalPhotos: suppliedJournalPhotos,
+  journalPhotoStore,
 }: JournalArchiveRouteProps = {}) {
+  const { user } = useAuth()
   const archive = useJournalCapsuleArchive({
     cacheNamespace: capsuleCacheNamespace,
     enabled: suppliedCapsules === undefined,
     store: capsuleStore,
   })
+  const photoLibrary = useJournalPhotoLibrary({
+    cacheNamespace: capsuleCacheNamespace,
+    contributorName: user?.displayName?.trim() || 'You',
+    enabled: suppliedJournalPhotos === undefined,
+    store: journalPhotoStore,
+  })
 
   return (
     <CapsulePhotoViewer
       capsules={suppliedCapsules ?? archive.capsules}
-      loading={suppliedCapsules === undefined && archive.loading}
+      loading={
+        (suppliedCapsules === undefined && archive.loading) ||
+        (suppliedJournalPhotos === undefined && photoLibrary.loading)
+      }
       now={now ?? archive.clock}
+      journalPhotos={suppliedJournalPhotos ?? photoLibrary.photos}
     />
   )
 }

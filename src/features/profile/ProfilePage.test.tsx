@@ -27,6 +27,20 @@ vi.mock('../auth', () => ({
 
 vi.mock('../../services/persistence', () => persistence)
 
+// ProfilePage owns the disclosure and summary; FamilySyncPanel's backend states
+// have their own focused suite. Keep this test deterministic even when a local
+// developer has valid Supabase credentials in .env.local.
+vi.mock('./family-sync', () => ({
+  FamilySyncPanel: () => (
+    <section aria-label="Family Sync">
+      <h2>Family Sync</h2>
+      <h3>Family groups need a connection</h3>
+      <p>Connect Supabase to securely create a group and share invite codes.</p>
+      <a href="/login">Open secure sign-in</a>
+    </section>
+  ),
+}))
+
 import { ProfilePage } from './ProfilePage'
 
 beforeEach(() => {

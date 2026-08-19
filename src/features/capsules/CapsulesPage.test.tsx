@@ -7,6 +7,9 @@ import type { FamilyCapsule } from './types'
 const capsuleImageMocks = vi.hoisted(() => ({
   processCapsuleImage: vi.fn(),
 }))
+const capsulePhotoDateMocks = vi.hoisted(() => ({
+  getCapsulePhotoCapturedAt: vi.fn(),
+}))
 const capsuleServiceMocks = vi.hoisted(() => ({
   createFamilySpecialCapsule: vi.fn(),
   ensureFamilyWeeklyCapsule: vi.fn(),
@@ -23,6 +26,7 @@ const nativeRecapMocks = vi.hoisted(() => ({
 }))
 
 vi.mock('./processCapsuleImage', () => capsuleImageMocks)
+vi.mock('./capsulePhotoDate', () => capsulePhotoDateMocks)
 vi.mock('./capsuleService', () => capsuleServiceMocks)
 vi.mock('./recap/nativeCapsuleRecap', () => nativeRecapMocks)
 vi.mock('../auth', () => ({
@@ -103,6 +107,9 @@ beforeEach(() => {
   capsuleServiceMocks.subscribeToFamilyCapsules.mockResolvedValue(() => undefined)
   capsuleServiceMocks.uploadFamilyCapsulePhoto.mockResolvedValue(null)
   capsuleServiceMocks.createFamilySpecialCapsule.mockResolvedValue(null)
+  capsulePhotoDateMocks.getCapsulePhotoCapturedAt.mockResolvedValue(
+    '2011-05-06T07:08:09.000Z',
+  )
   capsuleImageMocks.processCapsuleImage.mockResolvedValue({
     image: new Blob(['full'], { type: 'image/jpeg' }),
     thumbnail: new Blob(['thumb'], { type: 'image/jpeg' }),
@@ -161,6 +168,10 @@ describe('CapsulesPage', () => {
       'Saturday pancakes.jpg is saved on this device and waiting to share with your family.',
     )
     expect(capsuleImageMocks.processCapsuleImage).toHaveBeenCalledWith(portrait)
+    expect(capsulePhotoDateMocks.getCapsulePhotoCapturedAt).toHaveBeenCalledWith(portrait)
+    expect(
+      capsulePhotoDateMocks.getCapsulePhotoCapturedAt.mock.invocationCallOrder[0],
+    ).toBeLessThan(capsuleImageMocks.processCapsuleImage.mock.invocationCallOrder[0])
 
     const saved = await store.list()
     expect(saved.find(({ title }) => title === 'This week')?.photos).toHaveLength(1)
@@ -169,6 +180,52 @@ describe('CapsulesPage', () => {
       height: 1200,
       contributorName: 'Simreen',
       syncStatus: 'pending',
+      capturedAt: '2011-05-06T07:08:09.000Z',
+    })
+  })
+
+  it('sends the original capture date when a new photo is shared', async () => {
+    const user = userEvent.setup()
+    const capsuleId = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'
+    const syncedWeekly: FamilyCapsule = {
+      id: capsuleId,
+      kind: 'weekly',
+      title: 'This week',
+      weekStart: '2026-08-24',
+      createdAt: new Date(2026, 7, 24).toISOString(),
+      closesAt: new Date(2026, 7, 31).toISOString(),
+      opensAt: new Date(2026, 7, 31).toISOString(),
+      createdByName: 'Simreen',
+      photos: [],
+      totalPhotoCount: 0,
+      familySynced: true,
+    }
+    capsuleServiceMocks.ensureFamilyWeeklyCapsule.mockResolvedValue({
+      id: capsuleId,
+      weekStart: syncedWeekly.weekStart,
+    })
+    capsuleServiceMocks.fetchFamilyCapsules.mockResolvedValue([syncedWeekly])
+    capsuleServiceMocks.uploadFamilyCapsulePhoto.mockImplementation(
+      async ({ itemId }: { itemId: string }) => itemId,
+    )
+    const { container } = render(
+      <CapsulesPage now={testNow} store={createMemoryCapsuleStore()} />,
+    )
+    await screen.findByRole('heading', { name: 'This week' })
+    const input = container.querySelector<HTMLInputElement>('input[type="file"]')
+    const portrait = new File(['portrait'], 'Family portrait.jpg', {
+      type: 'image/jpeg',
+    })
+
+    await user.upload(input!, portrait)
+
+    await waitFor(() => {
+      expect(capsuleServiceMocks.uploadFamilyCapsulePhoto).toHaveBeenCalledWith(
+        expect.objectContaining({
+          capsuleId,
+          capturedAt: '2011-05-06T07:08:09.000Z',
+        }),
+      )
     })
   })
 
