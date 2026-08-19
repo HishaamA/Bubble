@@ -6,6 +6,7 @@ const coordinatorMocks = vi.hoisted(() => ({
     status: 'signed-in' as 'signed-in' | 'signed-out' | 'loading',
     user: { id: 'user_a' } as { id: string } | null,
   },
+  familyId: 'family_a' as string | null,
   listener: undefined as ((state: { isActive: boolean }) => void) | undefined,
   addListener: vi.fn(),
   remove: vi.fn(),
@@ -15,6 +16,17 @@ const coordinatorMocks = vi.hoisted(() => ({
 
 vi.mock('../auth', () => ({
   useAuth: () => coordinatorMocks.auth,
+}))
+
+vi.mock('../onboarding', () => ({
+  useFamilyOnboarding: () => ({
+    snapshot: coordinatorMocks.familyId
+      ? {
+          kind: 'member',
+          membership: { familyId: coordinatorMocks.familyId },
+        }
+      : { kind: 'needs-family' },
+  }),
 }))
 
 vi.mock('@capacitor/app', () => ({
@@ -34,6 +46,7 @@ beforeEach(() => {
   vi.clearAllMocks()
   coordinatorMocks.auth.status = 'signed-in'
   coordinatorMocks.auth.user = { id: 'user_a' }
+  coordinatorMocks.familyId = 'family_a'
   coordinatorMocks.listener = undefined
   coordinatorMocks.addListener.mockImplementation(
     async (_eventName: string, listener: (state: { isActive: boolean }) => void) => {
@@ -50,18 +63,24 @@ describe('EventReminderCoordinator', () => {
     render(<EventReminderCoordinator />)
 
     await waitFor(() => {
-      expect(coordinatorMocks.transition).toHaveBeenCalledWith('user_a')
+      expect(coordinatorMocks.transition).toHaveBeenCalledWith(
+        'user_a:family:family_a',
+      )
       expect(coordinatorMocks.listener).toBeTypeOf('function')
     })
     coordinatorMocks.listener?.({ isActive: true })
 
-    expect(coordinatorMocks.resume).toHaveBeenCalledWith('user_a')
+    expect(coordinatorMocks.resume).toHaveBeenCalledWith(
+      'user_a:family:family_a',
+    )
   })
 
   it('transitions to no account after sign-out without waiting for a route', async () => {
     const view = render(<EventReminderCoordinator />)
     await waitFor(() =>
-      expect(coordinatorMocks.transition).toHaveBeenCalledWith('user_a'),
+      expect(coordinatorMocks.transition).toHaveBeenCalledWith(
+        'user_a:family:family_a',
+      ),
     )
 
     coordinatorMocks.auth.status = 'signed-out'
@@ -71,5 +90,19 @@ describe('EventReminderCoordinator', () => {
     await waitFor(() =>
       expect(coordinatorMocks.transition).toHaveBeenCalledWith(null),
     )
+  })
+
+  it('uses a new reminder namespace when the account changes families', async () => {
+    const view = render(<EventReminderCoordinator />)
+    await waitFor(() => expect(coordinatorMocks.transition).toHaveBeenCalledWith(
+      'user_a:family:family_a',
+    ))
+
+    coordinatorMocks.familyId = 'family_b'
+    view.rerender(<EventReminderCoordinator />)
+
+    await waitFor(() => expect(coordinatorMocks.transition).toHaveBeenCalledWith(
+      'user_a:family:family_b',
+    ))
   })
 })

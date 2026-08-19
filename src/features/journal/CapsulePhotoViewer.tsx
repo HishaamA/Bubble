@@ -8,11 +8,18 @@ import { Icon } from '../../components/Icon'
 import type { FamilyCapsule } from '../capsules/types'
 import { CapsulePhotoImage } from './CapsulePhotoImage'
 import { unlockedCapsulePhotos } from './capsuleJournalArchive'
+import { journalPhotoAsUnlocked } from './journalPhotoLibrary'
+import {
+  JOURNAL_LIBRARY_ID,
+  type JournalPhoto,
+} from './journalPhotoTypes'
 import './CapsulePhotoViewer.css'
 
 type JournalViewerState = {
   returnTo?: string
   journalContext?: {
+    section?: string
+    personId?: string
     selectedDayKey?: string
     view?: 'grid'
     scrollTop?: number
@@ -25,6 +32,7 @@ type CapsulePhotoViewerProps = {
   capsules: FamilyCapsule[]
   loading?: boolean
   now?: Date
+  journalPhotos?: readonly JournalPhoto[]
 }
 
 function initials(name: string) {
@@ -60,18 +68,27 @@ export function CapsulePhotoViewer({
   capsules,
   loading = false,
   now = new Date(),
+  journalPhotos = [],
 }: CapsulePhotoViewerProps) {
   const navigate = useNavigate()
   const location = useLocation()
   const { capsuleId = '', photoId = '' } = useParams()
   const titleRef = useRef<HTMLHeadingElement>(null)
   const routeState = location.state as JournalViewerState | null
+  const requestedCapsuleId = capsuleId || (
+    location.pathname.startsWith('/journal/library/')
+      ? JOURNAL_LIBRARY_ID
+      : ''
+  )
   const unlockedPhotos = useMemo(
-    () => unlockedCapsulePhotos(capsules, now),
-    [capsules, now],
+    () => [
+      ...unlockedCapsulePhotos(capsules, now),
+      ...journalPhotos.map(journalPhotoAsUnlocked),
+    ],
+    [capsules, journalPhotos, now],
   )
   const requestedPhoto = unlockedPhotos.find((photo) =>
-    photo.capsuleId === capsuleId && photo.id === photoId,
+    photo.capsuleId === requestedCapsuleId && photo.id === photoId,
   )
   const photos = requestedPhoto
     ? unlockedPhotos.filter((photo) =>
@@ -79,7 +96,7 @@ export function CapsulePhotoViewer({
       )
     : unlockedPhotos
   const activeIndex = photos.findIndex((photo) =>
-    photo.capsuleId === capsuleId && photo.id === photoId,
+    photo.capsuleId === requestedCapsuleId && photo.id === photoId,
   )
   const photo = activeIndex >= 0 ? photos[activeIndex] : undefined
 
@@ -101,11 +118,23 @@ export function CapsulePhotoViewer({
   function openAdjacentPhoto(nextIndex: number) {
     const nextPhoto = photos[nextIndex]
     if (!nextPhoto) return
+    const nextMemoryId = nextPhoto.capsuleId === JOURNAL_LIBRARY_ID
+      ? `journal-photo-${nextPhoto.id}`
+      : `capsule-${nextPhoto.capsuleId}-${nextPhoto.id}`
+    const nextState: JournalViewerState = {
+      ...(routeState ?? { returnTo: '/journal' }),
+      journalContext: {
+        ...routeState?.journalContext,
+        focusMemoryId: nextMemoryId,
+      },
+    }
     navigate(
-      `/journal/photo/${encodeURIComponent(nextPhoto.capsuleId)}/${encodeURIComponent(nextPhoto.id)}`,
+      nextPhoto.capsuleId === JOURNAL_LIBRARY_ID
+        ? `/journal/library/${encodeURIComponent(nextPhoto.id)}`
+        : `/journal/photo/${encodeURIComponent(nextPhoto.capsuleId)}/${encodeURIComponent(nextPhoto.id)}`,
       {
         replace: true,
-        state: routeState ?? { returnTo: '/journal' },
+        state: nextState,
         viewTransition: true,
       },
     )
@@ -121,11 +150,20 @@ export function CapsulePhotoViewer({
   }
 
   if (!photo) {
+    const isLibraryPhoto = requestedCapsuleId === JOURNAL_LIBRARY_ID
     return (
       <section className="journal-photo-viewer journal-photo-viewer--status">
-        <p className="journal-photo-viewer__eyebrow">Capsule memory</p>
-        <h1 ref={titleRef} tabIndex={-1}>This photo is still sealed or unavailable.</h1>
-        <p>It will appear in Journal only after its Capsule opens.</p>
+        <p className="journal-photo-viewer__eyebrow">{isLibraryPhoto ? 'Family photos' : 'Capsule memory'}</p>
+        <h1 ref={titleRef} tabIndex={-1}>
+          {isLibraryPhoto
+            ? 'This family photo is unavailable.'
+            : 'This photo is still sealed or unavailable.'}
+        </h1>
+        <p>
+          {isLibraryPhoto
+            ? 'It may still be loading from this device or your family library.'
+            : 'It will appear in Journal only after its Capsule opens.'}
+        </p>
         <button type="button" onClick={returnToJournal}>Back to Journal</button>
       </section>
     )
@@ -186,7 +224,10 @@ export function CapsulePhotoViewer({
               <strong>{photo.contributorName}</strong>{' '}
               {photo.caption.trim() || `A little moment from ${photo.capsuleTitle}.`}
             </p>
-            <span>Opened from {photo.capsuleTitle}</span>
+            <span>
+              {photo.capsuleId === JOURNAL_LIBRARY_ID ? 'Added to' : 'Opened from'}{' '}
+              {photo.capsuleTitle}
+            </span>
           </div>
         </article>
       </div>

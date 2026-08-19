@@ -1,48 +1,54 @@
 import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom'
-import { describe, expect, it, vi } from 'vitest'
+import type { ComponentProps } from 'react'
+import { MemoryRouter } from 'react-router-dom'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { FamilyCapsule } from '../capsules/types'
-import type { PanoramaMoment } from '../memories/shared'
+import type { JournalPhoto } from './journalPhotoTypes'
 import { JournalPage } from './JournalPage'
 
-vi.mock('../auth', () => ({
-  useAuth: () => ({ user: { id: 'journal-test-user' } }),
+const sectionMocks = vi.hoisted(() => ({
+  people: vi.fn(),
+  plans: vi.fn(),
+  flights: vi.fn(),
+}))
+
+vi.mock('./people', () => ({
+  PeopleTimeline: (props: unknown) => {
+    sectionMocks.people(props)
+    return <section data-testid="people-section">People timeline</section>
+  },
+}))
+
+vi.mock('../events', () => ({
+  JournalEventsSection: () => {
+    sectionMocks.plans()
+    return <section data-testid="plans-section">Important plans</section>
+  },
+}))
+
+vi.mock('../flights', () => ({
+  FlightTrackerSection: (props: unknown) => {
+    sectionMocks.flights(props)
+    return <section data-testid="flights-section">Family flights</section>
+  },
 }))
 
 const testNow = new Date(2026, 7, 26, 12)
 
-function createSharedMoment(
-  id: string,
-  createdAt: Date,
-): PanoramaMoment {
-  return {
-    id,
-    blob: new Blob(['panorama'], { type: 'image/jpeg' }),
-    objectUrl: `blob:${id}`,
-    label: 'Balcony laughter',
-    caption: 'Everyone made it.',
-    createdAt: createdAt.toISOString(),
-    width: 4000,
-    height: 2000,
-    source: 'manual',
-    uploaderDisplayName: 'Maya Ahmed',
-  }
-}
-
 function createCapsule({
+  id,
   opensAt,
   capturedAt,
-  photoId = 'capsule-photo-1',
 }: {
+  id: string
   opensAt: Date
   capturedAt: Date
-  photoId?: string
 }): FamilyCapsule {
   return {
-    id: 'capsule-family-week',
+    id,
     kind: 'weekly',
-    title: 'Our family week',
+    title: `Family week ${id}`,
     createdAt: new Date(2026, 7, 17, 9).toISOString(),
     closesAt: opensAt.toISOString(),
     opensAt: opensAt.toISOString(),
@@ -50,10 +56,10 @@ function createCapsule({
     createdByName: 'Maya',
     photos: [
       {
-        id: photoId,
-        capsuleId: 'capsule-family-week',
-        image: '/assets/capsule/full-family-photo.jpg',
-        thumbnail: '/assets/capsule/family-photo-thumb.jpg',
+        id: `${id}-photo`,
+        capsuleId: id,
+        image: `/assets/capsule/${id}.jpg`,
+        thumbnail: `/assets/capsule/${id}-thumb.jpg`,
         width: 1200,
         height: 900,
         thumbnailWidth: 400,
@@ -68,354 +74,191 @@ function createCapsule({
   }
 }
 
-function renderJournalPage(sharedMoments: PanoramaMoment[] = []) {
+function renderJournal(
+  props: ComponentProps<typeof JournalPage> = {},
+  initialEntry: string | {
+    pathname: string
+    state?: unknown
+  } = '/journal',
+) {
   return render(
-    <MemoryRouter>
-      <JournalPage now={testNow} sharedMoments={sharedMoments} />
+    <MemoryRouter initialEntries={[initialEntry]}>
+      <JournalPage now={testNow} {...props} />
     </MemoryRouter>,
   )
 }
 
-function MemoryRouteState() {
-  const location = useLocation()
-  const state = location.state as {
-    returnTo?: string
-    sourceMemoryId?: string
-    journalContext?: {
-      selectedDayKey?: string
-      view?: string
-      focusMemoryId?: string
-    }
-  } | null
-
-  return (
-    <div>
-      <span>Return to {state?.returnTo}</span>
-      <span>Source memory {state?.sourceMemoryId}</span>
-      <span>Selected day {state?.journalContext?.selectedDayKey}</span>
-      <span>Selected view {state?.journalContext?.view}</span>
-      <span>Focus memory {state?.journalContext?.focusMemoryId}</span>
-    </div>
-  )
-}
-
 describe('JournalPage', () => {
-  it('opens on today with a clean three-column photo archive', () => {
-    const { container } = renderJournalPage()
+  beforeEach(() => {
+    sectionMocks.people.mockClear()
+    sectionMocks.plans.mockClear()
+    sectionMocks.flights.mockClear()
+  })
 
-    expect(screen.getByRole('heading', { name: 'Memory Journal' })).toBeInTheDocument()
-    expect(screen.queryByRole('link', { name: 'Back to Memories' })).not.toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'Wednesday, August 26, 8 memories' })).toHaveAttribute(
-      'aria-pressed',
+  it('shows a crisp three-section Journal with People selected by default', () => {
+    const { container } = renderJournal()
+
+    expect(screen.getByRole('heading', { name: 'Journal' })).toBeInTheDocument()
+    expect(
+      screen.getByText('Your family, through time and across every journey.'),
+    ).toBeInTheDocument()
+
+    const tablist = screen.getByRole('tablist', { name: 'Journal sections' })
+    expect(tablist).toBeInTheDocument()
+    expect(screen.getAllByRole('tab')).toHaveLength(3)
+    expect(screen.getByRole('tab', { name: 'People' })).toHaveAttribute(
+      'aria-selected',
       'true',
     )
-    expect(screen.getByRole('heading', { name: 'Wednesday, August 26' })).toBeInTheDocument()
-    expect(screen.getByText('8 memories')).toBeInTheDocument()
-    expect(container.querySelectorAll('.journal-memories article')).toHaveLength(8)
-    const memoryGrid = container.querySelector('.journal-memories')
-    expect(memoryGrid).toHaveAttribute('data-layout', 'grid')
-    expect(memoryGrid?.children).toHaveLength(8)
-    expect(memoryGrid).toHaveClass('journal-memories')
-    expect(memoryGrid).not.toHaveClass('journal-memories--list')
-    expect(container.querySelector('.journal-memory__meta')).not.toBeInTheDocument()
-    expect(container.querySelector('.journal-memory__avatar')).not.toBeInTheDocument()
-    expect(container.querySelector('.journal-memory__scrim')).not.toBeInTheDocument()
+    expect(screen.getByTestId('people-section')).toBeInTheDocument()
+    expect(screen.queryByTestId('plans-section')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('flights-section')).not.toBeInTheDocument()
+
     expect(screen.queryByText('Mountain day at golden hour')).not.toBeInTheDocument()
-    expect(screen.queryByText('Hishaam')).not.toBeInTheDocument()
-    expect(screen.queryByRole('group', { name: 'Memory layout' })).not.toBeInTheDocument()
-    const contactSheetImages = Array.from(
-      container.querySelectorAll<HTMLImageElement>(
-        'img[src="/assets/journal/family-memory-grid-v1.png"]',
-      ),
-    )
-    expect(contactSheetImages).toHaveLength(8)
+    expect(screen.queryByText('Dinner that lasted all evening')).not.toBeInTheDocument()
+    expect(container.querySelector('.journal-week')).not.toBeInTheDocument()
     expect(
-      new Set(
-        contactSheetImages.map(
-          (image) =>
-            `${image.style.getPropertyValue('--journal-sheet-x')}:${image.style.getPropertyValue('--journal-sheet-y')}`,
-        ),
-      ).size,
-    ).toBe(8)
-    expect(
-      container.querySelector(
-        'img[src="/assets/design/kinsphere-ui-reference.png"]',
-      ),
+      container.querySelector('img[src="/assets/journal/family-memory-grid-v1.png"]'),
     ).not.toBeInTheDocument()
-    expect(
-      screen.getByRole('link', {
-        name: 'Open Mountain day at golden hour, shared by Hishaam, panorama memory',
-      }),
-    ).toHaveAttribute('href', '/memory/mountains')
-    expect(
-      screen.queryByRole('button', { name: /create recap/i }),
-    ).not.toBeInTheDocument()
-    const page = container.querySelector('.journal-page')
-    const events = container.querySelector('.journal-events')
-    const week = container.querySelector('.journal-week')
-    expect(page).not.toBeNull()
-    expect(events).not.toBeNull()
-    expect(week).not.toBeNull()
-    expect(Array.from(page?.children ?? []).indexOf(events as Element)).toBeLessThan(
-      Array.from(page?.children ?? []).indexOf(week as Element),
-    )
   })
 
-  it('browses archived dates while keeping the fixed photo grid', async () => {
+  it('mounts only the selected People, Plans, or Flights section', async () => {
     const user = userEvent.setup()
-    const { container } = renderJournalPage()
+    renderJournal()
 
-    await user.click(screen.getByRole('button', { name: 'Sunday, August 23, 3 memories' }))
+    await user.click(screen.getByRole('tab', { name: 'Plans' }))
 
-    expect(screen.getByRole('heading', { name: 'Sunday, August 23' })).toBeInTheDocument()
-    expect(screen.getByText('3 memories')).toBeInTheDocument()
-    expect(container.querySelectorAll('.journal-memories article')).toHaveLength(3)
-    expect(container.querySelector('.journal-memories')).toHaveAttribute('data-layout', 'grid')
-    expect(screen.queryByRole('group', { name: 'Memory layout' })).not.toBeInTheDocument()
+    expect(screen.queryByTestId('people-section')).not.toBeInTheDocument()
+    expect(screen.getByTestId('plans-section')).toBeInTheDocument()
+    expect(screen.queryByTestId('flights-section')).not.toBeInTheDocument()
+    expect(screen.getByRole('tab', { name: 'Plans' })).toHaveAttribute(
+      'aria-selected',
+      'true',
+    )
+
+    await user.click(screen.getByRole('tab', { name: 'Flights' }))
+
+    expect(screen.queryByTestId('people-section')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('plans-section')).not.toBeInTheDocument()
+    expect(screen.getByTestId('flights-section')).toBeInTheDocument()
+    expect(sectionMocks.people).toHaveBeenCalledTimes(1)
+    expect(sectionMocks.plans).toHaveBeenCalledTimes(1)
+    expect(sectionMocks.flights).toHaveBeenCalledTimes(1)
+    expect(sectionMocks.flights).toHaveBeenLastCalledWith({ now: testNow })
   })
 
-  it('keeps future days blank and does not offer a recap', async () => {
+  it('supports arrow-key navigation across the segmented tabs', async () => {
     const user = userEvent.setup()
-    const futureMoment = createSharedMoment(
-      'future-balcony',
-      new Date(2026, 7, 27, 10),
-    )
-    const { container } = renderJournalPage([futureMoment])
+    renderJournal()
 
-    await user.click(
-      screen.getByRole('button', {
-        name: 'Thursday, August 27, 0 memories',
-      }),
-    )
+    const peopleTab = screen.getByRole('tab', { name: 'People' })
+    peopleTab.focus()
+    await user.keyboard('{ArrowRight}')
 
-    expect(
-      screen.getByRole('heading', { name: 'Thursday, August 27' }),
-    ).toBeInTheDocument()
-    expect(screen.getByText('0 memories')).toBeInTheDocument()
-    expect(container.querySelector('.journal-memories')).toBeEmptyDOMElement()
-    expect(container.querySelectorAll('.journal-memories article')).toHaveLength(0)
-    expect(
-      screen.queryByRole('button', { name: /create recap/i }),
-    ).not.toBeInTheDocument()
-    expect(screen.getByText(
-      'Moments from this day will appear here after they’re shared.',
-    )).toHaveAttribute('role', 'status')
+    const plansTab = screen.getByRole('tab', { name: 'Plans' })
+    expect(plansTab).toHaveFocus()
+    expect(plansTab).toHaveAttribute('aria-selected', 'true')
+    expect(screen.getByTestId('plans-section')).toBeInTheDocument()
   })
 
-  it('does not offer recaps for archived days before today', async () => {
-    const user = userEvent.setup()
-    const { container } = renderJournalPage()
-
-    await user.click(
-      screen.getByRole('button', {
-        name: 'Tuesday, August 25, 5 memories',
-      }),
-    )
-
-    expect(container.querySelectorAll('.journal-memories article')).toHaveLength(5)
-    expect(
-      screen.queryByRole('button', { name: /create recap/i }),
-    ).not.toBeInTheDocument()
-  })
-
-  it('archives uploaded moments on the local day they were created', async () => {
-    const user = userEvent.setup()
-    const yesterdayMoment = createSharedMoment(
-      'family-balcony',
-      new Date(2026, 7, 25, 18),
-    )
-    const { container } = renderJournalPage([yesterdayMoment])
-
-    expect(
-      screen.queryByRole('link', {
-        name: /open balcony laughter, shared by maya ahmed/i,
-      }),
-    ).not.toBeInTheDocument()
-
-    await user.click(
-      screen.getByRole('button', {
-        name: 'Tuesday, August 25, 6 memories',
-      }),
-    )
-
-    expect(
-      screen.getByRole('link', {
-        name: 'Open Balcony laughter, shared by Maya Ahmed, panorama memory',
-      }),
-    ).toHaveAttribute('href', '/memory/shared-family-balcony')
-    expect(container.querySelectorAll('.journal-memories article')).toHaveLength(6)
-  })
-
-  it('keeps Capsule photos sealed until the authoritative open time', () => {
+  it('passes only opened Capsule photos to People', () => {
+    const openedCapsule = createCapsule({
+      id: 'opened',
+      opensAt: new Date(2026, 7, 26, 11),
+      capturedAt: new Date(2001, 4, 12, 9),
+    })
     const lockedCapsule = createCapsule({
+      id: 'locked',
       opensAt: new Date(2026, 7, 26, 13),
-      capturedAt: new Date(2026, 7, 26, 9),
+      capturedAt: new Date(2002, 5, 13, 9),
     })
-    render(
-      <MemoryRouter>
-        <JournalPage now={testNow} capsules={[lockedCapsule]} />
-      </MemoryRouter>,
-    )
-
-    expect(
-      screen.getByRole('button', {
-        name: 'Wednesday, August 26, 8 memories',
-      }),
-    ).toHaveAttribute('aria-pressed', 'true')
-    expect(
-      screen.queryByRole('link', {
-        name: 'Open Kitchen dancing, shared by Maya, photo memory',
-      }),
-    ).not.toBeInTheDocument()
-  })
-
-  it('archives an opened Capsule photo on its captured day as an ordinary photo', () => {
-    const openedCapsule = createCapsule({
-      opensAt: new Date(2026, 7, 26, 11),
-      capturedAt: new Date(2026, 7, 26, 9),
+    const directPhoto: JournalPhoto = {
+      id: 'direct-photo',
+      image: '/assets/direct.jpg',
+      thumbnail: '/assets/direct-thumb.jpg',
+      width: 1200,
+      height: 900,
+      caption: 'Direct upload',
+      capturedAt: new Date(2000, 3, 11, 9).toISOString(),
+      contributorName: 'Maya',
+      ownedByCurrentUser: true,
+      syncStatus: 'pending',
+    }
+    const onUploadJournalPhotos = vi.fn(async () => ({ added: 1, failed: 0 }))
+    renderJournal({
+      capsules: [lockedCapsule, openedCapsule],
+      capsuleNow: testNow,
+      capsuleCacheNamespace: 'family:ahmed',
+      journalPhotos: [directPhoto],
+      onUploadJournalPhotos,
+      journalPhotoImportProgress: { importing: false, completed: 0, total: 0 },
     })
-    render(
-      <MemoryRouter>
-        <JournalPage now={testNow} capsules={[openedCapsule]} />
-      </MemoryRouter>,
-    )
 
-    expect(
-      screen.getByRole('button', {
-        name: 'Wednesday, August 26, 9 memories',
+    const peopleProps = sectionMocks.people.mock.lastCall?.[0] as {
+      photos: Array<{
+        id: string
+        capsuleId: string
+        capsuleTitle: string
+      }>
+      cacheNamespace: string
+      journalPhotos: JournalPhoto[]
+      onUploadPhotos: unknown
+    }
+
+    expect(peopleProps.photos).toEqual([
+      expect.objectContaining({
+        id: 'opened-photo',
+        capsuleId: 'opened',
+        capsuleTitle: 'Family week opened',
       }),
-    ).toHaveAttribute('aria-pressed', 'true')
-    expect(
-      screen.getByRole('link', {
-        name: 'Open Kitchen dancing, shared by Maya, photo memory',
-      }),
-    ).toHaveAttribute(
-      'href',
-      '/journal/photo/capsule-family-week/capsule-photo-1',
-    )
-    expect(
-      screen.getByRole('link', {
-        name: 'Open Mountain day at golden hour, shared by Hishaam, panorama memory',
-      }),
-    ).toHaveAttribute('href', '/memory/mountains')
+    ])
+    expect(peopleProps).not.toHaveProperty('sharedMoments')
+    expect(peopleProps.journalPhotos).toEqual([directPhoto])
+    expect(peopleProps.onUploadPhotos).toBe(onUploadJournalPhotos)
+    expect(peopleProps.cacheNamespace).toBe('family:ahmed')
   })
 
-  it('makes older photos from a newly opened weekly Capsule reachable', async () => {
-    const user = userEvent.setup()
-    const openedCapsule = createCapsule({
-      opensAt: new Date(2026, 7, 26, 11),
-      capturedAt: new Date(2026, 7, 20, 9),
-      photoId: 'older-capsule-photo',
-    })
-    render(
-      <MemoryRouter>
-        <JournalPage now={testNow} capsules={[openedCapsule]} />
-      </MemoryRouter>,
-    )
-
-    expect(
-      screen.queryByRole('link', {
-        name: 'Open Kitchen dancing, shared by Maya, photo memory',
-      }),
-    ).not.toBeInTheDocument()
-
-    await user.click(
-      screen.getByRole('button', { name: 'Show previous seven days' }),
-    )
-    await user.click(
-      screen.getByRole('button', {
-        name: 'Thursday, August 20, 1 memory',
-      }),
-    )
-
-    expect(
-      screen.getByRole('link', {
-        name: 'Open Kitchen dancing, shared by Maya, photo memory',
-      }),
-    ).toHaveAttribute(
-      'href',
-      '/journal/photo/capsule-family-week/older-capsule-photo',
-    )
-  })
-
-  it('builds the visible week around the supplied local date', () => {
-    render(
-      <MemoryRouter>
-        <JournalPage now={new Date(2027, 0, 1, 12)} />
-      </MemoryRouter>,
-    )
-
-    expect(
-      screen.getByRole('button', {
-        name: 'Friday, January 1, 8 memories',
-      }),
-    ).toHaveAttribute('aria-pressed', 'true')
-    expect(
-      screen.getByRole('button', {
-        name: 'Tuesday, December 29, 3 memories',
-      }),
-    ).toBeInTheDocument()
-    expect(
-      screen.getByRole('button', {
-        name: 'Monday, January 4, 0 memories',
-      }),
-    ).toBeInTheDocument()
-  })
-
-  it('opens a panorama with enough state to return to the journal', async () => {
-    const user = userEvent.setup()
-    render(
-      <MemoryRouter initialEntries={['/journal']}>
-        <Routes>
-          <Route path="/journal" element={<JournalPage now={testNow} />} />
-          <Route path="/memory/:memoryId" element={<MemoryRouteState />} />
-        </Routes>
-      </MemoryRouter>,
-    )
-
-    await user.click(
-      screen.getByRole('link', {
-        name: 'Open Mountain day at golden hour, shared by Hishaam, panorama memory',
-      }),
-    )
-
-    expect(screen.getByText('Return to /journal')).toBeInTheDocument()
-    expect(screen.getByText('Source memory mountains')).toBeInTheDocument()
-    expect(screen.getByText('Selected day wed-26')).toBeInTheDocument()
-    expect(screen.getByText('Selected view grid')).toBeInTheDocument()
-    expect(screen.getByText('Focus memory golden-hour')).toBeInTheDocument()
-  })
-
-  it('restores its selected day while ignoring a legacy list-layout preference', () => {
-    const { container } = render(
-      <MemoryRouter
-        initialEntries={[
-          {
-            pathname: '/journal',
-            state: {
-              journalContext: {
-                selectedDayKey: 'sun-23',
-                view: 'list',
-                scrollTop: 120,
-                focusMemoryId: 'park-picnic',
-              },
-            },
+  it('returns directly to the section recorded in journalContext', () => {
+    renderJournal(
+      {},
+      {
+        pathname: '/journal',
+        state: {
+          journalContext: {
+            section: 'flights',
+            personId: 'maya',
           },
-        ]}
-      >
-        <JournalPage now={testNow} />
-      </MemoryRouter>,
+        },
+      },
     )
 
-    expect(
-      screen.getByRole('button', {
-        name: 'Sunday, August 23, 3 memories',
-      }),
-    ).toHaveAttribute('aria-pressed', 'true')
-    expect(container.querySelector('.journal-memories')).toHaveAttribute(
-      'data-layout',
-      'grid',
+    expect(screen.getByRole('tab', { name: 'Flights' })).toHaveAttribute(
+      'aria-selected',
+      'true',
     )
-    expect(screen.queryByRole('button', { name: 'List view' })).not.toBeInTheDocument()
+    expect(screen.getByTestId('flights-section')).toBeInTheDocument()
+    expect(screen.queryByTestId('people-section')).not.toBeInTheDocument()
+    expect(sectionMocks.people).not.toHaveBeenCalled()
+  })
+
+  it('restores the selected person and focused memory after opening a photo', () => {
+    renderJournal(
+      {},
+      {
+        pathname: '/journal',
+        state: {
+          journalContext: {
+            section: 'people',
+            personId: 'maya',
+            focusMemoryId: 'capsule-opened-opened-photo',
+          },
+        },
+      },
+    )
+
+    expect(sectionMocks.people).toHaveBeenLastCalledWith(expect.objectContaining({
+      initialPersonId: 'maya',
+      focusMemoryId: 'capsule-opened-opened-photo',
+    }))
   })
 })

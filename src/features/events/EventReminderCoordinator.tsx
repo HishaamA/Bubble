@@ -1,22 +1,34 @@
 import { useEffect, useRef } from 'react'
 import { App as CapacitorApp } from '@capacitor/app'
 import { useAuth } from '../auth'
+import { useFamilyOnboarding } from '../onboarding'
 import {
   resumeEventReminderAccount,
   transitionEventReminderAccount,
 } from './eventReminders'
+import { familyEventStorageSubject } from './eventStorage'
 
 /** Owns notification lifecycle independently of the currently visible route. */
 export function EventReminderCoordinator() {
   const { status, user } = useAuth()
-  const activeAccount = status === 'signed-in' ? user?.id ?? null : null
+  const { snapshot, status: familyStatus } = useFamilyOnboarding()
+  const familyId = snapshot?.kind === 'member'
+    ? snapshot.membership.familyId
+    : null
+  const activeAccount = status === 'signed-in' && user?.id && familyId
+    ? familyEventStorageSubject(user.id, familyId)
+    : null
   const activeAccountRef = useRef<string | null>(null)
 
   useEffect(() => {
-    if (status === 'loading') return
+    if (
+      status === 'loading'
+      || familyStatus === 'idle'
+      || familyStatus === 'loading'
+    ) return
     activeAccountRef.current = activeAccount
     void transitionEventReminderAccount(activeAccount)
-  }, [activeAccount, status])
+  }, [activeAccount, familyStatus, status])
 
   useEffect(() => {
     let disposed = false

@@ -3,11 +3,13 @@ import {
   useEffect,
   useId,
   useMemo,
+  useRef,
   useState,
   type FormEvent,
 } from 'react'
 import { createPortal } from 'react-dom'
 import { useAuth } from '../auth'
+import { useFamilyOnboarding } from '../onboarding'
 import '../FeaturePages.css'
 import './EventsPage.css'
 import {
@@ -24,43 +26,31 @@ import {
   syncEventReminder,
   type FamilyEventRecord,
 } from './eventService'
-import { eventStorageKey } from './eventStorage'
+import {
+  eventStorageKey,
+  familyEventStorageSubject,
+} from './eventStorage'
 
 type FamilyEvent = ReminderEvent & {
   date: string
   time: string
   location: string
+  category: PlanCategory
 }
 
 const createdEventsKey = 'kinsphere-created-events'
 const reminderIdsKey = 'kinsphere-event-reminders'
+const categoryDetailsPrefix = 'kinsphere-plan-category:v1:'
+const planCategories = [
+  { value: 'travel', label: 'Travel' },
+  { value: 'graduation', label: 'Graduation' },
+  { value: 'wedding', label: 'Wedding' },
+  { value: 'anniversary', label: 'Anniversary' },
+  { value: 'appointment', label: 'Important appointment' },
+  { value: 'other', label: 'Other milestone' },
+] as const
 
-const upcomingEvents: FamilyEvent[] = [
-  {
-    id: 'beach-breakfast',
-    date: '2026-09-18',
-    time: '07:30',
-    startsAt: '2026-09-18T07:30:00',
-    title: 'Beach breakfast',
-    location: 'Kite Beach',
-  },
-  {
-    id: 'sara-graduation',
-    date: '2026-10-02',
-    time: '18:00',
-    startsAt: '2026-10-02T18:00:00',
-    title: 'Sara’s graduation',
-    location: 'Family room',
-  },
-  {
-    id: 'grandad-story-night',
-    date: '2026-11-21',
-    time: '20:00',
-    startsAt: '2026-11-21T20:00:00',
-    title: 'Grandad’s story night',
-    location: 'Video call',
-  },
-]
+type PlanCategory = (typeof planCategories)[number]['value']
 
 /**
  * Family plans embedded in Journal. This component owns the same offline,
@@ -68,8 +58,27 @@ const upcomingEvents: FamilyEvent[] = [
  */
 export function JournalEventsSection() {
   const { user } = useAuth()
+  const { snapshot } = useFamilyOnboarding()
+  const familyId = snapshot?.kind === 'member'
+    ? snapshot.membership.familyId
+    : null
+  const storageSubject = familyEventStorageSubject(user?.id, familyId)
+
+  return (
+    <JournalEventsSectionForFamily
+      key={storageSubject}
+      storageSubject={storageSubject}
+    />
+  )
+}
+
+function JournalEventsSectionForFamily({
+  storageSubject,
+}: {
+  storageSubject: string
+}) {
   const upcomingListId = useId()
-  const storageSubject = user?.id ?? 'signed-out'
+  const formErrorId = useId()
   const createdEventsStorageKey = eventStorageKey(
     createdEventsKey,
     storageSubject,
@@ -78,14 +87,17 @@ export function JournalEventsSection() {
     reminderIdsKey,
     storageSubject,
   )
-  const [isGoing, setIsGoing] = useState(false)
   const [isUpcomingExpanded, setIsUpcomingExpanded] = useState(false)
   const [showEventSheet, setShowEventSheet] = useState(false)
   const [eventSaving, setEventSaving] = useState(false)
+  const [eventFormError, setEventFormError] = useState('')
+  const [timelineOpenedAt] = useState(Date.now)
   const [createdEvents, setCreatedEvents] = useState<FamilyEvent[]>(() =>
     readCreatedEvents(createdEventsStorageKey),
   )
   const [sharedFamilyEvents, setSharedFamilyEvents] = useState<FamilyEvent[]>([])
+  const [eventsLoading, setEventsLoading] = useState(true)
+  const [sharedEventsUnavailable, setSharedEventsUnavailable] = useState(false)
   const [reminderIds, setReminderIds] = useState<Set<string>>(
     () =>
       new Set([
@@ -94,14 +106,15 @@ export function JournalEventsSection() {
       ]),
   )
   const [reminderStatus, setReminderStatus] = useState('')
+  const eventSheetRef = useRef<HTMLFormElement>(null)
+  const eventSheetFirstFieldRef = useRef<HTMLSelectElement>(null)
+  const eventSheetOpenerRef = useRef<HTMLElement | null>(null)
 
   const allUpcomingEvents = useMemo(() => {
     const eventsById = new Map<string, FamilyEvent>()
-    for (const event of [
-      ...upcomingEvents,
-      ...createdEvents,
-      ...sharedFamilyEvents,
-    ]) {
+    for (const event of [...createdEvents, ...sharedFamilyEvents]) {
+      const startsAt = new Date(event.startsAt).getTime()
+      if (!Number.isFinite(startsAt) || startsAt < timelineOpenedAt) continue
       eventsById.set(event.id, event)
     }
     return [...eventsById.values()].sort(
@@ -109,11 +122,12 @@ export function JournalEventsSection() {
         new Date(left.startsAt).getTime() -
         new Date(right.startsAt).getTime(),
     )
-  }, [createdEvents, sharedFamilyEvents])
+  }, [createdEvents, sharedFamilyEvents, timelineOpenedAt])
 
   const refreshFamilyEvents = useCallback(async () => {
     const records = await fetchFamilyEvents()
-    setSharedFamilyEvents(records.map(toFamilyEvent))
+    setSharedFamilyEvents(toImportantFamilyEvents(records))
+    setSharedEventsUnavailable(false)
   }, [])
 
   useEffect(() => {
@@ -123,9 +137,15 @@ export function JournalEventsSection() {
     async function refreshWhileActive() {
       try {
         const records = await fetchFamilyEvents()
-        if (active) setSharedFamilyEvents(records.map(toFamilyEvent))
+        if (active) {
+          setSharedFamilyEvents(toImportantFamilyEvents(records))
+          setSharedEventsUnavailable(false)
+        }
       } catch {
-        // Keep demo and locally-created events available while offline.
+        if (active) setSharedEventsUnavailable(true)
+        // Locally-created plans remain available while offline.
+      } finally {
+        if (active) setEventsLoading(false)
       }
     }
 
@@ -143,7 +163,7 @@ export function JournalEventsSection() {
       active = false
       unsubscribe()
     }
-  }, [])
+  }, [storageSubject])
 
   useEffect(() => {
     const selectedEvents = allUpcomingEvents.filter((event) =>
@@ -154,23 +174,68 @@ export function JournalEventsSection() {
 
   useEffect(() => {
     if (!showEventSheet) return
+    const frame = window.requestAnimationFrame(() => {
+      eventSheetFirstFieldRef.current?.focus()
+    })
+    const previousOverflow = document.body.style.overflow
+    document.body.style.overflow = 'hidden'
 
-    function closeOnEscape(event: KeyboardEvent) {
-      if (event.key === 'Escape') setShowEventSheet(false)
+    function handleModalKey(event: KeyboardEvent) {
+      if (event.key === 'Escape') {
+        if (!eventSaving) {
+          setShowEventSheet(false)
+          window.requestAnimationFrame(() => {
+            eventSheetOpenerRef.current?.focus()
+          })
+        }
+        return
+      }
+      if (event.key !== 'Tab' || !eventSheetRef.current) return
+      const focusable = [...eventSheetRef.current.querySelectorAll<HTMLElement>(
+        'button:not(:disabled), input:not(:disabled), select:not(:disabled), [tabindex]:not([tabindex="-1"])',
+      )]
+      const first = focusable[0]
+      const last = focusable.at(-1)
+      if (!first || !last) return
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault()
+        last.focus()
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault()
+        first.focus()
+      }
     }
 
-    window.addEventListener('keydown', closeOnEscape)
-    return () => window.removeEventListener('keydown', closeOnEscape)
-  }, [showEventSheet])
+    window.addEventListener('keydown', handleModalKey)
+    return () => {
+      window.cancelAnimationFrame(frame)
+      document.body.style.overflow = previousOverflow
+      window.removeEventListener('keydown', handleModalKey)
+    }
+  }, [eventSaving, showEventSheet])
+
+  function openEventSheet() {
+    eventSheetOpenerRef.current = document.activeElement as HTMLElement | null
+    setEventFormError('')
+    setShowEventSheet(true)
+  }
+
+  function closeEventSheet(force = false) {
+    if (eventSaving && !force) return
+    setShowEventSheet(false)
+    window.requestAnimationFrame(() => eventSheetOpenerRef.current?.focus())
+  }
 
   async function createFamilyEvent(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
+    setEventFormError('')
     const form = new FormData(event.currentTarget)
     const title = String(form.get('title') ?? '').trim()
     const date = String(form.get('date') ?? '')
     const time = String(form.get('time') ?? '')
     const location = String(form.get('location') ?? '').trim()
-    if (!title || !date || !time || !location) return
+    const category = parsePlanCategory(form.get('category'))
+    if (!title || !date || !time || !location || !category) return
 
     const startsAt = `${date}T${time}:00`
     setEventSaving(true)
@@ -179,6 +244,7 @@ export function JournalEventsSection() {
         title,
         startsAt,
         location,
+        details: `${categoryDetailsPrefix}${category}`,
       })
       const newEvent: FamilyEvent = {
         id: saved.id,
@@ -187,21 +253,28 @@ export function JournalEventsSection() {
         time,
         location,
         startsAt,
+        category,
       }
       const nextEvents = [...createdEvents, newEvent]
+      const persistedOnDevice = writeJson(createdEventsStorageKey, nextEvents)
+      if (!saved.synced && !persistedOnDevice) {
+        setEventFormError(
+          'This plan is not saved yet because device storage is unavailable. Keep this sheet open and try again.',
+        )
+        return
+      }
       setCreatedEvents(nextEvents)
-      writeJson(createdEventsStorageKey, nextEvents)
       setIsUpcomingExpanded(true)
-      setShowEventSheet(false)
+      closeEventSheet(true)
       if (saved.synced) void refreshFamilyEvents().catch(() => undefined)
       setReminderStatus(
         saved.synced
-          ? `${title} was shared with your family. Tap Remind me for a device alert.`
-          : `${title} was added on this device. Tap Remind me for a device alert.`,
+          ? `${title} was shared with your family. Choose Remind me for a device alert.`
+          : `${title} was saved on this device. Choose Remind me for a device alert.`,
       )
     } catch {
-      setReminderStatus(
-        'The event could not be saved. Check your connection and try again.',
+      setEventFormError(
+        'The plan could not be saved. Check your connection and try again.',
       )
     } finally {
       setEventSaving(false)
@@ -247,64 +320,21 @@ export function JournalEventsSection() {
     >
       <div className="journal-events__heading">
         <div>
-          <p>Family plans</p>
-          <h2 id="journal-events-title">What’s ahead</h2>
+          <p>Milestones worth remembering</p>
+          <h2 id="journal-events-title">Important plans</h2>
         </div>
         <button
           className="events-header-action"
           type="button"
           aria-haspopup="dialog"
-          onClick={() => setShowEventSheet(true)}
+          onClick={openEventSheet}
         >
           <span className="events-header-action__plus" aria-hidden="true">
             +
           </span>
-          <span>Add event</span>
+          <span>Add plan</span>
         </button>
       </div>
-
-      <article
-        className="ks-card event-hero"
-        aria-labelledby="featured-event-title"
-      >
-        <div className="event-hero__top">
-          <div className="event-hero__date" aria-label="September 6">
-            <strong>06</strong>
-            <span>Sep</span>
-          </div>
-        </div>
-        <div className="event-hero__body">
-          <h3 id="featured-event-title">Family dinner</h3>
-          <p>Saturday · 7:00 PM · The courtyard</p>
-          <div className="event-hero__footer">
-            <div
-              className="ks-avatar-stack"
-              aria-label="Mum, Hishaam, and four more are attending"
-            >
-              <span className="ks-avatar" aria-hidden="true">
-                MA
-              </span>
-              <span className="ks-avatar" aria-hidden="true">
-                HM
-              </span>
-              <span className="ks-avatar" aria-hidden="true">
-                SA
-              </span>
-              <span className="ks-avatar" aria-hidden="true">
-                +4
-              </span>
-            </div>
-            <button
-              className="event-rsvp"
-              type="button"
-              aria-pressed={isGoing}
-              onClick={() => setIsGoing((value) => !value)}
-            >
-              {isGoing ? '✓ Going' : 'I’m going'}
-            </button>
-          </div>
-        </div>
-      </article>
 
       <section
         className="ks-section journal-events__upcoming"
@@ -314,11 +344,14 @@ export function JournalEventsSection() {
           <div>
             <h3 id="upcoming-events-title">Coming up</h3>
             <p>
-              {allUpcomingEvents.length}{' '}
-              {allUpcomingEvents.length === 1 ? 'family plan' : 'family plans'}
+              {eventsLoading
+                ? 'Checking shared plans…'
+                : `${allUpcomingEvents.length} ${
+                    allUpcomingEvents.length === 1 ? 'family plan' : 'family plans'
+                  }`}
             </p>
           </div>
-          {allUpcomingEvents.length > 1 ? (
+          {allUpcomingEvents.length > 3 ? (
             <button
               className="journal-events__upcoming-toggle"
               type="button"
@@ -326,7 +359,7 @@ export function JournalEventsSection() {
               aria-controls={upcomingListId}
               aria-label={
                 isUpcomingExpanded
-                  ? 'Show only the next upcoming family event'
+                  ? 'Show fewer upcoming family plans'
                   : `Show all ${allUpcomingEvents.length} upcoming family events`
               }
               onClick={() => setIsUpcomingExpanded((expanded) => !expanded)}
@@ -345,7 +378,7 @@ export function JournalEventsSection() {
         >
           {(isUpcomingExpanded
             ? allUpcomingEvents
-            : allUpcomingEvents.slice(0, 1)
+            : allUpcomingEvents.slice(0, 3)
           ).map((event, index) => {
             const date = new Date(`${event.date}T12:00:00`)
             const day = new Intl.DateTimeFormat('en', {
@@ -377,6 +410,14 @@ export function JournalEventsSection() {
                 <div>
                   <h4>{event.title}</h4>
                   <p>
+                    {event.category ? (
+                      <>
+                        <span className="event-list-item__category">
+                          {planCategoryLabel(event.category)}
+                        </span>{' '}
+                        ·{' '}
+                      </>
+                    ) : null}
                     {time} · {event.location}
                   </p>
                 </div>
@@ -384,7 +425,9 @@ export function JournalEventsSection() {
                   <button
                     className="event-reminder-button"
                     type="button"
-                    aria-label={`${hasReminder ? 'Remove reminder for' : 'Remind me about'} ${event.title}`}
+                    aria-label={`${
+                      hasReminder ? 'Remove reminder for' : 'Remind me about'
+                    } ${event.title}`}
                     aria-pressed={hasReminder}
                     onClick={() => void toggleReminder(event)}
                   >
@@ -395,6 +438,40 @@ export function JournalEventsSection() {
             )
           })}
         </div>
+        {!eventsLoading && allUpcomingEvents.length === 0 ? (
+          <div className="journal-events__empty">
+            <span className="journal-events__empty-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24">
+                <path
+                  d="M7 3v3M17 3v3M4.5 9h15M6 5h12a2 2 0 0 1 2 2v11a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2Z"
+                />
+                <path d="m9 14 2 2 4-5" />
+              </svg>
+            </span>
+            <div>
+              <h3>No important plans yet</h3>
+              <p>
+                Add a trip, graduation, wedding, anniversary, or appointment
+                the family should remember.
+              </p>
+            </div>
+            <button
+              className="journal-events__empty-action"
+              type="button"
+              aria-haspopup="dialog"
+              onClick={openEventSheet}
+            >
+              Add your first plan
+            </button>
+          </div>
+        ) : null}
+        {sharedEventsUnavailable ? (
+          <p className="event-reminder-status" role="status">
+            {allUpcomingEvents.length > 0
+              ? 'Showing plans saved on this phone. Shared plans could not refresh.'
+              : 'Shared plans could not be checked. Try again when you are online.'}
+          </p>
+        ) : null}
         {reminderStatus ? (
           <p
             className="event-reminder-status"
@@ -404,10 +481,11 @@ export function JournalEventsSection() {
             {reminderStatus}
           </p>
         ) : null}
-        <p className="event-reminder-status">
-          The installed iPhone or Android app can alert you while it is closed. In
-          a browser, this tab must stay open.
-        </p>
+        {allUpcomingEvents.length > 0 ? (
+          <p className="journal-events__notification-note">
+            Phone reminders work even when the installed app is closed.
+          </p>
+        ) : null}
       </section>
 
       {showEventSheet
@@ -419,28 +497,46 @@ export function JournalEventsSection() {
               aria-labelledby="add-event-title"
             >
               <form
+                ref={eventSheetRef}
                 className="event-sheet__panel"
                 onSubmit={(event) => void createFamilyEvent(event)}
               >
                 <div className="event-sheet__header">
-                  <h2 id="add-event-title">Add a family event</h2>
+                  <h2 id="add-event-title">Add an important plan</h2>
                   <button
                     className="event-sheet__close"
                     type="button"
-                    aria-label="Close add event"
-                    onClick={() => setShowEventSheet(false)}
+                    aria-label="Close add plan"
+                    onClick={() => closeEventSheet()}
                     disabled={eventSaving}
                   >
                     ×
                   </button>
                 </div>
                 <label className="ks-field">
-                  <span>What’s happening?</span>
+                  <span>Plan type</span>
+                  <select
+                    ref={eventSheetFirstFieldRef}
+                    name="category"
+                    defaultValue=""
+                    required
+                  >
+                    <option value="" disabled>
+                      Choose a milestone
+                    </option>
+                    {planCategories.map((category) => (
+                      <option key={category.value} value={category.value}>
+                        {category.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="ks-field">
+                  <span>Plan name</span>
                   <input
                     name="title"
-                    autoFocus
                     maxLength={60}
-                    placeholder="Friday dinner"
+                    placeholder="Sara’s graduation"
                     required
                   />
                 </label>
@@ -460,25 +556,33 @@ export function JournalEventsSection() {
                   </label>
                 </div>
                 <label className="ks-field">
-                  <span>Where?</span>
+                  <span>Location</span>
                   <input
                     name="location"
                     maxLength={60}
-                    placeholder="Home, the park, or a video call"
+                    placeholder="Airport, campus, venue, or clinic"
                     required
                   />
                 </label>
                 <p className="event-sheet__hint">
-                  After adding it, choose “Remind me” to save a one-hour reminder
-                  and allow phone notifications. Browser reminders need this tab to
-                  stay open.
+                  Travel, graduations, weddings, anniversaries, and important
+                  appointments belong here. You can add a one-hour reminder next.
                 </p>
+                {eventFormError ? (
+                  <p
+                    className="event-sheet__error"
+                    id={formErrorId}
+                    role="alert"
+                  >
+                    {eventFormError}
+                  </p>
+                ) : null}
                 <button
                   className="ks-primary-button event-sheet__submit"
                   type="submit"
                   disabled={eventSaving}
                 >
-                  {eventSaving ? 'Adding…' : 'Add to Journal'}
+                  {eventSaving ? 'Saving…' : 'Save plan'}
                 </button>
               </form>
             </div>,
@@ -513,20 +617,37 @@ function readJson(key: string): unknown {
 function writeJson(key: string, value: unknown) {
   try {
     localStorage.setItem(key, JSON.stringify(value))
+    return true
   } catch {
-    // State still works for this session when private storage is unavailable.
+    // Callers decide whether an in-memory-only update is acceptable.
+    return false
   }
 }
 
 function isFamilyEvent(value: unknown): value is FamilyEvent {
   if (!value || typeof value !== 'object') return false
   const event = value as Partial<FamilyEvent>
-  return ['id', 'title', 'date', 'time', 'location', 'startsAt'].every(
-    (key) => typeof event[key as keyof FamilyEvent] === 'string',
+  const hasRequiredFields = [
+    'id',
+    'title',
+    'date',
+    'time',
+    'location',
+    'startsAt',
+  ].every((key) => typeof event[key as keyof FamilyEvent] === 'string')
+  return (
+    hasRequiredFields
+    && Boolean(parsePlanCategory(event.category))
   )
 }
 
-function toFamilyEvent(record: FamilyEventRecord): FamilyEvent {
+function toFamilyEvent(record: FamilyEventRecord): FamilyEvent | null {
+  const category = parsePlanCategory(
+    record.details?.startsWith(categoryDetailsPrefix)
+      ? record.details.slice(categoryDetailsPrefix.length)
+      : null,
+  )
+  if (!category) return null
   const startsAt = new Date(record.startsAt)
   const year = startsAt.getFullYear()
   const month = String(startsAt.getMonth() + 1).padStart(2, '0')
@@ -541,7 +662,26 @@ function toFamilyEvent(record: FamilyEventRecord): FamilyEvent {
     location: record.location,
     date: `${year}-${month}-${day}`,
     time: `${hour}:${minute}`,
+    category,
   }
+}
+
+function toImportantFamilyEvents(records: FamilyEventRecord[]) {
+  return records
+    .map(toFamilyEvent)
+    .filter((event): event is FamilyEvent => event !== null)
+}
+
+function parsePlanCategory(value: unknown): PlanCategory | undefined {
+  if (typeof value !== 'string') return undefined
+  return planCategories.find((category) => category.value === value)?.value
+}
+
+function planCategoryLabel(category: PlanCategory) {
+  return (
+    planCategories.find((item) => item.value === category)?.label
+    ?? 'Milestone'
+  )
 }
 
 function todayInputValue() {

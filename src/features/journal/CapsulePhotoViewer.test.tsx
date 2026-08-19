@@ -9,8 +9,12 @@ import {
 import { describe, expect, it } from 'vitest'
 import type { FamilyCapsule } from '../capsules/types'
 import { CapsulePhotoViewer } from './CapsulePhotoViewer'
+import type { JournalPhoto } from './journalPhotoTypes'
 
-function capsule(opensAt = '2026-08-28T00:00:00.000Z'): FamilyCapsule {
+function capsule(
+  opensAt = '2026-08-28T00:00:00.000Z',
+  includeAdjacentPhoto = false,
+): FamilyCapsule {
   return {
     id: 'family-week',
     kind: 'weekly',
@@ -20,19 +24,34 @@ function capsule(opensAt = '2026-08-28T00:00:00.000Z'): FamilyCapsule {
     opensAt,
     weekStart: '2026-08-24',
     createdByName: 'Simreen',
-    photos: [{
-      id: 'garden-photo',
-      capsuleId: 'family-week',
-      image: '/garden-full.jpg',
-      thumbnail: '/garden-thumb.jpg',
-      width: 1200,
-      height: 1600,
-      caption: 'Watering grandpa’s roses',
-      capturedAt: '2026-08-27T16:30:00.000Z',
-      contributorName: 'Maya Ahmed',
-      ownedByCurrentUser: false,
-      syncStatus: 'synced',
-    }],
+    photos: [
+      {
+        id: 'garden-photo',
+        capsuleId: 'family-week',
+        image: '/garden-full.jpg',
+        thumbnail: '/garden-thumb.jpg',
+        width: 1200,
+        height: 1600,
+        caption: 'Watering grandpa’s roses',
+        capturedAt: '2026-08-27T16:30:00.000Z',
+        contributorName: 'Maya Ahmed',
+        ownedByCurrentUser: false,
+        syncStatus: 'synced',
+      },
+      ...(includeAdjacentPhoto ? [{
+        id: 'patio-photo',
+        capsuleId: 'family-week',
+        image: '/patio-full.jpg',
+        thumbnail: '/patio-thumb.jpg',
+        width: 1200,
+        height: 1600,
+        caption: 'Tea on the patio',
+        capturedAt: '2026-08-27T18:30:00.000Z',
+        contributorName: 'Simreen Ahmed',
+        ownedByCurrentUser: false,
+        syncStatus: 'synced' as const,
+      }] : []),
+    ],
   }
 }
 
@@ -56,7 +75,7 @@ function JournalStateProbe() {
   )
 }
 
-function renderViewer(opensAt?: string) {
+function renderViewer(opensAt?: string, includeAdjacentPhoto = false) {
   return render(
     <MemoryRouter
       initialEntries={[{
@@ -78,7 +97,7 @@ function renderViewer(opensAt?: string) {
           path="/journal/photo/:capsuleId/:photoId"
           element={(
             <CapsulePhotoViewer
-              capsules={[capsule(opensAt)]}
+              capsules={[capsule(opensAt, includeAdjacentPhoto)]}
               now={new Date('2026-08-29T12:00:00.000Z')}
             />
           )}
@@ -122,6 +141,22 @@ describe('CapsulePhotoViewer', () => {
     expect(screen.getByText('Week offset -1')).toBeInTheDocument()
   })
 
+  it('returns focus context for the photo currently shown after paging', async () => {
+    const user = userEvent.setup()
+    renderViewer(undefined, true)
+
+    await user.click(screen.getByRole('button', { name: 'Next' }))
+    expect(
+      screen.getByRole('img', { name: 'Tea on the patio' }),
+    ).toHaveAttribute('src', '/patio-full.jpg')
+    await user.click(screen.getByRole('button', { name: 'Back to Journal' }))
+
+    expect(screen.getByText('Journal route')).toBeInTheDocument()
+    expect(
+      screen.getByText('Focus capsule-family-week-patio-photo'),
+    ).toBeInTheDocument()
+  })
+
   it('does not expose a direct-linked photo before its real unlock time', () => {
     renderViewer('2026-09-01T00:00:00.000Z')
 
@@ -132,5 +167,43 @@ describe('CapsulePhotoViewer', () => {
     ).toBeInTheDocument()
     expect(screen.queryByRole('img')).not.toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Back to Journal' })).toBeInTheDocument()
+  })
+
+  it('opens a direct Journal-library photo without Capsule semantics', () => {
+    const directPhoto: JournalPhoto = {
+      id: 'direct-photo',
+      image: '/direct-full.jpg',
+      thumbnail: '/direct-thumb.jpg',
+      width: 1200,
+      height: 900,
+      caption: 'First day of school',
+      capturedAt: '2012-09-03T08:00:00.000Z',
+      contributorName: 'Maya Ahmed',
+      ownedByCurrentUser: true,
+      syncStatus: 'pending',
+    }
+    render(
+      <MemoryRouter initialEntries={['/journal/library/direct-photo']}>
+        <Routes>
+          <Route
+            path="/journal/library/:photoId"
+            element={(
+              <CapsulePhotoViewer
+                capsules={[]}
+                journalPhotos={[directPhoto]}
+                now={new Date('2026-08-29T12:00:00.000Z')}
+              />
+            )}
+          />
+        </Routes>
+      </MemoryRouter>,
+    )
+
+    expect(
+      screen.getByRole('img', { name: 'First day of school' }),
+    ).toHaveAttribute('src', '/direct-full.jpg')
+    expect(screen.getAllByText('Family photos')).not.toHaveLength(0)
+    expect(screen.getByText(/added to/i)).toBeInTheDocument()
+    expect(screen.queryByText(/opened from/i)).not.toBeInTheDocument()
   })
 })

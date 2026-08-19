@@ -1,0 +1,723 @@
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
+import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
+import type { UnlockedCapsulePhoto } from '../capsuleJournalArchive'
+import type { JournalPhoto } from '../journalPhotoTypes'
+import { scanReferencePortrait, scanTimelineFaces } from './faceRecognition'
+import { PeopleTimeline } from './PeopleTimeline'
+import { emptyPeopleTimelineState } from './peopleTimelineStore'
+import type {
+  FaceProfile,
+  PeopleTimelineState,
+  StoredFaceDetection,
+  StoredPhotoFaceScan,
+} from './types'
+
+const storedStates = vi.hoisted(() => new Map<string, unknown>())
+
+vi.mock('./faceRecognition', () => ({
+  scanReferencePortrait: vi.fn(),
+  scanTimelineFaces: vi.fn(),
+}))
+
+vi.mock('./peopleTimelineStore', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('./peopleTimelineStore')>()
+  return {
+    ...actual,
+    loadPeopleTimelineState: vi.fn(async (namespace: string) =>
+      storedStates.get(namespace) ?? actual.emptyPeopleTimelineState(),
+    ),
+    savePeopleTimelineState: vi.fn(async (
+      namespace: string,
+      state: PeopleTimelineState,
+    ) => {
+      storedStates.set(namespace, state)
+      return true
+    }),
+  }
+})
+
+function capsulePhoto(
+  id: string,
+  capturedAt: string,
+  caption: string,
+): UnlockedCapsulePhoto {
+  return {
+    id,
+    capsuleId: 'family-week',
+    image: `/photos/${id}.jpg`,
+    thumbnail: `/photos/${id}-thumb.jpg`,
+    width: 1200,
+    height: 900,
+    caption,
+    capturedAt,
+    contributorName: 'Maya',
+    ownedByCurrentUser: false,
+    capsuleTitle: 'Our week',
+    capsuleOpensAt: '2026-01-10T00:00:00.000Z',
+  }
+}
+
+function journalPhoto(id: string): JournalPhoto {
+  return {
+    id,
+    image: `/photos/${id}.jpg`,
+    thumbnail: `/photos/${id}-thumb.jpg`,
+    width: 1200,
+    height: 900,
+    thumbnailWidth: 400,
+    thumbnailHeight: 300,
+    caption: 'Direct family upload',
+    capturedAt: '2024-02-03T12:00:00.000Z',
+    contributorName: 'Maya',
+    ownedByCurrentUser: true,
+    syncStatus: 'pending',
+  }
+}
+
+function stateWith(
+  changes: Partial<PeopleTimelineState>,
+): PeopleTimelineState {
+  return { ...emptyPeopleTimelineState(), ...changes }
+}
+
+const mayaEmbedding = Array<number>(1_024).fill(0)
+const leenaEmbedding = Array<number>(1_024).fill(1)
+
+function faceProfile(
+  ...embeddings: readonly number[][]
+): FaceProfile {
+  return {
+    references: embeddings.map((embedding, index) => ({
+      id: `reference-${index + 1}`,
+      embedding: [...embedding],
+      source: 'enrollment',
+      createdAt: '2026-01-01T00:00:00.000Z',
+      quality: 0.9,
+    })),
+  }
+}
+
+function detectedFace(
+  id: string,
+  embedding: readonly number[],
+  quality = 0.9,
+): StoredFaceDetection {
+  return {
+    id,
+    embedding: [...embedding],
+    box: [0.1, 0.1, 0.35, 0.45],
+    detectorScore: 0.95,
+    descriptorScore: 0.94,
+    quality,
+  }
+}
+
+function faceScan(...faces: StoredFaceDetection[]): StoredPhotoFaceScan {
+  return {
+    scannedAt: '2026-01-02T00:00:00.000Z',
+    faces,
+  }
+}
+
+function RouteState() {
+  const location = useLocation()
+  const state = location.state as {
+    returnTo?: string
+    journalContext?: {
+      section?: string
+      personId?: string
+      focusMemoryId?: string
+    }
+  } | null
+  return (
+    <output aria-label="Route state">
+      {location.pathname}|{state?.returnTo}|{state?.journalContext?.section}|
+      {state?.journalContext?.personId}|{state?.journalContext?.focusMemoryId}
+    </output>
+  )
+}
+
+function renderTimeline(
+  photos: UnlockedCapsulePhoto[],
+  namespace = `people-test-${Math.random()}`,
+  restore: { initialPersonId?: string; focusMemoryId?: string } = {},
+) {
+  return render(
+    <MemoryRouter initialEntries={['/']}>
+      <Routes>
+        <Route path="/" element={(
+          <PeopleTimeline
+            photos={photos}
+            cacheNamespace={namespace}
+            initialPersonId={restore.initialPersonId}
+            focusMemoryId={restore.focusMemoryId}
+          />
+        )} />
+        <Route path="*" element={<RouteState />} />
+      </Routes>
+    </MemoryRouter>,
+  )
+}
+
+function timelineChip(name: string) {
+  return within(screen.getByRole('group', {
+    name: 'Choose a person timeline',
+  })).getByRole('button', { name })
+}
+
+describe('PeopleTimeline', () => {
+  beforeEach(() => {
+    storedStates.clear()
+    vi.mocked(scanReferencePortrait).mockReset()
+    vi.mocked(scanReferencePortrait).mockResolvedValue({
+      embedding: mayaEmbedding,
+      quality: 0.9,
+    })
+    vi.mocked(scanTimelineFaces).mockReset()
+    vi.mocked(scanTimelineFaces).mockImplementation(async (photos, checkpoint) => {
+      const faceScans: Record<string, StoredPhotoFaceScan> = {}
+      for (let index = 0; index < photos.length; index += 1) {
+        const photo = photos[index]
+        if (!photo) continue
+        const scan = faceScan()
+        faceScans[photo.key] = scan
+        await checkpoint?.({
+          photoKey: photo.key,
+          faceScan: scan,
+          failed: false,
+          completed: index + 1,
+          total: photos.length,
+        })
+      }
+      return {
+        faceScans,
+        failedPhotoCount: 0,
+        completedPhotoCount: photos.length,
+      }
+    })
+  })
+
+  it('keeps Family separate and exposes ordinary uploads only through Review', async () => {
+    const user = userEvent.setup()
+    renderTimeline([
+      capsulePhoto('new', '2026-03-15T12:00:00.000Z', 'Graduation day'),
+      capsulePhoto('old', '2012-06-01T12:00:00.000Z', 'First school day'),
+    ])
+
+    expect(await screen.findByText('Set up two family faces')).toBeInTheDocument()
+    expect(screen.queryByRole('img')).not.toBeInTheDocument()
+    expect(screen.queryByText('360°')).not.toBeInTheDocument()
+
+    await user.click(timelineChip('All photos'))
+    const slider = await screen.findByRole('slider', {
+      name: 'Timeline position for All photos',
+    })
+    expect(slider).toHaveAttribute('aria-valuetext', '1 of 2, June 1, 2012')
+    expect(screen.getByRole('img', { name: 'First school day' })).toHaveAttribute(
+      'src',
+      '/photos/old-thumb.jpg',
+    )
+
+    fireEvent.change(slider, { target: { value: '1' } })
+    await user.click(screen.getByRole('link', {
+      name: 'Open Graduation day, shared by Maya',
+    }))
+    expect(screen.getByRole('status', { name: 'Route state' })).toHaveTextContent(
+      '/journal/photo/family-week/new|/journal|people|review-uploads|capsule-family-week-new',
+    )
+  })
+
+  it('requires a clear portrait when adding a person and never adds it to uploads', async () => {
+    const user = userEvent.setup()
+    renderTimeline([])
+    await screen.findByText('Set up two family faces')
+
+    await user.click(screen.getByRole('button', { name: 'Add person' }))
+    const form = screen.getByRole('form', { name: 'Add a person' })
+    await user.type(within(form).getByRole('textbox', { name: 'Name' }), 'Maya')
+    await user.click(within(form).getByRole('button', { name: 'Add person' }))
+    expect(within(form).getByRole('alert')).toHaveTextContent(
+      'Choose at least one clear face photo',
+    )
+
+    const portrait = new File(['portrait'], 'maya.jpg', { type: 'image/jpeg' })
+    await user.upload(within(form).getByLabelText(/^Face photo/), portrait)
+    await user.click(within(form).getByRole('button', { name: 'Add person' }))
+
+    expect(await screen.findByRole('button', { name: 'Maya' })).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    )
+    expect(scanReferencePortrait).toHaveBeenCalledWith(portrait)
+    expect(screen.queryByRole('img')).not.toBeInTheDocument()
+    expect(screen.getByText(/reference photos are scanned once and never stored/i)).toBeInTheDocument()
+    expect(screen.getByRole('status')).toHaveTextContent(
+      'Maya is ready. Add family photos',
+    )
+  })
+
+  it('enrolls several face views together and keeps every successful reference', async () => {
+    const namespace = 'people-multi-reference'
+    const alternateEmbedding = mayaEmbedding.map((value, index) =>
+      value + (index % 2 === 0 ? 0.08 : 0.04),
+    )
+    vi.mocked(scanReferencePortrait)
+      .mockResolvedValueOnce({ embedding: mayaEmbedding, quality: 0.92 })
+      .mockResolvedValueOnce({ embedding: alternateEmbedding, quality: 0.84 })
+    const user = userEvent.setup()
+    renderTimeline([], namespace)
+    await screen.findByText('Set up two family faces')
+
+    await user.click(screen.getByRole('button', { name: 'Add person' }))
+    const form = screen.getByRole('form', { name: 'Add a person' })
+    await user.type(within(form).getByRole('textbox', { name: 'Name' }), 'Maya')
+    const front = new File(['front'], 'maya-front.jpg', { type: 'image/jpeg' })
+    const side = new File(['side'], 'maya-side.jpg', { type: 'image/jpeg' })
+    const facePicker = within(form).getByLabelText(/^Face photos/)
+    expect(facePicker).toHaveAttribute('multiple')
+    await user.upload(facePicker, [front, side])
+    await user.click(within(form).getByRole('button', { name: 'Add person' }))
+
+    expect(await screen.findByRole('button', { name: 'Maya' })).toBeInTheDocument()
+    expect(scanReferencePortrait).toHaveBeenNthCalledWith(1, front)
+    expect(scanReferencePortrait).toHaveBeenNthCalledWith(2, side)
+    await waitFor(() => {
+      const savedState = storedStates.get(namespace) as PeopleTimelineState
+      const mayaId = savedState.people.find(({ name }) => name === 'Maya')?.id
+      expect(mayaId).toBeTruthy()
+      expect(savedState.faceProfiles[mayaId ?? '']?.references).toEqual([
+        expect.objectContaining({ embedding: mayaEmbedding, quality: 0.92 }),
+        expect.objectContaining({ embedding: alternateEmbedding, quality: 0.84 }),
+      ])
+    })
+
+    await user.click(screen.getByRole('button', { name: 'Rename or remove Maya' }))
+    expect(screen.getByText('2 face views ready')).toBeInTheDocument()
+  })
+
+  it('announces when a person still needs a face photo', async () => {
+    const namespace = 'people-missing-face'
+    storedStates.set(namespace, stateWith({
+      people: [{ id: 'maya', name: 'Maya', createdAt: '2026-01-01' }],
+    }))
+    renderTimeline([], namespace)
+
+    const chip = await screen.findByRole('button', {
+      name: 'Maya, face photo needed',
+    })
+    expect(chip).toHaveTextContent('Maya')
+    expect(chip).toHaveAttribute('data-needs-face', 'true')
+  })
+
+  it('shows only uncertain matches in Review and supports Yes, No, and Not sure', async () => {
+    const namespace = 'people-face-review'
+    const reviewBase = Array<number>(1_024).fill(1)
+    const mediumA = reviewBase.map((value) => value + 0.3)
+    const mediumB = reviewBase.map((value, index) =>
+      value + (index % 2 === 0 ? -0.3 : 0.3),
+    )
+    const mediumC = reviewBase.map((value, index) =>
+      value + (index % 3 === 0 ? -0.3 : 0.3),
+    )
+    storedStates.set(namespace, stateWith({
+      people: [{ id: 'maya', name: 'Maya', createdAt: '2026-01-01' }],
+      faceProfiles: { maya: faceProfile(reviewBase) },
+      faceScans: {
+        'photo:first': faceScan(detectedFace('face-1', mediumA)),
+        'photo:second': faceScan(detectedFace('face-1', mediumB)),
+        'photo:third': faceScan(detectedFace('face-1', mediumC)),
+      },
+    }))
+    const user = userEvent.setup()
+    renderTimeline([
+      capsulePhoto('first', '2020-01-01T12:00:00.000Z', 'First uncertain face'),
+      capsulePhoto('second', '2021-01-01T12:00:00.000Z', 'Second uncertain face'),
+      capsulePhoto('third', '2022-01-01T12:00:00.000Z', 'Third uncertain face'),
+    ], namespace)
+
+    const reviewChip = await screen.findByRole('button', { name: 'Review 3' })
+    expect(reviewChip).toHaveAttribute('aria-pressed', 'false')
+    await user.click(reviewChip)
+    expect(await screen.findByText('Is the outlined face Maya?')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Yes' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'No' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Not sure' })).toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: 'Yes' }))
+    expect(await screen.findByRole('img', { name: 'Second uncertain face' })).toBeInTheDocument()
+    await waitFor(() => expect(
+      (storedStates.get(namespace) as PeopleTimelineState).assignments,
+    ).toContainEqual(expect.objectContaining({
+      photoKey: 'photo:first',
+      faceId: 'face-1',
+      personId: 'maya',
+      source: 'manual',
+    })))
+
+    await user.click(screen.getByRole('button', { name: 'No' }))
+    expect(await screen.findByRole('img', { name: 'Third uncertain face' })).toBeInTheDocument()
+    await waitFor(() => expect(
+      (storedStates.get(namespace) as PeopleTimelineState).dismissedSuggestions,
+    ).toContainEqual(expect.objectContaining({
+      photoKey: 'photo:second',
+      faceId: 'face-1',
+      personId: 'maya',
+    })))
+
+    await user.click(screen.getByRole('button', { name: 'Not sure' }))
+    expect(await screen.findByText('Review complete for now')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /^Review/ })).not.toBeInTheDocument()
+  })
+
+  it('accepts a batch of ordinary photos and opens All photos', async () => {
+    const user = userEvent.setup()
+    const onUploadPhotos = vi.fn(async (files: readonly File[]) => ({
+      added: files.length,
+      failed: 0,
+    }))
+    render(
+      <MemoryRouter>
+        <PeopleTimeline
+          photos={[]}
+          journalPhotos={[]}
+          cacheNamespace="people-batch-upload"
+          onUploadPhotos={onUploadPhotos}
+          photoImportProgress={{ importing: false, completed: 0, total: 0 }}
+        />
+      </MemoryRouter>,
+    )
+    await screen.findByText('Set up two family faces')
+
+    const picker = screen.getByTestId('family-photo-input')
+    expect(picker).toHaveAttribute('multiple')
+    expect(picker).toHaveAttribute('tabindex', '-1')
+    expect(picker).toHaveAttribute('aria-hidden', 'true')
+    const pickerClick = vi.spyOn(picker, 'click')
+    await user.click(screen.getAllByRole('button', { name: 'Add photos' })[0])
+    expect(pickerClick).toHaveBeenCalledOnce()
+    const first = new File(['one'], 'maya-one.jpg', { type: 'image/jpeg' })
+    const second = new File(['two'], 'maya-two.png', { type: 'image/png' })
+    await user.upload(picker, [first, second])
+
+    await waitFor(() => expect(onUploadPhotos).toHaveBeenCalledWith([
+      first,
+      second,
+    ]))
+    expect(timelineChip('All photos')).toHaveAttribute('aria-pressed', 'true')
+    expect(await screen.findByRole('status')).toHaveTextContent(
+      '2 photos added',
+    )
+    expect(picker).toHaveValue('')
+  })
+
+  it('keeps the hidden picker out of tab order and warns about partial batches', async () => {
+    const user = userEvent.setup()
+    const onUploadPhotos = vi.fn(async () => ({ added: 1, failed: 1 }))
+    render(
+      <MemoryRouter>
+        <PeopleTimeline
+          photos={[]}
+          cacheNamespace="people-partial-upload"
+          onUploadPhotos={onUploadPhotos}
+        />
+      </MemoryRouter>,
+    )
+    await screen.findByText('Set up two family faces')
+
+    await user.tab()
+    expect(screen.getAllByRole('button', { name: 'Add photos' })[0]).toHaveFocus()
+    await user.upload(screen.getByTestId('family-photo-input'), [
+      new File(['ok'], 'ok.jpg', { type: 'image/jpeg' }),
+      new File(['bad'], 'bad.heic', { type: 'image/heic' }),
+    ])
+
+    const status = await screen.findByRole('status')
+    expect(status).toHaveTextContent('1 photo added · 1 could not be added')
+    expect(status).toHaveAttribute('data-error', 'true')
+    expect(status).toHaveTextContent('Saved on this device')
+  })
+
+  it('shows batch progress and scans a new direct upload after importing ends', async () => {
+    const namespace = 'people-direct-scan'
+    storedStates.set(namespace, stateWith({
+      people: [{ id: 'maya', name: 'Maya', createdAt: '2026-01-01' }],
+      faceProfiles: { maya: faceProfile(mayaEmbedding) },
+    }))
+    const { rerender } = render(
+      <MemoryRouter>
+        <PeopleTimeline
+          photos={[]}
+          journalPhotos={[journalPhoto('new-direct')]}
+          cacheNamespace={namespace}
+          onUploadPhotos={vi.fn()}
+          photoImportProgress={{ importing: true, completed: 1, total: 4 }}
+        />
+      </MemoryRouter>,
+    )
+
+    expect(await screen.findByRole('progressbar', {
+      name: 'Adding family photos',
+    })).toHaveTextContent('Adding 2 of 4')
+    expect(screen.getAllByRole('button', { name: 'Adding…' }).every(
+      (button) => button.hasAttribute('disabled'),
+    )).toBe(true)
+    expect(scanTimelineFaces).not.toHaveBeenCalled()
+
+    rerender(
+      <MemoryRouter>
+        <PeopleTimeline
+          photos={[]}
+          journalPhotos={[journalPhoto('new-direct')]}
+          cacheNamespace={namespace}
+          onUploadPhotos={vi.fn()}
+          photoImportProgress={{ importing: false, completed: 4, total: 4 }}
+        />
+      </MemoryRouter>,
+    )
+
+    await waitFor(() => expect(scanTimelineFaces).toHaveBeenCalledTimes(1))
+    expect(vi.mocked(scanTimelineFaces).mock.calls[0]?.[0]).toEqual([
+      expect.objectContaining({
+        key: 'journal-photo:new-direct',
+        kind: 'journal-photo',
+      }),
+    ])
+  })
+
+  it('does not enroll a person when the portrait scan is rejected', async () => {
+    const user = userEvent.setup()
+    vi.mocked(scanReferencePortrait).mockRejectedValue(
+      new Error('More than one face was found. Choose a photo containing only this person.'),
+    )
+    renderTimeline([])
+    await screen.findByText('Set up two family faces')
+
+    await user.click(screen.getByRole('button', { name: 'Add person' }))
+    const form = screen.getByRole('form', { name: 'Add a person' })
+    await user.type(within(form).getByRole('textbox', { name: 'Name' }), 'Maya')
+    await user.upload(
+      within(form).getByLabelText(/^Face photo/),
+      new File(['group'], 'group.jpg', { type: 'image/jpeg' }),
+    )
+    await user.click(within(form).getByRole('button', { name: 'Add person' }))
+
+    expect(await within(form).findByRole('alert')).toHaveTextContent(
+      'More than one face was found',
+    )
+    expect(screen.queryByRole('button', { name: 'Maya' })).not.toBeInTheDocument()
+  })
+
+  it('places group photos in Family and every matching person timeline automatically', async () => {
+    const namespace = 'people-auto-family'
+    storedStates.set(namespace, stateWith({
+      people: [
+        { id: 'maya', name: 'Maya', createdAt: '2026-01-01' },
+        { id: 'leena', name: 'Leena', createdAt: '2026-01-01' },
+      ],
+      faceProfiles: {
+        maya: faceProfile(mayaEmbedding),
+        leena: faceProfile(leenaEmbedding),
+      },
+      faceScans: {
+        'photo:maya': faceScan(detectedFace('face-1', mayaEmbedding)),
+        'photo:family': faceScan(
+          detectedFace('face-1', mayaEmbedding),
+          detectedFace('face-2', leenaEmbedding),
+        ),
+      },
+    }))
+    const user = userEvent.setup()
+    renderTimeline([
+      capsulePhoto('family', '2024-01-01T12:00:00.000Z', 'Everyone together'),
+      capsulePhoto('maya', '2020-01-01T12:00:00.000Z', 'Maya portrait'),
+    ], namespace)
+
+    expect(await screen.findByRole('img', { name: 'Everyone together' })).toBeInTheDocument()
+    expect(screen.getByText('1 of 1')).toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: 'Maya' }))
+    expect(await screen.findByRole('slider', {
+      name: 'Timeline position for Maya',
+    })).toHaveAttribute('aria-valuetext', '1 of 2, January 1, 2020')
+
+    await user.click(screen.getByRole('button', { name: 'Leena' }))
+    expect(await screen.findByRole('img', { name: 'Everyone together' })).toBeInTheDocument()
+    expect(screen.getByText('1 of 1')).toBeInTheDocument()
+    expect(scanTimelineFaces).not.toHaveBeenCalled()
+  })
+
+  it('does not treat duplicate detections of one person as a Family photo', async () => {
+    const namespace = 'people-distinct-family'
+    storedStates.set(namespace, stateWith({
+      people: [
+        { id: 'maya', name: 'Maya', createdAt: '2026-01-01' },
+        { id: 'leena', name: 'Leena', createdAt: '2026-01-01' },
+      ],
+      faceProfiles: {
+        maya: faceProfile(mayaEmbedding),
+        leena: faceProfile(leenaEmbedding),
+      },
+      faceScans: {
+        'photo:mirror': faceScan(
+          detectedFace('face-1', mayaEmbedding),
+          detectedFace('face-2', mayaEmbedding),
+        ),
+      },
+    }))
+    renderTimeline([
+      capsulePhoto('mirror', '2024-01-01T12:00:00.000Z', 'Mirror photo'),
+    ], namespace)
+
+    expect(await screen.findByText('No group photos matched yet')).toBeInTheDocument()
+    expect(screen.queryByRole('img', { name: 'Mirror photo' })).not.toBeInTheDocument()
+  })
+
+  it('uses Review uploads for manual corrections that override recognition', async () => {
+    const namespace = 'people-manual-correction'
+    storedStates.set(namespace, stateWith({
+      people: [
+        { id: 'maya', name: 'Maya', createdAt: '2026-01-01' },
+        { id: 'leena', name: 'Leena', createdAt: '2026-01-01' },
+      ],
+      faceProfiles: {
+        maya: faceProfile(mayaEmbedding),
+        leena: faceProfile(leenaEmbedding),
+      },
+      faceScans: {
+        'photo:picnic': faceScan(detectedFace('face-1', mayaEmbedding)),
+      },
+    }))
+    const user = userEvent.setup()
+    renderTimeline([
+      capsulePhoto('picnic', '2024-01-01T12:00:00.000Z', 'Family picnic'),
+    ], namespace)
+    await screen.findByText('No group photos matched yet')
+
+    await user.click(timelineChip('All photos'))
+    await screen.findByRole('img', { name: 'Family picnic' })
+    await user.click(screen.getByRole('button', { name: 'People in this photo' }))
+    expect(screen.getByRole('checkbox', { name: /Maya/ })).toBeChecked()
+    await user.click(screen.getByRole('checkbox', { name: /Leena/ }))
+
+    await user.click(screen.getByRole('button', { name: 'Family' }))
+    expect(await screen.findByRole('img', { name: 'Family picnic' })).toBeInTheDocument()
+
+    await user.click(timelineChip('All photos'))
+    const tagToggle = screen.getByRole('button', { name: 'People in this photo' })
+    if (tagToggle.getAttribute('aria-expanded') !== 'true') await user.click(tagToggle)
+    await user.click(screen.getByRole('checkbox', { name: /Maya/ }))
+    await user.click(screen.getByRole('button', { name: 'Family' }))
+
+    expect(await screen.findByText('No group photos matched yet')).toBeInTheDocument()
+    await waitFor(() => expect(
+      (storedStates.get(namespace) as PeopleTimelineState).dismissedSuggestions,
+    ).toEqual([expect.objectContaining({
+      photoKey: 'photo:picnic',
+      personId: 'maya',
+    })]))
+  })
+
+  it('automatically scans only ordinary photos that have not been checked', async () => {
+    const namespace = 'people-incremental-scan'
+    storedStates.set(namespace, stateWith({
+      people: [{ id: 'maya', name: 'Maya', createdAt: '2026-01-01' }],
+      faceProfiles: { maya: faceProfile(mayaEmbedding) },
+      faceScans: {
+        'photo:old': faceScan(detectedFace('face-1', mayaEmbedding)),
+      },
+    }))
+    vi.mocked(scanTimelineFaces).mockImplementation(async (photos, checkpoint) => {
+      const photo = photos[0]
+      const scan = faceScan(detectedFace('face-1', mayaEmbedding))
+      if (photo) await checkpoint?.({
+        photoKey: photo.key,
+        faceScan: scan,
+        failed: false,
+        completed: 1,
+        total: photos.length,
+      })
+      return {
+        faceScans: photo ? { [photo.key]: scan } : {},
+        failedPhotoCount: 0,
+        completedPhotoCount: photo ? 1 : 0,
+      }
+    })
+    const user = userEvent.setup()
+    renderTimeline([
+      capsulePhoto('old', '2020-01-01T12:00:00.000Z', 'Old portrait'),
+      capsulePhoto('new', '2024-01-01T12:00:00.000Z', 'New portrait'),
+    ], namespace)
+
+    await waitFor(() => expect(scanTimelineFaces).toHaveBeenCalledTimes(1))
+    expect(vi.mocked(scanTimelineFaces).mock.calls[0]?.[0]).toEqual([
+      expect.objectContaining({
+        key: 'photo:new',
+        source: '/photos/new-thumb.jpg',
+        scanSource: '/photos/new.jpg',
+      }),
+    ])
+    await user.click(screen.getByRole('button', { name: 'Maya' }))
+    expect(await screen.findByRole('slider', {
+      name: 'Timeline position for Maya',
+    })).toHaveAttribute('aria-valuetext', '1 of 2, January 1, 2020')
+  })
+
+  it('preserves manual tags while clearing enrolled faces and detections', async () => {
+    const namespace = 'people-clear-face-data'
+    storedStates.set(namespace, stateWith({
+      people: [{ id: 'maya', name: 'Maya', createdAt: '2026-01-01' }],
+      assignments: [{
+        photoKey: 'photo:portrait',
+        personId: 'maya',
+        source: 'manual',
+        confirmedAt: '2026-01-01',
+      }],
+      faceProfiles: { maya: faceProfile(mayaEmbedding) },
+      faceScans: {
+        'photo:portrait': faceScan(detectedFace('face-1', mayaEmbedding)),
+      },
+    }))
+    const user = userEvent.setup()
+    renderTimeline([
+      capsulePhoto('portrait', '2020-01-01T12:00:00.000Z', 'Maya portrait'),
+    ], namespace, { initialPersonId: 'maya' })
+    await screen.findByRole('img', { name: 'Maya portrait' })
+
+    await user.click(screen.getByRole('button', { name: 'Clear face data' }))
+    const confirmation = screen.getByRole('group', { name: 'Confirm clear face data' })
+    await user.click(within(confirmation).getByRole('button', { name: 'Clear' }))
+
+    expect(await screen.findByRole('status')).toHaveTextContent(
+      'Face references and detections have been cleared',
+    )
+    expect(screen.getByRole('img', { name: 'Maya portrait' })).toBeInTheDocument()
+    await waitFor(() => expect(storedStates.get(namespace)).toEqual(
+      expect.objectContaining({
+        faceProfiles: {},
+        faceScans: {},
+        assignments: [expect.objectContaining({ source: 'manual' })],
+      }),
+    ))
+  })
+
+  it('edits an ordinary photo to an approximate year from Review uploads', async () => {
+    const user = userEvent.setup()
+    renderTimeline([
+      capsulePhoto('childhood', '2008-08-12T12:00:00.000Z', 'At the park'),
+    ])
+    await screen.findByText('Set up two family faces')
+    await user.click(timelineChip('All photos'))
+    await screen.findByRole('slider')
+
+    await user.click(screen.getByRole('button', { name: 'Edit date' }))
+    await user.click(screen.getByRole('button', { name: 'Year' }))
+    const yearInput = screen.getByRole('spinbutton', { name: 'Approximate year' })
+    await user.clear(yearInput)
+    await user.type(yearInput, '1998')
+    await user.click(screen.getByRole('button', { name: 'Save date' }))
+
+    expect(screen.getByText('Around 1998')).toBeInTheDocument()
+  })
+})
