@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
+  aerodataboxLookup,
   aerodataboxStatus,
   clearAeroDataBoxProviderCachesForTest,
 } from '../../../supabase/functions/flight-status/aerodataboxProvider.ts'
@@ -170,7 +171,7 @@ describe('AeroDataBox provider adapter', () => {
     const [url, options] = fetchMock.mock.calls[0] as [string, RequestInit]
     expect(url).toBe(
       'https://aerodatabox.p.rapidapi.com/flights/number/EK202/2026-09-10'
-        + '?dateLocalRole=Both&withLocation=true&withAircraftImage=false',
+        + '?dateLocalRole=Departure&withLocation=true&withAircraftImage=false',
     )
     const headers = new Headers(options.headers)
     expect(headers.get('X-RapidAPI-Key')).toBe(apiKey)
@@ -356,7 +357,7 @@ describe('AeroDataBox provider adapter', () => {
     })
   })
 
-  it('accepts a unique operating codeshare arriving on the selected date', async () => {
+  it('matches a codeshare by its origin-local departure date, not arrival date', async () => {
     const operator = flightContract({
       number: 'FZ 1482',
       date: '2026-09-09',
@@ -374,6 +375,11 @@ describe('AeroDataBox provider adapter', () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse([operator])))
 
     await expect(aerodataboxStatus('EK2384', '2026-09-10', apiKey))
+      .resolves.toBeNull()
+
+    clearAeroDataBoxProviderCachesForTest()
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse([operator])))
+    await expect(aerodataboxStatus('EK2384', '2026-09-09', apiKey))
       .resolves.toMatchObject({
         flightNumber: 'EK2384',
         operatingFlightNumber: 'FZ1482',
@@ -415,6 +421,82 @@ describe('AeroDataBox provider adapter', () => {
     const ambiguous = aerodataboxStatus('EK2385', '2026-09-10', apiKey)
     await vi.advanceTimersByTimeAsync(1_000)
     await expect(ambiguous).resolves.toBeNull()
+  })
+
+  it('returns sanitized choices for multiple departure-local matches and revalidates the selection', async () => {
+    const first = flightContract({
+      number: 'EK 230',
+      departureExtra: {
+        scheduledTime: {
+          utc: '2026-09-10T06:00:00Z',
+          local: '2026-09-10T10:00:00+04:00',
+        },
+      },
+    })
+    const second = flightContract({
+      number: 'EK 230',
+      departureExtra: {
+        scheduledTime: {
+          utc: '2026-09-10T18:00:00Z',
+          local: '2026-09-10T22:00:00+04:00',
+        },
+      },
+    })
+    const fetchMock = vi.fn().mockImplementation(() =>
+      Promise.resolve(jsonResponse([second, first])),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    const result = await aerodataboxLookup('EK230', '2026-09-10', apiKey)
+
+    expect(result).toEqual({
+      kind: 'choices',
+      choices: [
+        expect.objectContaining({
+          providerFlightId: 'EK230:2026-09-10T06:00:00.000Z',
+          flightNumber: 'EK230',
+          origin: expect.objectContaining({ code: 'DXB' }),
+          destination: expect.objectContaining({ code: 'LHR' }),
+          scheduledDeparture: '2026-09-10T06:00:00.000Z',
+        }),
+        expect.objectContaining({
+          providerFlightId: 'EK230:2026-09-10T18:00:00.000Z',
+          scheduledDeparture: '2026-09-10T18:00:00.000Z',
+        }),
+      ],
+    })
+
+    const selectedLookup = aerodataboxLookup(
+      'EK230',
+      '2026-09-10',
+      apiKey,
+      null,
+      'EK230:2026-09-10T18:00:00.000Z',
+    )
+    await vi.advanceTimersByTimeAsync(1_000)
+    await expect(selectedLookup).resolves.toMatchObject({
+      kind: 'created',
+      snapshot: {
+        providerFlightId: 'EK230:2026-09-10T18:00:00.000Z',
+        flightNumber: 'EK230',
+        scheduledDeparture: '2026-09-10T18:00:00.000Z',
+      },
+    })
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+  })
+
+  it('rejects a selected provider identity that is not in the departure-date results', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse([
+      flightContract({ number: 'EK 231' }),
+    ])))
+
+    await expect(aerodataboxLookup(
+      'EK231',
+      '2026-09-10',
+      apiKey,
+      null,
+      'EK231:2026-09-10T18:00:00.000Z',
+    )).resolves.toBeNull()
   })
 
   it('treats a 204 flight response as no match', async () => {

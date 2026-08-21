@@ -1,6 +1,7 @@
 import { createClient } from 'npm:@supabase/supabase-js@2.112.4'
 import {
   AeroDataBoxProviderError,
+  aerodataboxLookup,
   aerodataboxStatus,
 } from './aerodataboxProvider.ts'
 import {
@@ -94,6 +95,14 @@ function normalizedFlightNumber(value: unknown) {
 function validUuid(value: unknown): value is string {
   return typeof value === 'string'
     && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value)
+}
+
+function validProviderFlightId(value: unknown) {
+  const candidate = text(value)
+  if (!candidate || candidate.length > 160) return null
+  return /^[A-Z0-9]+:[0-9T:.Z+-]+$/.test(candidate)
+    ? candidate
+    : null
 }
 
 async function authorizeLookup(request: Request): Promise<MemberContext | null> {
@@ -246,6 +255,7 @@ Deno.serve(async (request) => {
       'flightNumber',
       'travelDate',
       'clientCalendarDate',
+      'providerFlightId',
     ]
     : ['operation', 'flightId'])
   if (Object.keys(body).some((key) => !allowedKeys.has(key))) {
@@ -288,6 +298,9 @@ Deno.serve(async (request) => {
     } else {
       const travelerName = text(body.travelerName)?.replace(/\s+/g, ' ') ?? null
       const flightNumber = normalizedFlightNumber(body.flightNumber)
+      const providerFlightId = body.providerFlightId === undefined
+        ? null
+        : validProviderFlightId(body.providerFlightId)
       if (flightNumber === 'ticket') {
         return json(request, {
           error: 'Public flight trackers cannot resolve a 13-digit ticket number. Enter the airline flight number and travel date; ticket numbers are never stored.',
@@ -297,7 +310,13 @@ Deno.serve(async (request) => {
       const travelDate = clientCalendarDate
         ? validTravelDateForCalendar(body.travelDate, clientCalendarDate)
         : null
-      if (!travelerName || travelerName.length > 60 || !flightNumber || !travelDate) {
+      if (
+        !travelerName
+        || travelerName.length > 60
+        || !flightNumber
+        || !travelDate
+        || (body.providerFlightId !== undefined && !providerFlightId)
+      ) {
         return json(request, {
           error: 'Enter a valid traveler, flight number, and travel date.',
         }, 422)
@@ -305,11 +324,19 @@ Deno.serve(async (request) => {
 
       const existing = await storedFlightIdentity(database, flightId, context)
       if (existing) {
+        const existingProviderFlightId = text(
+          object(existing.previousSnapshot)?.providerFlightId,
+        )
         if (
           existing.createdBy !== context.userId
           || existing.flightNumber !== flightNumber
           || existing.travelDate !== travelDate
           || existing.travelerName !== travelerName
+          || (
+            providerFlightId
+            && existingProviderFlightId
+            && providerFlightId !== existingProviderFlightId
+          )
         ) {
           return json(request, {
             error: 'That flight request conflicts with an existing record.',
@@ -335,15 +362,39 @@ Deno.serve(async (request) => {
         error: 'Live flight tracking is not configured.',
       }, 503)
     }
-    const status = await aerodataboxStatus(
-      identity.flightNumber,
-      identity.travelDate,
-      apiKey,
-      identity.previousSnapshot,
-    )
+    const selectedProviderFlightId = operation === 'create'
+      ? validProviderFlightId(body.providerFlightId)
+      : null
+    const lookup = operation === 'create'
+      ? await aerodataboxLookup(
+          identity.flightNumber,
+          identity.travelDate,
+          apiKey,
+          identity.previousSnapshot,
+          selectedProviderFlightId,
+        )
+      : null
+    if (lookup?.kind === 'choices') {
+      if (!await membershipStillApproved(database, context)) {
+        return json(request, {
+          error: 'An approved family connection is required.',
+        }, 403)
+      }
+      return json(request, { kind: 'choices', choices: lookup.choices })
+    }
+    const status = operation === 'create'
+      ? lookup?.kind === 'created' ? lookup.snapshot : null
+      : await aerodataboxStatus(
+          identity.flightNumber,
+          identity.travelDate,
+          apiKey,
+          identity.previousSnapshot,
+        )
     if (!status) {
       return json(request, {
-        error: 'No unambiguous flight was found for that number on the selected departure or arrival date.',
+        error: selectedProviderFlightId
+          ? 'That flight choice no longer matches the selected departure date. Search again.'
+          : 'No flight was found for that number on the selected departure date.',
       }, 404)
     }
 
@@ -409,7 +460,9 @@ Deno.serve(async (request) => {
         .maybeSingle()
       if (error || !data) throw new Error('flight-storage-unavailable')
     }
-    return json(request, status)
+    return json(request, operation === 'create'
+      ? { kind: 'created', snapshot: status }
+      : status)
   } catch (error) {
     if (error instanceof AeroDataBoxProviderError) {
       return providerErrorResponse(request, error)

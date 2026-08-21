@@ -11,8 +11,9 @@ export function EventsPage() {
       className="ks-feature events-page"
       aria-labelledby="family-plans-title"
     >
-      <header className="ks-feature__header">
+      <header className="ks-feature__header app-page-header">
         <div className="ks-feature__header-copy">
+          <p className="eyebrow app-page-header__eyebrow">Our family</p>
           <h1 id="family-plans-title">Family plans</h1>
         </div>
       </header>

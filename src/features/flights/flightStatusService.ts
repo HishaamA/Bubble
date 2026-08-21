@@ -79,6 +79,100 @@ type CreateTrackedFamilyFlightInput = {
   flightNumber: string
   travelDate: string
   clientCalendarDate: string
+  providerFlightId?: string
+}
+
+export type FlightLookupChoice = {
+  providerFlightId: string
+  flightNumber: string
+  operatingFlightNumber: string | null
+  origin: {
+    code: string
+    name: string | null
+    city: string | null
+    timeZone: string | null
+  }
+  destination: {
+    code: string
+    name: string | null
+    city: string | null
+    timeZone: string | null
+  }
+  scheduledDeparture: string
+  scheduledArrival: string | null
+}
+
+export type CreateTrackedFamilyFlightResult =
+  | { kind: 'created'; snapshot: TrackedFlight['snapshot'] }
+  | { kind: 'choices'; choices: FlightLookupChoice[] }
+
+function isNullableText(value: unknown): value is string | null {
+  return value === null || typeof value === 'string'
+}
+
+function isLookupAirport(value: unknown): value is FlightLookupChoice['origin'] {
+  if (!value || typeof value !== 'object') return false
+  const airport = value as Partial<FlightLookupChoice['origin']>
+  return typeof airport.code === 'string'
+    && /^[A-Z0-9]{3,4}$/.test(airport.code)
+    && isNullableText(airport.name)
+    && isNullableText(airport.city)
+    && isNullableText(airport.timeZone)
+}
+
+function isIsoTimestamp(value: unknown): value is string {
+  return typeof value === 'string'
+    && Number.isFinite(new Date(value).getTime())
+}
+
+function isFlightLookupChoice(value: unknown): value is FlightLookupChoice {
+  if (!value || typeof value !== 'object') return false
+  const choice = value as Partial<FlightLookupChoice>
+  return typeof choice.providerFlightId === 'string'
+    && choice.providerFlightId.length <= 160
+    && /^[A-Z0-9]+:[0-9T:.Z+-]+$/.test(choice.providerFlightId)
+    && typeof choice.flightNumber === 'string'
+    && normalizeFlightNumber(choice.flightNumber) === choice.flightNumber
+    && (
+      choice.operatingFlightNumber === null
+      || (
+        typeof choice.operatingFlightNumber === 'string'
+        && normalizeFlightNumber(choice.operatingFlightNumber)
+          === choice.operatingFlightNumber
+      )
+    )
+    && isLookupAirport(choice.origin)
+    && isLookupAirport(choice.destination)
+    && isIsoTimestamp(choice.scheduledDeparture)
+    && (
+      choice.scheduledArrival === null
+      || isIsoTimestamp(choice.scheduledArrival)
+    )
+}
+
+function createResponse(value: unknown): CreateTrackedFamilyFlightResult | null {
+  if (!value || typeof value !== 'object') return null
+  const response = value as {
+    kind?: unknown
+    snapshot?: unknown
+    choices?: unknown
+  }
+  if (response.kind === 'created' && isFlightStatusSnapshot(response.snapshot)) {
+    return { kind: 'created', snapshot: response.snapshot }
+  }
+  if (
+    response.kind === 'choices'
+    && Array.isArray(response.choices)
+    && response.choices.length > 1
+    && response.choices.length <= 20
+    && response.choices.every(isFlightLookupChoice)
+    && new Set(response.choices.map((choice) =>
+      (choice as FlightLookupChoice).providerFlightId,
+    )).size === response.choices.length
+  ) {
+    return { kind: 'choices', choices: response.choices }
+  }
+  return null
 }
 
 function waitWithSignal<T>(promise: Promise<T>, signal: AbortSignal) {
@@ -206,13 +300,13 @@ async function requestFlightStatus(
       response.json() as Promise<unknown>,
       controller.signal,
     )
-    if (!isFlightStatusSnapshot(responseBody)) {
-      throw new FlightStatusError(
-        'The flight provider returned an incomplete update. Try again shortly.',
-        'unavailable',
-      )
-    }
-    return responseBody
+    if (isFlightStatusSnapshot(responseBody)) return responseBody
+    const parsedCreateResponse = createResponse(responseBody)
+    if (parsedCreateResponse) return parsedCreateResponse
+    throw new FlightStatusError(
+      'The flight provider returned an incomplete update. Try again shortly.',
+      'unavailable',
+    )
   } catch (error) {
     if (error instanceof FlightStatusError) throw error
     if (timedOut) {
@@ -243,21 +337,44 @@ export async function createTrackedFamilyFlight(
   options: FlightStatusRequestOptions = {},
 ) {
   const expectedFlightNumber = normalizeFlightNumber(input.flightNumber)
-  const snapshot = await requestFlightStatus({
+  const response = await requestFlightStatus({
     operation: 'create',
     flightId: input.id,
     travelerName: input.travelerName,
     flightNumber: expectedFlightNumber,
     travelDate: input.travelDate,
     clientCalendarDate: input.clientCalendarDate,
+    ...(input.providerFlightId
+      ? { providerFlightId: input.providerFlightId }
+      : {}),
   }, options)
-  if (snapshot.flightNumber !== expectedFlightNumber) {
+  const result = isFlightStatusSnapshot(response)
+    ? { kind: 'created' as const, snapshot: response }
+    : createResponse(response)
+  if (!result) {
+    throw new FlightStatusError(
+      'The flight provider returned an incomplete update. Try again shortly.',
+      'unavailable',
+    )
+  }
+  if (result.kind === 'choices') {
+    if (result.choices.some((choice) =>
+      choice.flightNumber !== expectedFlightNumber,
+    )) {
+      throw new FlightStatusError(
+        'The secure tracker returned a different flight identity.',
+        'unavailable',
+      )
+    }
+    return result
+  }
+  if (result.snapshot.flightNumber !== expectedFlightNumber) {
     throw new FlightStatusError(
       'The secure tracker returned a different flight identity.',
       'unavailable',
     )
   }
-  return snapshot
+  return result
 }
 
 /** Refresh identity comes from the stored row; the optional value is response-only defense. */
@@ -266,10 +383,17 @@ export async function refreshTrackedFamilyFlight(
   expectedFlightNumber?: string,
   options: FlightStatusRequestOptions = {},
 ) {
-  const snapshot = await requestFlightStatus(
+  const response = await requestFlightStatus(
     { operation: 'refresh', flightId },
     options,
   )
+  if (!isFlightStatusSnapshot(response)) {
+    throw new FlightStatusError(
+      'The flight provider returned an incomplete update. Try again shortly.',
+      'unavailable',
+    )
+  }
+  const snapshot = response
   if (
     expectedFlightNumber
     && snapshot.flightNumber !== normalizeFlightNumber(expectedFlightNumber)

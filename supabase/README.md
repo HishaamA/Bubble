@@ -203,9 +203,10 @@ supabase functions deploy flight-status --no-verify-jwt
 `AERODATABOX_RAPIDAPI_KEY` is a server-only secret. Never put it in a `VITE_`
 variable, the web bundle, or a native APK. The proxy calls only the fixed HTTPS
 `https://aerodatabox.p.rapidapi.com` host. Its normal lookup is the single-day
-flight-status endpoint with `dateLocalRole=Both` and `withLocation=true`, so a
-date copied from either an origin departure board or destination arrival board
-works;
+flight-status endpoint with `dateLocalRole=Departure` and `withLocation=true`.
+The date entered in the app is always the scheduled departure date in the
+origin airport's local calendar, so an overnight arrival on the next local day
+does not make the lookup ambiguous;
 the same provider's airport endpoint is used only when embedded route geometry
 is incomplete. The key is sent only from the Edge Function. AeroDataBox's
 RapidAPI Basic plan currently provides 600 units per month; a Tier-2 status
@@ -235,10 +236,16 @@ calls only fixed AeroDataBox HTTPS endpoints. Set `APP_ALLOWED_ORIGINS` to a
 comma-separated production allowlist; Capacitor and local-development origins
 are included by default.
 
-AeroDataBox flight results must match the selected departure or arrival date.
+AeroDataBox flight results must match the selected origin-local departure date.
 Equivalent IATA/ICAO airline prefixes and leading-zero formats are normalized;
 a different flight number is accepted only when the number-scoped lookup returns
-one unambiguous operating codeshare. Airport coordinates and IANA time zones are
+an operating codeshare. When the provider returns more than one matching
+departure on that day, the first request returns only sanitized route and time
+choices and does not write a database row. The client sends the selected opaque
+provider flight ID in a second request; the Edge Function repeats the fixed-host
+provider lookup and verifies that the selection still belongs to the same flight
+number and departure date before persisting its trusted snapshot. Client-supplied
+status JSON is never accepted. Airport coordinates and IANA time zones are
 normalized server-side. Live ADS-B position is optional: when it is unavailable
 or stale, the client labels the airplane as an estimated or scheduled timeline
 position rather than live GPS. Legacy saved snapshots with provider

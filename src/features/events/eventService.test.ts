@@ -46,8 +46,14 @@ const serviceMocks = vi.hoisted(() => {
   }
 })
 
+const identityMocks = vi.hoisted(() => ({
+  getClerkSupabaseIdentity: vi.fn((): { subject: string } | null => ({
+    subject: 'user_clerk_alice',
+  })),
+}))
+
 vi.mock('../../lib/supabase', () => ({
-  getClerkSupabaseIdentity: () => ({ subject: 'user_clerk_alice' }),
+  getClerkSupabaseIdentity: identityMocks.getClerkSupabaseIdentity,
   getSupabaseClient: () => ({
     channel: serviceMocks.channel,
     from: serviceMocks.from,
@@ -64,9 +70,11 @@ vi.mock('../../services/persistence', () => persistenceMocks)
 
 import {
   createFamilyEvent,
+  deleteFamilyEvent,
   fetchFamilyEvents,
   subscribeToFamilyEvents,
   syncEventReminder,
+  updateFamilyEventDetails,
 } from './eventService'
 
 const userId = '10000000-0000-4000-8000-000000000001'
@@ -75,6 +83,9 @@ const eventId = 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee'
 
 beforeEach(() => {
   vi.clearAllMocks()
+  identityMocks.getClerkSupabaseIdentity.mockReturnValue({
+    subject: 'user_clerk_alice',
+  })
   persistenceMocks.bootstrapCurrentClerkProfile.mockResolvedValue({
     userId,
   })
@@ -143,6 +154,49 @@ describe('eventService', () => {
     expect(serviceMocks.rpc).toHaveBeenLastCalledWith('cancel_event_reminder', {
       p_event_id: eventId,
     })
+  })
+
+  it('completes only server-backed events through the membership-scoped RPC', async () => {
+    await expect(deleteFamilyEvent('family-local-event')).resolves.toBe(false)
+    expect(serviceMocks.rpc).not.toHaveBeenCalled()
+
+    serviceMocks.rpc.mockResolvedValueOnce({ data: true, error: null })
+    await expect(deleteFamilyEvent(eventId)).resolves.toBe(true)
+    expect(serviceMocks.rpc).toHaveBeenCalledWith('complete_family_event', {
+      p_event_id: eventId,
+    })
+  })
+
+  it('updates shared details only for authenticated server-backed events', async () => {
+    await expect(
+      updateFamilyEventDetails('family-local-event', 'local details'),
+    ).resolves.toBe(false)
+    expect(serviceMocks.rpc).not.toHaveBeenCalled()
+
+    identityMocks.getClerkSupabaseIdentity.mockReturnValueOnce(null)
+    await expect(
+      updateFamilyEventDetails(eventId, 'signed-out details'),
+    ).resolves.toBe(false)
+    expect(serviceMocks.rpc).not.toHaveBeenCalled()
+
+    serviceMocks.rpc.mockResolvedValueOnce({ data: true, error: null })
+    await expect(
+      updateFamilyEventDetails(eventId, '  shared checklist  '),
+    ).resolves.toBe(true)
+    expect(serviceMocks.rpc).toHaveBeenCalledWith(
+      'update_family_event_details',
+      {
+        p_event_id: eventId,
+        p_details: 'shared checklist',
+      },
+    )
+  })
+
+  it('rejects oversized event details before calling the shared RPC', async () => {
+    await expect(
+      updateFamilyEventDetails(eventId, 'x'.repeat(2_001)),
+    ).rejects.toThrow('2,000 characters or fewer')
+    expect(serviceMocks.rpc).not.toHaveBeenCalled()
   })
 
   it('loads only valid upcoming event rows from the current family circle', async () => {

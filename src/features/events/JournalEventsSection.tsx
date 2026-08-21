@@ -21,26 +21,52 @@ import {
 } from './eventReminders'
 import {
   createFamilyEvent as createFamilyEventRecord,
+  deleteFamilyEvent as deleteFamilyEventRecord,
   fetchFamilyEvents,
   subscribeToFamilyEvents,
   syncEventReminder,
+  updateFamilyEventDetails,
   type FamilyEventRecord,
 } from './eventService'
 import {
   eventStorageKey,
   familyEventStorageSubject,
 } from './eventStorage'
+import {
+  decodePlanDetails,
+  encodePlanDetails,
+  type PlanCategory,
+  type PlanDoodleName,
+  type PlanTask,
+} from './planDetails'
 
 type FamilyEvent = ReminderEvent & {
   date: string
   time: string
   location: string
   category: PlanCategory
+  doodle?: PlanDoodleName
+  tasks?: PlanTask[]
+  demoPresentation?: DemoPlanPresentation
 }
+
+type DemoPlanPresentation = {
+  attendees: Array<{ name: string; initials: string; avatar?: string }>
+  additionalAttendees: number
+  checklist: Array<PlanTask & { initiallyDone: boolean }>
+  doodle: PlanDoodleName
+  timeStyle: 'time-location' | 'weekday-time' | 'next-weekend'
+}
+
+type PlanChecklistProgress = Record<string, string[]>
+type PlanTaskDefinitions = Record<string, PlanTask[]>
+type DraftPlanTask = { id: string; value: string }
 
 const createdEventsKey = 'kinsphere-created-events'
 const reminderIdsKey = 'kinsphere-event-reminders'
-const categoryDetailsPrefix = 'kinsphere-plan-category:v1:'
+const checklistProgressKey = 'kinsphere-plan-checklists:v1'
+const taskDefinitionsKey = 'kinsphere-plan-tasks:v1'
+const completedPlanIdsKey = 'kinsphere-completed-plans:v1'
 const planCategories = [
   { value: 'travel', label: 'Travel' },
   { value: 'graduation', label: 'Graduation' },
@@ -50,31 +76,33 @@ const planCategories = [
   { value: 'other', label: 'Other milestone' },
 ] as const
 
-type PlanCategory = (typeof planCategories)[number]['value']
-
 /**
  * Family plans embedded in Journal. This component owns the same offline,
  * Realtime, and device-reminder behavior that the former Together page used.
  */
 export function JournalEventsSection() {
-  const { user } = useAuth()
+  const { isDevelopmentPreview, user } = useAuth()
   const { snapshot } = useFamilyOnboarding()
   const familyId = snapshot?.kind === 'member'
     ? snapshot.membership.familyId
     : null
   const storageSubject = familyEventStorageSubject(user?.id, familyId)
+  const showDemoPlans = Boolean(isDevelopmentPreview)
 
   return (
     <JournalEventsSectionForFamily
       key={storageSubject}
       storageSubject={storageSubject}
+      showDemoPlans={showDemoPlans}
     />
   )
 }
 
 function JournalEventsSectionForFamily({
+  showDemoPlans,
   storageSubject,
 }: {
+  showDemoPlans: boolean
   storageSubject: string
 }) {
   const upcomingListId = useId()
@@ -87,11 +115,28 @@ function JournalEventsSectionForFamily({
     reminderIdsKey,
     storageSubject,
   )
+  const checklistProgressStorageKey = eventStorageKey(
+    checklistProgressKey,
+    storageSubject,
+  )
+  const taskDefinitionsStorageKey = eventStorageKey(
+    taskDefinitionsKey,
+    storageSubject,
+  )
+  const completedPlanIdsStorageKey = eventStorageKey(
+    completedPlanIdsKey,
+    storageSubject,
+  )
   const [isUpcomingExpanded, setIsUpcomingExpanded] = useState(false)
   const [showEventSheet, setShowEventSheet] = useState(false)
   const [eventSaving, setEventSaving] = useState(false)
   const [eventFormError, setEventFormError] = useState('')
   const [timelineOpenedAt] = useState(Date.now)
+  const [selectedPlanDay, setSelectedPlanDay] = useState(todayInputValue)
+  const demoPlans = useMemo(
+    () => showDemoPlans ? createDemoFamilyPlans(timelineOpenedAt) : [],
+    [showDemoPlans, timelineOpenedAt],
+  )
   const [createdEvents, setCreatedEvents] = useState<FamilyEvent[]>(() =>
     readCreatedEvents(createdEventsStorageKey),
   )
@@ -106,15 +151,43 @@ function JournalEventsSectionForFamily({
       ]),
   )
   const [reminderStatus, setReminderStatus] = useState('')
+  const [checklistProgress, setChecklistProgress] =
+    useState<PlanChecklistProgress>(() =>
+      readChecklistProgress(checklistProgressStorageKey),
+    )
+  const [taskDefinitions, setTaskDefinitions] =
+    useState<PlanTaskDefinitions>(() =>
+      readPlanTaskDefinitions(taskDefinitionsStorageKey),
+    )
+  const [draftPlanTasks, setDraftPlanTasks] = useState<DraftPlanTask[]>(() => [
+    createDraftPlanTask(),
+  ])
+  const [taskComposerPlanId, setTaskComposerPlanId] = useState('')
+  const [taskComposerValue, setTaskComposerValue] = useState('')
+  const [completedPlanIds, setCompletedPlanIds] = useState<Set<string>>(
+    () => readStringSet(completedPlanIdsStorageKey),
+  )
   const eventSheetRef = useRef<HTMLFormElement>(null)
-  const eventSheetFirstFieldRef = useRef<HTMLSelectElement>(null)
+  const eventSheetFirstFieldRef = useRef<HTMLInputElement>(null)
   const eventSheetOpenerRef = useRef<HTMLElement | null>(null)
+  const taskComposerInputRef = useRef<HTMLInputElement>(null)
 
   const allUpcomingEvents = useMemo(() => {
     const eventsById = new Map<string, FamilyEvent>()
-    for (const event of [...createdEvents, ...sharedFamilyEvents]) {
+    for (const event of [
+      ...demoPlans,
+      ...createdEvents,
+      ...sharedFamilyEvents,
+    ]) {
+      if (completedPlanIds.has(event.id)) continue
       const startsAt = new Date(event.startsAt).getTime()
-      if (!Number.isFinite(startsAt) || startsAt < timelineOpenedAt) continue
+      if (
+        !Number.isFinite(startsAt)
+        || (
+          !event.demoPresentation
+          && event.date < localDateInputValue(new Date(timelineOpenedAt))
+        )
+      ) continue
       eventsById.set(event.id, event)
     }
     return [...eventsById.values()].sort(
@@ -122,7 +195,17 @@ function JournalEventsSectionForFamily({
         new Date(left.startsAt).getTime() -
         new Date(right.startsAt).getTime(),
     )
-  }, [createdEvents, sharedFamilyEvents, timelineOpenedAt])
+  }, [completedPlanIds, createdEvents, demoPlans, sharedFamilyEvents, timelineOpenedAt])
+  const selectedDayEvents = useMemo(
+    () => allUpcomingEvents.filter((event) => event.date === selectedPlanDay),
+    [allUpcomingEvents, selectedPlanDay],
+  )
+  const displayedWeek = useMemo(
+    () => planWeekForDate(selectedPlanDay),
+    [selectedPlanDay],
+  )
+  const displayedWeekRange = formatPlanWeekRange(displayedWeek)
+  const selectedDayLabel = formatPlanDay(selectedPlanDay)
 
   const refreshFamilyEvents = useCallback(async () => {
     const records = await fetchFamilyEvents()
@@ -214,10 +297,24 @@ function JournalEventsSectionForFamily({
     }
   }, [eventSaving, showEventSheet])
 
+  useEffect(() => {
+    if (!taskComposerPlanId) return
+    const frame = window.requestAnimationFrame(() => {
+      taskComposerInputRef.current?.focus()
+    })
+    return () => window.cancelAnimationFrame(frame)
+  }, [taskComposerPlanId])
+
   function openEventSheet() {
     eventSheetOpenerRef.current = document.activeElement as HTMLElement | null
     setEventFormError('')
+    setDraftPlanTasks([createDraftPlanTask()])
     setShowEventSheet(true)
+  }
+
+  function choosePlanDay(date: string) {
+    setSelectedPlanDay(date)
+    setIsUpcomingExpanded(false)
   }
 
   function closeEventSheet(force = false) {
@@ -234,17 +331,23 @@ function JournalEventsSectionForFamily({
     const date = String(form.get('date') ?? '')
     const time = String(form.get('time') ?? '')
     const location = String(form.get('location') ?? '').trim()
-    const category = parsePlanCategory(form.get('category'))
-    if (!title || !date || !time || !location || !category) return
+    const category: PlanCategory = 'other'
+    const tasks = form.getAll('tasks')
+      .map((value) => String(value).trim())
+      .filter(Boolean)
+      .slice(0, 12)
+      .map((label) => createPlanTask(label))
+    if (!title || !date || !time || !location) return
 
     const startsAt = `${date}T${time}:00`
+    const doodle = planDoodleForSeed(`${title}-${date}-${time}`)
     setEventSaving(true)
     try {
       const saved = await createFamilyEventRecord({
         title,
         startsAt,
         location,
-        details: `${categoryDetailsPrefix}${category}`,
+        details: encodePlanDetails({ category, doodle, tasks }),
       })
       const newEvent: FamilyEvent = {
         id: saved.id,
@@ -254,6 +357,8 @@ function JournalEventsSectionForFamily({
         location,
         startsAt,
         category,
+        doodle,
+        tasks,
       }
       const nextEvents = [...createdEvents, newEvent]
       const persistedOnDevice = writeJson(createdEventsStorageKey, nextEvents)
@@ -264,6 +369,7 @@ function JournalEventsSectionForFamily({
         return
       }
       setCreatedEvents(nextEvents)
+      setSelectedPlanDay(date)
       setIsUpcomingExpanded(true)
       closeEventSheet(true)
       if (saved.synced) void refreshFamilyEvents().catch(() => undefined)
@@ -313,63 +419,224 @@ function JournalEventsSectionForFamily({
     setReminderStatus(result.message)
   }
 
+  function toggleChecklistItem(
+    event: FamilyEvent,
+    item: PlanTask,
+    checklist: Array<PlanTask & { initiallyDone?: boolean }>,
+  ) {
+    setChecklistProgress((current) => {
+      const completed = new Set(
+        current[event.id]
+        ?? checklist.filter((task) => task.initiallyDone).map((task) => task.id),
+      )
+      if (completed.has(item.id)) completed.delete(item.id)
+      else completed.add(item.id)
+      const next = { ...current, [event.id]: [...completed] }
+      if (!writeJson(checklistProgressStorageKey, next)) {
+        setReminderStatus(
+          'Checklist updated for this session, but it could not be saved on this device.',
+        )
+      }
+      return next
+    })
+  }
+
+  function tasksForPlan(event: FamilyEvent) {
+    return taskDefinitions[event.id]
+      ?? event.tasks
+      ?? event.demoPresentation?.checklist
+      ?? []
+  }
+
+  function openTaskComposer(eventId: string) {
+    setTaskComposerValue('')
+    setTaskComposerPlanId((current) => current === eventId ? '' : eventId)
+  }
+
+  async function addTaskToPlan(
+    submitEvent: FormEvent<HTMLFormElement>,
+    event: FamilyEvent,
+  ) {
+    submitEvent.preventDefault()
+    const label = taskComposerValue.trim()
+    if (!label) {
+      taskComposerInputRef.current?.focus()
+      return
+    }
+    const currentTasks = tasksForPlan(event)
+    if (currentTasks.length >= 12) {
+      setReminderStatus('This plan already has the maximum of 12 tasks.')
+      return
+    }
+
+    const nextTasks = [...currentTasks, createPlanTask(label)]
+    const nextDefinitions = { ...taskDefinitions, [event.id]: nextTasks }
+    setTaskDefinitions(nextDefinitions)
+    writeJson(taskDefinitionsStorageKey, nextDefinitions)
+
+    const doodle = event.doodle
+      ?? event.demoPresentation?.doodle
+      ?? planDoodleForSeed(event.id)
+    const updateEvent = (item: FamilyEvent): FamilyEvent =>
+      item.id === event.id ? { ...item, doodle, tasks: nextTasks } : item
+    setCreatedEvents((current) => {
+      const next = current.map(updateEvent)
+      writeJson(createdEventsStorageKey, next)
+      return next
+    })
+    setSharedFamilyEvents((current) => current.map(updateEvent))
+    setTaskComposerPlanId('')
+    setTaskComposerValue('')
+
+    try {
+      const shared = await updateFamilyEventDetails(
+        event.id,
+        encodePlanDetails({ category: event.category, doodle, tasks: nextTasks }),
+      )
+      setReminderStatus(
+        shared
+          ? `“${label}” was added for the whole family.`
+          : `“${label}” was added to this plan on this device.`,
+      )
+    } catch {
+      setReminderStatus(
+        `“${label}” was saved here. Family sync will retry when the calendar reconnects.`,
+      )
+    }
+  }
+
+  async function completePlan(event: FamilyEvent) {
+    const nextCompletedPlanIds = new Set(completedPlanIds).add(event.id)
+    setCompletedPlanIds(nextCompletedPlanIds)
+    writeJson(completedPlanIdsStorageKey, [...nextCompletedPlanIds])
+
+    const nextCreatedEvents = createdEvents.filter((item) => item.id !== event.id)
+    setCreatedEvents(nextCreatedEvents)
+    writeJson(createdEventsStorageKey, nextCreatedEvents)
+    setSharedFamilyEvents((current) =>
+      current.filter((item) => item.id !== event.id),
+    )
+
+    setTaskDefinitions((current) => {
+      const next = { ...current }
+      delete next[event.id]
+      writeJson(taskDefinitionsStorageKey, next)
+      return next
+    })
+    setChecklistProgress((current) => {
+      const next = { ...current }
+      delete next[event.id]
+      writeJson(checklistProgressStorageKey, next)
+      return next
+    })
+    if (taskComposerPlanId === event.id) {
+      setTaskComposerPlanId('')
+      setTaskComposerValue('')
+    }
+
+    const nextReminderIds = new Set(reminderIds)
+    nextReminderIds.delete(event.id)
+    setReminderIds(nextReminderIds)
+    writeJson(reminderIdsStorageKey, [...nextReminderIds])
+    await cancelEventReminder(event.id, storageSubject)
+
+    try {
+      const removedForFamily = await deleteFamilyEventRecord(event.id)
+      setReminderStatus(
+        removedForFamily
+          ? `${event.title} was completed and removed from the shared calendar.`
+          : `${event.title} was completed and removed from this calendar.`,
+      )
+    } catch {
+      setReminderStatus(
+        `${event.title} was removed here. Shared removal will retry when the family calendar reconnects.`,
+      )
+    }
+  }
+
   return (
     <section
       className="journal-events"
       aria-labelledby="journal-events-title"
     >
-      <div className="journal-events__heading">
+      <div className="journal-events__heading journal-events__sr-only">
         <div>
           <p>Milestones worth remembering</p>
           <h2 id="journal-events-title">Important plans</h2>
         </div>
-        <button
-          className="events-header-action"
-          type="button"
-          aria-haspopup="dialog"
-          onClick={openEventSheet}
-        >
-          <span className="events-header-action__plus" aria-hidden="true">
-            +
-          </span>
-          <span>Add plan</span>
-        </button>
       </div>
+
+      <nav
+        className="journal-events__week"
+        aria-label={`Family plans, ${displayedWeekRange}`}
+      >
+        <div className="journal-events__week-days">
+          {displayedWeek.map((date) => {
+            const dateValue = localDateInputValue(date)
+            const selected = dateValue === selectedPlanDay
+            const hasPlans = allUpcomingEvents.some(
+              (event) => event.date === dateValue,
+            )
+            const weekday = new Intl.DateTimeFormat('en', {
+              weekday: 'long',
+            }).format(date)
+            return (
+              <button
+                key={dateValue}
+                type="button"
+                aria-label={`${weekday}, ${new Intl.DateTimeFormat('en', {
+                  month: 'long',
+                  day: 'numeric',
+                }).format(date)}${hasPlans ? ', has plans' : ''}`}
+                aria-pressed={selected}
+                data-has-plans={hasPlans ? 'true' : 'false'}
+                onClick={() => choosePlanDay(dateValue)}
+              >
+                <span aria-hidden="true">{weekday.slice(0, 1)}</span>
+                <strong>{date.getDate()}</strong>
+                <i aria-hidden="true" />
+              </button>
+            )
+          })}
+        </div>
+        <div className="journal-events__week-navigation">
+          <button
+            type="button"
+            aria-label="Previous week"
+            onClick={() => choosePlanDay(shiftPlanDay(selectedPlanDay, -7))}
+          >
+            <svg aria-hidden="true" viewBox="0 0 12 12">
+              <path d="m7.5 2-4 4 4 4" />
+            </svg>
+          </button>
+          <p aria-live="polite">{displayedWeekRange}</p>
+          <button
+            type="button"
+            aria-label="Next week"
+            onClick={() => choosePlanDay(shiftPlanDay(selectedPlanDay, 7))}
+          >
+            <svg aria-hidden="true" viewBox="0 0 12 12">
+              <path d="m4.5 2 4 4-4 4" />
+            </svg>
+          </button>
+        </div>
+      </nav>
 
       <section
         className="ks-section journal-events__upcoming"
         aria-labelledby="upcoming-events-title"
       >
-        <div className="ks-section__heading journal-events__upcoming-heading">
+        <div className="journal-events__upcoming-heading journal-events__sr-only">
           <div>
             <h3 id="upcoming-events-title">Coming up</h3>
             <p>
               {eventsLoading
                 ? 'Checking shared plans…'
-                : `${allUpcomingEvents.length} ${
-                    allUpcomingEvents.length === 1 ? 'family plan' : 'family plans'
+                : `${selectedDayEvents.length} ${
+                    selectedDayEvents.length === 1 ? 'family plan' : 'family plans'
                   }`}
             </p>
           </div>
-          {allUpcomingEvents.length > 3 ? (
-            <button
-              className="journal-events__upcoming-toggle"
-              type="button"
-              aria-expanded={isUpcomingExpanded}
-              aria-controls={upcomingListId}
-              aria-label={
-                isUpcomingExpanded
-                  ? 'Show fewer upcoming family plans'
-                  : `Show all ${allUpcomingEvents.length} upcoming family events`
-              }
-              onClick={() => setIsUpcomingExpanded((expanded) => !expanded)}
-            >
-              <span>{isUpcomingExpanded ? 'Show less' : 'See all'}</span>
-              <svg aria-hidden="true" viewBox="0 0 12 8">
-                <path d="m1 1 5 5 5-5" />
-              </svg>
-            </button>
-          ) : null}
         </div>
         <div
           className="event-list journal-events__upcoming-list"
@@ -377,8 +644,8 @@ function JournalEventsSectionForFamily({
           data-expanded={isUpcomingExpanded}
         >
           {(isUpcomingExpanded
-            ? allUpcomingEvents
-            : allUpcomingEvents.slice(0, 3)
+            ? selectedDayEvents
+            : selectedDayEvents.slice(0, 3)
           ).map((event, index) => {
             const date = new Date(`${event.date}T12:00:00`)
             const day = new Intl.DateTimeFormat('en', {
@@ -391,54 +658,204 @@ function JournalEventsSectionForFamily({
               hour: 'numeric',
               minute: '2-digit',
             }).format(new Date(event.startsAt))
+            const weekday = new Intl.DateTimeFormat('en', {
+              weekday: 'long',
+            }).format(date)
             const hasReminder = reminderIds.has(event.id)
+            const categoryLabel = planCategoryLabel(event.category)
+            const presentation = event.demoPresentation
+            const checklist = tasksForPlan(event)
+            const doodle = event.doodle
+              ?? presentation?.doodle
+              ?? planDoodleForSeed(event.id)
+            const completedChecklistItems = new Set(
+              checklistProgress[event.id]
+              ?? checklist
+                .filter(taskStartsCompleted)
+                .map((item) => item.id)
+              ?? [],
+            )
 
             return (
               <article
                 key={event.id}
-                className={`ks-card event-list-item${
+                className={`ks-card event-list-item event-plan-card${
                   index > 0 ? ' journal-events__event--revealed' : ''
                 }`}
+                data-category={event.category}
               >
-                <div
-                  className="event-list-item__date"
-                  aria-label={`${month} ${day}`}
-                >
-                  <strong>{day}</strong>
-                  <span>{month}</span>
-                </div>
-                <div>
-                  <h4>{event.title}</h4>
-                  <p>
-                    {event.category ? (
-                      <>
-                        <span className="event-list-item__category">
-                          {planCategoryLabel(event.category)}
-                        </span>{' '}
-                        ·{' '}
-                      </>
-                    ) : null}
-                    {time} · {event.location}
-                  </p>
-                </div>
-                <div className="event-list-item__actions">
-                  <button
-                    className="event-reminder-button"
-                    type="button"
-                    aria-label={`${
-                      hasReminder ? 'Remove reminder for' : 'Remind me about'
-                    } ${event.title}`}
-                    aria-pressed={hasReminder}
-                    onClick={() => void toggleReminder(event)}
+                <div className="event-plan-card__artwork" aria-hidden="true">
+                  <span className="event-plan-card__sketch">
+                    <PlanDoodle doodle={doodle} />
+                  </span>
+                  <time
+                    className="event-plan-card__date journal-events__sr-only"
+                    dateTime={event.date}
+                    aria-label={`${weekday}, ${month} ${day}`}
                   >
-                    {hasReminder ? 'Reminder on' : 'Remind me'}
+                    <strong>{day}</strong>
+                    <span>{month}</span>
+                  </time>
+                </div>
+                <div className="event-plan-card__content">
+                  <div className="event-plan-card__title-row">
+                    <div>
+                      <span className="event-list-item__category journal-events__sr-only">
+                        {categoryLabel}
+                      </span>
+                      <h4>{event.title}</h4>
+                    </div>
+                    <button
+                      className="event-reminder-button event-plan-card__doodle"
+                      type="button"
+                      aria-label={`${
+                        hasReminder ? 'Remove reminder for' : 'Remind me about'
+                      } ${event.title}`}
+                      aria-pressed={hasReminder}
+                      onClick={() => void toggleReminder(event)}
+                    >
+                      <ReminderBellDoodle />
+                      <span className="journal-events__sr-only">
+                        {hasReminder ? 'Reminder on' : 'Remind me'}
+                      </span>
+                    </button>
+                  </div>
+                  <p className="event-plan-card__when">
+                    <time dateTime={event.startsAt}>
+                      {presentation?.timeStyle === 'time-location'
+                        ? time
+                        : presentation?.timeStyle === 'next-weekend'
+                          ? 'Next weekend'
+                          : `${weekday} · ${time}`}
+                    </time>
+                    {presentation?.timeStyle === 'time-location' ? (
+                      <span> · {event.location}</span>
+                    ) : null}
+                  </p>
+                  {!presentation ? (
+                    <p className="event-plan-card__location">{event.location}</p>
+                  ) : null}
+                  {presentation ? (
+                    <div
+                      className="event-plan-card__attendees"
+                      aria-label={`Going: ${presentation.attendees
+                        .map((attendee) => attendee.name)
+                        .join(', ')}${presentation.additionalAttendees > 0
+                        ? `, plus ${presentation.additionalAttendees} more`
+                        : ''}`}
+                    >
+                      {presentation.attendees.map((attendee) => (
+                        <span key={attendee.name} title={attendee.name}>
+                          {attendee.initials}
+                        </span>
+                      ))}
+                      {presentation.additionalAttendees > 0 ? (
+                        <span aria-hidden="true">
+                          +{presentation.additionalAttendees}
+                        </span>
+                      ) : null}
+                    </div>
+                  ) : null}
+                </div>
+                {checklist.length > 0 ? (
+                  <ul
+                    className="event-plan-card__checklist"
+                    aria-label={`${event.title} checklist`}
+                  >
+                    {checklist.map((item) => {
+                      const checked = completedChecklistItems.has(item.id)
+                      return (
+                        <li key={item.id}>
+                          <label data-checked={checked ? 'true' : 'false'}>
+                            <input
+                              type="checkbox"
+                              checked={checked}
+                              onChange={() => toggleChecklistItem(event, item, checklist)}
+                            />
+                            <span className="event-plan-card__checkbox" aria-hidden="true">
+                              <svg viewBox="0 0 16 16">
+                                <path d="m3 8 3 3 7-8" />
+                              </svg>
+                            </span>
+                            <span>{item.label}</span>
+                          </label>
+                        </li>
+                      )
+                    })}
+                  </ul>
+                ) : null}
+                {taskComposerPlanId === event.id ? (
+                  <form
+                    className="event-plan-card__task-composer"
+                    aria-label={`Add task to ${event.title}`}
+                    onSubmit={(submitEvent) => void addTaskToPlan(submitEvent, event)}
+                  >
+                    <label htmlFor={`plan-task-${event.id}`}>New task</label>
+                    <div>
+                      <input
+                        ref={taskComposerInputRef}
+                        id={`plan-task-${event.id}`}
+                        value={taskComposerValue}
+                        maxLength={80}
+                        placeholder="Bring dessert"
+                        onChange={(changeEvent) => setTaskComposerValue(changeEvent.target.value)}
+                        onKeyDown={(keyEvent) => {
+                          if (keyEvent.key === 'Escape') {
+                            setTaskComposerPlanId('')
+                            setTaskComposerValue('')
+                          }
+                        }}
+                      />
+                      <button type="submit">Save</button>
+                    </div>
+                  </form>
+                ) : null}
+                <div className="event-plan-card__actions">
+                  <button
+                    className="event-plan-card__add-task"
+                    type="button"
+                    aria-expanded={taskComposerPlanId === event.id}
+                    onClick={() => openTaskComposer(event.id)}
+                  >
+                    <span aria-hidden="true">＋</span>
+                    <span>{taskComposerPlanId === event.id ? 'Cancel' : 'Add task'}</span>
+                  </button>
+                  <button
+                    className="event-plan-card__complete"
+                    type="button"
+                    aria-label={`Complete task: ${event.title}`}
+                    onClick={() => void completePlan(event)}
+                  >
+                    <svg aria-hidden="true" viewBox="0 0 20 20">
+                      <path d="m4 10 4 4 8-9" />
+                    </svg>
+                    <span>Complete task</span>
                   </button>
                 </div>
               </article>
             )
           })}
         </div>
-        {!eventsLoading && allUpcomingEvents.length === 0 ? (
+        {selectedDayEvents.length > 3 ? (
+          <button
+            className="journal-events__upcoming-toggle"
+            type="button"
+            aria-expanded={isUpcomingExpanded}
+            aria-controls={upcomingListId}
+            aria-label={
+              isUpcomingExpanded
+                ? 'Show fewer upcoming family plans'
+                : `Show all ${selectedDayEvents.length} plans on ${selectedDayLabel}`
+            }
+            onClick={() => setIsUpcomingExpanded((expanded) => !expanded)}
+          >
+            <span>{isUpcomingExpanded ? 'Show less' : 'See all'}</span>
+            <svg aria-hidden="true" viewBox="0 0 12 8">
+              <path d="m1 1 5 5 5-5" />
+            </svg>
+          </button>
+        ) : null}
+        {!eventsLoading && selectedDayEvents.length === 0 ? (
           <div className="journal-events__empty">
             <span className="journal-events__empty-icon" aria-hidden="true">
               <svg viewBox="0 0 24 24">
@@ -449,25 +866,17 @@ function JournalEventsSectionForFamily({
               </svg>
             </span>
             <div>
-              <h3>No important plans yet</h3>
+              <h3>No plans on {selectedDayLabel}</h3>
               <p>
-                Add a trip, graduation, wedding, anniversary, or appointment
-                the family should remember.
+                Choose another date or add a plan for this day to the shared
+                family calendar.
               </p>
             </div>
-            <button
-              className="journal-events__empty-action"
-              type="button"
-              aria-haspopup="dialog"
-              onClick={openEventSheet}
-            >
-              Add your first plan
-            </button>
           </div>
         ) : null}
         {sharedEventsUnavailable ? (
           <p className="event-reminder-status" role="status">
-            {allUpcomingEvents.length > 0
+            {selectedDayEvents.length > 0
               ? 'Showing plans saved on this phone. Shared plans could not refresh.'
               : 'Shared plans could not be checked. Try again when you are online.'}
           </p>
@@ -481,12 +890,22 @@ function JournalEventsSectionForFamily({
             {reminderStatus}
           </p>
         ) : null}
-        {allUpcomingEvents.length > 0 ? (
+        {selectedDayEvents.length > 0 ? (
           <p className="journal-events__notification-note">
             Phone reminders work even when the installed app is closed.
           </p>
         ) : null}
       </section>
+
+      <button
+        className="events-header-action events-header-action--footer"
+        type="button"
+        aria-haspopup="dialog"
+        onClick={openEventSheet}
+      >
+        <span className="events-header-action__plus" aria-hidden="true">+</span>
+        <span>Add plan</span>
+      </button>
 
       {showEventSheet
         ? createPortal(
@@ -514,26 +933,9 @@ function JournalEventsSectionForFamily({
                   </button>
                 </div>
                 <label className="ks-field">
-                  <span>Plan type</span>
-                  <select
-                    ref={eventSheetFirstFieldRef}
-                    name="category"
-                    defaultValue=""
-                    required
-                  >
-                    <option value="" disabled>
-                      Choose a milestone
-                    </option>
-                    {planCategories.map((category) => (
-                      <option key={category.value} value={category.value}>
-                        {category.label}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                <label className="ks-field">
                   <span>Plan name</span>
                   <input
+                    ref={eventSheetFirstFieldRef}
                     name="title"
                     maxLength={60}
                     placeholder="Sara’s graduation"
@@ -564,6 +966,60 @@ function JournalEventsSectionForFamily({
                     required
                   />
                 </label>
+                <fieldset className="event-sheet__tasks">
+                  <div className="event-sheet__tasks-heading">
+                    <div>
+                      <legend>Tasks</legend>
+                      <p>Optional little jobs for everyone.</p>
+                    </div>
+                    <button
+                      type="button"
+                      disabled={draftPlanTasks.length >= 12}
+                      onClick={() => setDraftPlanTasks((current) => [
+                        ...current,
+                        createDraftPlanTask(),
+                      ])}
+                    >
+                      <span aria-hidden="true">＋</span>
+                      Add task
+                    </button>
+                  </div>
+                  <div className="event-sheet__task-list">
+                    {draftPlanTasks.map((task, index) => (
+                      <div className="event-sheet__task-row" key={task.id}>
+                        <label htmlFor={`draft-plan-task-${task.id}`}>
+                          {index === 0 ? 'First task' : `Task ${index + 1}`}
+                        </label>
+                        <div>
+                          <input
+                            id={`draft-plan-task-${task.id}`}
+                            name="tasks"
+                            value={task.value}
+                            maxLength={80}
+                            placeholder={index === 0 ? 'Bring dessert' : 'Add another little job'}
+                            onChange={(changeEvent) => {
+                              const value = changeEvent.target.value
+                              setDraftPlanTasks((current) => current.map((item) =>
+                                item.id === task.id ? { ...item, value } : item,
+                              ))
+                            }}
+                          />
+                          {draftPlanTasks.length > 1 ? (
+                            <button
+                              type="button"
+                              aria-label={`Remove task ${index + 1}`}
+                              onClick={() => setDraftPlanTasks((current) =>
+                                current.filter((item) => item.id !== task.id),
+                              )}
+                            >
+                              ×
+                            </button>
+                          ) : null}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </fieldset>
                 <p className="event-sheet__hint">
                   Travel, graduations, weddings, anniversaries, and important
                   appointments belong here. You can add a one-hour reminder next.
@@ -605,6 +1061,35 @@ function readReminderIds(storageKey: string) {
   return new Set(value.filter((item): item is string => typeof item === 'string'))
 }
 
+function readStringSet(storageKey: string) {
+  const value = readJson(storageKey)
+  if (!Array.isArray(value)) return new Set<string>()
+  return new Set(
+    value.filter((item): item is string =>
+      typeof item === 'string' && item.length <= 160,
+    ),
+  )
+}
+
+function readPlanTaskDefinitions(storageKey: string): PlanTaskDefinitions {
+  const value = readJson(storageKey)
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return {}
+
+  return Object.fromEntries(
+    Object.entries(value)
+      .filter(([eventId, tasks]) => (
+        eventId.length <= 160
+        && Array.isArray(tasks)
+      ))
+      .map(([eventId, tasks]) => [
+        eventId,
+        (tasks as unknown[])
+          .filter(isPlanTask)
+          .slice(0, 12),
+      ]),
+  )
+}
+
 function readJson(key: string): unknown {
   try {
     const value = localStorage.getItem(key)
@@ -638,16 +1123,18 @@ function isFamilyEvent(value: unknown): value is FamilyEvent {
   return (
     hasRequiredFields
     && Boolean(parsePlanCategory(event.category))
+    && (event.doodle === undefined || isPlanDoodleName(event.doodle))
+    && (event.tasks === undefined || (
+      Array.isArray(event.tasks)
+      && event.tasks.length <= 12
+      && event.tasks.every(isPlanTask)
+    ))
   )
 }
 
 function toFamilyEvent(record: FamilyEventRecord): FamilyEvent | null {
-  const category = parsePlanCategory(
-    record.details?.startsWith(categoryDetailsPrefix)
-      ? record.details.slice(categoryDetailsPrefix.length)
-      : null,
-  )
-  if (!category) return null
+  const details = decodePlanDetails(record.details)
+  if (!details) return null
   const startsAt = new Date(record.startsAt)
   const year = startsAt.getFullYear()
   const month = String(startsAt.getMonth() + 1).padStart(2, '0')
@@ -662,7 +1149,9 @@ function toFamilyEvent(record: FamilyEventRecord): FamilyEvent | null {
     location: record.location,
     date: `${year}-${month}-${day}`,
     time: `${hour}:${minute}`,
-    category,
+    category: details.category,
+    doodle: details.doodle,
+    tasks: details.tasks,
   }
 }
 
@@ -677,6 +1166,50 @@ function parsePlanCategory(value: unknown): PlanCategory | undefined {
   return planCategories.find((category) => category.value === value)?.value
 }
 
+function isPlanDoodleName(value: unknown): value is PlanDoodleName {
+  return value === 'heart' || value === 'star' || value === 'sun' || value === 'fish'
+}
+
+function isPlanTask(value: unknown): value is PlanTask {
+  if (!value || typeof value !== 'object') return false
+  const task = value as Partial<PlanTask>
+  return (
+    typeof task.id === 'string'
+    && task.id.length > 0
+    && task.id.length <= 160
+    && typeof task.label === 'string'
+    && task.label.trim().length > 0
+    && task.label.length <= 80
+  )
+}
+
+function taskStartsCompleted(
+  task: PlanTask,
+): task is PlanTask & { initiallyDone: true } {
+  return 'initiallyDone' in task && task.initiallyDone === true
+}
+
+function createPlanTask(label: string): PlanTask {
+  const randomSuffix = typeof crypto !== 'undefined' && crypto.randomUUID
+    ? crypto.randomUUID()
+    : `${Date.now()}-${Math.random().toString(16).slice(2)}`
+  return { id: `task-${randomSuffix}`, label: label.trim().slice(0, 80) }
+}
+
+function createDraftPlanTask(): DraftPlanTask {
+  const task = createPlanTask('New task')
+  return { id: task.id, value: '' }
+}
+
+function planDoodleForSeed(seed: string): PlanDoodleName {
+  const doodles: PlanDoodleName[] = ['star', 'sun', 'fish', 'heart']
+  const hash = [...seed].reduce(
+    (current, character) => ((current * 31) + character.charCodeAt(0)) >>> 0,
+    7,
+  )
+  return doodles[hash % doodles.length]
+}
+
 function planCategoryLabel(category: PlanCategory) {
   return (
     planCategories.find((item) => item.value === category)?.label
@@ -684,10 +1217,242 @@ function planCategoryLabel(category: PlanCategory) {
   )
 }
 
-function todayInputValue() {
-  const today = new Date()
-  const year = today.getFullYear()
-  const month = String(today.getMonth() + 1).padStart(2, '0')
-  const day = String(today.getDate()).padStart(2, '0')
+function PlanDoodle({ doodle }: { doodle: PlanDoodleName }) {
+  if (doodle === 'heart') {
+    return (
+      <svg viewBox="0 0 32 32" aria-hidden="true">
+        <path d="M16 27S5 21 5 12.8C5 8.2 10.6 6 16 12c5.4-6 11-3.8 11 1 0 8-11 14-11 14Z" />
+      </svg>
+    )
+  }
+  if (doodle === 'star') {
+    return (
+      <svg viewBox="0 0 32 32" aria-hidden="true">
+        <path d="m16 3.5 3.7 8 8.7 1-6.5 5.8 1.8 8.5-7.7-4.5-7.7 4.5 1.8-8.5-6.5-5.8 8.7-1Z" />
+        <path d="m16 8 1.9 5.8 6 .1-4.8 3.5 1.7 5.8-4.8-3.5-4.8 3.5 1.7-5.8-4.8-3.5 6-.1Z" />
+      </svg>
+    )
+  }
+  if (doodle === 'sun') {
+    return (
+      <svg viewBox="0 0 32 32" aria-hidden="true">
+        <circle cx="16" cy="16" r="6" />
+        <path d="M16 2v5m0 18v5M2 16h5m18 0h5M6.1 6.1l3.6 3.6m12.6 12.6 3.6 3.6m0-19.8-3.6 3.6M9.7 22.3l-3.6 3.6" />
+      </svg>
+    )
+  }
+  if (doodle === 'fish') {
+    return (
+      <svg viewBox="0 0 32 32" aria-hidden="true">
+        <path d="M5 16c4.2-6.3 11.7-8.4 18-3.2l5-3v12.4l-5-3C16.7 24.4 9.2 22.3 5 16Z" />
+        <circle cx="20" cy="14.3" r="0.8" />
+        <path d="M10 12.5c1.8 2.1 1.8 4.9 0 7m4.5-9.1 2.2-3.2 2.1 3.9" />
+      </svg>
+    )
+  }
+  return (
+    <svg viewBox="0 0 32 32" aria-hidden="true">
+      <path d="M16 27S5 21 5 12.8C5 8.2 10.6 6 16 12c5.4-6 11-3.8 11 1 0 8-11 14-11 14Z" />
+    </svg>
+  )
+}
+
+function ReminderBellDoodle() {
+  return (
+    <svg viewBox="0 0 32 32" aria-hidden="true">
+      <path d="M9 22h14l-2-3.2V14a5 5 0 0 0-10 0v4.8Zm5 3h4" />
+      <path d="M8 8.5c-1.5 1.4-2.2 3.2-2.2 5.2m18.4-5.2c1.5 1.4 2.2 3.2 2.2 5.2" />
+    </svg>
+  )
+}
+
+function createDemoFamilyPlans(anchorTimestamp: number): FamilyEvent[] {
+  const anchor = new Date(anchorTimestamp)
+  const dayInWeek = (anchor.getDay() + 6) % 7
+  const secondOffset = dayInWeek < 6 ? 1 : -1
+  const thirdOffset = dayInWeek < 5 ? 2 : -2
+  const sundayDinner = new Date(
+    anchor.getFullYear(),
+    anchor.getMonth(),
+    anchor.getDate(),
+    18,
+    30,
+  )
+  const mayasBirthday = new Date(
+    anchor.getFullYear(),
+    anchor.getMonth(),
+    anchor.getDate() + secondOffset,
+    16,
+  )
+  const beachDay = new Date(
+    anchor.getFullYear(),
+    anchor.getMonth(),
+    anchor.getDate() + thirdOffset,
+    9,
+  )
+  const plans: Array<Omit<FamilyEvent, 'date' | 'time' | 'startsAt'> & {
+    startsAtDate: Date
+  }> = [
+    {
+      id: 'demo-plan-sunday-dinner',
+      title: 'Sunday dinner',
+      startsAtDate: sundayDinner,
+      location: 'At Mum’s',
+      category: 'other',
+      demoPresentation: {
+        attendees: [
+          { name: 'Mum', initials: 'MU', avatar: '/assets/journal/demo/demo-person-mum.png' },
+          { name: 'Maya', initials: 'MA', avatar: '/assets/journal/demo/demo-person-maya.png' },
+          { name: 'Sara', initials: 'SA', avatar: '/assets/journal/demo/demo-person-mum.png' },
+          { name: 'Hishaam', initials: 'HI', avatar: '/assets/journal/demo/demo-person-granddad.png' },
+          { name: 'Rami', initials: 'RA', avatar: '/assets/journal/demo/demo-person-maya.png' },
+        ],
+        additionalAttendees: 2,
+        checklist: [
+          { id: 'ask-dessert', label: 'Ask Maya what dessert she wants', initiallyDone: true },
+          { id: 'bring-flowers', label: 'Bring flowers for Mum', initiallyDone: false },
+          { id: 'pick-up-bread', label: 'Pick up bread', initiallyDone: true },
+        ],
+        doodle: 'heart',
+        timeStyle: 'time-location',
+      },
+    },
+    {
+      id: 'demo-plan-mayas-birthday',
+      title: 'Maya’s birthday',
+      startsAtDate: mayasBirthday,
+      location: 'Family home',
+      category: 'anniversary',
+      demoPresentation: {
+        attendees: [
+          { name: 'Grandad', initials: 'GR', avatar: '/assets/journal/demo/demo-person-granddad.png' },
+          { name: 'Mum', initials: 'MU', avatar: '/assets/journal/demo/demo-person-mum.png' },
+          { name: 'Maya', initials: 'MA', avatar: '/assets/journal/demo/demo-person-maya.png' },
+          { name: 'Sara', initials: 'SA', avatar: '/assets/journal/demo/demo-person-mum.png' },
+          { name: 'Hishaam', initials: 'HI', avatar: '/assets/journal/demo/demo-person-granddad.png' },
+        ],
+        additionalAttendees: 1,
+        checklist: [
+          { id: 'buy-candles', label: 'Buy candles', initiallyDone: true },
+          { id: 'wrap-gift', label: 'Wrap gift', initiallyDone: true },
+          { id: 'book-venue', label: 'Book the venue', initiallyDone: false },
+        ],
+        doodle: 'star',
+        timeStyle: 'weekday-time',
+      },
+    },
+    {
+      id: 'demo-plan-family-beach-day',
+      title: 'Family beach day',
+      startsAtDate: beachDay,
+      location: 'Jumeirah Beach',
+      category: 'travel',
+      demoPresentation: {
+        attendees: [
+          { name: 'Mum', initials: 'MU', avatar: '/assets/journal/demo/demo-person-mum.png' },
+          { name: 'Maya', initials: 'MA', avatar: '/assets/journal/demo/demo-person-maya.png' },
+          { name: 'Sara', initials: 'SA', avatar: '/assets/journal/demo/demo-person-mum.png' },
+          { name: 'Rami', initials: 'RA', avatar: '/assets/journal/demo/demo-person-granddad.png' },
+        ],
+        additionalAttendees: 3,
+        checklist: [
+          { id: 'pack-snacks', label: 'Pack snacks', initiallyDone: false },
+          { id: 'sunscreen', label: 'Sunscreen', initiallyDone: true },
+          { id: 'beach-games', label: 'Beach games', initiallyDone: false },
+        ],
+        doodle: 'sun',
+        timeStyle: 'next-weekend',
+      },
+    },
+  ]
+
+  return plans.map((plan) => {
+    const { startsAtDate: startsAt, ...event } = plan
+    const year = startsAt.getFullYear()
+    const month = String(startsAt.getMonth() + 1).padStart(2, '0')
+    const day = String(startsAt.getDate()).padStart(2, '0')
+    const hour = String(startsAt.getHours()).padStart(2, '0')
+    const minute = String(startsAt.getMinutes()).padStart(2, '0')
+
+    return {
+      ...event,
+      startsAt: startsAt.toISOString(),
+      date: `${year}-${month}-${day}`,
+      time: `${hour}:${minute}`,
+    }
+  })
+}
+
+function readChecklistProgress(storageKey: string): PlanChecklistProgress {
+  const value = readJson(storageKey)
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return {}
+  return Object.fromEntries(
+    Object.entries(value)
+      .filter(([eventId, completed]) =>
+        eventId.length <= 160
+        && Array.isArray(completed),
+      )
+      .map(([eventId, completed]) => [
+        eventId,
+        (completed as unknown[]).filter((item): item is string =>
+          typeof item === 'string' && item.length <= 120,
+        ),
+      ]),
+  )
+}
+
+function planWeekForDate(value: string) {
+  const selected = new Date(`${value}T12:00:00`)
+  const mondayOffset = (selected.getDay() + 6) % 7
+  const monday = new Date(
+    selected.getFullYear(),
+    selected.getMonth(),
+    selected.getDate() - mondayOffset,
+    12,
+  )
+  return Array.from({ length: 7 }, (_, index) => new Date(
+    monday.getFullYear(),
+    monday.getMonth(),
+    monday.getDate() + index,
+    12,
+  ))
+}
+
+function formatPlanWeekRange(week: Date[]) {
+  const first = week[0]
+  const last = week.at(-1)
+  if (!first || !last) return ''
+  const format = (date: Date) => new Intl.DateTimeFormat('en', {
+    month: 'short',
+    day: 'numeric',
+  }).format(date)
+  return `${format(first)} – ${format(last)}`
+}
+
+function formatPlanDay(value: string) {
+  const date = new Date(`${value}T12:00:00`)
+  if (Number.isNaN(date.getTime())) return value
+  return new Intl.DateTimeFormat('en', {
+    weekday: 'long',
+    month: 'long',
+    day: 'numeric',
+  }).format(date)
+}
+
+function shiftPlanDay(value: string, days: number) {
+  const date = new Date(`${value}T12:00:00`)
+  if (Number.isNaN(date.getTime())) return todayInputValue()
+  date.setDate(date.getDate() + days)
+  return localDateInputValue(date)
+}
+
+function localDateInputValue(date: Date) {
+  const year = date.getFullYear()
+  const month = String(date.getMonth() + 1).padStart(2, '0')
+  const day = String(date.getDate()).padStart(2, '0')
   return `${year}-${month}-${day}`
+}
+
+function todayInputValue() {
+  return localDateInputValue(new Date())
 }

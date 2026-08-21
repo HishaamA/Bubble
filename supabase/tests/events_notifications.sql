@@ -1,7 +1,7 @@
 begin;
 
 create extension if not exists pgtap with schema extensions;
-select plan(19);
+select plan(27);
 
 insert into auth.users (
   instance_id,
@@ -122,6 +122,39 @@ exception
 end;
 $$;
 
+create or replace function pg_temp.complete_event_result(p_event_id uuid)
+returns text
+language plpgsql
+as $$
+declare
+  v_completed boolean;
+begin
+  v_completed := public.complete_family_event(p_event_id);
+  return v_completed::text;
+exception
+  when others then
+    return sqlstate || ':' || sqlerrm;
+end;
+$$;
+
+create or replace function pg_temp.update_event_details_result(
+  p_event_id uuid,
+  p_details text
+)
+returns text
+language plpgsql
+as $$
+declare
+  v_updated boolean;
+begin
+  v_updated := public.update_family_event_details(p_event_id, p_details);
+  return v_updated::text;
+exception
+  when others then
+    return sqlstate || ':' || sqlerrm;
+end;
+$$;
+
 create or replace function pg_temp.dispatch_result(p_limit integer)
 returns text
 language plpgsql
@@ -152,6 +185,16 @@ select is(
     'authenticated',
     'public.cancel_event_reminder(uuid)',
     'execute'
+  )
+  and has_function_privilege(
+    'authenticated',
+    'public.complete_family_event(uuid)',
+    'execute'
+  )
+  and has_function_privilege(
+    'authenticated',
+    'public.update_family_event_details(uuid,text)',
+    'execute'
   ),
   true,
   'authenticated users can execute only the intended event mutation RPCs'
@@ -166,6 +209,16 @@ select is(
   and not has_function_privilege(
     'anon',
     'public.set_event_reminder(uuid,interval)',
+    'execute'
+  )
+  and not has_function_privilege(
+    'anon',
+    'public.complete_family_event(uuid)',
+    'execute'
+  )
+  and not has_function_privilege(
+    'anon',
+    'public.update_family_event_details(uuid,text)',
     'execute'
   ),
   true,
@@ -204,6 +257,21 @@ select like(
   pg_temp.create_event_result('eeeeeeee-aaaa-4aaa-8aaa-aaaaaaaaaaaa'),
   '42501:%',
   'anonymous callers cannot create an event'
+);
+
+select like(
+  pg_temp.complete_event_result('ffffffff-ffff-4fff-8fff-ffffffffffff'),
+  '42501:%',
+  'anonymous callers cannot complete a family event'
+);
+
+select like(
+  pg_temp.update_event_details_result(
+    'ffffffff-ffff-4fff-8fff-ffffffffffff',
+    'anonymous update'
+  ),
+  '42501:%',
+  'anonymous callers cannot update family event details'
 );
 
 reset role;
@@ -334,6 +402,21 @@ select is(
   'a cross-circle user cannot opt in to another family event reminder'
 );
 
+select is(
+  pg_temp.complete_event_result(current_setting('test.event_id')::uuid),
+  '42501:approved_membership_required',
+  'a cross-circle user cannot complete another family event'
+);
+
+select is(
+  pg_temp.update_event_details_result(
+    current_setting('test.event_id')::uuid,
+    'cross-circle update'
+  ),
+  '42501:approved_membership_required',
+  'a cross-circle user cannot update another family event details'
+);
+
 reset role;
 
 update public.scheduled_jobs
@@ -396,6 +479,46 @@ select is(
   'another family member cannot read a notification addressed to someone else'
 );
 
+select is(
+  pg_temp.update_event_details_result(
+    current_setting('test.event_id')::uuid,
+    '  kinsphere-plan-category:v1:other  '
+  ),
+  'true',
+  'an approved family member can update shared event details'
+);
+
+select is(
+  (
+    select details
+    from public.events
+    where id = current_setting('test.event_id')::uuid
+  ),
+  'kinsphere-plan-category:v1:other',
+  'shared event details are trimmed and persisted'
+);
+
+select is(
+  pg_temp.complete_event_result(current_setting('test.event_id')::uuid),
+  'true',
+  'an approved family member can complete a shared event'
+);
+
 reset role;
+
+select is(
+  (
+    select count(*)
+    from public.events
+    where id = current_setting('test.event_id')::uuid
+  ) + (
+    select count(*)
+    from public.event_reminders
+    where event_id = current_setting('test.event_id')::uuid
+  ),
+  0::bigint,
+  'completing a family event removes it and its reminder rows'
+);
+
 select * from finish();
 rollback;

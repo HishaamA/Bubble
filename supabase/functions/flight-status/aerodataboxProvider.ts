@@ -39,6 +39,30 @@ export type AeroDataBoxStatusSnapshot = {
   updatedAt: string
 }
 
+export type AeroDataBoxFlightChoice = {
+  providerFlightId: string
+  flightNumber: string
+  operatingFlightNumber: string | null
+  origin: {
+    code: string
+    name: string | null
+    city: string | null
+    timeZone: string | null
+  }
+  destination: {
+    code: string
+    name: string | null
+    city: string | null
+    timeZone: string | null
+  }
+  scheduledDeparture: string
+  scheduledArrival: string | null
+}
+
+export type AeroDataBoxLookupResult =
+  | { kind: 'created'; snapshot: AeroDataBoxStatusSnapshot }
+  | { kind: 'choices'; choices: AeroDataBoxFlightChoice[] }
+
 export type AeroDataBoxProviderErrorCode =
   | 'auth'
   | 'plan'
@@ -69,7 +93,7 @@ const maximumRetryAfterDelay = 5_000
 
 const responseCache = new Map<string, {
   expiresAt: number
-  value: AeroDataBoxStatusSnapshot | null
+  value: AeroDataBoxLookupResult | null
 }>()
 const airportCache = new Map<string, {
   expiresAt: number
@@ -77,7 +101,7 @@ const airportCache = new Map<string, {
 }>()
 const inFlightLookups = new Map<
   string,
-  Promise<AeroDataBoxStatusSnapshot | null>
+  Promise<AeroDataBoxLookupResult | null>
 >()
 let providerRequestTail: Promise<void> = Promise.resolve()
 let nextProviderRequestAt = 0
@@ -412,11 +436,9 @@ function equivalentFlightNumber(
     && requestedParts.suffix === returnedParts.suffix
 }
 
-function rowMatchesTravelDate(row: JsonObject, travelDate: string) {
+function rowMatchesDepartureDate(row: JsonObject, travelDate: string) {
   const departure = object(row.departure)
-  const arrival = object(row.arrival)
   return departure !== null && localMovementDate(departure) === travelDate
-    || arrival !== null && localMovementDate(arrival) === travelDate
 }
 
 function candidateProviderFlightId(row: JsonObject) {
@@ -430,17 +452,16 @@ function candidateProviderFlightId(row: JsonObject) {
     : providerNumber
 }
 
-function matchingFlightRow(
+function matchingFlightRows(
   response: unknown,
   flightNumber: string,
   travelDate: string,
-  previousSnapshot: unknown,
 ) {
-  if (!Array.isArray(response)) return null
+  if (!Array.isArray(response)) return []
   const datedRows = response
     .map(object)
     .filter((row): row is JsonObject => row !== null)
-    .filter((row) => rowMatchesTravelDate(row, travelDate))
+    .filter((row) => rowMatchesDepartureDate(row, travelDate))
   const exactMatches = datedRows.filter((row) =>
     equivalentFlightNumber(row, flightNumber),
   )
@@ -448,24 +469,63 @@ function matchingFlightRow(
     text(row.codeshareStatus)?.toLowerCase() === 'isoperator',
   )
   const matches = exactMatches.length > 0 ? exactMatches : operatorMatches
-  if (matches.length === 0) return null
-
-  const previous = object(previousSnapshot)
-  const previousProviderFlightId = text(previous?.providerFlightId)
-  if (previousProviderFlightId) {
-    const previousMatch = matches.find((row) =>
-      candidateProviderFlightId(row) === previousProviderFlightId,
-    )
-    if (previousMatch) return previousMatch
-  }
-
   const uniqueMatches = new Map<string, JsonObject>()
   for (const row of matches) {
     const identity = candidateProviderFlightId(row)
     if (identity) uniqueMatches.set(identity, row)
   }
-  if (uniqueMatches.size !== 1) return null
-  return uniqueMatches.values().next().value as JsonObject
+  return [...uniqueMatches.values()].sort((left, right) => {
+    const leftDeparture = movementTimestamp(object(left.departure), 'scheduledTime')
+    const rightDeparture = movementTimestamp(object(right.departure), 'scheduledTime')
+    return (leftDeparture ?? '').localeCompare(rightDeparture ?? '')
+  })
+}
+
+function embeddedAirportChoice(value: unknown) {
+  const airport = object(value)
+  if (!airport) return null
+  const iata = code(airport.iata, 3)
+  const icao = code(airport.icao, 4)
+  const airportCode = iata ?? icao
+  if (!airportCode) return null
+  return {
+    code: airportCode,
+    name: text(airport.name) ?? text(airport.shortName),
+    city: text(airport.municipalityName),
+    timeZone: validTimeZone(airport.timeZone),
+  }
+}
+
+function flightChoice(
+  row: JsonObject,
+  requestedFlightNumber: string,
+): AeroDataBoxFlightChoice | null {
+  const providerFlightId = candidateProviderFlightId(row)
+  const providerFlightNumber = normalizedFlightNumber(row.number)
+  const departure = object(row.departure)
+  const arrival = object(row.arrival)
+  const origin = embeddedAirportChoice(departure?.airport)
+  const destination = embeddedAirportChoice(arrival?.airport)
+  const scheduledDeparture = movementTimestamp(departure, 'scheduledTime')
+  const scheduledArrival = movementTimestamp(arrival, 'scheduledTime')
+  if (
+    !providerFlightId
+    || !providerFlightNumber
+    || !origin
+    || !destination
+    || !scheduledDeparture
+  ) return null
+  return {
+    providerFlightId,
+    flightNumber: requestedFlightNumber,
+    operatingFlightNumber: equivalentFlightNumber(row, requestedFlightNumber)
+      ? null
+      : providerFlightNumber,
+    origin,
+    destination,
+    scheduledDeparture,
+    scheduledArrival,
+  }
 }
 
 function movementTimestamp(
@@ -686,24 +746,11 @@ function latestTimestamp(...values: Array<string | null | undefined>) {
 }
 
 async function buildNormalizedStatus(
+  selected: JsonObject,
   flightNumber: string,
-  travelDate: string,
   apiKey: string,
   previousSnapshot: unknown,
-): Promise<AeroDataBoxStatusSnapshot | null> {
-  const response = await providerRequest(
-    `/flights/number/${encodeURIComponent(flightNumber)}/${travelDate}`
-      + '?dateLocalRole=Both&withLocation=true&withAircraftImage=false',
-    apiKey,
-  )
-  if (response === null) return null
-  const selected = matchingFlightRow(
-    response,
-    flightNumber,
-    travelDate,
-    previousSnapshot,
-  )
-  if (!selected) return null
+): Promise<AeroDataBoxStatusSnapshot> {
   const providerFlightNumber = normalizedFlightNumber(selected.number)
   if (!providerFlightNumber) {
     throw new AeroDataBoxProviderError(
@@ -799,11 +846,72 @@ async function buildNormalizedStatus(
   }
 }
 
-export async function aerodataboxStatus(
+async function buildLookupResult(
+  flightNumber: string,
+  travelDate: string,
+  apiKey: string,
+  previousSnapshot: unknown,
+  selectedProviderFlightId: string | null,
+): Promise<AeroDataBoxLookupResult | null> {
+  const response = await providerRequest(
+    `/flights/number/${encodeURIComponent(flightNumber)}/${travelDate}`
+      + '?dateLocalRole=Departure&withLocation=true&withAircraftImage=false',
+    apiKey,
+  )
+  if (response === null) return null
+  const matches = matchingFlightRows(response, flightNumber, travelDate)
+  if (matches.length === 0) return null
+
+  const previous = object(previousSnapshot)
+  const previousProviderFlightId = text(previous?.providerFlightId)
+  const requestedProviderFlightId = selectedProviderFlightId
+    ?? previousProviderFlightId
+  if (requestedProviderFlightId) {
+    const selected = matches.find((row) =>
+      candidateProviderFlightId(row) === requestedProviderFlightId,
+    )
+    if (!selected) return null
+    return {
+      kind: 'created',
+      snapshot: await buildNormalizedStatus(
+        selected,
+        flightNumber,
+        apiKey,
+        previousSnapshot,
+      ),
+    }
+  }
+
+  if (matches.length === 1) {
+    return {
+      kind: 'created',
+      snapshot: await buildNormalizedStatus(
+        matches[0],
+        flightNumber,
+        apiKey,
+        previousSnapshot,
+      ),
+    }
+  }
+
+  const choices = matches
+    .map((row) => flightChoice(row, flightNumber))
+    .filter((choice): choice is AeroDataBoxFlightChoice => choice !== null)
+  if (choices.length !== matches.length) {
+    throw new AeroDataBoxProviderError(
+      'AeroDataBox returned incomplete flight choice details.',
+      'incomplete',
+    )
+  }
+  return { kind: 'choices', choices }
+}
+
+export async function aerodataboxLookup(
   requestedFlightNumber: string,
   requestedTravelDate: string,
   apiKey: string,
   previousSnapshot: unknown = null,
+  selectedProviderFlightId: string | null = null,
 ) {
   const flightNumber = normalizedFlightNumber(requestedFlightNumber)
   const travelDate = calendarDate(requestedTravelDate)
@@ -813,17 +921,32 @@ export async function aerodataboxStatus(
       'incomplete',
     )
   }
-  const cacheKey = `aerodatabox:status:${flightNumber}:${travelDate}`
+  const selectedIdentity = selectedProviderFlightId?.trim() || null
+  if (selectedIdentity && (
+    selectedIdentity.length > 160
+    || !/^[A-Z0-9]+:[0-9T:.Z+-]+$/.test(selectedIdentity)
+  )) {
+    throw new AeroDataBoxProviderError(
+      'The selected provider flight identity is invalid.',
+      'incomplete',
+    )
+  }
+  const previousProviderFlightId = text(object(previousSnapshot)?.providerFlightId)
+  const cacheIdentity = selectedIdentity
+    ?? previousProviderFlightId
+    ?? 'unselected'
+  const cacheKey = `aerodatabox:status:${flightNumber}:${travelDate}:${cacheIdentity}`
   const cached = responseCache.get(cacheKey)
   if (cached && cached.expiresAt > Date.now()) return cached.value
   const existing = inFlightLookups.get(cacheKey)
   if (existing) return existing
 
-  const lookup = buildNormalizedStatus(
+  const lookup = buildLookupResult(
     flightNumber,
     travelDate,
     apiKey,
     previousSnapshot,
+    selectedIdentity,
   )
   inFlightLookups.set(cacheKey, lookup)
   try {
@@ -841,6 +964,21 @@ export async function aerodataboxStatus(
       inFlightLookups.delete(cacheKey)
     }
   }
+}
+
+export async function aerodataboxStatus(
+  requestedFlightNumber: string,
+  requestedTravelDate: string,
+  apiKey: string,
+  previousSnapshot: unknown = null,
+) {
+  const result = await aerodataboxLookup(
+    requestedFlightNumber,
+    requestedTravelDate,
+    apiKey,
+    previousSnapshot,
+  )
+  return result?.kind === 'created' ? result.snapshot : null
 }
 
 /** Test isolation only; production callers should rely on normal TTL expiry. */

@@ -1,18 +1,24 @@
-import { act, render, screen, waitFor } from '@testing-library/react'
+import { act, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { MemoryRouter } from 'react-router-dom'
 
 const eventServiceMocks = vi.hoisted(() => ({
   createFamilyEvent: vi.fn(),
+  deleteFamilyEvent: vi.fn(),
   fetchFamilyEvents: vi.fn(),
   subscribeToFamilyEvents: vi.fn(),
   syncEventReminder: vi.fn(),
+  updateFamilyEventDetails: vi.fn(),
 }))
+const authMocks = vi.hoisted(() => ({ isDevelopmentPreview: false }))
 
 vi.mock('./eventService', () => eventServiceMocks)
 vi.mock('../auth', () => ({
-  useAuth: () => ({ user: { id: 'user_test' } }),
+  useAuth: () => ({
+    user: { id: 'user_test' },
+    isDevelopmentPreview: authMocks.isDevelopmentPreview,
+  }),
 }))
 vi.mock('../onboarding', () => ({
   useFamilyOnboarding: () => ({
@@ -24,10 +30,8 @@ vi.mock('../onboarding', () => ({
 }))
 
 import { JournalEventsSection } from './JournalEventsSection'
-import {
-  eventStorageKey,
-  familyEventStorageSubject,
-} from './eventStorage'
+import { eventStorageKey, familyEventStorageSubject } from './eventStorage'
+import { decodePlanDetails } from './planDetails'
 
 const storageSubject = familyEventStorageSubject('user_test', 'family_test')
 
@@ -39,11 +43,35 @@ function renderJournalEventsSection() {
   )
 }
 
+function localDateValue(date: Date) {
+  return [
+    date.getFullYear(),
+    String(date.getMonth() + 1).padStart(2, '0'),
+    String(date.getDate()).padStart(2, '0'),
+  ].join('-')
+}
+
+function dateFromToday(days: number, hour = 18) {
+  const date = new Date()
+  date.setDate(date.getDate() + days)
+  date.setHours(hour, 30, 0, 0)
+  return date
+}
+
+function formatDayButton(date: Date) {
+  const weekday = new Intl.DateTimeFormat('en', { weekday: 'long' }).format(date)
+  const monthDay = new Intl.DateTimeFormat('en', {
+    month: 'long',
+    day: 'numeric',
+  }).format(date)
+  return `${weekday}, ${monthDay}`
+}
+
 function storeCreatedPlans(
   plans: Array<{
     id: string
     title: string
-    startsAt: string
+    startsAt: Date
     location: string
     category?: string
   }>,
@@ -51,20 +79,14 @@ function storeCreatedPlans(
   localStorage.setItem(
     eventStorageKey('kinsphere-created-events', storageSubject),
     JSON.stringify(
-      plans.map((plan) => {
-        const startsAt = new Date(plan.startsAt)
-        return {
-          ...plan,
-          date: [
-            startsAt.getFullYear(),
-            String(startsAt.getMonth() + 1).padStart(2, '0'),
-            String(startsAt.getDate()).padStart(2, '0'),
-          ].join('-'),
-          time: `${String(startsAt.getHours()).padStart(2, '0')}:${String(
-            startsAt.getMinutes(),
-          ).padStart(2, '0')}`,
-        }
-      }),
+      plans.map((plan) => ({
+        ...plan,
+        startsAt: plan.startsAt.toISOString(),
+        date: localDateValue(plan.startsAt),
+        time: `${String(plan.startsAt.getHours()).padStart(2, '0')}:${String(
+          plan.startsAt.getMinutes(),
+        ).padStart(2, '0')}`,
+      })),
     ),
   )
 }
@@ -77,303 +99,300 @@ afterEach(() => {
 
 beforeEach(() => {
   vi.clearAllMocks()
+  authMocks.isDevelopmentPreview = false
   eventServiceMocks.createFamilyEvent.mockResolvedValue({
     id: 'family-local-test',
     synced: false,
   })
+  eventServiceMocks.deleteFamilyEvent.mockResolvedValue(false)
   eventServiceMocks.fetchFamilyEvents.mockResolvedValue([])
   eventServiceMocks.subscribeToFamilyEvents.mockResolvedValue(() => undefined)
   eventServiceMocks.syncEventReminder.mockResolvedValue(false)
+  eventServiceMocks.updateFamilyEventDetails.mockResolvedValue(false)
 })
 
 describe('JournalEventsSection', () => {
-  it('shows an honest, actionable empty state without placeholder events', async () => {
+  it('shows the selected date in an actionable empty calendar state', async () => {
     renderJournalEventsSection()
 
-    expect(
-      screen.getByRole('heading', { name: 'Important plans' }),
-    ).toBeInTheDocument()
-    expect(screen.getByText('Milestones worth remembering')).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'Important plans' })).toBeInTheDocument()
     expect(screen.getByRole('heading', { name: 'Coming up' })).toBeInTheDocument()
-    expect(
-      await screen.findByRole('heading', { name: 'No important plans yet' }),
-    ).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'Add your first plan' })).toBeInTheDocument()
-    expect(screen.queryByText('Family dinner')).not.toBeInTheDocument()
-    expect(screen.queryByText('Beach breakfast')).not.toBeInTheDocument()
+    expect(await screen.findByRole('heading', { name: /^No plans on / })).toBeInTheDocument()
+    expect(screen.getByText(/shared family calendar/i)).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Add plan' })).toBeInTheDocument()
   })
 
-  it('keeps a compact three-plan list and expands accessibly', async () => {
-    storeCreatedPlans([
-      {
-        id: 'flight-home',
-        title: 'Flight home',
-        startsAt: '2099-12-20T09:00:00',
-        location: 'Dubai International Airport',
-        category: 'travel',
-      },
-      {
-        id: 'graduation',
-        title: 'Sara’s graduation',
-        startsAt: '2099-12-21T18:00:00',
-        location: 'University campus',
-        category: 'graduation',
-      },
-      {
-        id: 'wedding',
-        title: 'Amina’s wedding',
-        startsAt: '2099-12-22T17:00:00',
-        location: 'The ceremony hall',
-        category: 'wedding',
-      },
-      {
-        id: 'appointment',
-        title: 'Grandad’s appointment',
-        startsAt: '2099-12-23T11:00:00',
-        location: 'City clinic',
-        category: 'appointment',
-      },
-    ])
+  it('filters the three demo plans onto distinct days in the current week', async () => {
+    authMocks.isDevelopmentPreview = true
     const user = userEvent.setup()
-    const { container } = renderJournalEventsSection()
-
-    const expand = screen.getByRole('button', {
-      name: 'Show all 4 upcoming family events',
-    })
-    const controlledListId = expand.getAttribute('aria-controls')
-
-    expect(expand).toHaveAttribute('aria-expanded', 'false')
-    expect(controlledListId).toBeTruthy()
-    expect(document.getElementById(controlledListId ?? '')).toBeInTheDocument()
-    expect(screen.getByRole('heading', { name: 'Flight home' })).toBeInTheDocument()
-    expect(screen.getByRole('heading', { name: 'Sara’s graduation' })).toBeInTheDocument()
-    expect(screen.getByRole('heading', { name: 'Amina’s wedding' })).toBeInTheDocument()
-    expect(
-      screen.queryByRole('heading', { name: 'Grandad’s appointment' }),
-    ).not.toBeInTheDocument()
-    expect(container.querySelectorAll('.journal-events__upcoming-list article')).toHaveLength(3)
-
-    await user.click(expand)
-
-    const collapse = screen.getByRole('button', {
-      name: 'Show fewer upcoming family plans',
-    })
-    expect(collapse).toHaveAttribute('aria-expanded', 'true')
-    expect(
-      screen.getByRole('heading', { name: 'Grandad’s appointment' }),
-    ).toBeInTheDocument()
-    expect(container.querySelectorAll('.journal-events__upcoming-list article')).toHaveLength(4)
-
-    await user.click(collapse)
-
-    expect(screen.getByRole('button', {
-      name: 'Show all 4 upcoming family events',
-    })).toHaveAttribute('aria-expanded', 'false')
-    expect(container.querySelectorAll('.journal-events__upcoming-list article')).toHaveLength(3)
-  })
-
-  it('excludes legacy and remote events that were not classified as important', async () => {
-    storeCreatedPlans([
-      {
-        id: 'legacy-dinner',
-        title: 'Family dinner',
-        startsAt: '2099-12-20T19:00:00',
-        location: 'Home',
-      },
-    ])
-    eventServiceMocks.fetchFamilyEvents.mockResolvedValue([
-      {
-        id: 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeee3',
-        title: 'Weekly catch-up',
-        startsAt: '2099-12-21T18:00:00.000Z',
-        location: 'Video call',
-        details: null,
-      },
-    ])
-
     renderJournalEventsSection()
 
-    expect(
-      await screen.findByRole('heading', { name: 'No important plans yet' }),
-    ).toBeInTheDocument()
-    expect(screen.queryByText('Family dinner')).not.toBeInTheDocument()
-    expect(screen.queryByText('Weekly catch-up')).not.toBeInTheDocument()
+    expect(await screen.findByRole('heading', { name: 'Sunday dinner' })).toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: 'Maya’s birthday' })).not.toBeInTheDocument()
+
+    const weekDays = document.querySelector('.journal-events__week-days')
+    expect(weekDays).not.toBeNull()
+    const plannedDays = within(weekDays as HTMLElement)
+      .getAllByRole('button')
+      .filter((button) => button.getAttribute('data-has-plans') === 'true')
+    expect(plannedDays).toHaveLength(3)
+
+    await user.click(plannedDays[1])
+    expect(screen.getByRole('heading', { name: 'Maya’s birthday' })).toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: 'Sunday dinner' })).not.toBeInTheDocument()
+
+    await user.click(plannedDays[2])
+    expect(screen.getByRole('heading', { name: 'Family beach day' })).toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: 'Maya’s birthday' })).not.toBeInTheDocument()
+
+    const emptyDay = within(weekDays as HTMLElement)
+      .getAllByRole('button')
+      .find((button) => button.getAttribute('data-has-plans') === 'false')
+    expect(emptyDay).toBeTruthy()
+    await user.click(emptyDay!)
+    expect(screen.getByRole('heading', { name: /^No plans on / })).toBeInTheDocument()
   })
 
-  it('creates and saves a categorized important plan', async () => {
+  it('strikes completed checklist text and restores it after reload', async () => {
+    authMocks.isDevelopmentPreview = true
     const user = userEvent.setup()
+    const view = renderJournalEventsSection()
+
+    const flowers = await screen.findByRole('checkbox', { name: 'Bring flowers for Mum' })
+    const label = flowers.closest('label')
+    expect(label).toHaveAttribute('data-checked', 'false')
+    await user.click(flowers)
+    expect(flowers).toBeChecked()
+    expect(label).toHaveAttribute('data-checked', 'true')
+    expect(
+      localStorage.getItem(
+        eventStorageKey('kinsphere-plan-checklists:v1', storageSubject),
+      ),
+    ).toContain('bring-flowers')
+
+    view.unmount()
+    renderJournalEventsSection()
+    expect(
+      await screen.findByRole('checkbox', { name: 'Bring flowers for Mum' }),
+    ).toBeChecked()
+  })
+
+  it('completes a demo plan and does not resurrect it after reload', async () => {
+    authMocks.isDevelopmentPreview = true
+    const user = userEvent.setup()
+    const view = renderJournalEventsSection()
+
+    expect(await screen.findByRole('heading', { name: 'Sunday dinner' })).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Complete task: Sunday dinner' }))
+    expect(screen.queryByRole('heading', { name: 'Sunday dinner' })).not.toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: /^No plans on / })).toBeInTheDocument()
+    expect(
+      localStorage.getItem(
+        eventStorageKey('kinsphere-completed-plans:v1', storageSubject),
+      ),
+    ).toContain('demo-plan-sunday-dinner')
+
+    view.unmount()
+    renderJournalEventsSection()
+    expect(screen.queryByRole('heading', { name: 'Sunday dinner' })).not.toBeInTheDocument()
+  })
+
+  it('creates a plan without a type dropdown and selects its calendar date', async () => {
+    const user = userEvent.setup()
+    const plannedDate = dateFromToday(1, 16)
     renderJournalEventsSection()
 
     await user.click(screen.getByRole('button', { name: 'Add plan' }))
-    expect(
-      screen.getByRole('dialog', { name: 'Add an important plan' }),
-    ).toBeInTheDocument()
-
-    await user.selectOptions(screen.getByLabelText('Plan type'), 'graduation')
-    await user.type(screen.getByLabelText('Plan name'), 'Sara’s graduation')
-    await user.type(screen.getByLabelText('Date'), '2099-12-20')
+    expect(screen.queryByLabelText('Plan type')).not.toBeInTheDocument()
+    await user.type(screen.getByLabelText('Plan name'), 'Family road trip')
+    await user.type(screen.getByLabelText('Date'), localDateValue(plannedDate))
     await user.type(screen.getByLabelText('Time'), '16:30')
-    await user.type(screen.getByLabelText('Location'), 'University campus')
+    await user.type(screen.getByLabelText('Location'), 'Mountain cabin')
+    await user.type(screen.getByLabelText('First task'), 'Pack snacks')
+    await user.click(screen.getByRole('button', { name: 'Add task' }))
+    await user.type(screen.getByLabelText('Task 2'), 'Charge the camera')
     await user.click(screen.getByRole('button', { name: 'Save plan' }))
 
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
-    expect(
-      screen.getByRole('heading', { name: 'Sara’s graduation' }),
-    ).toBeInTheDocument()
-    expect(screen.getByText(/University campus/)).toBeInTheDocument()
-    expect(screen.getByText('Graduation')).toBeInTheDocument()
-    expect(
-      screen.getByRole('button', { name: 'Remind me about Sara’s graduation' }),
-    ).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'Family road trip' })).toBeInTheDocument()
     expect(eventServiceMocks.createFamilyEvent).toHaveBeenCalledWith({
-      title: 'Sara’s graduation',
-      startsAt: '2099-12-20T16:30:00',
-      location: 'University campus',
-      details: 'kinsphere-plan-category:v1:graduation',
+      title: 'Family road trip',
+      startsAt: `${localDateValue(plannedDate)}T16:30:00`,
+      location: 'Mountain cabin',
+      details: expect.stringMatching(/^kinsphere-plan:v2:/),
     })
-    expect(
-      localStorage.getItem(
-        eventStorageKey('kinsphere-created-events', storageSubject),
-      ),
-    ).toContain('Sara’s graduation')
-    expect(localStorage.getItem('kinsphere-created-events')).toBeNull()
+    const details = eventServiceMocks.createFamilyEvent.mock.calls[0]?.[0]?.details
+    expect(decodePlanDetails(details)).toMatchObject({
+      category: 'other',
+      tasks: [{ label: 'Pack snacks' }, { label: 'Charge the camera' }],
+    })
+    expect(screen.getByRole('checkbox', { name: 'Pack snacks' })).toBeInTheDocument()
+    expect(screen.getByRole('checkbox', { name: 'Charge the camera' })).toBeInTheDocument()
   })
 
-  it('keeps a local-only plan open for retry when device persistence fails', async () => {
+  it('adds a checklist task from the plan card and restores it after reload', async () => {
     const user = userEvent.setup()
+    const today = dateFromToday(0, 20)
+    storeCreatedPlans([{
+      id: 'dinner', title: 'Dinner', startsAt: today, location: 'Home', category: 'other',
+    }])
+    const view = renderJournalEventsSection()
+
+    await user.click(screen.getByRole('button', { name: 'Add task' }))
+    const composer = screen.getByRole('form', { name: 'Add task to Dinner' })
+    await user.type(within(composer).getByLabelText('New task'), 'Bring flowers')
+    await user.click(within(composer).getByRole('button', { name: 'Save' }))
+    expect(screen.getByRole('checkbox', { name: 'Bring flowers' })).toBeInTheDocument()
+
+    view.unmount()
+    renderJournalEventsSection()
+    const restoredTask = await screen.findByRole('checkbox', { name: 'Bring flowers' })
+    expect(restoredTask).not.toBeChecked()
+    await user.click(restoredTask)
+    expect(restoredTask.closest('label')).toHaveAttribute('data-checked', 'true')
+  })
+
+  it('shares a newly added task for a server-backed plan', async () => {
+    const user = userEvent.setup()
+    const today = dateFromToday(0, 20)
+    const eventId = 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeee9'
+    eventServiceMocks.fetchFamilyEvents.mockResolvedValue([{
+      id: eventId,
+      title: 'Family supper',
+      startsAt: today.toISOString(),
+      location: 'Home',
+      details: 'kinsphere-plan-category:v1:other',
+    }])
+    eventServiceMocks.updateFamilyEventDetails.mockResolvedValue(true)
     renderJournalEventsSection()
 
-    await user.click(screen.getByRole('button', { name: 'Add plan' }))
-    await user.selectOptions(screen.getByLabelText('Plan type'), 'travel')
-    await user.type(screen.getByLabelText('Plan name'), 'Flight home')
-    await user.type(screen.getByLabelText('Date'), '2099-12-20')
-    await user.type(screen.getByLabelText('Time'), '16:30')
-    await user.type(screen.getByLabelText('Location'), 'Airport')
+    expect(await screen.findByRole('heading', { name: 'Family supper' })).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Add task' }))
+    await user.type(screen.getByLabelText('New task'), 'Choose dessert')
+    await user.click(screen.getByRole('button', { name: 'Save' }))
 
-    const setItem = vi.spyOn(Storage.prototype, 'setItem')
-      .mockImplementation(() => {
-        throw new DOMException('Storage unavailable', 'QuotaExceededError')
-      })
-    await user.click(screen.getByRole('button', { name: 'Save plan' }))
-
-    expect(
-      screen.getByRole('dialog', { name: 'Add an important plan' }),
-    ).toBeInTheDocument()
-    expect(await screen.findByRole('alert')).toHaveTextContent(
-      'This plan is not saved yet because device storage is unavailable. Keep this sheet open and try again.',
+    expect(eventServiceMocks.updateFamilyEventDetails).toHaveBeenCalledWith(
+      eventId,
+      expect.stringMatching(/^kinsphere-plan:v2:/),
     )
-    expect(screen.getByLabelText('Plan name')).toHaveValue('Flight home')
-    expect(
-      screen.queryByRole('heading', { name: 'Flight home' }),
-    ).not.toBeInTheDocument()
-    expect(
-      localStorage.getItem(
-        eventStorageKey('kinsphere-created-events', storageSubject),
-      ),
-    ).toBeNull()
-
-    setItem.mockRestore()
-    await user.click(screen.getByRole('button', { name: 'Save plan' }))
-
-    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
-    expect(
-      screen.getByRole('heading', { name: 'Flight home' }),
-    ).toBeInTheDocument()
-    expect(
-      localStorage.getItem(
-        eventStorageKey('kinsphere-created-events', storageSubject),
-      ),
-    ).toContain('Flight home')
+    expect(screen.getByRole('checkbox', { name: 'Choose dessert' })).toBeInTheDocument()
   })
 
-  it('keeps save errors inside the modal and restores focus when it closes', async () => {
-    eventServiceMocks.createFamilyEvent.mockRejectedValueOnce(
-      new Error('offline'),
-    )
-    const user = userEvent.setup()
+  it('uses notebook doodles instead of plan photographs', async () => {
+    authMocks.isDevelopmentPreview = true
     renderJournalEventsSection()
-    const opener = screen.getByRole('button', { name: 'Add plan' })
 
-    await user.click(opener)
-    const planType = screen.getByLabelText('Plan type')
-    await waitFor(() => expect(planType).toHaveFocus())
-    screen.getByRole('button', { name: 'Close add plan' }).focus()
-    await user.keyboard('{Shift>}{Tab}{/Shift}')
-    expect(screen.getByRole('button', { name: 'Save plan' })).toHaveFocus()
-
-    await user.selectOptions(planType, 'travel')
-    await user.type(screen.getByLabelText('Plan name'), 'Flight home')
-    await user.type(screen.getByLabelText('Date'), '2099-12-20')
-    await user.type(screen.getByLabelText('Time'), '16:30')
-    await user.type(screen.getByLabelText('Location'), 'Airport')
-    await user.click(screen.getByRole('button', { name: 'Save plan' }))
-
-    const dialog = screen.getByRole('dialog', { name: 'Add an important plan' })
-    expect(dialog).toContainElement(await screen.findByRole('alert'))
-    expect(screen.getByRole('alert')).toHaveTextContent(/could not be saved/i)
-
-    await user.keyboard('{Escape}')
-    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
-    await waitFor(() => expect(opener).toHaveFocus())
+    expect(await screen.findByRole('heading', { name: 'Sunday dinner' })).toBeInTheDocument()
+    const card = screen.getByRole('heading', { name: 'Sunday dinner' }).closest('article')
+    expect(card?.querySelector('.event-plan-card__sketch')).not.toBeNull()
+    expect(card?.querySelector('img')).toBeNull()
   })
 
-  it('requests notification permission only after an explicit reminder action', async () => {
+  it('completes a shared plan through the shared completion service', async () => {
+    const user = userEvent.setup()
+    const today = dateFromToday(0, 20)
+    const eventId = 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeee1'
+    eventServiceMocks.fetchFamilyEvents.mockResolvedValue([{
+      id: eventId,
+      title: 'Family supper',
+      startsAt: today.toISOString(),
+      location: 'Home',
+      details: 'kinsphere-plan-category:v1:other',
+    }])
+    eventServiceMocks.deleteFamilyEvent.mockResolvedValue(true)
+    renderJournalEventsSection()
+
+    expect(await screen.findByRole('heading', { name: 'Family supper' })).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Complete task: Family supper' }))
+    expect(screen.queryByRole('heading', { name: 'Family supper' })).not.toBeInTheDocument()
+    expect(eventServiceMocks.deleteFamilyEvent).toHaveBeenCalledWith(eventId)
+    expect(await screen.findByRole('status')).toHaveTextContent(/shared calendar/i)
+  })
+
+  it('changes weeks and filters locally saved plans by the selected date', async () => {
+    const user = userEvent.setup()
+    const today = dateFromToday(0, 20)
+    const tomorrow = dateFromToday(1, 20)
+    const nextWeek = dateFromToday(7, 20)
     storeCreatedPlans([
-      {
-        id: 'flight-home',
-        title: 'Flight home',
-        startsAt: '2099-12-20T09:00:00',
-        location: 'Dubai International Airport',
-        category: 'travel',
-      },
+      { id: 'today', title: 'Today plan', startsAt: today, location: 'Home', category: 'other' },
+      { id: 'tomorrow', title: 'Tomorrow plan', startsAt: tomorrow, location: 'Park', category: 'other' },
+      { id: 'next-week', title: 'Next week plan', startsAt: nextWeek, location: 'Beach', category: 'other' },
     ])
+    renderJournalEventsSection()
+
+    expect(screen.getByRole('heading', { name: 'Today plan' })).toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: 'Tomorrow plan' })).not.toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: new RegExp(`^${formatDayButton(tomorrow)}`) }))
+    expect(screen.getByRole('heading', { name: 'Tomorrow plan' })).toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: 'Today plan' })).not.toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: 'Next week' }))
+    expect(screen.getByRole('heading', { name: /^No plans on / })).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: new RegExp(`^${formatDayButton(nextWeek)}`) }))
+    expect(screen.getByRole('heading', { name: 'Next week plan' })).toBeInTheDocument()
+  })
+
+  it('toggles a device reminder only after an explicit action', async () => {
+    const today = dateFromToday(0, 20)
+    storeCreatedPlans([{
+      id: 'dinner', title: 'Dinner', startsAt: today, location: 'Home', category: 'other',
+    }])
     const requestPermission = vi.fn().mockResolvedValue('denied')
-    vi.stubGlobal('Notification', {
-      permission: 'default',
-      requestPermission,
-    })
+    vi.stubGlobal('Notification', { permission: 'default', requestPermission })
     const user = userEvent.setup()
     renderJournalEventsSection()
 
     expect(requestPermission).not.toHaveBeenCalled()
-    await user.click(screen.getByRole('button', { name: 'Remind me about Flight home' }))
-
+    await user.click(screen.getByRole('button', { name: 'Remind me about Dinner' }))
     expect(requestPermission).toHaveBeenCalledTimes(1)
-    expect(
-      screen.getByRole('button', { name: 'Remove reminder for Flight home' }),
-    ).toHaveAttribute('aria-pressed', 'true')
-    expect(screen.getByRole('status')).toHaveTextContent(
-      /allow notifications in browser settings/i,
-    )
-    expect(
-      localStorage.getItem(
-        eventStorageKey('kinsphere-event-reminders', storageSubject),
-      ),
-    ).toContain('flight-home')
-    expect(localStorage.getItem('kinsphere-event-reminders')).toBeNull()
+    expect(screen.getByRole('button', { name: 'Remove reminder for Dinner' }))
+      .toHaveAttribute('aria-pressed', 'true')
   })
 
-  it('loads shared family events and refreshes them after a Realtime change', async () => {
-    const sharedEvents = [
-      {
-        id: 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeee1',
-        title: 'Family flight',
-        startsAt: '2099-12-20T12:30:00.000Z',
-        location: 'Dubai International Airport',
-        details: 'kinsphere-plan-category:v1:travel',
-      },
-    ]
+  it('keeps local-only creation in the sheet when persistence fails', async () => {
+    const user = userEvent.setup()
+    const plannedDate = dateFromToday(1)
+    renderJournalEventsSection()
+    await user.click(screen.getByRole('button', { name: 'Add plan' }))
+    await user.type(screen.getByLabelText('Plan name'), 'Flight home')
+    await user.type(screen.getByLabelText('Date'), localDateValue(plannedDate))
+    await user.type(screen.getByLabelText('Time'), '16:30')
+    await user.type(screen.getByLabelText('Location'), 'Airport')
+
+    const setItem = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
+      throw new DOMException('Storage unavailable', 'QuotaExceededError')
+    })
+    await user.click(screen.getByRole('button', { name: 'Save plan' }))
+    expect(screen.getByRole('dialog', { name: 'Add an important plan' })).toBeInTheDocument()
+    expect(await screen.findByRole('alert')).toHaveTextContent(/not saved yet/i)
+
+    setItem.mockRestore()
+    await user.click(screen.getByRole('button', { name: 'Save plan' }))
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'Flight home' })).toBeInTheDocument()
+  })
+
+  it('refreshes shared plans after a Realtime family-calendar change', async () => {
+    const today = dateFromToday(0, 20)
     let notifyChange: () => void = () => undefined
+    const first = {
+      id: 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeee1',
+      title: 'Family flight',
+      startsAt: today.toISOString(),
+      location: 'Airport',
+      details: 'kinsphere-plan-category:v1:other',
+    }
     eventServiceMocks.fetchFamilyEvents
-      .mockResolvedValueOnce(sharedEvents)
+      .mockResolvedValueOnce([first])
       .mockResolvedValueOnce([
-        ...sharedEvents,
+        first,
         {
           id: 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeee2',
-          title: 'Grandma’s anniversary',
-          startsAt: '2099-12-21T12:30:00.000Z',
-          location: 'Family home',
-          details: 'kinsphere-plan-category:v1:anniversary',
+          title: 'Family picnic',
+          startsAt: new Date(today.getTime() + 30 * 60 * 1000).toISOString(),
+          location: 'Park',
+          details: 'kinsphere-plan-category:v1:other',
         },
       ])
     eventServiceMocks.subscribeToFamilyEvents.mockImplementation(
@@ -382,21 +401,28 @@ describe('JournalEventsSection', () => {
         return () => undefined
       },
     )
-
     renderJournalEventsSection()
-    expect(
-      await screen.findByRole('heading', { name: 'Family flight' }),
-    ).toBeInTheDocument()
-    expect(screen.getByText('Travel')).toBeInTheDocument()
+    expect(await screen.findByRole('heading', { name: 'Family flight' })).toBeInTheDocument()
 
     await act(async () => {
       notifyChange()
       await Promise.resolve()
     })
+    expect(await screen.findByRole('heading', { name: 'Family picnic' })).toBeInTheDocument()
+  })
 
-    expect(
-      await screen.findByRole('heading', { name: 'Grandma’s anniversary' }),
-    ).toBeInTheDocument()
-    expect(eventServiceMocks.fetchFamilyEvents).toHaveBeenCalledTimes(2)
+  it('traps focus in the add-plan sheet and restores it after Escape', async () => {
+    const user = userEvent.setup()
+    renderJournalEventsSection()
+    const opener = screen.getByRole('button', { name: 'Add plan' })
+    await user.click(opener)
+    const name = screen.getByLabelText('Plan name')
+    await waitFor(() => expect(name).toHaveFocus())
+    screen.getByRole('button', { name: 'Close add plan' }).focus()
+    await user.keyboard('{Shift>}{Tab}{/Shift}')
+    expect(screen.getByRole('button', { name: 'Save plan' })).toHaveFocus()
+    await user.keyboard('{Escape}')
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+    await waitFor(() => expect(opener).toHaveFocus())
   })
 })

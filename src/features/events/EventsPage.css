@@ -13,15 +13,19 @@
 }
 
 .journal-events {
+  --plan-gold: #e2ae69;
+  --plan-gold-bright: #f0c27f;
+  --plan-paper: #12110f;
+  --plan-paper-line: rgba(242, 214, 176, 0.075);
   display: grid;
-  padding: 0.2rem 0 1.35rem;
-  gap: 0.75rem;
+  padding: 0.15rem 0 1.5rem;
+  gap: 0.95rem;
 }
 
 .journal-events__heading {
   display: flex;
-  padding: 0 0.12rem;
-  align-items: center;
+  padding: 0.2rem 0.12rem 0.35rem;
+  align-items: flex-end;
   justify-content: space-between;
   gap: 1rem;
 }
@@ -32,28 +36,31 @@
 }
 
 .journal-events__heading p {
-  margin-bottom: 0.22rem;
-  color: rgba(237, 187, 132, 0.74);
+  margin-bottom: 0.28rem;
+  color: rgba(240, 194, 127, 0.78);
   font-size: 0.6rem;
-  font-weight: 680;
-  letter-spacing: 0.075em;
+  font-weight: 720;
+  letter-spacing: 0.1em;
   text-transform: uppercase;
 }
 
 .journal-events__heading h2 {
-  color: rgba(255, 255, 255, 0.92);
-  font-size: 1rem;
-  font-weight: 640;
-  letter-spacing: -0.025em;
+  color: rgba(255, 251, 246, 0.96);
+  font-size: 1.12rem;
+  font-weight: 650;
+  letter-spacing: -0.035em;
 }
 
 .journal-events__upcoming {
-  margin-top: 0.45rem;
+  margin-top: 0;
+  gap: 0.82rem;
 }
 
 .journal-events__upcoming-heading {
   min-width: 0;
   align-items: center;
+  padding: 0.65rem 0.18rem 0.45rem;
+  border-top: 1px solid rgba(226, 174, 105, 0.22);
 }
 
 .journal-events__upcoming-heading > div {
@@ -62,16 +69,16 @@
 
 .journal-events .ks-section__heading h3 {
   margin: 0;
-  color: rgba(255, 255, 255, 0.92);
-  font-size: 0.92rem;
-  font-weight: 640;
-  letter-spacing: -0.02em;
+  color: rgba(255, 250, 243, 0.92);
+  font-size: 0.9rem;
+  font-weight: 630;
+  letter-spacing: -0.015em;
 }
 
 .journal-events__upcoming-heading p {
-  margin: 0.2rem 0 0;
+  margin: 0.22rem 0 0;
   overflow: hidden;
-  color: rgba(255, 244, 232, 0.42);
+  color: rgba(255, 239, 220, 0.44);
   font-size: 0.62rem;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -87,7 +94,7 @@
   gap: 0.42rem;
   border: 0;
   border-radius: 999px;
-  color: rgba(237, 201, 147, 0.88);
+  color: rgba(240, 194, 127, 0.9);
   background: transparent;
   font: inherit;
   font-size: 0.67rem;
@@ -123,7 +130,10 @@
 }
 
 .journal-events__upcoming-list {
+  display: grid;
   min-width: 0;
+  gap: 0.82rem;
+  border: 0;
 }
 
 .journal-events__event--revealed {
@@ -143,44 +153,312 @@
   }
 }
 
-.journal-events .event-list-item h4,
-.journal-events .event-list-item p {
+.journal-events .event-plan-card h4,
+.journal-events .event-plan-card p {
   margin: 0;
 }
 
-.journal-events .event-list-item > :nth-child(2) {
+.journal-events .event-plan-card {
+  position: relative;
+  isolation: isolate;
+  display: grid;
+  overflow: hidden;
+  grid-template-columns: 5rem minmax(0, 1fr);
+  min-height: 8.6rem;
+  padding: 1rem 0.95rem 0.95rem;
+  align-items: start;
+  gap: 0.9rem;
+  border: 1px solid rgba(226, 174, 105, 0.2);
+  border-radius: 0.4rem;
+  background:
+    repeating-linear-gradient(
+      to bottom,
+      transparent 0,
+      transparent 1.86rem,
+      var(--plan-paper-line) 1.9rem,
+      var(--plan-paper-line) 1.94rem
+    ),
+    radial-gradient(circle at 9% 6%, rgba(226, 174, 105, 0.09), transparent 22%),
+    radial-gradient(circle at 92% 86%, rgba(255, 255, 255, 0.035), transparent 30%),
+    var(--plan-paper);
+  box-shadow:
+    0 0.9rem 2.2rem rgba(0, 0, 0, 0.24),
+    inset 0 0 2.6rem rgba(255, 245, 230, 0.018);
+  clip-path: polygon(
+    0 0.45rem,
+    3% 0.2rem,
+    7% 0.42rem,
+    12% 0.12rem,
+    18% 0.38rem,
+    25% 0.16rem,
+    34% 0.4rem,
+    44% 0.14rem,
+    54% 0.34rem,
+    65% 0.12rem,
+    76% 0.38rem,
+    86% 0.16rem,
+    94% 0.4rem,
+    100% 0.2rem,
+    100% calc(100% - 0.4rem),
+    96% calc(100% - 0.18rem),
+    89% calc(100% - 0.42rem),
+    80% calc(100% - 0.15rem),
+    69% calc(100% - 0.38rem),
+    57% calc(100% - 0.14rem),
+    45% calc(100% - 0.4rem),
+    33% calc(100% - 0.16rem),
+    22% calc(100% - 0.36rem),
+    11% calc(100% - 0.12rem),
+    4% calc(100% - 0.38rem),
+    0 calc(100% - 0.2rem)
+  );
+}
+
+.journal-events .event-plan-card::before,
+.journal-events .event-plan-card::after {
+  position: absolute;
+  z-index: 0;
+  pointer-events: none;
+  content: '';
+}
+
+.journal-events .event-plan-card > * {
+  position: relative;
+  z-index: 1;
+}
+
+.journal-events .event-plan-card::before {
+  inset: 0.46rem 0.35rem;
+  border-right: 1px solid rgba(226, 174, 105, 0.06);
+  border-left: 1px solid rgba(226, 174, 105, 0.08);
+}
+
+.journal-events .event-plan-card::after {
+  top: 0;
+  right: 0;
+  width: 5.8rem;
+  height: 5.8rem;
+  opacity: 0.12;
+  background:
+    radial-gradient(circle at 20% 40%, var(--plan-gold) 0 1px, transparent 1.5px),
+    radial-gradient(circle at 62% 18%, var(--plan-gold) 0 0.8px, transparent 1.3px),
+    radial-gradient(circle at 78% 72%, var(--plan-gold) 0 1px, transparent 1.5px);
+  background-size: 1.15rem 1.05rem;
+}
+
+.event-plan-card__artwork,
+.event-plan-card__content,
+.event-plan-card__title-row > div {
   min-width: 0;
 }
 
-.journal-events .event-list-item h4 {
-  overflow: hidden;
-  color: rgba(255, 255, 255, 0.83);
-  font-size: 0.77rem;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+.event-plan-card__artwork {
+  position: relative;
+  width: 4.7rem;
+  padding-bottom: 0.72rem;
 }
 
-.journal-events .event-list-item p {
-  margin-top: 0.2rem;
+.event-plan-card__portrait {
+  position: relative;
+  display: grid;
+  width: 4.45rem;
+  aspect-ratio: 1;
   overflow: hidden;
-  color: rgba(255, 255, 255, 0.4);
-  font-size: 0.63rem;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  place-items: center;
+  border: 1px solid rgba(240, 194, 127, 0.7);
+  border-radius: 50%;
+  color: rgba(255, 248, 239, 0.9);
+  background:
+    radial-gradient(circle at 38% 30%, rgba(255, 255, 255, 0.16), transparent 22%),
+    radial-gradient(circle at 65% 68%, rgba(226, 174, 105, 0.18), transparent 30%),
+    #24201b;
+  box-shadow:
+    0 0.55rem 1.2rem rgba(0, 0, 0, 0.34),
+    inset 0 0 1.5rem rgba(0, 0, 0, 0.3);
+}
+
+.event-plan-card[data-category='travel'] .event-plan-card__portrait {
+  background: radial-gradient(circle at 35% 25%, #6a7778, transparent 30%), #283132;
+}
+
+.event-plan-card[data-category='graduation'] .event-plan-card__portrait {
+  background: radial-gradient(circle at 38% 25%, #7e5f37, transparent 31%), #33271b;
+}
+
+.event-plan-card[data-category='wedding'] .event-plan-card__portrait,
+.event-plan-card[data-category='anniversary'] .event-plan-card__portrait {
+  background: radial-gradient(circle at 38% 25%, #805e58, transparent 31%), #392526;
+}
+
+.event-plan-card[data-category='appointment'] .event-plan-card__portrait {
+  background: radial-gradient(circle at 35% 25%, #586b61, transparent 31%), #25302b;
+}
+
+.event-plan-card__portrait > span {
+  position: relative;
+  z-index: 1;
+  font-family: var(--font-accent);
+  font-size: 1.75rem;
+  line-height: 1;
+  text-shadow: 0 0.15rem 0.4rem rgba(0, 0, 0, 0.42);
+}
+
+.event-plan-card__portrait > svg {
+  position: absolute;
+  right: -0.3rem;
+  bottom: -0.25rem;
+  width: 2.65rem;
+  height: 2.65rem;
+  opacity: 0.22;
+  fill: none;
+  stroke: var(--plan-gold-bright);
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 1.1;
+}
+
+.event-plan-card .event-list-item__date {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  display: grid;
+  width: 2.45rem;
+  height: 2.45rem;
+  place-items: center;
+  align-content: center;
+  border: 2px solid var(--plan-paper);
+  border-radius: 50%;
+  color: #20160e;
+  background: var(--plan-gold);
+  box-shadow: 0 0.35rem 0.8rem rgba(0, 0, 0, 0.3);
+  text-align: center;
+}
+
+.event-plan-card .event-list-item__date strong,
+.event-plan-card .event-list-item__date span {
+  display: block;
+  line-height: 1;
+}
+
+.event-plan-card .event-list-item__date strong {
+  font-size: 0.86rem;
+  font-weight: 720;
+}
+
+.event-plan-card .event-list-item__date span {
+  margin-top: 0.13rem;
+  color: rgba(32, 22, 14, 0.72);
+  font-size: 0.47rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+}
+
+.event-plan-card__content {
+  display: grid;
+  padding: 0.12rem 0 0.15rem;
+  align-self: stretch;
+}
+
+.event-plan-card__title-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 0.65rem;
+}
+
+.journal-events .event-plan-card h4 {
+  margin-top: 0.16rem;
+  overflow-wrap: anywhere;
+  color: rgba(255, 252, 248, 0.95);
+  font-size: 1rem;
+  font-weight: 600;
+  letter-spacing: -0.025em;
+  line-height: 1.16;
+}
+
+.event-plan-card__doodle {
+  display: grid;
+  width: 2.2rem;
+  height: 2.2rem;
+  place-items: center;
+  color: var(--plan-gold);
+  transform: rotate(5deg);
+}
+
+.event-plan-card__doodle svg {
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 1.35;
 }
 
 .event-list-item__category {
-  color: rgba(237, 201, 147, 0.78);
-  font-weight: 620;
+  color: rgba(240, 194, 127, 0.78);
+  font-size: 0.52rem;
+  font-weight: 730;
+  letter-spacing: 0.095em;
+  text-transform: uppercase;
+}
+
+.journal-events .event-plan-card .event-plan-card__when {
+  margin-top: 0.42rem;
+  color: var(--plan-gold-bright);
+  font-family: var(--font-accent);
+  font-size: 0.74rem;
+  line-height: 1.3;
+}
+
+.journal-events .event-plan-card .event-plan-card__location {
+  display: flex;
+  min-width: 0;
+  margin-top: 0.38rem;
+  align-items: flex-start;
+  gap: 0.28rem;
+  color: rgba(255, 246, 235, 0.5);
+  font-size: 0.63rem;
+  line-height: 1.35;
+}
+
+.event-plan-card__location svg {
+  width: 0.78rem;
+  height: 0.78rem;
+  margin-top: 0.02rem;
+  flex: 0 0 auto;
+  fill: none;
+  stroke: rgba(240, 194, 127, 0.7);
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 1.5;
+}
+
+.event-plan-card__location span {
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 .journal-events__empty {
+  position: relative;
   display: grid;
   grid-template-columns: auto minmax(0, 1fr);
-  padding: 1.15rem 0.7rem 1.2rem;
+  padding: 1.15rem 1rem 1.2rem;
+  overflow: hidden;
   align-items: start;
   gap: 0.78rem;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+  border: 1px solid rgba(226, 174, 105, 0.18);
+  border-radius: 0.45rem;
+  background:
+    repeating-linear-gradient(
+      to bottom,
+      transparent 0,
+      transparent 1.75rem,
+      var(--plan-paper-line) 1.78rem,
+      var(--plan-paper-line) 1.82rem
+    ),
+    var(--plan-paper);
 }
 
 .journal-events__empty-icon {
@@ -188,10 +466,10 @@
   width: 2.4rem;
   height: 2.4rem;
   place-items: center;
-  border: 1px solid rgba(232, 189, 123, 0.2);
-  border-radius: 0.8rem;
-  color: rgba(237, 201, 147, 0.8);
-  background: rgba(232, 189, 123, 0.06);
+  border: 1px solid rgba(226, 174, 105, 0.5);
+  border-radius: 50%;
+  color: var(--plan-gold-bright);
+  background: rgba(226, 174, 105, 0.08);
 }
 
 .journal-events__empty-icon svg {
@@ -211,7 +489,7 @@
 
 .journal-events__empty h3 {
   color: rgba(255, 255, 255, 0.88);
-  font-size: 0.78rem;
+  font-size: 0.84rem;
   font-weight: 650;
 }
 
@@ -225,12 +503,13 @@
 .journal-events__empty-action {
   grid-column: 2;
   min-height: 2.75rem;
-  margin-top: -0.2rem;
-  padding: 0.45rem 0;
+  margin-top: 0.05rem;
+  padding: 0.45rem 0.78rem;
   justify-self: start;
-  border: 0;
-  color: #edc993;
-  background: transparent;
+  border: 1px solid rgba(226, 174, 105, 0.45);
+  border-radius: 999px;
+  color: var(--plan-gold-bright);
+  background: rgba(226, 174, 105, 0.045);
   font: inherit;
   font-size: 0.68rem;
   font-weight: 650;
@@ -244,8 +523,8 @@
 }
 
 .journal-events__notification-note {
-  margin: 0.2rem 0 0;
-  padding: 0 0.12rem;
+  margin: 0.1rem 0 0;
+  padding: 0 0.2rem;
   color: rgba(255, 255, 255, 0.36);
   font-size: 0.61rem;
   line-height: 1.45;
@@ -255,13 +534,13 @@
   display: inline-flex;
   max-width: 8.5rem;
   min-height: 2.75rem;
-  padding: 0.45rem 0.78rem 0.45rem 0.56rem;
+  padding: 0.45rem 0.82rem;
   align-items: center;
   gap: 0.38rem;
-  border: 1px solid rgba(255, 255, 255, 0.15);
+  border: 1px solid rgba(226, 174, 105, 0.5);
   border-radius: 999px;
-  color: rgba(255, 255, 255, 0.92);
-  background: rgba(18, 18, 19, 0.82);
+  color: var(--plan-gold-bright);
+  background: rgba(226, 174, 105, 0.055);
   font: inherit;
   font-size: 0.7rem;
   font-weight: 680;
@@ -272,32 +551,37 @@
 
 .events-header-action__plus {
   display: grid;
-  width: 1.45rem;
-  height: 1.45rem;
+  width: 1.25rem;
+  height: 1.25rem;
   place-items: center;
   border-radius: 50%;
-  color: #16120b;
-  background: #e8bd7b;
-  font-size: 1.1rem;
+  color: var(--plan-gold-bright);
+  background: transparent;
+  font-size: 1.15rem;
   font-weight: 420;
   line-height: 1;
 }
 
 .event-list-item__actions {
-  display: grid;
+  display: flex;
   min-width: 0;
-  justify-items: end;
-  gap: 0.25rem;
+  margin-top: 0.72rem;
+  padding-top: 0.62rem;
+  justify-content: flex-end;
+  border-top: 1px dashed rgba(226, 174, 105, 0.16);
 }
 
 .event-reminder-button {
+  display: inline-flex;
   max-width: 100%;
-  min-height: 2.75rem;
-  padding: 0.45rem 0.7rem;
-  border: 1px solid rgba(255, 255, 255, 0.12);
+  min-height: 2.4rem;
+  padding: 0.42rem 0.72rem;
+  align-items: center;
+  gap: 0.34rem;
+  border: 1px solid rgba(226, 174, 105, 0.28);
   border-radius: 999px;
-  color: rgba(255, 255, 255, 0.68);
-  background: transparent;
+  color: rgba(255, 242, 225, 0.66);
+  background: rgba(0, 0, 0, 0.14);
   font: inherit;
   font-size: 0.62rem;
   font-weight: 650;
@@ -307,10 +591,21 @@
   cursor: pointer;
 }
 
+.event-reminder-button svg {
+  width: 0.82rem;
+  height: 0.82rem;
+  flex: 0 0 auto;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 1.6;
+}
+
 .event-reminder-button[aria-pressed='true'] {
-  border-color: rgba(232, 189, 123, 0.42);
-  color: #edc993;
-  background: rgba(232, 189, 123, 0.08);
+  border-color: rgba(226, 174, 105, 0.62);
+  color: var(--plan-gold-bright);
+  background: rgba(226, 174, 105, 0.1);
 }
 
 .event-reminder-status {
@@ -320,6 +615,512 @@
   color: rgba(255, 255, 255, 0.48);
   font-size: 0.64rem;
   line-height: 1.45;
+}
+
+.events-header-action:focus-visible,
+.event-reminder-button:focus-visible,
+.journal-events__empty-action:focus-visible {
+  outline: 2px solid rgba(240, 194, 127, 0.9);
+  outline-offset: 0.16rem;
+}
+
+.journal-events__sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  clip-path: inset(50%);
+  border: 0;
+  white-space: nowrap;
+}
+
+.journal-events__week {
+  display: grid;
+  margin: -0.15rem 0 0.25rem;
+  padding: 0.25rem 0.1rem 0.8rem;
+  gap: 0.28rem;
+  border-bottom: 1px solid rgba(226, 174, 105, 0.2);
+}
+
+.journal-events__week-days {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 0.1rem;
+}
+
+.journal-events__week-days button {
+  position: relative;
+  display: grid;
+  min-width: 0;
+  min-height: 3.85rem;
+  padding: 0.2rem 0 0.28rem;
+  place-items: center;
+  align-content: space-between;
+  border: 0;
+  border-radius: 999px;
+  color: rgba(255, 249, 241, 0.62);
+  background: transparent;
+  font: inherit;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.journal-events__week-days button > span {
+  font-size: 0.58rem;
+  font-weight: 680;
+  line-height: 1;
+}
+
+.journal-events__week-days button > strong {
+  display: grid;
+  width: 2rem;
+  height: 2rem;
+  place-items: center;
+  border-radius: 50%;
+  color: rgba(255, 251, 247, 0.9);
+  font-size: 0.88rem;
+  font-weight: 520;
+  line-height: 1;
+}
+
+.journal-events__week-days button > i {
+  width: 0.26rem;
+  height: 0.26rem;
+  border-radius: 50%;
+  background: transparent;
+}
+
+.journal-events__week-days button[data-has-plans='true'] > i {
+  background: var(--plan-gold);
+  box-shadow: 0 0 0.35rem rgba(226, 174, 105, 0.38);
+}
+
+.journal-events__week-days button[aria-pressed='true'] > strong {
+  color: #21170e;
+  background: linear-gradient(145deg, #f0c47f, #d79b50);
+  box-shadow:
+    inset 0 1px rgba(255, 245, 222, 0.45),
+    0 0.35rem 0.9rem rgba(226, 174, 105, 0.22);
+}
+
+.journal-events__week-days button:focus-visible {
+  outline: 2px solid rgba(240, 194, 127, 0.9);
+  outline-offset: 0.08rem;
+}
+
+.journal-events__week-navigation {
+  display: grid;
+  grid-template-columns: 2rem minmax(0, 1fr) 2rem;
+  align-items: center;
+}
+
+.journal-events__week-navigation > p {
+  margin: 0.12rem 0 0;
+  color: rgba(255, 247, 236, 0.52);
+  font-size: 0.68rem;
+  line-height: 1;
+  text-align: center;
+}
+
+.journal-events__week-navigation > button {
+  display: grid;
+  width: 2rem;
+  height: 2rem;
+  padding: 0;
+  place-items: center;
+  border: 0;
+  border-radius: 50%;
+  color: rgba(240, 194, 127, 0.76);
+  background: transparent;
+  cursor: pointer;
+}
+
+.journal-events__week-navigation > button svg {
+  width: 0.75rem;
+  height: 0.75rem;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 1.4;
+}
+
+.journal-events__week-navigation > button:focus-visible {
+  outline: 2px solid rgba(240, 194, 127, 0.95);
+  outline-offset: 0.08rem;
+}
+
+.journal-events__upcoming {
+  gap: 0.75rem;
+}
+
+.journal-events .event-plan-card {
+  grid-template-columns: 3.65rem minmax(0, 1fr);
+  min-height: 0;
+  padding: 1.05rem 0.95rem 1rem;
+  gap: 0.58rem 0.9rem;
+}
+
+.event-plan-card__artwork {
+  display: grid;
+  width: 3.5rem;
+  min-height: 4.35rem;
+  padding-bottom: 0;
+  place-items: center;
+}
+
+.event-plan-card__sketch {
+  position: relative;
+  display: grid;
+  width: 3.15rem;
+  height: 3.15rem;
+  place-items: center;
+  color: var(--plan-gold-bright);
+  filter: drop-shadow(0 0.2rem 0.35rem rgba(226, 174, 105, 0.14));
+  transform: rotate(-7deg);
+}
+
+.event-plan-card__sketch::after {
+  position: absolute;
+  right: 0.18rem;
+  bottom: -0.38rem;
+  left: 0.1rem;
+  height: 0.42rem;
+  border-top: 1px solid rgba(226, 174, 105, 0.52);
+  border-radius: 50%;
+  content: '';
+  transform: rotate(3deg);
+}
+
+.event-plan-card__sketch svg {
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 1.25;
+}
+
+.event-plan-card__content {
+  display: block;
+  padding: 0.15rem 0 0;
+}
+
+.journal-events .event-plan-card h4 {
+  margin-top: 0;
+  padding-top: 0.06rem;
+  font-size: 1.02rem;
+  font-weight: 560;
+  letter-spacing: -0.025em;
+  line-height: 1.16;
+}
+
+.event-plan-card__title-row {
+  grid-template-columns: minmax(0, 1fr) 2.5rem;
+  gap: 0.35rem;
+}
+
+.event-plan-card__doodle.event-reminder-button {
+  display: grid;
+  width: 2.45rem;
+  height: 2.45rem;
+  min-height: 2.45rem;
+  padding: 0.12rem;
+  place-items: center;
+  align-self: start;
+  border: 0;
+  border-radius: 0.45rem;
+  color: var(--plan-gold);
+  background: transparent;
+  overflow: visible;
+  transform: rotate(5deg);
+}
+
+.event-plan-card__doodle.event-reminder-button svg {
+  width: 2.2rem;
+  height: 2.2rem;
+  overflow: visible;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 1.35;
+}
+
+.event-plan-card__doodle.event-reminder-button[aria-pressed='true'] {
+  color: var(--plan-gold-bright);
+  background: rgba(226, 174, 105, 0.08);
+  filter: drop-shadow(0 0 0.25rem rgba(226, 174, 105, 0.35));
+}
+
+.journal-events .event-plan-card .event-plan-card__when {
+  margin-top: 0.32rem;
+  color: var(--plan-gold-bright);
+  font-family: var(--font-accent);
+  font-size: 0.76rem;
+  font-weight: 470;
+  line-height: 1.3;
+}
+
+.journal-events .event-plan-card .event-plan-card__location {
+  margin-top: 0.32rem;
+  color: rgba(255, 246, 235, 0.48);
+  font-size: 0.64rem;
+  line-height: 1.35;
+}
+
+.event-plan-card__attendees {
+  display: flex;
+  min-width: 0;
+  margin-top: 0.52rem;
+  padding-left: 0.12rem;
+  align-items: center;
+}
+
+.event-plan-card__attendees > span {
+  display: grid;
+  width: 1.82rem;
+  height: 1.82rem;
+  margin-left: -0.24rem;
+  place-items: center;
+  border: 1px solid rgba(226, 174, 105, 0.72);
+  border-radius: 50%;
+  color: rgba(255, 249, 241, 0.88);
+  background: linear-gradient(145deg, #60564b, #2b2824);
+  box-shadow: 0 0 0 2px var(--plan-paper);
+  font-size: 0.47rem;
+  font-weight: 720;
+  letter-spacing: -0.02em;
+}
+
+.event-plan-card__attendees > span:first-child {
+  margin-left: 0;
+  background: linear-gradient(145deg, #73604d, #31261e);
+}
+
+.event-plan-card__attendees > span:nth-child(2) {
+  background: linear-gradient(145deg, #5c695d, #253029);
+}
+
+.event-plan-card__attendees > span:nth-child(3) {
+  background: linear-gradient(145deg, #73595d, #302226);
+}
+
+.event-plan-card__attendees > span:nth-child(4) {
+  background: linear-gradient(145deg, #535e70, #242b35);
+}
+
+.event-plan-card__attendees > span:last-child {
+  color: rgba(255, 247, 236, 0.72);
+  background: rgba(18, 17, 15, 0.86);
+}
+
+.event-plan-card__attendees > span img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  border-radius: inherit;
+  object-fit: cover;
+}
+
+.event-plan-card__checklist {
+  display: grid;
+  grid-column: 1 / -1;
+  margin: 0.1rem 0 0;
+  padding: 0.5rem 0.18rem 0;
+  gap: 0;
+  border-top: 1px solid rgba(255, 244, 230, 0.075);
+  list-style: none;
+}
+
+.event-plan-card__checklist li {
+  min-width: 0;
+}
+
+.event-plan-card__checklist label {
+  position: relative;
+  display: grid;
+  grid-template-columns: 1.18rem minmax(0, 1fr);
+  min-height: 1.86rem;
+  padding: 0.23rem 0.42rem;
+  align-items: center;
+  gap: 0.58rem;
+  color: rgba(255, 249, 242, 0.6);
+  font-family: var(--font-accent);
+  font-size: 0.72rem;
+  line-height: 1.25;
+  cursor: pointer;
+}
+
+.event-plan-card__checklist label[data-checked='true'] {
+  color: rgba(255, 249, 242, 0.42);
+}
+
+.event-plan-card__checklist label[data-checked='true'] > span:last-child {
+  text-decoration: line-through;
+  text-decoration-color: rgba(226, 174, 105, 0.74);
+  text-decoration-thickness: 1px;
+}
+
+.event-plan-card__checklist input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  opacity: 0;
+}
+
+.event-plan-card__checkbox {
+  display: grid;
+  width: 1.12rem;
+  height: 1.12rem;
+  place-items: center;
+  border: 1px solid rgba(255, 250, 243, 0.5);
+  color: var(--plan-gold-bright);
+  background: rgba(0, 0, 0, 0.12);
+}
+
+.event-plan-card__checkbox svg {
+  width: 0.92rem;
+  height: 0.92rem;
+  overflow: visible;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 1.7;
+  opacity: 0;
+}
+
+.event-plan-card__checklist label[data-checked='true'] .event-plan-card__checkbox svg {
+  opacity: 1;
+}
+
+.event-plan-card__checklist input:focus-visible + .event-plan-card__checkbox {
+  outline: 2px solid rgba(240, 194, 127, 0.95);
+  outline-offset: 0.14rem;
+}
+
+.event-plan-card__actions {
+  display: grid;
+  grid-column: 1 / -1;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  margin-top: 0.12rem;
+  padding-top: 0.62rem;
+  gap: 0.48rem;
+  border-top: 1px dashed rgba(226, 174, 105, 0.2);
+}
+
+.event-plan-card__add-task,
+.event-plan-card__complete {
+  display: inline-flex;
+  width: 100%;
+  min-width: 0;
+  min-height: 2.55rem;
+  margin: 0;
+  padding: 0.42rem 0.68rem;
+  align-items: center;
+  justify-content: center;
+  gap: 0.42rem;
+  border: 1px solid rgba(226, 174, 105, 0.42);
+  border-radius: 999px;
+  color: var(--plan-gold-bright);
+  background: rgba(226, 174, 105, 0.035);
+  font: inherit;
+  font-size: 0.66rem;
+  font-weight: 560;
+  cursor: pointer;
+}
+
+.event-plan-card__add-task {
+  color: rgba(255, 244, 230, 0.72);
+  border-color: rgba(226, 174, 105, 0.24);
+}
+
+.event-plan-card__add-task > span:first-child {
+  color: var(--plan-gold-bright);
+  font-size: 0.95rem;
+  font-weight: 360;
+  line-height: 1;
+}
+
+.event-plan-card__task-composer {
+  display: grid;
+  grid-column: 1 / -1;
+  margin-top: 0.08rem;
+  padding: 0.7rem 0.18rem 0.12rem;
+  gap: 0.34rem;
+  border-top: 1px solid rgba(255, 244, 230, 0.075);
+}
+
+.event-plan-card__task-composer > label {
+  color: rgba(240, 194, 127, 0.72);
+  font-family: var(--font-accent);
+  font-size: 0.65rem;
+}
+
+.event-plan-card__task-composer > div {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 0.42rem;
+}
+
+.event-plan-card__task-composer input {
+  min-width: 0;
+  min-height: 2.55rem;
+  padding: 0.5rem 0.72rem;
+  border: 1px solid rgba(226, 174, 105, 0.28);
+  border-radius: 0.72rem;
+  color: rgba(255, 250, 244, 0.92);
+  background: rgba(0, 0, 0, 0.2);
+  font: 0.72rem/1.3 var(--font-accent);
+  outline: none;
+}
+
+.event-plan-card__task-composer button {
+  min-width: 3.5rem;
+  min-height: 2.55rem;
+  padding: 0.45rem 0.7rem;
+  border: 1px solid rgba(226, 174, 105, 0.48);
+  border-radius: 999px;
+  color: var(--plan-gold-bright);
+  background: rgba(226, 174, 105, 0.06);
+  font: 600 0.65rem/1 var(--font-ui);
+}
+
+.event-plan-card__complete svg {
+  width: 0.9rem;
+  height: 0.9rem;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 1.7;
+}
+
+.event-plan-card__add-task:focus-visible,
+.event-plan-card__complete:focus-visible,
+.event-plan-card__task-composer input:focus-visible,
+.event-plan-card__task-composer button:focus-visible {
+  outline: 2px solid rgba(240, 194, 127, 0.95);
+  outline-offset: 0.14rem;
+}
+
+.journal-events__upcoming-toggle {
+  justify-self: center;
+}
+
+.events-header-action--footer {
+  margin-top: -0.15rem;
+  justify-self: center;
+  border-color: rgba(226, 174, 105, 0.68);
+  color: var(--plan-gold-bright);
+  background: rgba(226, 174, 105, 0.035);
 }
 
 .event-sheet {
@@ -414,6 +1215,117 @@
   max-width: 100%;
 }
 
+.event-sheet__tasks {
+  display: grid;
+  min-width: 0;
+  margin: 0;
+  padding: 0.78rem 0 0;
+  gap: 0.62rem;
+  border: 0;
+  border-top: 1px dashed rgba(226, 174, 105, 0.22);
+}
+
+.event-sheet__tasks-heading {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.65rem;
+}
+
+.event-sheet__tasks-heading > div {
+  min-width: 0;
+}
+
+.event-sheet__tasks legend,
+.event-sheet__tasks p {
+  margin: 0;
+}
+
+.event-sheet__tasks legend {
+  color: rgba(255, 250, 244, 0.88);
+  font-size: 0.74rem;
+  font-weight: 620;
+}
+
+.event-sheet__tasks p {
+  margin-top: 0.15rem;
+  color: rgba(255, 248, 239, 0.4);
+  font-size: 0.58rem;
+}
+
+.event-sheet__tasks-heading > button {
+  display: inline-flex;
+  min-height: 2.4rem;
+  padding: 0.4rem 0.7rem;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 0.3rem;
+  border: 1px solid rgba(226, 174, 105, 0.34);
+  border-radius: 999px;
+  color: var(--plan-gold-bright);
+  background: rgba(226, 174, 105, 0.05);
+  font: 600 0.64rem/1 var(--font-ui);
+}
+
+.event-sheet__tasks-heading > button:disabled {
+  opacity: 0.35;
+}
+
+.event-sheet__task-list {
+  display: grid;
+  min-width: 0;
+  gap: 0.52rem;
+}
+
+.event-sheet__task-row {
+  display: grid;
+  min-width: 0;
+  gap: 0.26rem;
+}
+
+.event-sheet__task-row > label {
+  color: rgba(240, 194, 127, 0.65);
+  font-family: var(--font-accent);
+  font-size: 0.61rem;
+}
+
+.event-sheet__task-row > div {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 0.38rem;
+}
+
+.event-sheet__task-row input {
+  min-width: 0;
+  min-height: 2.65rem;
+  padding: 0.52rem 0.68rem;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 0.72rem;
+  color: rgba(255, 255, 255, 0.92);
+  background: rgba(255, 255, 255, 0.055);
+  font: 0.72rem/1.3 var(--font-accent);
+  outline: none;
+}
+
+.event-sheet__task-row button {
+  width: 2.65rem;
+  height: 2.65rem;
+  padding: 0;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 50%;
+  color: rgba(255, 255, 255, 0.6);
+  background: rgba(255, 255, 255, 0.05);
+  font: 1rem/1 var(--font-ui);
+}
+
+.event-sheet__tasks button:focus-visible,
+.event-sheet__task-row input:focus-visible {
+  outline: 2px solid rgba(240, 194, 127, 0.95);
+  outline-offset: 0.12rem;
+}
+
 .event-sheet__hint {
   margin: -0.15rem 0 0;
   color: rgba(255, 255, 255, 0.42);
@@ -426,8 +1338,157 @@
 }
 
 @media (max-width: 28rem) {
+  .journal-events .event-plan-card {
+    grid-template-columns: 3.2rem minmax(0, 1fr);
+    padding: 0.92rem 0.82rem 0.88rem;
+    gap: 0.52rem 0.72rem;
+  }
+
+  .event-plan-card__artwork {
+    width: 3.05rem;
+  }
+
+  .event-plan-card__sketch {
+    width: 2.85rem;
+    height: 2.85rem;
+  }
+
   .event-sheet__row {
     grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+@media (max-width: 26rem) {
+  .journal-events {
+    gap: 0.5rem;
+  }
+
+  .journal-events__week {
+    margin-top: -0.38rem;
+    padding: 0.08rem 0.1rem 0.5rem;
+    gap: 0.05rem;
+  }
+
+  .journal-events__week-days button {
+    min-height: 3.15rem;
+    padding-top: 0.1rem;
+  }
+
+  .journal-events__week-days button > strong {
+    width: 1.8rem;
+    height: 1.8rem;
+  }
+
+  .journal-events__week-navigation > p {
+    margin-top: 0;
+    font-size: 0.62rem;
+  }
+
+  .journal-events__upcoming-list {
+    gap: 0.5rem;
+  }
+
+  .journal-events .event-plan-card {
+    grid-template-columns: 2.85rem minmax(0, 1fr);
+    padding: 0.58rem 0.68rem 0.42rem;
+    gap: 0.26rem 0.58rem;
+  }
+
+  .event-plan-card__artwork {
+    width: 2.7rem;
+    min-height: 3.45rem;
+  }
+
+  .event-plan-card__sketch {
+    width: 2.45rem;
+    height: 2.45rem;
+  }
+
+  .event-plan-card__content {
+    padding-top: 0.05rem;
+  }
+
+  .event-plan-card__title-row {
+    grid-template-columns: minmax(0, 1fr) 2rem;
+  }
+
+  .journal-events .event-plan-card h4 {
+    font-size: 0.86rem;
+  }
+
+  .event-plan-card__doodle.event-reminder-button {
+    width: 1.95rem;
+    height: 1.95rem;
+    min-height: 1.95rem;
+  }
+
+  .event-plan-card__doodle.event-reminder-button svg {
+    width: 1.75rem;
+    height: 1.75rem;
+  }
+
+  .journal-events .event-plan-card .event-plan-card__when {
+    margin-top: 0.2rem;
+    font-size: 0.66rem;
+  }
+
+  .event-plan-card__attendees {
+    min-height: 1.45rem;
+    margin-top: 0.28rem;
+  }
+
+  .event-plan-card__attendees > span {
+    width: 1.45rem;
+    height: 1.45rem;
+    margin-left: -0.18rem;
+    font-size: 0.4rem;
+    box-shadow: 0 0 0 1px var(--plan-paper);
+  }
+
+  .event-plan-card__checklist {
+    margin-top: 0;
+    padding-top: 0.12rem;
+  }
+
+  .event-plan-card__checklist label {
+    min-height: 1.16rem;
+    padding: 0.12rem 0.28rem;
+    grid-template-columns: 0.92rem minmax(0, 1fr);
+    gap: 0.42rem;
+    font-size: 0.59rem;
+  }
+
+  .event-plan-card__checkbox {
+    width: 0.9rem;
+    height: 0.9rem;
+  }
+
+  .event-plan-card__checkbox svg {
+    width: 0.76rem;
+    height: 0.76rem;
+  }
+
+  .event-plan-card__add-task,
+  .event-plan-card__complete {
+    min-height: 2.35rem;
+    padding: 0.32rem 0.52rem;
+    font-size: 0.58rem;
+  }
+
+  .journal-events__notification-note {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+  }
+
+  .events-header-action--footer {
+    margin-top: -0.5rem;
+    min-height: 2.25rem;
+    padding-block: 0.34rem;
   }
 }
 
@@ -459,20 +1520,63 @@
     white-space: nowrap;
   }
 
-  .journal-events .event-list-item {
-    grid-template-columns: 2.25rem minmax(0, 1fr);
-    padding-inline: 0.35rem;
-    gap: 0.5rem;
+  .journal-events .event-plan-card {
+    grid-template-columns: 2.85rem minmax(0, 1fr);
+    padding: 0.82rem 0.68rem 0.8rem;
+    gap: 0.46rem 0.58rem;
   }
 
-  .journal-events .event-list-item__actions {
-    grid-column: 2;
-    justify-items: start;
+  .event-plan-card__artwork {
+    width: 2.7rem;
   }
 
-  .event-reminder-button {
-    padding-inline: 0.52rem;
-    font-size: 0.57rem;
+  .event-plan-card__sketch {
+    width: 2.45rem;
+    height: 2.45rem;
+  }
+
+  .event-plan-card__title-row {
+    grid-template-columns: minmax(0, 1fr) 2.1rem;
+  }
+
+  .event-plan-card__doodle.event-reminder-button {
+    width: 2.05rem;
+    height: 2.05rem;
+    min-height: 2.05rem;
+  }
+
+  .event-plan-card__doodle.event-reminder-button svg {
+    width: 1.82rem;
+    height: 1.82rem;
+  }
+
+  .journal-events .event-plan-card h4 {
+    font-size: 0.9rem;
+  }
+
+  .event-plan-card__attendees > span {
+    width: 1.58rem;
+    height: 1.58rem;
+    font-size: 0.42rem;
+  }
+
+  .event-plan-card__checklist label {
+    font-size: 0.66rem;
+  }
+
+  .events-header-action--footer {
+    width: auto;
+    max-width: 8.5rem;
+    padding: 0.45rem 0.82rem;
+  }
+
+  .events-header-action--footer > span:last-child {
+    position: static;
+    width: auto;
+    height: auto;
+    overflow: visible;
+    clip: auto;
+    white-space: nowrap;
   }
 }
 

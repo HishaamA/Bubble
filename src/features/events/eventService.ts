@@ -142,6 +142,39 @@ export async function createFamilyEvent(
   return { id: data, synced: true }
 }
 
+/** Removes a server-backed event from its family circle. */
+export async function deleteFamilyEvent(eventId: string) {
+  if (!isUuid(eventId)) return false
+  const client = getSupabaseClient()
+  if (!client || !getClerkSupabaseIdentity()) return false
+  const { data, error } = await client.rpc('complete_family_event', {
+    p_event_id: eventId,
+  })
+  if (error) throw error
+  return data === true
+}
+
+/** Updates only the collaborative details attached to a server-backed event. */
+export async function updateFamilyEventDetails(
+  eventId: string,
+  details: string,
+) {
+  if (!isUuid(eventId)) return false
+  const normalizedDetails = details.trim()
+  if (normalizedDetails.length > 2000) {
+    throw new Error('Keep the event details to 2,000 characters or fewer.')
+  }
+
+  const client = getSupabaseClient()
+  if (!client || !getClerkSupabaseIdentity()) return false
+  const { data, error } = await client.rpc('update_family_event_details', {
+    p_event_id: eventId,
+    p_details: normalizedDetails || null,
+  })
+  if (error) throw error
+  return data === true
+}
+
 export async function fetchFamilyEvents(): Promise<FamilyEventRecord[]> {
   const client = getSupabaseClient()
   if (!client) return []

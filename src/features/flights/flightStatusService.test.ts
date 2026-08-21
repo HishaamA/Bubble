@@ -90,13 +90,13 @@ describe('trusted flight status requests', () => {
     ))
     vi.stubGlobal('fetch', fetchMock)
 
-    await createTrackedFamilyFlight({
+    await expect(createTrackedFamilyFlight({
       id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
       travelerName: 'Sara',
       flightNumber: 'ek 202',
       travelDate: '2026-09-10',
       clientCalendarDate: '2026-08-29',
-    })
+    })).resolves.toEqual({ kind: 'created', snapshot })
 
     const request = JSON.parse(fetchMock.mock.calls[0][1].body)
     expect(request).toEqual({
@@ -113,6 +113,139 @@ describe('trusted flight status requests', () => {
       Authorization: 'Bearer clerk-token',
     })
     expect(fetchMock.mock.calls[0][1].headers).not.toHaveProperty('apikey')
+  })
+
+  it('returns sanitized choices and sends only the selected provider identity on confirmation', async () => {
+    const providerFlightId = 'EK202:2026-09-10T10:00:00.000Z'
+    const choiceResponse = {
+      kind: 'choices',
+      choices: [
+        {
+          providerFlightId,
+          flightNumber: 'EK202',
+          operatingFlightNumber: null,
+          origin: {
+            code: 'JFK',
+            name: 'John F. Kennedy International',
+            city: 'New York',
+            timeZone: 'America/New_York',
+          },
+          destination: {
+            code: 'DXB',
+            name: 'Dubai International',
+            city: 'Dubai',
+            timeZone: 'Asia/Dubai',
+          },
+          scheduledDeparture: '2026-09-10T10:00:00.000Z',
+          scheduledArrival: '2026-09-10T20:00:00.000Z',
+        },
+        {
+          providerFlightId: 'EK202:2026-09-10T18:00:00.000Z',
+          flightNumber: 'EK202',
+          operatingFlightNumber: null,
+          origin: {
+            code: 'JFK',
+            name: 'John F. Kennedy International',
+            city: 'New York',
+            timeZone: 'America/New_York',
+          },
+          destination: {
+            code: 'DXB',
+            name: 'Dubai International',
+            city: 'Dubai',
+            timeZone: 'Asia/Dubai',
+          },
+          scheduledDeparture: '2026-09-10T18:00:00.000Z',
+          scheduledArrival: '2026-09-11T04:00:00.000Z',
+        },
+      ],
+    }
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify(choiceResponse), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        kind: 'created',
+        snapshot,
+      }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }))
+    vi.stubGlobal('fetch', fetchMock)
+    const identity = {
+      id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+      travelerName: 'Sara',
+      flightNumber: 'EK202',
+      travelDate: '2026-09-10',
+      clientCalendarDate: '2026-08-29',
+    }
+
+    await expect(createTrackedFamilyFlight(identity)).resolves.toEqual(choiceResponse)
+    await expect(createTrackedFamilyFlight({
+      ...identity,
+      providerFlightId,
+    })).resolves.toEqual({ kind: 'created', snapshot })
+
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body)).not.toHaveProperty(
+      'providerFlightId',
+    )
+    expect(JSON.parse(fetchMock.mock.calls[1][1].body)).toEqual({
+      operation: 'create',
+      flightId: identity.id,
+      travelerName: 'Sara',
+      flightNumber: 'EK202',
+      travelDate: '2026-09-10',
+      clientCalendarDate: '2026-08-29',
+      providerFlightId,
+    })
+    expect(JSON.parse(fetchMock.mock.calls[1][1].body)).not.toHaveProperty(
+      'snapshot',
+    )
+  })
+
+  it('rejects malformed or cross-flight choice responses', async () => {
+    const baseChoice = {
+      providerFlightId: 'EK202:2026-09-10T10:00:00.000Z',
+      flightNumber: 'EK203',
+      operatingFlightNumber: null,
+      origin: {
+        code: 'JFK',
+        name: null,
+        city: 'New York',
+        timeZone: 'America/New_York',
+      },
+      destination: {
+        code: 'DXB',
+        name: null,
+        city: 'Dubai',
+        timeZone: 'Asia/Dubai',
+      },
+      scheduledDeparture: '2026-09-10T10:00:00.000Z',
+      scheduledArrival: '2026-09-10T20:00:00.000Z',
+    }
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      kind: 'choices',
+      choices: [
+        baseChoice,
+        {
+          ...baseChoice,
+          providerFlightId: 'EK203:2026-09-10T18:00:00.000Z',
+          scheduledDeparture: '2026-09-10T18:00:00.000Z',
+        },
+      ],
+    }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    })))
+
+    await expect(createTrackedFamilyFlight({
+      id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+      travelerName: 'Sara',
+      flightNumber: 'EK202',
+      travelDate: '2026-09-10',
+      clientCalendarDate: '2026-08-29',
+    })).rejects.toThrow(/different flight identity/i)
   })
 
   it('derives the Supabase function endpoint and separates API and user credentials', async () => {
