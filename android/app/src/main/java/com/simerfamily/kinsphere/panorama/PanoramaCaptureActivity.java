@@ -416,7 +416,7 @@ public final class PanoramaCaptureActivity extends AppCompatActivity implements 
         } catch (UnavailableApkTooOldException error) {
             failCapture("NOT_SUPPORTED", "Update Google Play Services for AR, then try again.");
         } catch (UnavailableSdkTooOldException error) {
-            failCapture("NOT_SUPPORTED", "This KinSphere build must be updated before AR capture can start.");
+            failCapture("NOT_SUPPORTED", "This Bubble build must be updated before AR capture can start.");
         } catch (UnavailableDeviceNotCompatibleException error) {
             failCapture("NOT_SUPPORTED", "Guided panorama capture requires an ARCore-capable Android phone.");
         } catch (Exception error) {

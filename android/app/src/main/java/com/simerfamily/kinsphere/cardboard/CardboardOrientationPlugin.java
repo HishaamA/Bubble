@@ -20,7 +20,7 @@ public final class CardboardOrientationPlugin extends Plugin {
         AppCompatActivity activity = getActivity();
         if (!isActivityAvailable(activity)) {
             call.reject(
-                "The KinSphere app view is not available.",
+                "The Bubble app view is not available.",
                 "ORIENTATION_CONTROLLER_UNAVAILABLE"
             );
             return;
@@ -29,7 +29,7 @@ public final class CardboardOrientationPlugin extends Plugin {
         activity.runOnUiThread(() -> {
             if (!isActivityAvailable(activity)) {
                 call.reject(
-                    "The KinSphere app view is not available.",
+                    "The Bubble app view is not available.",
                     "ORIENTATION_CONTROLLER_UNAVAILABLE"
                 );
                 return;
@@ -57,7 +57,7 @@ public final class CardboardOrientationPlugin extends Plugin {
         AppCompatActivity activity = getActivity();
         if (!isActivityAvailable(activity)) {
             call.reject(
-                "The KinSphere app view is not available.",
+                "The Bubble app view is not available.",
                 "ORIENTATION_CONTROLLER_UNAVAILABLE"
             );
             return;
@@ -66,7 +66,7 @@ public final class CardboardOrientationPlugin extends Plugin {
         activity.runOnUiThread(() -> {
             if (!isActivityAvailable(activity)) {
                 call.reject(
-                    "The KinSphere app view is not available.",
+                    "The Bubble app view is not available.",
                     "ORIENTATION_CONTROLLER_UNAVAILABLE"
                 );
                 return;

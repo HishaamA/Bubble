@@ -190,7 +190,7 @@ public final class CapsuleRecapPlugin extends Plugin {
                 send.putExtra(Intent.EXTRA_STREAM, contentUri);
                 send.setClipData(ClipData.newUri(
                     context.getContentResolver(),
-                    "KinSphere Capsule recap",
+                    "Bubble Capsule recap",
                     contentUri
                 ));
                 send.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);

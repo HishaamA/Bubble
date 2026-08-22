@@ -22,7 +22,7 @@ final class ArCameraRenderer implements GLSurfaceView.Renderer {
         void onFailure(Exception error);
     }
 
-    private static final String TAG = "KinSphereArPreview";
+    private static final String TAG = "BubbleArPreview";
     private static final float[] QUAD = {
         -1.0f, -1.0f,
         1.0f, -1.0f,

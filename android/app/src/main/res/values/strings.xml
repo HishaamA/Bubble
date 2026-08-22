@@ -1,7 +1,7 @@
 <?xml version='1.0' encoding='utf-8'?>
 <resources>
-    <string name="app_name">KinSphere</string>
-    <string name="title_activity_main">KinSphere</string>
+    <string name="app_name">Bubble</string>
+    <string name="title_activity_main">Bubble</string>
     <string name="package_name">com.simerfamily.kinsphere</string>
     <string name="custom_url_scheme">com.simerfamily.kinsphere</string>
 </resources>
