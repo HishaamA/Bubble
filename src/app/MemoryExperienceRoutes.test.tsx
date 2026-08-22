@@ -6,9 +6,15 @@ import type { JournalPhoto } from '../features/journal/journalPhotoTypes'
 import type { PanoramaMoment } from '../features/memories/shared'
 import { SharedMomentsContext } from '../features/memories/shared/context'
 import { FamilyMomentSyncContext } from '../features/memories/shared/useFamilyMomentSync'
-import { JournalRoute, MemoriesRoute } from './MemoryExperienceRoutes'
+import {
+  CapsulePhotoRoute,
+  JournalRoute,
+  MemoriesRoute,
+} from './MemoryExperienceRoutes'
 
 const routeMocks = vi.hoisted(() => ({
+  capsulePhotoViewer: vi.fn(),
+  developmentPreview: false,
   journalPage: vi.fn(),
   memoryConstellation: vi.fn(),
 }))
@@ -20,6 +26,13 @@ vi.mock('../features/journal', () => ({
   },
 }))
 
+vi.mock('../features/journal/CapsulePhotoViewer', () => ({
+  CapsulePhotoViewer: (props: unknown) => {
+    routeMocks.capsulePhotoViewer(props)
+    return <div data-testid="capsule-photo-viewer">Photo viewer</div>
+  },
+}))
+
 vi.mock('../features/memories/MemoryConstellation', () => ({
   MemoryConstellation: (props: unknown) => {
     routeMocks.memoryConstellation(props)
@@ -28,7 +41,10 @@ vi.mock('../features/memories/MemoryConstellation', () => ({
 }))
 
 vi.mock('../features/auth', () => ({
-  useAuth: () => ({ user: { id: 'journal-route-test-user' } }),
+  useAuth: () => ({
+    isDevelopmentPreview: routeMocks.developmentPreview,
+    user: { id: 'journal-route-test-user' },
+  }),
 }))
 
 const uploadedMoment: PanoramaMoment = {
@@ -73,6 +89,8 @@ const directPhoto: JournalPhoto = {
 
 describe('JournalRoute', () => {
   beforeEach(() => {
+    routeMocks.capsulePhotoViewer.mockClear()
+    routeMocks.developmentPreview = false
     routeMocks.journalPage.mockClear()
     routeMocks.memoryConstellation.mockClear()
   })
@@ -108,6 +126,49 @@ describe('JournalRoute', () => {
     expect(journalProps.journalPhotos).toEqual([directPhoto])
     expect(journalProps.onUploadJournalPhotos).toEqual(expect.any(Function))
     expect(journalProps.capsuleCacheNamespace).toBe('family:ahmed')
+  })
+
+  it('adds local preview photos in demo mode without replacing supplied photos', () => {
+    routeMocks.developmentPreview = true
+
+    render(
+      <MemoryRouter>
+        <JournalRoute journalPhotos={[directPhoto]} />
+      </MemoryRouter>,
+    )
+
+    const journalProps = routeMocks.journalPage.mock.lastCall?.[0] as {
+      journalPhotos: JournalPhoto[]
+      openAllPhotosByDefault: boolean
+    }
+    expect(journalProps.openAllPhotosByDefault).toBe(true)
+    expect(journalProps.journalPhotos).toHaveLength(10)
+    expect(journalProps.journalPhotos).toContain(directPhoto)
+    expect(journalProps.journalPhotos).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        id: 'demo-journal-park-picnic',
+        image: '/assets/journal/demo/demo-park-picnic.jpg',
+      }),
+    ]))
+  })
+
+  it('uses the same demo-only collection when a preview photo is opened', () => {
+    routeMocks.developmentPreview = true
+
+    render(
+      <MemoryRouter>
+        <CapsulePhotoRoute journalPhotos={[]} />
+      </MemoryRouter>,
+    )
+
+    expect(screen.getByTestId('capsule-photo-viewer')).toBeInTheDocument()
+    const viewerProps = routeMocks.capsulePhotoViewer.mock.lastCall?.[0] as {
+      journalPhotos: JournalPhoto[]
+    }
+    expect(viewerProps.journalPhotos).toHaveLength(9)
+    expect(viewerProps.journalPhotos.every(({ image }) =>
+      typeof image === 'string' && image.startsWith('/assets/journal/demo/'),
+    )).toBe(true)
   })
 
   it('keeps shared 360 moments connected to Memories', () => {

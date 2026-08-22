@@ -95,18 +95,16 @@ describe('JournalPage', () => {
     sectionMocks.flights.mockClear()
   })
 
-  it('shows a crisp three-section Journal with People selected by default', () => {
+  it('shows the reference three-section Journal with Photos selected by default', () => {
     const { container } = renderJournal()
 
-    expect(screen.getByRole('heading', { name: 'Journal' })).toBeInTheDocument()
-    expect(
-      screen.getByText('Your family, through time and across every journey.'),
-    ).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'Photo Journal' })).toBeInTheDocument()
+    expect(screen.getByText('Our family')).toBeInTheDocument()
 
     const tablist = screen.getByRole('tablist', { name: 'Journal sections' })
     expect(tablist).toBeInTheDocument()
     expect(screen.getAllByRole('tab')).toHaveLength(3)
-    expect(screen.getByRole('tab', { name: 'People' })).toHaveAttribute(
+    expect(screen.getByRole('tab', { name: 'Photos' })).toHaveAttribute(
       'aria-selected',
       'true',
     )
@@ -135,6 +133,7 @@ describe('JournalPage', () => {
       'aria-selected',
       'true',
     )
+    expect(screen.getByRole('heading', { name: 'Family Plans' })).toBeInTheDocument()
 
     await user.click(screen.getByRole('tab', { name: 'Flights' }))
 
@@ -151,7 +150,7 @@ describe('JournalPage', () => {
     const user = userEvent.setup()
     renderJournal()
 
-    const peopleTab = screen.getByRole('tab', { name: 'People' })
+    const peopleTab = screen.getByRole('tab', { name: 'Photos' })
     peopleTab.focus()
     await user.keyboard('{ArrowRight}')
 
@@ -218,6 +217,16 @@ describe('JournalPage', () => {
     expect(peopleProps.cacheNamespace).toBe('family:ahmed')
   })
 
+  it('keeps the original People default when preview content is enabled', () => {
+    renderJournal({ openAllPhotosByDefault: true })
+
+    expect(sectionMocks.people).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        initialPersonId: undefined,
+      }),
+    )
+  })
+
   it('returns directly to the section recorded in journalContext', () => {
     renderJournal(
       {},
@@ -243,7 +252,7 @@ describe('JournalPage', () => {
 
   it('restores the selected person and focused memory after opening a photo', () => {
     renderJournal(
-      {},
+      { openAllPhotosByDefault: true },
       {
         pathname: '/journal',
         state: {

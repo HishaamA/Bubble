@@ -18,9 +18,9 @@ import { PeopleTimeline } from './people'
 import './JournalPage.css'
 
 const journalSections = [
-  { id: 'people', label: 'People' },
-  { id: 'plans', label: 'Plans' },
-  { id: 'flights', label: 'Flights' },
+  { id: 'people', label: 'Photos', title: 'Photo Journal' },
+  { id: 'plans', label: 'Plans', title: 'Family Plans' },
+  { id: 'flights', label: 'Flights', title: 'Flights' },
 ] as const
 
 type JournalSection = (typeof journalSections)[number]['id']
@@ -43,6 +43,7 @@ type JournalPageProps = {
     files: readonly File[],
   ) => Promise<JournalPhotoImportResult>
   journalPhotoImportProgress?: JournalPhotoImportProgress
+  openAllPhotosByDefault?: boolean
 }
 
 function readJournalSection(value: unknown): JournalSection | null {
@@ -78,6 +79,9 @@ export function JournalPage({
   const [activeSection, setActiveSection] = useState<JournalSection>(
     () => returnedSection ?? 'people',
   )
+  const activeSectionDetails = journalSections.find(
+    ({ id }) => id === activeSection,
+  ) ?? journalSections[0]
   const tabRefs = useRef<Array<HTMLButtonElement | null>>([])
   const photos = useMemo(
     () => unlockedCapsulePhotos(capsules, effectiveCapsuleNow),
@@ -114,37 +118,39 @@ export function JournalPage({
 
   return (
     <section className="journal-page" aria-labelledby="journal-title">
-      <header className="journal-page__header">
-        <h1 id="journal-title">Journal</h1>
-        <p>Your family, through time and across every journey.</p>
-      </header>
+      <div className="journal-page__chrome">
+        <header className="journal-page__header app-page-header">
+          <p className="journal-page__eyebrow app-page-header__eyebrow">Our family</p>
+          <h1 id="journal-title">{activeSectionDetails.title}</h1>
+        </header>
 
-      <div
-        className="journal-page__tabs"
-        role="tablist"
-        aria-label="Journal sections"
-      >
-        {journalSections.map((section, index) => {
-          const selected = activeSection === section.id
-          return (
-            <button
-              key={section.id}
-              ref={(node) => {
-                tabRefs.current[index] = node
-              }}
-              id={`journal-tab-${section.id}`}
-              type="button"
-              role="tab"
-              aria-selected={selected}
-              aria-controls={`journal-panel-${section.id}`}
-              tabIndex={selected ? 0 : -1}
-              onClick={() => chooseSection(section.id)}
-              onKeyDown={(event) => handleTabKeyDown(event, index)}
-            >
-              {section.label}
-            </button>
-          )
-        })}
+        <div
+          className="journal-page__tabs"
+          role="tablist"
+          aria-label="Journal sections"
+        >
+          {journalSections.map((section, index) => {
+            const selected = activeSection === section.id
+            return (
+              <button
+                key={section.id}
+                ref={(node) => {
+                  tabRefs.current[index] = node
+                }}
+                id={`journal-tab-${section.id}`}
+                type="button"
+                role="tab"
+                aria-selected={selected}
+                aria-controls={`journal-panel-${section.id}`}
+                tabIndex={selected ? 0 : -1}
+                onClick={() => chooseSection(section.id)}
+                onKeyDown={(event) => handleTabKeyDown(event, index)}
+              >
+                {section.label}
+              </button>
+            )
+          })}
+        </div>
       </div>
 
       <div

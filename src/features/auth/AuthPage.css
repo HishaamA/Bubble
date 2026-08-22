@@ -2,8 +2,11 @@
   position: relative;
   display: grid;
   min-height: 100%;
-  padding: max(1.25rem, env(safe-area-inset-top)) 1.1rem
-    max(1.25rem, env(safe-area-inset-bottom));
+  padding:
+    var(--app-page-top)
+    var(--app-page-gutter-right)
+    max(1.25rem, env(safe-area-inset-bottom))
+    var(--app-page-gutter-left);
   align-content: start;
   color: #fff;
   background: #000;
@@ -67,9 +70,9 @@
   max-width: 19rem;
   color: #fff;
   font-size: var(--app-page-title-size);
-  font-weight: 640;
-  letter-spacing: -0.06em;
-  line-height: 0.98;
+  font-weight: var(--app-page-title-weight);
+  letter-spacing: var(--app-page-title-tracking);
+  line-height: var(--app-page-title-leading);
 }
 
 .auth-card__intro > p:last-child {
@@ -83,9 +86,9 @@
 .auth-card__eyebrow {
   margin-bottom: 0.45rem !important;
   color: var(--app-eyebrow-color);
-  font-size: 0.62rem;
-  font-weight: 720;
-  letter-spacing: 0.09em;
+  font-size: var(--app-eyebrow-size);
+  font-weight: var(--app-eyebrow-weight);
+  letter-spacing: var(--app-eyebrow-tracking);
   text-transform: uppercase;
 }
 
@@ -192,7 +195,7 @@
 
 .auth-card__setup code {
   color: rgb(255 255 255 / 76%);
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-family: var(--font-mono);
   font-size: 0.63rem;
 }
 

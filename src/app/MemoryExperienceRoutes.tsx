@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import {
   Capture360Page,
@@ -7,6 +7,7 @@ import {
 } from '../features/capture'
 import { CapsulePhotoViewer } from '../features/journal/CapsulePhotoViewer'
 import { useJournalCapsuleArchive } from '../features/journal/capsuleJournalArchive'
+import { withDemoJournalPhotos } from '../features/journal/demoJournalPhotos'
 import { useJournalPhotoLibrary } from '../features/journal/journalPhotoLibrary'
 import type {
   JournalPhoto,
@@ -63,7 +64,7 @@ export function JournalRoute({
   journalPhotos: suppliedJournalPhotos,
   journalPhotoStore,
 }: JournalArchiveRouteProps = {}) {
-  const { user } = useAuth()
+  const { isDevelopmentPreview, user } = useAuth()
   const archive = useJournalCapsuleArchive({
     cacheNamespace: capsuleCacheNamespace,
     enabled: suppliedCapsules === undefined,
@@ -75,6 +76,13 @@ export function JournalRoute({
     enabled: suppliedJournalPhotos === undefined,
     store: journalPhotoStore,
   })
+  const journalPhotos = useMemo(
+    () => withDemoJournalPhotos(
+      suppliedJournalPhotos ?? photoLibrary.photos,
+      isDevelopmentPreview === true,
+    ),
+    [isDevelopmentPreview, photoLibrary.photos, suppliedJournalPhotos],
+  )
 
   return (
     <JournalPage
@@ -82,9 +90,10 @@ export function JournalRoute({
       capsules={suppliedCapsules ?? archive.capsules}
       capsuleNow={now ?? archive.clock}
       capsuleCacheNamespace={capsuleCacheNamespace}
-      journalPhotos={suppliedJournalPhotos ?? photoLibrary.photos}
+      journalPhotos={journalPhotos}
       onUploadJournalPhotos={photoLibrary.importPhotos}
       journalPhotoImportProgress={photoLibrary.importProgress}
+      openAllPhotosByDefault={isDevelopmentPreview === true}
     />
   )
 }
@@ -97,7 +106,7 @@ export function CapsulePhotoRoute({
   journalPhotos: suppliedJournalPhotos,
   journalPhotoStore,
 }: JournalArchiveRouteProps = {}) {
-  const { user } = useAuth()
+  const { isDevelopmentPreview, user } = useAuth()
   const archive = useJournalCapsuleArchive({
     cacheNamespace: capsuleCacheNamespace,
     enabled: suppliedCapsules === undefined,
@@ -109,6 +118,13 @@ export function CapsulePhotoRoute({
     enabled: suppliedJournalPhotos === undefined,
     store: journalPhotoStore,
   })
+  const journalPhotos = useMemo(
+    () => withDemoJournalPhotos(
+      suppliedJournalPhotos ?? photoLibrary.photos,
+      isDevelopmentPreview === true,
+    ),
+    [isDevelopmentPreview, photoLibrary.photos, suppliedJournalPhotos],
+  )
 
   return (
     <CapsulePhotoViewer
@@ -118,7 +134,7 @@ export function CapsulePhotoRoute({
         (suppliedJournalPhotos === undefined && photoLibrary.loading)
       }
       now={now ?? archive.clock}
-      journalPhotos={suppliedJournalPhotos ?? photoLibrary.photos}
+      journalPhotos={journalPhotos}
     />
   )
 }

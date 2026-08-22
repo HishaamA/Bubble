@@ -36,8 +36,9 @@ export function RelayPage() {
 
   return (
     <section className="ks-feature relay-page" aria-labelledby="relay-title">
-      <header className="ks-feature__header">
+      <header className="ks-feature__header app-page-header">
         <div className="ks-feature__header-copy">
+          <p className="eyebrow app-page-header__eyebrow">Our family</p>
           <h1 id="relay-title">Family Relay</h1>
         </div>
       </header>

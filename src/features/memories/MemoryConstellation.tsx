@@ -782,11 +782,11 @@ export function MemoryConstellation({
 
   return (
     <section className="memories-screen" aria-labelledby="moments-title">
-      <header className="top-bar">
+      <header className="top-bar app-page-header">
         <div>
-          <p className="eyebrow">Our family</p>
+          <p className="eyebrow app-page-header__eyebrow">Our family</p>
           <h1 id="moments-title">Moments</h1>
-          <time className="moments-date" dateTime={toLocalIsoDate(now)}>
+          <time className="moments-date app-page-header__subtitle" dateTime={toLocalIsoDate(now)}>
             {formatLocalDay(now)}
           </time>
         </div>

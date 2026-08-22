@@ -317,6 +317,10 @@ function formatWeekRange(capsule: FamilyCapsule) {
   return `${startLabel}–${endLabel}`
 }
 
+function capsuleDisplayTitle(capsule: FamilyCapsule) {
+  return capsule.kind === 'weekly' ? formatWeekRange(capsule) : capsule.title
+}
+
 function formatOpenDate(capsule: FamilyCapsule) {
   return new Intl.DateTimeFormat('en', {
     weekday: 'short',
@@ -338,6 +342,10 @@ function formatExactOpenDate(opensAt: string) {
 
 function photoCountLabel(count: number) {
   return `${count} ${count === 1 ? 'photo' : 'photos'}`
+}
+
+function capsuleHasPhotos(capsule: FamilyCapsule) {
+  return Math.max(capsule.totalPhotoCount ?? 0, capsule.photos.length) > 0
 }
 
 function capsuleRecapPhotos(photos: CapsulePhoto[]) {
@@ -536,6 +544,7 @@ function CapsuleCard({
   const totalPhotoCount = capsule.totalPhotoCount ?? capsule.photos.length
   const pendingPhotoCount = capsule.photos.filter(({ syncStatus }) => syncStatus === 'pending').length
   const recapPhotoCount = capsuleRecapPhotos(capsule.photos).length
+  const displayTitle = capsuleDisplayTitle(capsule)
 
   return (
     <article
@@ -545,8 +554,8 @@ function CapsuleCard({
     >
       <header className="capsule-collection__header">
         <div>
-          <p>{capsule.kind === 'weekly' ? formatWeekRange(capsule) : 'Special Capsule'}</p>
-          <h2>{capsule.title}</h2>
+          {capsule.kind === 'special' ? <p>Special Capsule</p> : null}
+          <h2>{displayTitle}</h2>
         </div>
         <span className="capsule-collection__state" data-unlocked={unlocked ? 'true' : 'false'}>
           {unlocked ? 'Open' : formatCapsuleCountdown(capsule.opensAt, now)}
@@ -599,7 +608,7 @@ function CapsuleCard({
         <button
           className="capsule-demo-unlock"
           type="button"
-          aria-label={`Demo only: Preview ${capsule.title} recap`}
+          aria-label={`Demo only: Preview ${displayTitle} recap`}
           onClick={() => onDemoUnlock(capsule)}
         >
           <span>Demo only</span>
@@ -626,6 +635,7 @@ function RecapSheet({
       .sort((left, right) => left.capturedAt.localeCompare(right.capturedAt)),
     [capsule.photos],
   )
+  const displayTitle = capsuleDisplayTitle(capsule)
   const [index, setIndex] = useState(0)
   const [saving, setSaving] = useState(false)
   const [status, setStatus] = useState('')
@@ -700,7 +710,7 @@ function RecapSheet({
       const objectUrl = URL.createObjectURL(video)
       const link = document.createElement('a')
       link.href = objectUrl
-      link.download = `${capsule.title.replace(/[^a-z0-9]+/gi, '-').replace(/^-|-$/g, '').toLowerCase() || 'family-capsule'}.${capsuleRecapFileExtension(video)}`
+      link.download = `${displayTitle.replace(/[^a-z0-9]+/gi, '-').replace(/^-|-$/g, '').toLowerCase() || 'family-capsule'}.${capsuleRecapFileExtension(video)}`
       link.click()
       window.setTimeout(() => URL.revokeObjectURL(objectUrl), 1_000)
       setStatus('Your recap is ready in Downloads.')
@@ -719,7 +729,7 @@ function RecapSheet({
         <header>
           <div>
             <p>{demoMode ? 'Demo preview' : 'Family recap'}</p>
-            <h2 id="capsule-recap-title">{capsule.title}</h2>
+            <h2 id="capsule-recap-title">{displayTitle}</h2>
           </div>
           <button type="button" aria-label="Close recap" onClick={onClose}>×</button>
         </header>
@@ -933,7 +943,7 @@ export function CapsulesPage({
       ))
       setAnnouncement(
         synced
-          ? `${file.name} was shared with your family in ${capsule.title}.`
+          ? `${file.name} was shared with your family in ${capsuleDisplayTitle(capsule)}.`
           : `${file.name} is saved on this device and waiting to share with your family.`,
       )
     } catch (reason) {
@@ -1005,18 +1015,22 @@ export function CapsulesPage({
   const activeRecap = capsules.find(({ id }) => id === activeRecapId) ?? null
   const currentWeekly = capsules.find(({ id }) => id === authoritativeWeeklyId) ??
     capsules.find((capsule) => capsule.kind === 'weekly' && capsule.weekStart === weekKey)
-  const previousWeekly = capsules.filter(
-    (capsule) => capsule.kind === 'weekly' && capsule.id !== currentWeekly?.id,
-  )
+  const completedWeeklyWithPhotos = capsules.filter((capsule) => (
+    capsule.kind === 'weekly'
+    && capsule.id !== currentWeekly?.id
+    && isCapsuleUnlocked(capsule.opensAt, clock)
+    && capsuleHasPhotos(capsule)
+  ))
+  const pastWeeklyRecaps = completedWeeklyWithPhotos
   const specialCapsules = capsules.filter((capsule) => capsule.kind === 'special')
 
   return (
     <section className="ks-feature capsules-page" aria-labelledby="capsules-title">
-      <header className="ks-feature__header capsule-page-header">
+      <header className="ks-feature__header capsule-page-header app-page-header">
         <div className="ks-feature__header-copy">
-          <p className="capsule-page-header__eyebrow">Our family</p>
+          <p className="capsule-page-header__eyebrow app-page-header__eyebrow">Our family</p>
           <h1 id="capsules-title">Capsule</h1>
-          <p>Small pieces of the week, opened together.</p>
+          <p className="app-page-header__subtitle">Small pieces of the week, opened together.</p>
         </div>
         <button
           className="ks-feature__header-action"
@@ -1073,6 +1087,38 @@ export function CapsulesPage({
         </section>
       ) : null}
 
+      {pastWeeklyRecaps.length > 0 ? (
+        <section className="capsule-page__section" aria-labelledby="past-weekly-capsules-title">
+          <div className="capsule-section-heading">
+            <div>
+              <p>Opened together</p>
+              <h2 id="past-weekly-capsules-title">Past weeks</h2>
+            </div>
+            <span>Swipe · play · download</span>
+          </div>
+          <ul
+            className="capsule-weekly-carousel"
+            data-single={pastWeeklyRecaps.length === 1 ? 'true' : 'false'}
+            aria-label="Past weekly recaps"
+            tabIndex={0}
+          >
+            {pastWeeklyRecaps.map((capsule) => (
+              <li key={capsule.id}>
+                <CapsuleCard
+                  capsule={capsule}
+                  now={clock}
+                  uploading={false}
+                  demoUnlocked={demoRecapId === capsule.id}
+                  onChoosePhoto={addPhoto}
+                  onOpenRecap={openRecap}
+                  onDemoUnlock={openDemoRecap}
+                />
+              </li>
+            ))}
+          </ul>
+        </section>
+      ) : null}
+
       <section className="capsule-page__section" aria-labelledby="special-capsules-title">
         <div className="capsule-section-heading">
           <div>
@@ -1100,29 +1146,6 @@ export function CapsulesPage({
           </button>
         )}
       </section>
-
-      {previousWeekly.length > 0 ? (
-        <section className="capsule-page__section" aria-labelledby="past-capsules-title">
-          <div className="capsule-section-heading">
-            <div>
-              <p>Opened together</p>
-              <h2 id="past-capsules-title">Past weeks</h2>
-            </div>
-          </div>
-          {previousWeekly.map((capsule) => (
-            <CapsuleCard
-              key={capsule.id}
-              capsule={capsule}
-              now={clock}
-              uploading={false}
-              demoUnlocked={demoRecapId === capsule.id}
-              onChoosePhoto={addPhoto}
-              onOpenRecap={openRecap}
-              onDemoUnlock={openDemoRecap}
-            />
-          ))}
-        </section>
-      ) : null}
 
       {activeRecap ? (
         <RecapSheet

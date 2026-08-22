@@ -38,6 +38,8 @@ vi.mock('../auth', () => ({
 import { CapsulesPage } from './CapsulesPage'
 
 const testNow = new Date(2026, 7, 29, 12)
+const currentWeekRange = 'Aug 24–Aug 30'
+const previousWeekRange = 'Aug 17–Aug 23'
 
 function unlockedCapsule(): FamilyCapsule {
   return {
@@ -49,6 +51,8 @@ function unlockedCapsule(): FamilyCapsule {
     closesAt: '2026-08-24T00:00:00.000Z',
     opensAt: '2026-08-24T00:00:00.000Z',
     createdByName: 'Simreen',
+    totalPhotoCount: 1,
+    familySynced: true,
     photos: [
       {
         id: 'photo-one',
@@ -140,7 +144,7 @@ describe('CapsulesPage', () => {
     const store = createMemoryCapsuleStore()
     const { container } = render(<CapsulesPage now={testNow} store={store} />)
 
-    expect(await screen.findByRole('heading', { name: 'This week' })).toBeInTheDocument()
+    expect(await screen.findByRole('heading', { name: currentWeekRange })).toBeInTheDocument()
     expect(screen.getByText('Photos only · not 360°')).toBeInTheDocument()
 
     const input = container.querySelector<HTMLInputElement>('input[type="file"]')
@@ -154,7 +158,7 @@ describe('CapsulesPage', () => {
     const user = userEvent.setup()
     const store = createMemoryCapsuleStore()
     const { container } = render(<CapsulesPage now={testNow} store={store} />)
-    await screen.findByRole('heading', { name: 'This week' })
+    await screen.findByRole('heading', { name: currentWeekRange })
 
     const input = container.querySelector<HTMLInputElement>('input[type="file"]')
     expect(input).not.toBeNull()
@@ -211,7 +215,7 @@ describe('CapsulesPage', () => {
     const { container } = render(
       <CapsulesPage now={testNow} store={createMemoryCapsuleStore()} />,
     )
-    await screen.findByRole('heading', { name: 'This week' })
+    await screen.findByRole('heading', { name: currentWeekRange })
     const input = container.querySelector<HTMLInputElement>('input[type="file"]')
     const portrait = new File(['portrait'], 'Family portrait.jpg', {
       type: 'image/jpeg',
@@ -233,7 +237,7 @@ describe('CapsulesPage', () => {
     const user = userEvent.setup()
     const store = createMemoryCapsuleStore()
     render(<CapsulesPage now={testNow} store={store} />)
-    await screen.findByRole('heading', { name: 'This week' })
+    await screen.findByRole('heading', { name: currentWeekRange })
 
     await user.click(screen.getByRole('button', { name: 'Create a special Capsule' }))
     await user.type(screen.getByRole('textbox', { name: 'Name' }), 'Grandpa’s 60th')
@@ -260,19 +264,79 @@ describe('CapsulesPage', () => {
     const store = createMemoryCapsuleStore([unlockedCapsule()])
     render(<CapsulesPage now={testNow} store={store} />)
 
-    const pastHeading = await screen.findByRole('heading', { name: 'Last week' })
+    const pastHeading = await screen.findByRole('heading', { name: previousWeekRange })
     const pastCard = pastHeading.closest('article')
+    expect(screen.getByRole('heading', { name: 'Past weeks' })).toBeInTheDocument()
+    expect(screen.getByRole('list', { name: 'Past weekly recaps' })).toContainElement(pastCard)
+    expect(screen.getByText('Swipe · play · download')).toBeInTheDocument()
+    expect(screen.queryByText('Last week')).not.toBeInTheDocument()
     expect(pastCard).toHaveTextContent('Open')
     expect(pastCard).not.toHaveTextContent('Add photo')
 
     await user.click(screen.getByRole('button', { name: 'Play recap' }))
-    expect(screen.getByRole('dialog', { name: 'Last week' })).toBeInTheDocument()
+    expect(screen.getByRole('dialog', { name: previousWeekRange })).toBeInTheDocument()
     expect(screen.getByText('Family recap')).toBeInTheDocument()
     expect(screen.queryByText(/0\.2 seconds each/i)).not.toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Save video' })).toBeInTheDocument()
 
     await user.click(screen.getByRole('button', { name: 'Close recap' }))
     await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+  })
+
+  it('does not show Past weeks before the family has an uploaded weekly photo', async () => {
+    const emptyPastWeek: FamilyCapsule = {
+      ...unlockedCapsule(),
+      photos: [],
+      totalPhotoCount: 0,
+    }
+    const store = createMemoryCapsuleStore([emptyPastWeek])
+    render(<CapsulesPage now={testNow} store={store} />)
+
+    await screen.findByRole('heading', { name: currentWeekRange })
+    expect(screen.queryByRole('heading', { name: 'Past weeks' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('list', { name: 'Past weekly recaps' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: previousWeekRange })).not.toBeInTheDocument()
+  })
+
+  it('keeps a locally saved family photo in Past weeks while it waits to sync', async () => {
+    const pendingPastWeek = unlockedCapsule()
+    pendingPastWeek.photos = pendingPastWeek.photos.map((photo) => ({
+      ...photo,
+      syncStatus: 'pending' as const,
+    }))
+    pendingPastWeek.totalPhotoCount = 1
+    pendingPastWeek.familySynced = false
+    const store = createMemoryCapsuleStore([pendingPastWeek])
+    render(<CapsulesPage now={testNow} store={store} />)
+
+    expect(await screen.findByRole('heading', { name: 'Past weeks' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: previousWeekRange })).toBeInTheDocument()
+  })
+
+  it('places every completed photo week in the horizontal recap slider', async () => {
+    const latest = unlockedCapsule()
+    const older: FamilyCapsule = {
+      ...unlockedCapsule(),
+      id: 'weekly-2026-08-10',
+      weekStart: '2026-08-10',
+      createdAt: '2026-08-10T00:00:00.000Z',
+      closesAt: '2026-08-17T00:00:00.000Z',
+      opensAt: '2026-08-17T00:00:00.000Z',
+      photos: unlockedCapsule().photos.map((photo) => ({
+        ...photo,
+        id: 'photo-older',
+        capsuleId: 'weekly-2026-08-10',
+      })),
+    }
+    const store = createMemoryCapsuleStore([older, latest])
+    render(<CapsulesPage now={testNow} store={store} />)
+
+    const slider = await screen.findByRole('list', { name: 'Past weekly recaps' })
+    expect(slider).toHaveAttribute('data-single', 'false')
+    expect(slider.children).toHaveLength(2)
+    const cards = Array.from(slider.children) as HTMLElement[]
+    expect(within(cards[0]).getByRole('heading', { name: previousWeekRange })).toBeInTheDocument()
+    expect(within(cards[1]).getByRole('heading', { name: 'Aug 10–Aug 16' })).toBeInTheDocument()
   })
 
   it('opens and saves every on-device pending photo after its Capsule unlocks', async () => {
@@ -301,14 +365,14 @@ describe('CapsulesPage', () => {
     render(<CapsulesPage now={testNow} store={store} />)
 
     const card = (await screen.findByRole('heading', {
-      name: capsule.title,
+      name: previousWeekRange,
     })).closest('article')!
     const playButton = within(card).getByRole('button', { name: 'Play recap' })
     expect(playButton).toBeEnabled()
     expect(card).toHaveTextContent('5 photos saved on this phone')
 
     await user.click(playButton)
-    const dialog = screen.getByRole('dialog', { name: capsule.title })
+    const dialog = screen.getByRole('dialog', { name: previousWeekRange })
     await user.click(within(dialog).getByRole('button', { name: 'Save video' }))
 
     await waitFor(() => {
@@ -340,7 +404,7 @@ describe('CapsulesPage', () => {
     render(<CapsulesPage now={testNow} store={store} />)
 
     const card = (await screen.findByRole('heading', {
-      name: capsule.title,
+      name: previousWeekRange,
     })).closest('article')!
     expect(within(card).getByRole('button', {
       name: 'Photos unavailable on this phone',
@@ -424,7 +488,7 @@ describe('CapsulesPage', () => {
     render(<CapsulesPage now={testNow} store={store} />)
 
     const card = (await screen.findByRole('heading', {
-      name: staleCapsule.title,
+      name: previousWeekRange,
     })).closest('article')!
     expect(within(card).getByRole('img', {
       name: /Preview unavailable until KinSphere reconnects/i,
@@ -437,7 +501,7 @@ describe('CapsulesPage', () => {
     render(<CapsulesPage now={testNow} store={store} />)
 
     const card = (await screen.findByRole('heading', {
-      name: 'Last week',
+      name: previousWeekRange,
     })).closest('article')!
     const image = card.querySelector('img')
     expect(image).not.toBeNull()

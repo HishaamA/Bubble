@@ -20,19 +20,19 @@ const tabs: Tab[] = [
       pathname.startsWith('/relay'),
   },
   {
+    label: 'Capsule',
+    path: '/capsule',
+    icon: 'capsules',
+    isActive: (pathname) =>
+      pathname === '/capsule' || pathname.startsWith('/capsule/'),
+  },
+  {
     label: 'Journal',
     path: '/journal',
     icon: 'journal',
     isActive: (pathname, returnTo) =>
       pathname.startsWith('/journal') ||
       (pathname.startsWith('/memory/') && returnTo === '/journal'),
-  },
-  {
-    label: 'Capsule',
-    path: '/capsule',
-    icon: 'capsules',
-    isActive: (pathname) =>
-      pathname === '/capsule' || pathname.startsWith('/capsule/'),
   },
   {
     label: 'Profile',

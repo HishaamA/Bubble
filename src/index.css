@@ -1,7 +1,21 @@
 :root {
-  font-family:
-    -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'SF Pro Text', Inter,
+  /*
+   * KinSphere uses three type families, each with one clear job. Keeping the
+   * stacks here prevents feature CSS from inventing a new visual voice.
+   */
+  --font-ui: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Helvetica Neue',
     system-ui, sans-serif;
+  --font-accent: ui-serif, 'Iowan Old Style', Baskerville, Georgia, serif;
+  --font-mono: ui-monospace, 'SF Mono', SFMono-Regular, Menlo, monospace;
+  --weight-regular: 400;
+  --weight-medium: 500;
+  --weight-semibold: 600;
+  --weight-bold: 700;
+  --tracking-display: -0.045em;
+  --tracking-heading: -0.02em;
+  --tracking-eyebrow: 0.1em;
+
+  font-family: var(--font-ui);
   color: #f5f5f7;
   background: #000;
   font-synthesis: none;
@@ -18,8 +32,7 @@
 h1,
 h2,
 h3 {
-  font-family: ui-rounded, -apple-system, BlinkMacSystemFont, 'SF Pro Rounded',
-    system-ui, sans-serif;
+  font-family: var(--font-ui);
 }
 
 html,
@@ -37,9 +50,18 @@ body {
 }
 
 button,
-a {
+a,
+input,
+textarea,
+select {
   font: inherit;
   -webkit-tap-highlight-color: transparent;
+}
+
+code,
+kbd,
+samp {
+  font-family: var(--font-mono);
 }
 
 button {

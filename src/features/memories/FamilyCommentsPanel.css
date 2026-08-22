@@ -85,7 +85,7 @@
   height: 2.75rem;
   padding: 0;
   color: rgb(255 255 255 / 72%);
-  font: 300 1.5rem/1 system-ui, sans-serif;
+  font: 300 1.5rem/1 var(--font-ui);
   background: rgb(255 255 255 / 7%);
   border: 0;
   border-radius: 50%;
@@ -108,7 +108,7 @@
   padding: 0.5rem 0.72rem;
   flex: 0 0 auto;
   color: rgb(255 255 255 / 58%);
-  font: 550 0.68rem/1.2 system-ui, sans-serif;
+  font: 550 0.68rem/1.2 var(--font-ui);
   background: rgb(255 255 255 / 5%);
   border: 1px solid rgb(255 255 255 / 9%);
   border-radius: 999px;
@@ -230,7 +230,7 @@
   padding: 0.7rem 0.78rem;
   resize: none;
   color: #fff;
-  font: 400 1rem/1.35 system-ui, sans-serif;
+  font: 400 1rem/1.35 var(--font-ui);
   background: rgb(255 255 255 / 7%);
   border: 1px solid rgb(255 255 255 / 11%);
   border-radius: 1rem;
@@ -246,7 +246,7 @@
   min-height: 3rem;
   padding: 0.65rem;
   color: #17120b;
-  font: 650 0.68rem/1 system-ui, sans-serif;
+  font: 650 0.68rem/1 var(--font-ui);
   background: #e8c690;
   border: 0;
   border-radius: 1rem;

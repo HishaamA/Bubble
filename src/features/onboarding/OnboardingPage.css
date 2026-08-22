@@ -3,8 +3,11 @@
   display: grid;
   height: 100%;
   min-height: inherit;
-  padding: max(1.1rem, env(safe-area-inset-top)) 1.2rem
-    max(1.1rem, env(safe-area-inset-bottom));
+  padding:
+    var(--app-page-top)
+    var(--app-page-gutter-right)
+    max(1.1rem, env(safe-area-inset-bottom))
+    var(--app-page-gutter-left);
   grid-template-rows: auto auto minmax(0, 1fr) auto;
   color: #fff;
   background: #000;
@@ -59,7 +62,7 @@
   border-radius: 50%;
   color: #20150a;
   background: #e6b476;
-  font-family: ui-serif, Georgia, serif;
+  font-family: var(--font-accent);
   font-size: 0.75rem;
 }
 
@@ -129,7 +132,7 @@
 
 .onboarding-story__mark span {
   color: #e6b476;
-  font-family: ui-serif, Georgia, serif;
+  font-family: var(--font-accent);
   font-size: clamp(3.4rem, 17vw, 5.2rem);
   font-weight: 200;
 }
@@ -138,9 +141,9 @@
 .onboarding-family__intro > p {
   margin: 0 0 0.5rem;
   color: var(--app-eyebrow-color);
-  font-size: 0.61rem;
-  font-weight: 600;
-  letter-spacing: 0.08em;
+  font-size: var(--app-eyebrow-size);
+  font-weight: var(--app-eyebrow-weight);
+  letter-spacing: var(--app-eyebrow-tracking);
   text-transform: uppercase;
 }
 
@@ -149,11 +152,11 @@
   max-width: 20rem;
   margin: 0;
   color: #fff;
-  font-family: ui-serif, "Iowan Old Style", Baskerville, Georgia, serif;
+  font-family: var(--font-ui);
   font-size: var(--app-page-title-size);
-  font-weight: 400;
-  letter-spacing: -0.045em;
-  line-height: 0.99;
+  font-weight: var(--app-page-title-weight);
+  letter-spacing: var(--app-page-title-tracking);
+  line-height: var(--app-page-title-leading);
 }
 
 .onboarding-story__description,
@@ -205,7 +208,7 @@
 
 .onboarding-family__choices button > span {
   color: #e6b476;
-  font-family: ui-serif, Georgia, serif;
+  font-family: var(--font-accent);
   font-size: 1.25rem;
   font-weight: 300;
 }
@@ -257,7 +260,7 @@
 }
 
 .onboarding-family__code {
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace !important;
+  font-family: var(--font-mono) !important;
   letter-spacing: 0.045em;
 }
 

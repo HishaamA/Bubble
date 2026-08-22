@@ -3,6 +3,36 @@
   --text-secondary: rgba(235, 235, 245, 0.6);
   --app-eyebrow-color: rgba(226, 179, 111, 0.9);
   --app-page-title-size: clamp(2rem, 9vw, 2.65rem);
+  --app-page-title-weight: var(--weight-semibold);
+  --app-page-title-tracking: var(--tracking-display);
+  --app-page-title-leading: 0.98;
+  --app-eyebrow-size: 0.66rem;
+  --app-eyebrow-weight: var(--weight-bold);
+  --app-eyebrow-tracking: var(--tracking-eyebrow);
+  --app-header-subtitle-size: 0.76rem;
+  --app-header-subtitle-leading: 1.45;
+  --app-header-action-size: 2.8rem;
+  --app-header-min-height: 4.5rem;
+  --app-page-top: max(
+    1.75rem,
+    calc(env(safe-area-inset-top) + 0.55rem)
+  );
+  --app-page-gutter-left: max(
+    1rem,
+    calc(env(safe-area-inset-left) + 0.35rem)
+  );
+  --app-page-gutter-right: max(
+    1rem,
+    calc(env(safe-area-inset-right) + 0.35rem)
+  );
+  --app-header-gutter-left: max(
+    1.5rem,
+    calc(env(safe-area-inset-left) + 0.75rem)
+  );
+  --app-header-gutter-right: max(
+    1.5rem,
+    calc(env(safe-area-inset-right) + 0.75rem)
+  );
   --surface: rgba(28, 28, 30, 0.74);
   --surface-solid: #1c1c1e;
   --separator: rgba(84, 84, 88, 0.62);
@@ -15,7 +45,7 @@
 
 .app-viewport {
   --app-page-top: max(
-    1.5rem,
+    1.75rem,
     calc(env(safe-area-inset-top) + 0.55rem),
     calc(var(--native-safe-area-top, 0px) + 0.55rem)
   );
@@ -23,6 +53,26 @@
     1rem,
     calc(env(safe-area-inset-bottom) + 0.45rem),
     calc(var(--native-safe-area-bottom, 0px) + 0.45rem)
+  );
+  --app-page-gutter-left: max(
+    1rem,
+    calc(env(safe-area-inset-left) + 0.35rem),
+    calc(var(--native-safe-area-left, 0px) + 0.35rem)
+  );
+  --app-page-gutter-right: max(
+    1rem,
+    calc(env(safe-area-inset-right) + 0.35rem),
+    calc(var(--native-safe-area-right, 0px) + 0.35rem)
+  );
+  --app-header-gutter-left: max(
+    1.5rem,
+    calc(env(safe-area-inset-left) + 0.75rem),
+    calc(var(--native-safe-area-left, 0px) + 0.75rem)
+  );
+  --app-header-gutter-right: max(
+    1.5rem,
+    calc(env(safe-area-inset-right) + 0.75rem),
+    calc(var(--native-safe-area-right, 0px) + 0.75rem)
   );
   position: relative;
   top: var(--app-visual-viewport-offset-top, 0px);
@@ -38,7 +88,7 @@
 
 .app-viewport--native {
   --app-page-top: max(
-    3.75rem,
+    4rem,
     calc(env(safe-area-inset-top) + 0.55rem),
     calc(var(--native-safe-area-top, 0px) + 0.55rem)
   );
@@ -71,55 +121,85 @@
 }
 
 .eyebrow {
-  margin: 0 0 0.25rem;
+  margin: 0 0 0.4rem;
   color: var(--app-eyebrow-color);
-  font-size: 0.72rem;
-  font-weight: 650;
-  letter-spacing: 0.11em;
+  font-size: var(--app-eyebrow-size);
+  font-weight: var(--app-eyebrow-weight);
+  letter-spacing: var(--app-eyebrow-tracking);
+  line-height: 1.2;
   text-transform: uppercase;
+}
+
+/* Shared contract for every full-page app header. Layout can be sticky,
+ * scrolling, or overlaid, but the type hierarchy is always the same. */
+.app-page-header {
+  min-height: var(--app-header-min-height);
+  font-family: var(--font-ui);
+}
+
+.app-page-header h1 {
+  margin: 0;
+  color: var(--text-primary);
+  font-size: var(--app-page-title-size);
+  font-weight: var(--app-page-title-weight);
+  letter-spacing: var(--app-page-title-tracking);
+  line-height: var(--app-page-title-leading);
+}
+
+.app-page-header .app-page-header__eyebrow {
+  margin: 0 0 0.4rem;
+  color: var(--app-eyebrow-color);
+  font-size: var(--app-eyebrow-size);
+  font-weight: var(--app-eyebrow-weight);
+  letter-spacing: var(--app-eyebrow-tracking);
+  line-height: 1.2;
+  text-transform: uppercase;
+}
+
+.app-page-header .app-page-header__subtitle {
+  margin: 0.32rem 0 0;
+  color: var(--text-secondary);
+  font-size: var(--app-header-subtitle-size);
+  font-weight: var(--weight-regular);
+  letter-spacing: 0;
+  line-height: var(--app-header-subtitle-leading);
 }
 
 .top-bar {
   position: absolute;
   z-index: 20;
   top: var(--app-page-top);
-  right: max(
-    1.5rem,
-    calc(env(safe-area-inset-right) + 0.75rem),
-    calc(var(--native-safe-area-right, 0px) + 0.75rem)
-  );
-  left: max(
-    1.5rem,
-    calc(env(safe-area-inset-left) + 0.75rem),
-    calc(var(--native-safe-area-left, 0px) + 0.75rem)
-  );
+  right: var(--app-header-gutter-right);
+  left: var(--app-header-gutter-left);
   display: flex;
   align-items: center;
   justify-content: space-between;
-  min-height: 4.5rem;
+  min-height: var(--app-header-min-height);
 }
 
 .top-bar h1 {
   margin: 0;
   color: var(--text-primary);
   font-size: var(--app-page-title-size);
-  font-weight: 650;
-  letter-spacing: -0.045em;
+  font-weight: var(--app-page-title-weight);
+  letter-spacing: var(--app-page-title-tracking);
+  line-height: var(--app-page-title-leading);
 }
 
 .moments-date {
   display: block;
   margin-top: 0.32rem;
   color: var(--text-secondary);
-  font-size: 0.73rem;
-  font-weight: 520;
-  letter-spacing: -0.01em;
+  font-size: var(--app-header-subtitle-size);
+  font-weight: var(--weight-regular);
+  letter-spacing: 0;
+  line-height: var(--app-header-subtitle-leading);
 }
 
 .round-control {
   display: grid;
-  width: 3.15rem;
-  height: 3.15rem;
+  width: var(--app-header-action-size);
+  height: var(--app-header-action-size);
   padding: 0;
   place-items: center;
   border: 1px solid rgba(255, 255, 255, 0.12);
@@ -550,26 +630,25 @@
 .memory-bubble__arc-text {
   fill: currentColor;
   stroke: none;
-  font-family: Baskerville, "Iowan Old Style", "Palatino Linotype", Georgia,
-    serif;
+  font-family: var(--font-accent);
   font-size: 4.8px;
   font-style: italic;
-  font-weight: 300;
-  letter-spacing: 0.012em;
+  font-weight: var(--weight-regular);
+  letter-spacing: 0.01em;
   text-transform: none;
 }
 
 .memory-bubble__arc-title {
   fill: rgba(255, 252, 245, 0.86);
   font-size: 5.8px;
-  letter-spacing: 0.008em;
+  letter-spacing: 0.01em;
 }
 
 .memory-bubble__arc-sender {
   fill: rgba(243, 193, 112, 0.82);
   font-size: 4.45px;
-  font-weight: 300;
-  letter-spacing: 0.018em;
+  font-weight: var(--weight-regular);
+  letter-spacing: 0.01em;
 }
 
 .memory-bubble[data-depth='far'] .memory-bubble__arc-labels {
@@ -635,7 +714,7 @@
   border-radius: 50%;
   color: #111;
   background: transparent;
-  font-family: -apple-system, BlinkMacSystemFont, sans-serif;
+  font-family: var(--font-ui);
   cursor: pointer;
   pointer-events: auto;
   touch-action: manipulation;
@@ -909,7 +988,7 @@
   color: #111;
   background: rgba(255, 255, 255, 0.94);
   box-shadow: 0 0.75rem 2rem rgba(0, 0, 0, 0.32);
-  font: 680 0.72rem/1 system-ui, sans-serif;
+  font: 680 0.72rem/1 var(--font-ui);
   cursor: pointer;
   backdrop-filter: blur(22px);
 }

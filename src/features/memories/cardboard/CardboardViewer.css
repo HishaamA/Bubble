@@ -151,13 +151,13 @@
 }
 
 .ks-cardboard__memory-label strong {
-  font: 590 0.65rem/1.15 system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+  font: 590 0.65rem/1.15 var(--font-ui);
   letter-spacing: -0.01em;
 }
 
 .ks-cardboard__memory-label span {
   color: var(--cardboard-accent);
-  font: 540 0.54rem/1.15 system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+  font: 540 0.54rem/1.15 var(--font-ui);
 }
 
 .ks-cardboard__exit {
@@ -177,7 +177,7 @@
   justify-content: center;
   color: #fff;
   border-radius: 50%;
-  font: 650 0.72rem/1 system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+  font: 650 0.72rem/1 var(--font-ui);
   transform: translateX(-50%);
   cursor: pointer;
 }
@@ -243,7 +243,7 @@
 .ks-cardboard__status-panel p {
   margin: 0;
   color: rgb(255 255 255 / 76%);
-  font: 540 0.68rem/1.35 system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+  font: 540 0.68rem/1.35 var(--font-ui);
 }
 
 .ks-cardboard__status-panel button {
@@ -254,7 +254,7 @@
   border: 0;
   border-radius: 999px;
   background: var(--cardboard-accent);
-  font: 700 0.65rem/1 system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+  font: 700 0.65rem/1 var(--font-ui);
   cursor: pointer;
 }
 
@@ -268,7 +268,7 @@
   color: rgb(255 255 255 / 68%);
   background: rgb(0 0 0 / 58%);
   border-radius: 999px;
-  font: 520 0.6rem/1.25 system-ui, sans-serif;
+  font: 520 0.6rem/1.25 var(--font-ui);
 }
 
 .ks-cardboard__rotate-hint {
@@ -288,13 +288,13 @@
 
 .ks-cardboard__rotate-hint strong {
   margin-block-start: 0.3rem;
-  font: 680 clamp(1.25rem, 5vw, 1.8rem)/1.1 system-ui, sans-serif;
+  font: 680 clamp(1.25rem, 5vw, 1.8rem)/1.1 var(--font-ui);
   letter-spacing: -0.035em;
 }
 
 .ks-cardboard__rotate-hint > span:not(.ks-cardboard__phone) {
   color: rgb(255 255 255 / 64%);
-  font: 520 0.8rem/1.4 system-ui, sans-serif;
+  font: 520 0.8rem/1.4 var(--font-ui);
 }
 
 .ks-cardboard__rotate-hint button {
@@ -305,7 +305,7 @@
   border: 1px solid var(--cardboard-accent);
   border-radius: 999px;
   background: var(--cardboard-accent);
-  font: 650 0.78rem/1 system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+  font: 650 0.78rem/1 var(--font-ui);
 }
 
 .ks-cardboard__phone {

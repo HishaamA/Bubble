@@ -3,8 +3,8 @@
   --feature-accent-rgb: 245, 245, 247;
   width: 100%;
   max-width: 100%;
-  padding-right: 1rem;
-  padding-left: 1rem;
+  padding-right: var(--app-page-gutter-right, 1rem);
+  padding-left: var(--app-page-gutter-left, 1rem);
   color-scheme: dark;
 }
 

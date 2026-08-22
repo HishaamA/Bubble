@@ -690,8 +690,9 @@ export function Capture360Page({
       className={`ks-feature capture-page${draft && !reviewingPanorama && !isSuccess ? ' capture-page--editor' : ''}`}
       aria-labelledby="capture-title"
     >
-      <header className="ks-feature__header capture-page__header">
+      <header className="ks-feature__header capture-page__header app-page-header">
         <div className="ks-feature__header-copy">
+          <p className="eyebrow app-page-header__eyebrow">Our family</p>
           <h1 id="capture-title">360 Moment</h1>
         </div>
         {onClose ? (

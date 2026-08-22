@@ -264,7 +264,7 @@
 
 .family-sync__code-input,
 .family-sync__invite output {
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-family: var(--font-mono);
 }
 
 .family-sync__primary,

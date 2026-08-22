@@ -18,7 +18,7 @@ describe('AppTabBar', () => {
       within(navigation)
         .getAllByRole('link')
         .map((link) => link.textContent),
-    ).toEqual(['Moments', 'Journal', 'Capsule', 'Profile'])
+    ).toEqual(['Moments', 'Capsule', 'Journal', 'Profile'])
 
     expect(screen.getByRole('link', { name: 'Moments' })).toHaveAttribute(
       'href',

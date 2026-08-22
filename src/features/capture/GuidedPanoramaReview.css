@@ -386,7 +386,7 @@
   border-radius: 0.95rem;
   color: #fff;
   background: rgb(0 0 0 / 28%);
-  font: 400 0.9rem/1.45 system-ui, sans-serif;
+  font: 400 0.9rem/1.45 var(--font-ui);
 }
 
 .guided-panorama-review__editor textarea::placeholder {
