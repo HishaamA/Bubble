@@ -1,7 +1,7 @@
 const DEMO_LOGIN_STORAGE_KEY = 'kinsphere.demo-login.active.v1'
 
 /**
- * Temporary product-level demo access requested for the KinSphere prototype.
+ * Temporary product-level demo access requested for the Bubble prototype.
  * Set VITE_DEMO_LOGIN_ENABLED=false for a production build that must require
  * Clerk authentication.
  */

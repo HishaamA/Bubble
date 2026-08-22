@@ -204,6 +204,20 @@ describe('FlightTrackerSection', () => {
     expect(screen.queryByText('EK202')).not.toBeInTheDocument()
   })
 
+  it('joins the header dotted route to the paper plane at one exact point', () => {
+    const { container } = render(
+      <FlightTrackerSection now={new Date('2026-08-29T12:00:00Z')} />,
+    )
+    const route = container.querySelector('.flight-doodle-header__route')
+    const join = container.querySelector('.flight-doodle-header__route-join')
+    const plane = container.querySelector('.flight-doodle-header__plane')
+
+    expect(route?.getAttribute('d')).toMatch(/160 38$/)
+    expect(join).toHaveAttribute('cx', '160')
+    expect(join).toHaveAttribute('cy', '38')
+    expect(plane?.getAttribute('d')).toMatch(/^M160 38\b/)
+  })
+
   it('shows local sample flights only in demo mode and completes one from its card', async () => {
     identityMocks.isDevelopmentPreview = true
     const { unmount } = render(
@@ -213,6 +227,8 @@ describe('FlightTrackerSection', () => {
 
     expect(screen.getByText('EK001')).toBeInTheDocument()
     expect(screen.getByText('SV301')).toBeInTheDocument()
+    expect(screen.queryByText('Boarding pass')).not.toBeInTheDocument()
+    expect(screen.queryByText('Passenger')).not.toBeInTheDocument()
     expect(screen.queryByRole('heading', { name: 'No flights tracked' })).not.toBeInTheDocument()
 
     await expandFlightInfo(user, 'EK001')
@@ -458,12 +474,18 @@ describe('FlightTrackerSection', () => {
   })
 
   it('unfolds an accessible route map in the card and refreshes from its icon', async () => {
-    render(<FlightTrackerSection now={new Date('2026-08-29T12:00:00Z')} />)
+    const { container } = render(
+      <FlightTrackerSection now={new Date('2026-08-29T12:00:00Z')} />,
+    )
     const user = await addFlight()
     await expandFlightInfo(user, 'EK202')
 
     expect(screen.getByRole('region', { name: 'EK202 full flight information' }))
       .toBeInTheDocument()
+    expect(container.querySelectorAll('.flight-card__route, .flight-detail__route'))
+      .toHaveLength(1)
+    expect(screen.queryByRole('group', { name: 'JFK to DXB' }))
+      .not.toBeInTheDocument()
     expect(screen.queryByRole('dialog', { name: 'EK202' })).not.toBeInTheDocument()
     expect(screen.getByRole('img', { name: /route from JFK to DXB/i })).toBeInTheDocument()
     expect(screen.getByText(/estimated timeline position, not live GPS/i)).toBeInTheDocument()

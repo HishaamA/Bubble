@@ -1,6 +1,6 @@
 # Supabase foundation
 
-This directory is the reproducible backend baseline for KinSphere. The first
+This directory is the reproducible backend baseline for Bubble. The first
 migration creates profiles, private profile preferences, Family Circles,
 approved/removed memberships, server-generated hashed expiring invites, join requests, atomic
 membership workflow functions, and the private `family-media` Storage bucket.
@@ -200,6 +200,12 @@ supabase secrets set APP_ALLOWED_ORIGINS=https://your-production-origin.example
 supabase functions deploy flight-status --no-verify-jwt
 ```
 
+Copy `supabase/.env.demo.example` to the gitignored `supabase/.env.demo`, then
+add a newly rotated AeroDataBox key. Run `pnpm supabase:functions:serve:demo`
+to use it with the local Edge Function. Only run `pnpm
+supabase:secrets:demo` when the local file contains the intended hosted secret
+and allowed origins.
+
 `AERODATABOX_RAPIDAPI_KEY` is a server-only secret. Never put it in a `VITE_`
 variable, the web bundle, or a native APK. The proxy calls only the fixed HTTPS
 `https://aerodatabox.p.rapidapi.com` host. Its normal lookup is the single-day
@@ -265,7 +271,7 @@ the user. Ambiguous create retries reuse the same server row ID.
 Each phone opts into its own departure and arrival alerts. The installed iPhone
 or Android app uses Capacitor Local Notifications. Browser alerts are explicitly
 best-effort and work only while the tab remains open. Local notifications are
-rescheduled from the latest saved ETA whenever KinSphere refreshes; they are not
+rescheduled from the latest saved ETA whenever Bubble refreshes; they are not
 airline push alerts and cannot learn about a new delay while the app is killed.
 
 ## Family Journal photo library

@@ -132,8 +132,9 @@ function FlightDoodleHeader() {
         <path d="M6 23c-4-1-4-8 1-10 2-1 4 0 5 1 1-6 6-9 11-7 2-6 10-8 14-3 3-2 8-1 10 3 6-1 11 3 11 8 8-1 11 9 4 12H6Z" />
       </svg>
       <svg className="flight-doodle-header__journey" viewBox="0 0 208 58" aria-hidden="true">
-        <path className="flight-doodle-header__route" d="M2 42c14-11 29-9 36 2 5 8-6 13-12 6-9-11 4-31 23-26 22 7 28 19 51 19 21 0 32-10 46-20" />
-        <path className="flight-doodle-header__plane" d="m145 21 55-17-30 49-8-22-17-10Zm17 10L200 4m-33 32 1 11 8-9" />
+        <path className="flight-doodle-header__route" d="M2 42c14-11 29-9 36 2 5 8-6 13-12 6-9-11 4-31 23-26 22 7 28 19 51 19C123 43 139 41 160 38" />
+        <circle className="flight-doodle-header__route-join" cx="160" cy="38" r="1.4" />
+        <path className="flight-doodle-header__plane" d="M160 38 154 23 202 5l-28 47-6-20-8 6Zm8-6 34-27m-28 47-6-20" />
       </svg>
       <svg className="flight-doodle-header__cloud flight-doodle-header__cloud--small" viewBox="0 0 72 30" aria-hidden="true">
         <path d="M6 23c-4-1-4-8 1-10 2-1 4 0 5 1 1-6 6-9 11-7 2-6 10-8 14-3 3-2 8-1 10 3 6-1 11 3 11 8 8-1 11 9 4 12H6Z" />
@@ -1026,21 +1027,6 @@ function FlightTrackerBody({
             <span>Operated as {flight.snapshot.operatingFlightNumber}</span>
           ) : null}
         </div>
-        <div
-          className="flight-detail__route"
-          role="group"
-          aria-label={`${flight.snapshot.origin.code} to ${flight.snapshot.destination.code}`}
-        >
-          <div>
-            <strong>{flight.snapshot.origin.code}</strong>
-            <span>{airportPlace(flight.snapshot, 'origin')}</span>
-          </div>
-          <FlightRouteMark />
-          <div>
-            <strong>{flight.snapshot.destination.code}</strong>
-            <span>{airportPlace(flight.snapshot, 'destination')}</span>
-          </div>
-        </div>
         <FlightRouteMap flight={flight} now={now} />
         <dl className="flight-detail__times">
           <div>
@@ -1170,7 +1156,7 @@ function FlightTrackerBody({
                       <span className="flight-card__duration">{duration} · Direct</span>
                       <div>
                         <span>{flight.snapshot.actualArrival ? 'Arrived' : 'Arrive'}</span>
-                        <strong>{cancelled ? '—' : formatTicketTime(arrival, flight.snapshot.destination.timeZone) ?? 'Not available'}</strong>
+                        <strong>{cancelled ? 'Not available' : formatTicketTime(arrival, flight.snapshot.destination.timeZone) ?? 'Not available'}</strong>
                         <small>{cancelled ? 'No estimate' : formatDayMonth(flight.travelDate)}</small>
                         {cancelled ? <span className="flight-tracker__sr-only">No ETA</span> : null}
                       </div>
@@ -1201,7 +1187,7 @@ function FlightTrackerBody({
                       </span>
                       <span className="flight-card__compact-date">
                         <small>{formatDayMonth(flight.travelDate)}</small>
-                        <strong>{formatTicketTime(departure, flight.snapshot.origin.timeZone) ?? '—'}</strong>
+                        <strong>{formatTicketTime(departure, flight.snapshot.origin.timeZone) ?? 'Not available'}</strong>
                       </span>
                       <span className="flight-card__compact-meta">
                         <span className="flight-quality" data-quality={cancelled ? 'cancelled' : quality}>

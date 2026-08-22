@@ -22,7 +22,7 @@ export const developmentPreviewAvailable = canUseDevelopmentPreview(
 
 export const developmentPreviewUser: AuthUser = {
   id: 'development-preview-user',
-  displayName: 'KinSphere Preview',
+  displayName: 'Bubble Preview',
   email: null,
   phone: null,
   imageUrl: null,

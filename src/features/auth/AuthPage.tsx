@@ -1,7 +1,8 @@
-import { SignInButton, SignUpButton } from '@clerk/react'
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { useAuth } from './authContext'
+import { AuthFamilyIllustration } from './AuthFamilyIllustration'
+import { EmailCodeAuthFlow } from './EmailCodeAuthFlow'
 import './AuthPage.css'
 
 const AUTH_RETURN_TO_STORAGE_KEY = 'kinsphere.auth.returnTo'
@@ -113,7 +114,7 @@ function ClerkConfigurationState({
       {onContinue ? (
         <div className="auth-card__preview">
           <button type="button" onClick={onContinue}>
-            {testingMode ? 'Continue without signing in' : 'Continue to demo'}
+            {testingMode ? 'Continue without signing in' : 'Explore the demo'}
           </button>
           <small>
             {testingMode
@@ -128,21 +129,17 @@ function ClerkConfigurationState({
 
 function DemoLoginAction({ onContinue }: { onContinue: () => void }) {
   return (
-    <div className="auth-card__demo">
-      <div className="auth-card__demo-divider" aria-hidden="true">
-        <span />
-        <small>or</small>
-        <span />
-      </div>
+    <div className="auth-demo-action">
       <button type="button" onClick={onContinue}>
-        Continue to demo
+        Explore the demo <span aria-hidden="true">→</span>
       </button>
-      <small>Explore the full app · cloud family sync stays offline</small>
+      <small>Cloud family sync stays off in demo mode.</small>
     </div>
   )
 }
 
 export function AuthPage() {
+  const [authOpen, setAuthOpen] = useState(false)
   const {
     isDevelopmentPreview,
     isTestAccess,
@@ -171,25 +168,24 @@ export function AuthPage() {
 
   return (
     <section className="auth-page" aria-labelledby="auth-title">
-      <div className="auth-page__halo" aria-hidden="true" />
       <header className="auth-page__brand">
-        <span aria-hidden="true">K</span>
-        <p>KinSphere</p>
+        <p>Bubble</p>
       </header>
+
+      <AuthFamilyIllustration />
 
       <div className="auth-card">
         <div className="auth-card__intro">
-          <p className="auth-card__eyebrow">A private place for your people</p>
-          <h1 id="auth-title">Come home to your family.</h1>
+          <h1 id="auth-title">Big days. Little moments. Never missed.</h1>
           <p>
-            Keep the small moments, make plans, and feel close—even when
-            everyone is somewhere else.
+            Keep every celebration, plan, and everyday memory close, wherever
+            your family is.
           </p>
         </div>
 
         {status === 'loading' ? (
           <div className="auth-card__loading" role="status">
-            <span aria-hidden="true" /> Preparing secure sign-in…
+            <span aria-hidden="true" /> Getting things ready…
           </div>
         ) : null}
 
@@ -202,25 +198,15 @@ export function AuthPage() {
 
         {status === 'signed-out' ? (
           <div className="auth-actions">
-            <SignInButton mode="modal">
-              <button
-                className="auth-actions__primary"
-                type="button"
-                onClick={() => rememberReturnTo(returnTo)}
-              >
-                Sign in
-              </button>
-            </SignInButton>
-            <SignUpButton mode="modal">
-              <button
-                className="auth-actions__secondary"
-                type="button"
-                onClick={() => rememberReturnTo(returnTo)}
-              >
-                Create an account
-              </button>
-            </SignUpButton>
-            <p>Continue securely with Google, Apple, or your phone.</p>
+            <button
+              className="auth-actions__primary"
+              type="button"
+              aria-haspopup="dialog"
+              aria-expanded={authOpen}
+              onClick={() => setAuthOpen(true)}
+            >
+              Get started
+            </button>
           </div>
         ) : null}
 
@@ -229,10 +215,12 @@ export function AuthPage() {
         ) : null}
       </div>
 
-      <p className="auth-page__privacy">
-        Your family space stays private. Invite codes are shared by you, never
-        listed publicly.
-      </p>
+      {status === 'signed-out' && authOpen ? (
+        <EmailCodeAuthFlow
+          onClose={() => setAuthOpen(false)}
+          onStart={() => rememberReturnTo(returnTo)}
+        />
+      ) : null}
     </section>
   )
 }

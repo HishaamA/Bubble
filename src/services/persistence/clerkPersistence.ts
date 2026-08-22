@@ -92,7 +92,7 @@ function requireAuthenticatedClient() {
 }
 
 /**
- * Idempotently maps the verified Clerk JWT subject to KinSphere's internal ID.
+ * Idempotently maps the verified Clerk JWT subject to Bubble's internal ID.
  * The subject is read by PostgreSQL from auth.jwt(); it is never accepted from
  * this client payload.
  */

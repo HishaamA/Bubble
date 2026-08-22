@@ -194,7 +194,7 @@ create table public.app_identities (
 );
 
 comment on table public.app_identities is
-  'Private mapping from a verified OIDC JWT subject to the stable internal UUID used by KinSphere rows. Never writable or directly readable by clients.';
+  'Private mapping from a verified OIDC JWT subject to the stable internal UUID used by Bubble rows. Never writable or directly readable by clients.';
 
 comment on column public.profile_private.email is
   'Display-only email metadata supplied by the signed-in client. It is not independently verified here and must never be used for authorization or contact until a trusted Clerk webhook or verified JWT claim supplies it.';
@@ -458,7 +458,7 @@ after delete on auth.users
 for each row execute function public.handle_deleted_auth_user();
 
 -- Upgrade every existing application function that used auth.uid(). This is
--- deliberately limited to the known KinSphere functions and preserves their
+-- deliberately limited to the known Bubble functions and preserves their
 -- signatures, validation, grants and fixed search paths.
 do $$
 declare

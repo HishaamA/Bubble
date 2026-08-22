@@ -66,7 +66,7 @@ function notificationTargets(
         id: departureId,
         at,
         kind: 'departure',
-        body: 'A tracked family flight departs in about three hours. Open KinSphere for details.',
+        body: 'A tracked family flight departs in about three hours. Open Bubble for details.',
       })
     }
   }
@@ -77,7 +77,7 @@ function notificationTargets(
         id: arrivalId,
         at,
         kind: 'arrival',
-        body: 'A tracked family flight is due to arrive in about 30 minutes. Open KinSphere for details.',
+        body: 'A tracked family flight is due to arrive in about 30 minutes. Open Bubble for details.',
       })
     }
   }

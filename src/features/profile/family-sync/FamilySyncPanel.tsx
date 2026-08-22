@@ -49,11 +49,11 @@ function LocalOnlyState() {
     <div className="family-sync__state family-sync__state--local">
       <div>
         <h3>Family groups need a connection</h3>
-        <p>Connect KinSphere to securely create a group and share invite codes.</p>
+        <p>Connect Bubble to securely create a group and share invite codes.</p>
         <Link
           className="family-sync__auth-link"
           to="/login"
-          state={{ returnTo: '/profile' }}
+          state={{ returnTo: '/settings' }}
         >
           Open secure sign-in
         </Link>
@@ -260,7 +260,7 @@ export function FamilySyncPanel({
           <Link
             className="family-sync__auth-link"
             to="/login"
-            state={{ returnTo: '/profile' }}
+            state={{ returnTo: '/settings' }}
           >
             Sign in or create an account
           </Link>

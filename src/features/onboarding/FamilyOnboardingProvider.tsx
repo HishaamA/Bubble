@@ -71,7 +71,7 @@ export function toFamilyOnboardingMessage(reason: unknown) {
     message.includes('network') ||
     message.includes('offline')
   ) {
-    return 'KinSphere could not reach your family space. Check your connection and try again.'
+    return 'Bubble could not reach your family space. Check your connection and try again.'
   }
   if (
     code === '42501' ||

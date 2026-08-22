@@ -18,7 +18,7 @@ export function getFamilyInviteMessage(
   invite: CreatedCircleInvite,
   circleName: string,
 ) {
-  return `Join ${circleName} on KinSphere with this private family code:\n${invite.code}`
+  return `Join ${circleName} on Bubble with this private family code:\n${invite.code}`
 }
 
 export async function shareFamilyInvite(

@@ -144,9 +144,9 @@ export function OnboardingPage() {
     <section className="onboarding-page" aria-labelledby="onboarding-title">
       <div className="onboarding-page__aura" aria-hidden="true" />
       <header className="onboarding-header">
-        <div className="onboarding-brand" aria-label="KinSphere">
+        <div className="onboarding-brand" aria-label="Bubble">
           <span aria-hidden="true">K</span>
-          KinSphere
+          Bubble
         </div>
         <button type="button" onClick={() => void handleSignOut()}>
           Sign out
@@ -274,7 +274,7 @@ export function OnboardingPage() {
           {status === 'unavailable' ? (
             <p className="onboarding-family__notice" role="status">
               Family setup is not connected in this build. Configure the
-              durable family membership adapter to continue—access remains
+              durable family membership adapter to continue. Access remains
               locked until then.
             </p>
           ) : null}

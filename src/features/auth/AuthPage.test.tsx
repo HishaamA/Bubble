@@ -1,4 +1,3 @@
-import type { ReactNode } from 'react'
 import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import {
@@ -7,21 +6,65 @@ import {
   Routes,
   useLocation,
 } from 'react-router-dom'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { AuthPage } from './AuthPage'
 import { AuthProvider, RequireAuthentication } from './AuthProvider'
 import type { AuthContextValue } from './authContext'
 import type { AuthUser } from './types'
 
+const clerkMocks = vi.hoisted(() => ({
+  signIn: {
+    status: 'needs_first_factor',
+    existingSession: undefined as { sessionId: string } | undefined,
+    supportedSecondFactors: [] as Array<{ strategy: string }>,
+    create: vi.fn(),
+    emailCode: {
+      sendCode: vi.fn(),
+      verifyCode: vi.fn(),
+    },
+    mfa: {
+      sendEmailCode: vi.fn(),
+      verifyEmailCode: vi.fn(),
+    },
+    finalize: vi.fn(),
+    reset: vi.fn(),
+  },
+  signUp: {
+    status: 'missing_requirements',
+    missingFields: [] as string[],
+    create: vi.fn(),
+    finalize: vi.fn(),
+    reset: vi.fn(),
+  },
+  client: {
+    sessions: [] as Array<{ id: string }>,
+    signedInSessions: [] as Array<{
+      id: string
+      user: null | {
+        emailAddresses: Array<{ emailAddress: string }>
+      }
+    }>,
+    reload: vi.fn(),
+  },
+  setActive: vi.fn(),
+}))
+
 vi.mock('@clerk/react', () => ({
-  SignInButton: ({ children, mode }: { children: ReactNode; mode: string }) => (
-    <div data-testid="clerk-sign-in" data-mode={mode}>{children}</div>
-  ),
-  SignUpButton: ({ children, mode }: { children: ReactNode; mode: string }) => (
-    <div data-testid="clerk-sign-up" data-mode={mode}>{children}</div>
-  ),
+  useSignIn: () => ({
+    signIn: clerkMocks.signIn,
+    errors: { fields: {} },
+    fetchStatus: 'idle',
+  }),
+  useSignUp: () => ({
+    signUp: clerkMocks.signUp,
+    errors: { fields: {} },
+    fetchStatus: 'idle',
+  }),
   useAuth: vi.fn(),
-  useClerk: vi.fn(),
+  useClerk: () => ({
+    client: clerkMocks.client,
+    setActive: clerkMocks.setActive,
+  }),
   useUser: vi.fn(),
 }))
 
@@ -51,6 +94,29 @@ function LoginDestination() {
   return <output aria-label="Requested return route">{returnTo}</output>
 }
 
+beforeEach(() => {
+  vi.clearAllMocks()
+  clerkMocks.signIn.status = 'needs_first_factor'
+  clerkMocks.signIn.existingSession = undefined
+  clerkMocks.signIn.supportedSecondFactors = []
+  clerkMocks.signUp.status = 'missing_requirements'
+  clerkMocks.signUp.missingFields = []
+  clerkMocks.client.sessions = []
+  clerkMocks.client.signedInSessions = []
+  clerkMocks.client.reload.mockResolvedValue(clerkMocks.client)
+  clerkMocks.signIn.create.mockResolvedValue({ error: null })
+  clerkMocks.signIn.emailCode.sendCode.mockResolvedValue({ error: null })
+  clerkMocks.signIn.emailCode.verifyCode.mockResolvedValue({ error: null })
+  clerkMocks.signIn.mfa.sendEmailCode.mockResolvedValue({ error: null })
+  clerkMocks.signIn.mfa.verifyEmailCode.mockResolvedValue({ error: null })
+  clerkMocks.signIn.finalize.mockResolvedValue({ error: null })
+  clerkMocks.signIn.reset.mockResolvedValue({ error: null })
+  clerkMocks.signUp.create.mockResolvedValue({ error: null })
+  clerkMocks.signUp.finalize.mockResolvedValue({ error: null })
+  clerkMocks.signUp.reset.mockResolvedValue({ error: null })
+  clerkMocks.setActive.mockResolvedValue(undefined)
+})
+
 afterEach(() => {
   window.sessionStorage.clear()
 })
@@ -71,7 +137,7 @@ describe('AuthPage', () => {
     expect(screen.queryByText(/local preview/i)).not.toBeInTheDocument()
   })
 
-  it('uses Clerk modal controls and preserves a safe return route', async () => {
+  it('opens one email-only flow inside the app', async () => {
     const user = userEvent.setup()
     render(
       <AuthProvider value={authValue('signed-out')}>
@@ -85,12 +151,243 @@ describe('AuthPage', () => {
       </AuthProvider>,
     )
 
-    expect(screen.getByTestId('clerk-sign-in')).toHaveAttribute('data-mode', 'modal')
-    expect(screen.getByTestId('clerk-sign-up')).toHaveAttribute('data-mode', 'modal')
-    await user.click(screen.getByRole('button', { name: 'Sign in' }))
+    await user.click(screen.getByRole('button', { name: 'Get started' }))
+
+    expect(screen.getByRole('dialog')).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'Continue with email' })).toBeInTheDocument()
+    expect(screen.getByLabelText('Email address')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /google/i })).not.toBeInTheDocument()
+    expect(screen.queryByLabelText(/phone/i)).not.toBeInTheDocument()
+    expect(screen.queryByLabelText(/password/i)).not.toBeInTheDocument()
+    expect(screen.queryByText(/development mode/i)).not.toBeInTheDocument()
+    expect(window.sessionStorage.getItem('kinsphere.auth.returnTo')).toBeNull()
+  })
+
+  it('sends an email code and preserves a safe return route', async () => {
+    const user = userEvent.setup()
+    render(
+      <AuthProvider value={authValue('signed-out')}>
+        <MemoryRouter
+          initialEntries={[
+            { pathname: '/login', state: { returnTo: '/journal?view=list' } },
+          ]}
+        >
+          <AuthPage />
+        </MemoryRouter>
+      </AuthProvider>,
+    )
+
+    await user.click(screen.getByRole('button', { name: 'Get started' }))
+    await user.type(screen.getByLabelText('Email address'), ' User@Example.com ')
+    await user.click(screen.getByRole('button', { name: 'Send me a code' }))
+
+    expect(clerkMocks.signIn.create).toHaveBeenCalledWith({
+      identifier: 'user@example.com',
+      signUpIfMissing: true,
+    })
+    expect(clerkMocks.signIn.emailCode.sendCode).toHaveBeenCalledOnce()
+    expect(screen.getByRole('heading', { name: 'Enter your code' })).toBeInTheDocument()
     expect(window.sessionStorage.getItem('kinsphere.auth.returnTo')).toBe(
       '/journal?view=list',
     )
+  })
+
+  it('verifies an existing user and activates the Clerk session', async () => {
+    const user = userEvent.setup()
+    clerkMocks.signIn.emailCode.verifyCode.mockImplementation(async () => {
+      clerkMocks.signIn.status = 'complete'
+      return { error: null }
+    })
+
+    render(
+      <AuthProvider value={authValue('signed-out')}>
+        <MemoryRouter initialEntries={['/login']}>
+          <AuthPage />
+        </MemoryRouter>
+      </AuthProvider>,
+    )
+
+    await user.click(screen.getByRole('button', { name: 'Get started' }))
+    await user.type(screen.getByLabelText('Email address'), 'family@example.com')
+    await user.click(screen.getByRole('button', { name: 'Send me a code' }))
+    await user.type(screen.getByLabelText('Verification code'), '123456')
+    await user.click(screen.getByRole('button', { name: 'Continue' }))
+
+    expect(clerkMocks.signIn.emailCode.verifyCode).toHaveBeenCalledWith({
+      code: '123456',
+    })
+    expect(clerkMocks.signIn.finalize).toHaveBeenCalledOnce()
+  })
+
+  it('reactivates only the exact existing Clerk session', async () => {
+    const user = userEvent.setup()
+    clerkMocks.signIn.existingSession = { sessionId: 'sess_family' }
+    clerkMocks.signIn.create.mockResolvedValue({
+      error: { errors: [{ code: 'session_exists' }] },
+    })
+
+    render(
+      <AuthProvider value={authValue('signed-out')}>
+        <MemoryRouter initialEntries={['/login']}>
+          <AuthPage />
+        </MemoryRouter>
+      </AuthProvider>,
+    )
+
+    await user.click(screen.getByRole('button', { name: 'Get started' }))
+    await user.type(screen.getByLabelText('Email address'), 'family@example.com')
+    await user.click(screen.getByRole('button', { name: 'Send me a code' }))
+
+    expect(clerkMocks.setActive).toHaveBeenCalledWith(
+      expect.objectContaining({ session: 'sess_family' }),
+    )
+    expect(clerkMocks.client.reload).not.toHaveBeenCalled()
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+  })
+
+  it('matches a refreshed session by email instead of activating the first session', async () => {
+    const user = userEvent.setup()
+    clerkMocks.signIn.create.mockResolvedValue({
+      error: { errors: [{ code: 'session_exists' }] },
+    })
+    clerkMocks.client.signedInSessions = [
+      {
+        id: 'sess_someone_else',
+        user: { emailAddresses: [{ emailAddress: 'other@example.com' }] },
+      },
+      {
+        id: 'sess_family',
+        user: { emailAddresses: [{ emailAddress: 'Family@Example.com' }] },
+      },
+    ]
+
+    render(
+      <AuthProvider value={authValue('signed-out')}>
+        <MemoryRouter initialEntries={['/login']}>
+          <AuthPage />
+        </MemoryRouter>
+      </AuthProvider>,
+    )
+
+    await user.click(screen.getByRole('button', { name: 'Get started' }))
+    await user.type(screen.getByLabelText('Email address'), 'family@example.com')
+    await user.click(screen.getByRole('button', { name: 'Send me a code' }))
+
+    expect(clerkMocks.client.reload).toHaveBeenCalledOnce()
+    expect(clerkMocks.setActive).toHaveBeenCalledWith(
+      expect.objectContaining({ session: 'sess_family' }),
+    )
+  })
+
+  it('does not activate another account when the existing session does not match', async () => {
+    const user = userEvent.setup()
+    clerkMocks.signIn.create.mockResolvedValue({
+      error: { errors: [{ code: 'session_exists' }] },
+    })
+    clerkMocks.client.signedInSessions = [
+      {
+        id: 'sess_someone_else',
+        user: { emailAddresses: [{ emailAddress: 'other@example.com' }] },
+      },
+    ]
+
+    render(
+      <AuthProvider value={authValue('signed-out')}>
+        <MemoryRouter initialEntries={['/login']}>
+          <AuthPage />
+        </MemoryRouter>
+      </AuthProvider>,
+    )
+
+    await user.click(screen.getByRole('button', { name: 'Get started' }))
+    await user.type(screen.getByLabelText('Email address'), 'family@example.com')
+    await user.click(screen.getByRole('button', { name: 'Send me a code' }))
+
+    expect(clerkMocks.setActive).not.toHaveBeenCalled()
+    expect(
+      screen.getByText(/another account is already open on this device/i),
+    ).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Send me a code' })).toBeEnabled()
+  })
+
+  it('releases the loading state when existing-session activation fails', async () => {
+    const user = userEvent.setup()
+    clerkMocks.signIn.existingSession = { sessionId: 'sess_family' }
+    clerkMocks.signIn.create.mockResolvedValue({
+      error: { errors: [{ code: 'session_exists' }] },
+    })
+    clerkMocks.setActive.mockRejectedValue(new Error('offline'))
+
+    render(
+      <AuthProvider value={authValue('signed-out')}>
+        <MemoryRouter initialEntries={['/login']}>
+          <AuthPage />
+        </MemoryRouter>
+      </AuthProvider>,
+    )
+
+    await user.click(screen.getByRole('button', { name: 'Get started' }))
+    await user.type(screen.getByLabelText('Email address'), 'family@example.com')
+    await user.click(screen.getByRole('button', { name: 'Send me a code' }))
+
+    expect(screen.getByText(/check your connection and try again/i)).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Send me a code' })).toBeEnabled()
+  })
+
+  it('releases the loading state when Clerk session finalization throws', async () => {
+    const user = userEvent.setup()
+    clerkMocks.signIn.emailCode.verifyCode.mockImplementation(async () => {
+      clerkMocks.signIn.status = 'complete'
+      return { error: null }
+    })
+    clerkMocks.signIn.finalize.mockRejectedValue(new Error('offline'))
+
+    render(
+      <AuthProvider value={authValue('signed-out')}>
+        <MemoryRouter initialEntries={['/login']}>
+          <AuthPage />
+        </MemoryRouter>
+      </AuthProvider>,
+    )
+
+    await user.click(screen.getByRole('button', { name: 'Get started' }))
+    await user.type(screen.getByLabelText('Email address'), 'family@example.com')
+    await user.click(screen.getByRole('button', { name: 'Send me a code' }))
+    await user.type(screen.getByLabelText('Verification code'), '123456')
+    await user.click(screen.getByRole('button', { name: 'Continue' }))
+
+    expect(screen.getByText(/check your connection and try again/i)).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Continue' })).toBeEnabled()
+  })
+
+  it('creates a new Clerk user only after the email code is verified', async () => {
+    const user = userEvent.setup()
+    clerkMocks.signIn.emailCode.verifyCode.mockResolvedValue({
+      error: {
+        errors: [{ code: 'sign_up_if_missing_transfer' }],
+      },
+    })
+    clerkMocks.signUp.create.mockImplementation(async () => {
+      clerkMocks.signUp.status = 'complete'
+      return { error: null }
+    })
+
+    render(
+      <AuthProvider value={authValue('signed-out')}>
+        <MemoryRouter initialEntries={['/login']}>
+          <AuthPage />
+        </MemoryRouter>
+      </AuthProvider>,
+    )
+
+    await user.click(screen.getByRole('button', { name: 'Get started' }))
+    await user.type(screen.getByLabelText('Email address'), 'new@example.com')
+    await user.click(screen.getByRole('button', { name: 'Send me a code' }))
+    await user.type(screen.getByLabelText('Verification code'), '424242')
+    await user.click(screen.getByRole('button', { name: 'Continue' }))
+
+    expect(clerkMocks.signUp.create).toHaveBeenCalledWith({ transfer: true })
+    expect(clerkMocks.signUp.finalize).toHaveBeenCalledOnce()
   })
 
   it('offers explicit demo access while Clerk is signed out', async () => {
@@ -115,7 +412,7 @@ describe('AuthPage', () => {
     )
 
     await user.click(
-      screen.getByRole('button', { name: 'Continue to demo' }),
+      screen.getByRole('button', { name: 'Explore the demo' }),
     )
 
     expect(startDevelopmentPreview).toHaveBeenCalledOnce()
@@ -146,7 +443,7 @@ describe('AuthPage', () => {
     )
 
     await user.click(
-      screen.getByRole('button', { name: 'Continue to demo' }),
+      screen.getByRole('button', { name: 'Explore the demo' }),
     )
 
     expect(window.sessionStorage.getItem('kinsphere.auth.returnTo')).toBe('/')

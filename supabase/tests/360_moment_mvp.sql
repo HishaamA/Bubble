@@ -1,7 +1,7 @@
 begin;
 
 create extension if not exists pgtap with schema extensions;
-select plan(58);
+select plan(59);
 
 insert into auth.users (
   instance_id,
@@ -997,6 +997,18 @@ select is(
   ),
   3,
   'the uploader starts deletion with the exact panorama, thumbnail, and voice paths'
+);
+
+select is(
+  (
+    select cardinality(deletion.media_paths)
+    from public.begin_delete_own_family_moment(
+      'cccccccc-cccc-4ccc-8ccc-cccccccccccc',
+      '40000000-0000-4000-8000-000000000011'
+    ) as deletion
+  ),
+  3,
+  'restarting an in-progress deletion reuses its existing tombstone'
 );
 
 reset role;

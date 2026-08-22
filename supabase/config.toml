@@ -34,7 +34,7 @@ additional_redirect_urls = [
 # project's Clerk publishable key; no Clerk or Supabase secret is stored here.
 [auth.third_party.clerk]
 enabled = true
-domain = "well-guppy-1961.clerk.accounts.dev"
+domain = "cuddly-anchovy-2100.clerk.accounts.dev"
 
 [storage]
 enabled = true

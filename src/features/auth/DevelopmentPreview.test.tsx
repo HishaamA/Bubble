@@ -75,13 +75,13 @@ describe('development preview authentication', () => {
     const firstRender = render(<PreviewRoutes />)
 
     const continueButton = await screen.findByRole('button', {
-      name: 'Continue to demo',
+      name: 'Explore the demo',
     })
     await user.click(continueButton)
     expect(
       await screen.findByRole('heading', { name: 'Development main app' }),
     ).toBeInTheDocument()
-    expect(screen.getByText('KinSphere Preview')).toBeInTheDocument()
+    expect(screen.getByText('Bubble Preview')).toBeInTheDocument()
     firstRender.unmount()
 
     render(<PreviewRoutes />)
@@ -97,14 +97,14 @@ describe('development preview authentication', () => {
     const user = userEvent.setup()
     render(<PreviewRoutes />)
     await user.click(
-      await screen.findByRole('button', { name: 'Continue to demo' }),
+      await screen.findByRole('button', { name: 'Explore the demo' }),
     )
     await user.click(
       await screen.findByRole('button', { name: 'Sign out of preview' }),
     )
 
     expect(
-      await screen.findByRole('button', { name: 'Continue to demo' }),
+      await screen.findByRole('button', { name: 'Explore the demo' }),
     ).toBeInTheDocument()
   })
 })
