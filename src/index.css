@@ -1,6 +1,6 @@
 :root {
   /*
-   * KinSphere uses three type families, each with one clear job. Keeping the
+   * Bubble uses three type families, each with one clear job. Keeping the
    * stacks here prevents feature CSS from inventing a new visual voice.
    */
   --font-ui: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Helvetica Neue',
@@ -76,7 +76,7 @@ a:focus-visible {
 
 /*
  * Mobile Safari zooms the whole page when a focused text control renders below
- * 16px. KinSphere keeps browser zoom available for accessibility; only the
+ * 16px. Bubble keeps browser zoom available for accessibility; only the
  * control text is raised to the non-auto-zoom threshold on touch devices.
  */
 @media (hover: none) and (pointer: coarse) {

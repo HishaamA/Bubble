@@ -6,7 +6,7 @@ Accepted for the persistent MVP.
 
 ## Context
 
-KinSphere uses Clerk for account sessions and Supabase for Postgres, private
+Bubble uses Clerk for account sessions and Supabase for Postgres, private
 Storage, Realtime, and server-time workflows. Clerk user subjects are strings
 such as `user_...`; they are not UUID rows in Supabase's managed `auth.users`
 table. The previous schema coupled application ownership directly to

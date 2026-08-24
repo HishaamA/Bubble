@@ -1,13 +1,13 @@
-# KinSphere
+# Bubble
 
-KinSphere is a private family app for sharing immersive memories. A family
+Bubble is a private family app for sharing immersive memories. A family
 member can follow a native dot guide to capture the surrounding sphere or
 import an existing equirectangular panorama, add a caption, and share a
 sanitized derivative with an approved Family Circle. Other members can explore
 the panorama, hear a voice Echo Pin, and follow one doorway into a second scene.
 
 > [!IMPORTANT]
-> [`KinSphere_Implementation_Handoff.docx`](./KinSphere_Implementation_Handoff.docx) is the source of truth for the first build. Implement its phases in order, and do not add optional features until the two-phone core flow is stable.
+> The legacy-named [`KinSphere_Implementation_Handoff.docx`](./KinSphere_Implementation_Handoff.docx) is the source of truth for the first build. Implement its phases in order, and do not add optional features until the two-phone core flow is stable.
 
 ## Core proof
 

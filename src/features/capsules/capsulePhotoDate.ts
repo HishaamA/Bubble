@@ -178,7 +178,7 @@ function plausiblePhotoDate(
 /**
  * Reads only capture-time fields and their matching timezone offsets while the
  * original file still has metadata. The returned ISO string is the only value
- * retained by KinSphere; GPS and unrelated blocks remain disabled.
+ * retained by Bubble; GPS and unrelated blocks remain disabled.
  */
 export async function getCapsulePhotoCapturedAt(
   file: File,

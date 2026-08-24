@@ -40,7 +40,7 @@ const notificationGroup = 'family-events'
 const notificationKind = 'family-event-reminder'
 const privateNotificationTitle = 'Family time soon'
 const privateNotificationBody =
-  'A family event starts in one hour. Open KinSphere for the details.'
+  'A family event starts in one hour. Open Bubble for the details.'
 const registryKeyPrefix = 'kinsphere-event-reminder-registry:v1:'
 const legacyReminderIdsKey = 'kinsphere-event-reminders'
 const activeAccountKey = 'kinsphere-event-reminder-active-account:v1'
@@ -752,7 +752,7 @@ export function cancelEventReminder(
     return {
       cleared: false,
       message:
-        'Reminder turned off in KinSphere. Phone alert cleanup will retry when the app resumes.',
+        'Reminder turned off in Bubble. Phone alert cleanup will retry when the app resumes.',
     }
   })
 }

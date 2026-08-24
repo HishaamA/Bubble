@@ -47,7 +47,7 @@ function MomentHarness() {
       <ul>
         {moments.map((moment) => (
           <li key={moment.id}>
-            {moment.label} — {moment.objectUrl ?? 'No preview'}
+            {moment.label}: {moment.objectUrl ?? 'No preview'}
           </li>
         ))}
       </ul>
@@ -107,7 +107,7 @@ describe('SharedMomentsProvider', () => {
 
     expect(await screen.findByText('1 moments')).toBeInTheDocument()
     expect(
-      screen.getByText('Friday picnic — blob:local-preview'),
+      screen.getByText('Friday picnic: blob:local-preview'),
     ).toBeInTheDocument()
     expect(objectUrls.create).toHaveBeenCalledWith(firstMoment.blob)
   })

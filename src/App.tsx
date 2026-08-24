@@ -22,7 +22,7 @@ import {
   FamilyMomentSyncProvider,
   SharedMomentsProvider,
 } from './features/memories/shared'
-import { ProfilePage } from './features/profile'
+import { SettingsPage } from './features/profile'
 import { RelayPage } from './features/relay'
 import {
   FamilyOnboardingProvider,
@@ -169,7 +169,11 @@ function App() {
                         />
                       }
                     />
-                    <Route path="/profile" element={<ProfilePage />} />
+                    <Route path="/settings" element={<SettingsPage />} />
+                    <Route
+                      path="/profile/*"
+                      element={<Navigate to="/settings" replace />}
+                    />
                     <Route path="*" element={<Navigate to="/" replace />} />
                   </Route>
                 </Route>

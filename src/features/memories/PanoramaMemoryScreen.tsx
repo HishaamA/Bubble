@@ -473,7 +473,7 @@ export function PanoramaMemoryScreen({
           id: candidate.id,
           label: candidate.label,
           sender: candidate.sender,
-          thumbnailUrl: '/assets/design/kinsphere-ui-reference.png',
+          thumbnailUrl: '/assets/design/bubble-ui-reference.png',
           crop: {
             ...candidate.crop,
             sourceWidth: MEMORY_SPRITE_WIDTH,
@@ -588,8 +588,8 @@ export function PanoramaMemoryScreen({
           : 'A wide panoramic view of Jordan Pond and the surrounding mountains.',
         title: memory.label,
         description: isDinnerMemory
-          ? 'A bundled concept panorama for the first KinSphere memory flow.'
-          : 'A bundled local panorama used for the first KinSphere viewer proof.',
+          ? 'A bundled concept panorama for the first Bubble memory flow.'
+          : 'A bundled local panorama used for the first Bubble viewer proof.',
         pitch: -2,
         yaw: 12,
         hfov: 104,

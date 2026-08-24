@@ -1,4 +1,4 @@
-# KinSphere delivery roadmap
+# Bubble delivery roadmap
 
 ## How to use this roadmap
 

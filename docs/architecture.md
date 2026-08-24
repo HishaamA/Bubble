@@ -1,8 +1,8 @@
-# KinSphere architecture
+# Bubble architecture
 
 ## Authority and change control
 
-[`KinSphere_Implementation_Handoff.docx`](../KinSphere_Implementation_Handoff.docx) is the source of truth for the first build. This document translates its locked rules into implementation boundaries. A conflicting change requires an explicit product decision recorded in [`docs/decisions/`](./decisions/README.md); ordinary refactoring cannot weaken an invariant.
+The legacy-named [`KinSphere_Implementation_Handoff.docx`](../KinSphere_Implementation_Handoff.docx) is the source of truth for the first build. This document translates its locked rules into implementation boundaries. A conflicting change requires an explicit product decision recorded in [`docs/decisions/`](./decisions/README.md); ordinary refactoring cannot weaken an invariant.
 
 ## System boundaries
 
@@ -74,7 +74,7 @@ scheduled or privileged work -> Edge Functions -> Postgres / providers
 - **OPS-01 — Idempotent effects:** Scheduled jobs, upload finalization, notifications, deletion work, and provider calls use unique idempotency keys or equivalent database guarantees.
 - **UPLOAD-01 — Persistent queue:** Persist upload state and processed local paths. Supported states are queued, uploading, finalizing, ready, retryable failure, permanent failure, and cancelled.
 - **UPLOAD-02 — Reconcile first:** On launch, sign-in, foreground, network return, or manual retry, compare local and server state before transmitting again.
-- **UPLOAD-03 — No false background promise:** KinSphere promises resume when reopened; it does not promise uninterrupted transfer after the operating system kills it.
+- **UPLOAD-03 — No false background promise:** Bubble promises resume when reopened; it does not promise uninterrupted transfer after the operating system kills it.
 - **CACHE-01 — Bounded private cache:** Cache thumbnails and recently opened panoramas under a size limit. Never evict files required by pending uploads, and clear inaccessible content after authorization changes.
 
 ### Product truth and AI

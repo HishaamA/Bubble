@@ -414,7 +414,7 @@ function CapsulePhotoImage({
       <span
         className="capsule-photo-placeholder"
         role="img"
-        aria-label={`${alt}. Preview unavailable until KinSphere reconnects.`}
+        aria-label={`${alt}. Preview unavailable until Bubble reconnects.`}
       >
         <span aria-hidden="true">✦</span>
       </span>

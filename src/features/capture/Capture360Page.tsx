@@ -496,7 +496,7 @@ export function Capture360Page({
       })
       const file = new File(
         [processed.viewer],
-        `kinsphere-${new Date().toISOString().replace(/[:.]/g, '-')}-360.jpg`,
+        `bubble-${new Date().toISOString().replace(/[:.]/g, '-')}-360.jpg`,
         { type: 'image/jpeg', lastModified: Date.now() },
       )
       const assembledDraft = installDraft(
@@ -513,7 +513,7 @@ export function Capture360Page({
           await saveDraftLocally(assembledDraft)
         } catch {
           keepNativeCapture = true
-          throw new Error('Your sphere was assembled, but it could not be saved yet. The preview and source pictures are still here—try saving again.')
+          throw new Error('Your sphere was assembled, but it could not be saved yet. The preview and source pictures are still here. Try saving again.')
         }
         captureResult = undefined
       }
@@ -835,11 +835,11 @@ export function Capture360Page({
           {source === 'manual' ? (
             <section className="ks-card capture-manual-panel" aria-labelledby="manual-upload-title">
               <h2 id="manual-upload-title">Capture every direction</h2>
-              <p>KinSphere places a quiet field of dots around you and takes each view automatically when your phone is lined up and still.</p>
+              <p>Bubble places a quiet field of dots around you and takes each view automatically when your phone is lined up and still.</p>
               <ol className="capture-panorama-steps" aria-label="How guided 360 capture works">
                 <li><span>1</span><p><strong>Stand in one place</strong>Keep the phone close to where your head will be in VR.</p></li>
                 <li><span>2</span><p><strong>Follow the dots</strong>Turn slowly through the middle, ceiling, and floor.</p></li>
-                <li><span>3</span><p><strong>Hold for a moment</strong>Each aligned view captures itself—no shutter tapping.</p></li>
+                <li><span>3</span><p><strong>Hold for a moment</strong>Each aligned view captures itself. No shutter tapping.</p></li>
               </ol>
               <button
                 className="ks-primary-button"

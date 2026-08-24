@@ -8,6 +8,6 @@ viewer proof has no runtime CDN dependency.
 - `sunday-dinner-demo.jpg`: AI-generated 2:1 concept panorama created for this
   prototype; it contains no real family members or source photography.
 
-Replace these fixtures with explicit KinSphere demo media before release. The
+Replace these fixtures with explicit Bubble demo media before release. The
 Pannellum source distribution is licensed under the MIT License; see the pinned
 `pannellum` package's `COPYING` file.

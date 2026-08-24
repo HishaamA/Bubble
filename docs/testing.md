@@ -1,8 +1,8 @@
-# KinSphere testing and release gates
+# Bubble testing and release gates
 
 ## Testing principle
 
-KinSphere handles private family data, time-gated content, resumable media, native sensors, and privileged background work. A UI-only happy path is insufficient. Tests must prove the permission boundary, recovery behavior, device behavior, and negative cases described below.
+Bubble handles private family data, time-gated content, resumable media, native sensors, and privileged background work. A UI-only happy path is insufficient. Tests must prove the permission boundary, recovery behavior, device behavior, and negative cases described below.
 
 ## Baseline pull-request gate
 

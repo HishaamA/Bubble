@@ -34,12 +34,6 @@ const tabs: Tab[] = [
       pathname.startsWith('/journal') ||
       (pathname.startsWith('/memory/') && returnTo === '/journal'),
   },
-  {
-    label: 'Profile',
-    path: '/profile',
-    icon: 'profile',
-    isActive: (pathname) => pathname.startsWith('/profile'),
-  },
 ]
 
 export function AppTabBar() {

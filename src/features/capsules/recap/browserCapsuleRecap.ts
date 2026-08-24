@@ -104,7 +104,7 @@ function wait(milliseconds: number) {
 export async function renderBrowserCapsuleRecap(photos: CapsulePhoto[]) {
   const mimeType = supportedMimeType()
   if (!mimeType || !canRenderBrowserCapsuleRecap()) {
-    throw new Error('Compatible video export is not available on this device. Try KinSphere on another supported phone or tablet.')
+    throw new Error('Compatible video export is not available on this device. Try Bubble on another supported phone or tablet.')
   }
 
   const plan = buildCapsuleRecapPlan(photos)

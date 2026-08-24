@@ -199,6 +199,57 @@ describe('PeopleTimeline', () => {
     })
   })
 
+  it('presents people onboarding and opens the existing add-person form', async () => {
+    const user = userEvent.setup()
+    renderTimeline([])
+
+    expect(await screen.findByRole('heading', {
+      name: 'Create your people',
+    })).toBeInTheDocument()
+    expect(screen.getAllByRole('button', { name: 'Add person' })).toHaveLength(1)
+    expect(screen.getByRole('button', { name: 'Empty family slot 1' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: 'Empty family slot 2' })).toBeDisabled()
+    expect(within(screen.getByLabelText('Family face setup')).getAllByRole('button')).toHaveLength(3)
+
+    expect(screen.queryByRole('button', {
+      name: 'Add first person',
+    })).not.toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Add person' }))
+
+    expect(screen.getByRole('form', { name: 'Add a person' })).toBeInTheDocument()
+    expect(scanReferencePortrait).not.toHaveBeenCalled()
+    expect(scanTimelineFaces).not.toHaveBeenCalled()
+  })
+
+  it('keeps every family member in the compact people rail and adds more from its trailing circle', async () => {
+    const namespace = 'people-notes-rail'
+    storedStates.set(namespace, stateWith({
+      people: [
+        { id: 'maya', name: 'Maya', createdAt: '2026-01-01' },
+        { id: 'leena', name: 'Leena', createdAt: '2026-01-01' },
+        { id: 'omar', name: 'Omar', createdAt: '2026-01-01' },
+        { id: 'sara', name: 'Sara', createdAt: '2026-01-01' },
+      ],
+      faceProfiles: {
+        maya: faceProfile(mayaEmbedding),
+        leena: faceProfile(leenaEmbedding),
+        omar: faceProfile(mayaEmbedding),
+        sara: faceProfile(leenaEmbedding),
+      },
+    }))
+    const user = userEvent.setup()
+    renderTimeline([], namespace)
+
+    const peopleRail = await screen.findByRole('group', { name: 'Family face setup' })
+    expect(within(peopleRail).getAllByRole('button')).toHaveLength(5)
+    expect(within(peopleRail).getByRole('button', { name: 'Maya' })).toBeInTheDocument()
+    expect(within(peopleRail).getByRole('button', { name: 'Sara' })).toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: 'Create your people' })).not.toBeInTheDocument()
+
+    await user.click(within(peopleRail).getByRole('button', { name: 'Add person' }))
+    expect(screen.getByRole('form', { name: 'Add a person' })).toBeInTheDocument()
+  })
+
   it('keeps Family separate and exposes ordinary uploads only through Review', async () => {
     const user = userEvent.setup()
     renderTimeline([
@@ -206,7 +257,9 @@ describe('PeopleTimeline', () => {
       capsulePhoto('old', '2012-06-01T12:00:00.000Z', 'First school day'),
     ])
 
-    expect(await screen.findByText('Set up two family faces')).toBeInTheDocument()
+    expect(await screen.findByRole('heading', {
+      name: 'Create your people',
+    })).toBeInTheDocument()
     expect(screen.queryByRole('img')).not.toBeInTheDocument()
     expect(screen.queryByText('360°')).not.toBeInTheDocument()
 
@@ -232,9 +285,12 @@ describe('PeopleTimeline', () => {
   it('requires a clear portrait when adding a person and never adds it to uploads', async () => {
     const user = userEvent.setup()
     renderTimeline([])
-    await screen.findByText('Set up two family faces')
+    await screen.findByRole('heading', { name: 'Create your people' })
+    const addPersonButton = screen.getByRole('button', {
+      name: 'Add person',
+    })
 
-    await user.click(screen.getByRole('button', { name: 'Add person' }))
+    await user.click(addPersonButton)
     const form = screen.getByRole('form', { name: 'Add a person' })
     await user.type(within(form).getByRole('textbox', { name: 'Name' }), 'Maya')
     await user.click(within(form).getByRole('button', { name: 'Add person' }))
@@ -268,9 +324,12 @@ describe('PeopleTimeline', () => {
       .mockResolvedValueOnce({ embedding: alternateEmbedding, quality: 0.84 })
     const user = userEvent.setup()
     renderTimeline([], namespace)
-    await screen.findByText('Set up two family faces')
+    await screen.findByRole('heading', { name: 'Create your people' })
+    const addPersonButton = screen.getByRole('button', {
+      name: 'Add person',
+    })
 
-    await user.click(screen.getByRole('button', { name: 'Add person' }))
+    await user.click(addPersonButton)
     const form = screen.getByRole('form', { name: 'Add a person' })
     await user.type(within(form).getByRole('textbox', { name: 'Name' }), 'Maya')
     const front = new File(['front'], 'maya-front.jpg', { type: 'image/jpeg' })
@@ -337,6 +396,16 @@ describe('PeopleTimeline', () => {
       capsulePhoto('third', '2022-01-01T12:00:00.000Z', 'Third uncertain face'),
     ], namespace)
 
+    const facesToName = await screen.findByRole('region', {
+      name: 'Faces to name',
+    })
+    expect(within(facesToName).getByRole('button', {
+      name: 'Review all',
+    })).toBeInTheDocument()
+    expect(within(facesToName).getAllByRole('button', {
+      name: 'Review face suggested as Maya',
+    })).toHaveLength(3)
+
     const reviewChip = await screen.findByRole('button', { name: 'Review 3' })
     expect(reviewChip).toHaveAttribute('aria-pressed', 'false')
     await user.click(reviewChip)
@@ -371,6 +440,45 @@ describe('PeopleTimeline', () => {
     expect(screen.queryByRole('button', { name: /^Review/ })).not.toBeInTheDocument()
   })
 
+  it('opens the existing review flow from a face candidate', async () => {
+    const namespace = 'people-face-candidate'
+    const reviewBase = Array<number>(1_024).fill(1)
+    const uncertainFace = reviewBase.map((value, index) =>
+      value + (index % 2 === 0 ? -0.3 : 0.3),
+    )
+    storedStates.set(namespace, stateWith({
+      people: [{ id: 'maya', name: 'Maya', createdAt: '2026-01-01' }],
+      faceProfiles: { maya: faceProfile(reviewBase) },
+      faceScans: {
+        'photo:candidate': faceScan(detectedFace('face-1', uncertainFace)),
+      },
+    }))
+    const user = userEvent.setup()
+    renderTimeline([
+      capsulePhoto(
+        'candidate',
+        '2020-01-01T12:00:00.000Z',
+        'Candidate face',
+      ),
+    ], namespace)
+
+    const facesToName = await screen.findByRole('region', {
+      name: 'Faces to name',
+    })
+    await user.click(within(facesToName).getByRole('button', {
+      name: 'Review face suggested as Maya',
+    }))
+
+    expect(await screen.findByRole('img', { name: 'Candidate face' })).toBeInTheDocument()
+    expect(screen.getByText('Is the outlined face Maya?')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Review 1' })).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    )
+    expect(scanReferencePortrait).not.toHaveBeenCalled()
+    expect(scanTimelineFaces).not.toHaveBeenCalled()
+  })
+
   it('accepts a batch of ordinary photos and opens All photos', async () => {
     const user = userEvent.setup()
     const onUploadPhotos = vi.fn(async (files: readonly File[]) => ({
@@ -388,7 +496,7 @@ describe('PeopleTimeline', () => {
         />
       </MemoryRouter>,
     )
-    await screen.findByText('Set up two family faces')
+    await screen.findByRole('heading', { name: 'Create your people' })
 
     const picker = screen.getByTestId('family-photo-input')
     expect(picker).toHaveAttribute('multiple')
@@ -424,10 +532,10 @@ describe('PeopleTimeline', () => {
         />
       </MemoryRouter>,
     )
-    await screen.findByText('Set up two family faces')
+    await screen.findByRole('heading', { name: 'Create your people' })
 
     await user.tab()
-    expect(screen.getAllByRole('button', { name: 'Add photos' })[0]).toHaveFocus()
+    expect(screen.getByRole('button', { name: 'Add person' })).toHaveFocus()
     await user.upload(screen.getByTestId('family-photo-input'), [
       new File(['ok'], 'ok.jpg', { type: 'image/jpeg' }),
       new File(['bad'], 'bad.heic', { type: 'image/heic' }),
@@ -492,9 +600,12 @@ describe('PeopleTimeline', () => {
       new Error('More than one face was found. Choose a photo containing only this person.'),
     )
     renderTimeline([])
-    await screen.findByText('Set up two family faces')
+    await screen.findByRole('heading', { name: 'Create your people' })
+    const addPersonButton = screen.getByRole('button', {
+      name: 'Add person',
+    })
 
-    await user.click(screen.getByRole('button', { name: 'Add person' }))
+    await user.click(addPersonButton)
     const form = screen.getByRole('form', { name: 'Add a person' })
     await user.type(within(form).getByRole('textbox', { name: 'Name' }), 'Maya')
     await user.upload(
@@ -707,7 +818,7 @@ describe('PeopleTimeline', () => {
     renderTimeline([
       capsulePhoto('childhood', '2008-08-12T12:00:00.000Z', 'At the park'),
     ])
-    await screen.findByText('Set up two family faces')
+    await screen.findByRole('heading', { name: 'Create your people' })
     await user.click(timelineChip('All photos'))
     await screen.findByRole('slider')
 

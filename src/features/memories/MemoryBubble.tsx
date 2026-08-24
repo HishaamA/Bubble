@@ -69,7 +69,7 @@ export function MemoryBubble({
         <span className="memory-bubble__motion" style={motionStyle}>
           <span className="memory-bubble__image" aria-hidden="true">
             <img
-              src="/assets/design/kinsphere-ui-reference.png"
+              src="/assets/design/bubble-ui-reference.png"
               alt=""
               draggable="false"
               style={spriteStyle}

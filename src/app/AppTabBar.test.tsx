@@ -4,7 +4,7 @@ import { describe, expect, it } from 'vitest'
 import { AppTabBar } from './AppTabBar'
 
 describe('AppTabBar', () => {
-  it('shows the four primary destinations', () => {
+  it('shows the three primary destinations', () => {
     render(
       <MemoryRouter>
         <AppTabBar />
@@ -18,7 +18,7 @@ describe('AppTabBar', () => {
       within(navigation)
         .getAllByRole('link')
         .map((link) => link.textContent),
-    ).toEqual(['Moments', 'Capsule', 'Journal', 'Profile'])
+    ).toEqual(['Moments', 'Capsule', 'Journal'])
 
     expect(screen.getByRole('link', { name: 'Moments' })).toHaveAttribute(
       'href',
@@ -32,10 +32,7 @@ describe('AppTabBar', () => {
       'href',
       '/capsule',
     )
-    expect(screen.getByRole('link', { name: 'Profile' })).toHaveAttribute(
-      'href',
-      '/profile',
-    )
+    expect(screen.queryByRole('link', { name: 'Profile' })).not.toBeInTheDocument()
     expect(screen.getByRole('link', { name: 'Moments' })).toHaveAttribute(
       'aria-current',
       'page',
@@ -121,16 +118,15 @@ describe('AppTabBar', () => {
     },
   )
 
-  it('keeps Profile active on profile routes', () => {
+  it('does not add Settings back into the primary navigation', () => {
     render(
-      <MemoryRouter initialEntries={['/profile/family']}>
+      <MemoryRouter initialEntries={['/settings']}>
         <AppTabBar />
       </MemoryRouter>,
     )
 
-    expect(screen.getByRole('link', { name: 'Profile' })).toHaveAttribute(
-      'aria-current',
-      'page',
-    )
+    expect(screen.queryByRole('link', { name: 'Profile' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('link', { name: 'Settings' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('link', { current: 'page' })).not.toBeInTheDocument()
   })
 })

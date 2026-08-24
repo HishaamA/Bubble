@@ -65,7 +65,7 @@ function getFamilySummary(snapshot: FamilySyncSnapshot | null) {
   if (snapshot?.kind === 'local-only') {
     return {
       title: 'Family group',
-      detail: 'Connect KinSphere to create or join securely',
+      detail: 'Connect Bubble to create or join securely',
     }
   }
 
@@ -75,7 +75,7 @@ function getFamilySummary(snapshot: FamilySyncSnapshot | null) {
   }
 }
 
-export function ProfilePage() {
+export function SettingsPage() {
   const navigate = useNavigate()
   const { signOut, user } = useAuth()
   const [notifications, setNotifications] = useState(true)
@@ -84,12 +84,14 @@ export function ProfilePage() {
     'notifications' | 'quiet-hours' | null
   >(null)
   const [preferenceError, setPreferenceError] = useState<string | null>(null)
+  const [showProfileSettings, setShowProfileSettings] = useState(false)
   const [showFamilySync, setShowFamilySync] = useState(false)
   const [familySnapshot, setFamilySnapshot] =
     useState<FamilySyncSnapshot | null>(null)
   const familySummary = getFamilySummary(familySnapshot)
   const displayName = user?.displayName || 'Family member'
   const initial = displayName.slice(0, 1).toUpperCase()
+  const accountIdentity = user?.email || user?.phone || 'Signed in'
   const userId = user?.id ?? null
 
   useEffect(() => {
@@ -156,14 +158,14 @@ export function ProfilePage() {
   }
 
   return (
-    <section className="ks-feature profile-page" aria-labelledby="profile-title">
+    <section className="ks-feature profile-page" aria-labelledby="settings-title">
       <header className="ks-feature__header app-page-header">
         <div className="ks-feature__header-copy">
           <p className="eyebrow app-page-header__eyebrow">Our family</p>
-          <h1 id="profile-title">{displayName}</h1>
-          {user?.email || user?.phone ? (
-            <p className="profile-page__identity app-page-header__subtitle">{user.email || user.phone}</p>
-          ) : null}
+          <h1 id="settings-title">Settings</h1>
+          <p className="profile-page__identity app-page-header__subtitle">
+            Profile, family, and preferences
+          </p>
         </div>
         <div className="profile-card__avatar">
           {user?.imageUrl ? (
@@ -173,6 +175,65 @@ export function ProfilePage() {
           )}
         </div>
       </header>
+
+      <section className="ks-section" aria-labelledby="profile-settings-title">
+        <div className="ks-section__heading">
+          <h2 id="profile-settings-title">Profile</h2>
+        </div>
+        <button
+          className="profile-action-row"
+          type="button"
+          aria-label={
+            showProfileSettings
+              ? 'Close profile settings'
+              : 'Manage profile settings'
+          }
+          aria-expanded={showProfileSettings}
+          aria-controls="profile-account-panel"
+          onClick={() => setShowProfileSettings((value) => !value)}
+        >
+          <span className="profile-account-mark" aria-hidden="true">
+            {user?.imageUrl ? <img src={user.imageUrl} alt="" /> : initial}
+          </span>
+          <span className="profile-family-copy">
+            <strong>{displayName}</strong>
+            <small>{accountIdentity}</small>
+          </span>
+          <span aria-hidden="true">{showProfileSettings ? '−' : '›'}</span>
+        </button>
+        {showProfileSettings ? (
+          <div
+            id="profile-account-panel"
+            className="profile-account-details"
+            role="region"
+            aria-label="Profile details"
+          >
+            <dl>
+              <div>
+                <dt>Name</dt>
+                <dd>{displayName}</dd>
+              </div>
+              {user?.email ? (
+                <div>
+                  <dt>Email</dt>
+                  <dd>{user.email}</dd>
+                </div>
+              ) : null}
+              {user?.phone ? (
+                <div>
+                  <dt>Phone</dt>
+                  <dd>{user.phone}</dd>
+                </div>
+              ) : null}
+              <div>
+                <dt>Account</dt>
+                <dd>Signed in</dd>
+              </div>
+            </dl>
+            <p>Your profile details come from your secure sign-in account.</p>
+          </div>
+        ) : null}
+      </section>
 
       <section className="ks-section" aria-labelledby="family-sharing-title">
         <div className="ks-section__heading">

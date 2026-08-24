@@ -2,13 +2,13 @@
 
 Status: accepted
 Date: 2026-08-27
-Owners: KinSphere product and client engineering
+Owners: Bubble product and client engineering
 
 ## Context
 
 ADR 0002 limited the first prototype to importing a finished panorama or
 wrapping one horizontal phone sweep. Product direction now explicitly requires
-KinSphere to guide the user through photographing the whole surrounding sphere,
+Bubble to guide the user through photographing the whole surrounding sphere,
 including the ceiling and floor, and to make the result available as a Moment.
 
 A WebView file input cannot synchronize full-resolution camera frames with

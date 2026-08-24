@@ -491,7 +491,7 @@ describe('CapsulesPage', () => {
       name: previousWeekRange,
     })).closest('article')!
     expect(within(card).getByRole('img', {
-      name: /Preview unavailable until KinSphere reconnects/i,
+      name: /Preview unavailable until Bubble reconnects/i,
     })).toBeInTheDocument()
     expect(card.querySelector('img')).toBeNull()
   })
@@ -513,7 +513,7 @@ describe('CapsulesPage', () => {
 
     expect(card.querySelector('img')).toBeNull()
     expect(within(card).getByRole('img', {
-      name: /Preview unavailable until KinSphere reconnects/i,
+      name: /Preview unavailable until Bubble reconnects/i,
     })).toBeInTheDocument()
   })
 

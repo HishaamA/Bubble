@@ -1,6 +1,7 @@
 import { Capacitor } from '@capacitor/core'
 import { useEffect, useRef, type PropsWithChildren } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
+import { Icon } from '../components/Icon'
 import { useAuth } from '../features/auth/authContext'
 import { Capture360Shortcut } from '../features/capture'
 import {
@@ -20,7 +21,7 @@ export function AppShell({ children }: PropsWithChildren) {
     authStatus === 'signed-in'
   const showPrimaryNavigation =
     showPrimaryChrome && !location.pathname.startsWith('/capture')
-  const showCaptureShortcut = showPrimaryChrome && location.pathname === '/'
+  const showMomentsShortcuts = showPrimaryChrome && location.pathname === '/'
   const nativeApp = Capacitor.isNativePlatform()
   const viewportRef = useRef<HTMLDivElement>(null)
 
@@ -56,12 +57,22 @@ export function AppShell({ children }: PropsWithChildren) {
       data-app-shell={nativeApp ? 'native' : 'web'}
     >
       <main className="app-content">{children}</main>
-      {showCaptureShortcut ? (
-        <Capture360Shortcut
-          onClick={() =>
-            navigate('/capture?mode=manual', { viewTransition: true })
-          }
-        />
+      {showMomentsShortcuts ? (
+        <div className="moments-shortcuts" aria-label="Moments shortcuts">
+          <Capture360Shortcut
+            onClick={() =>
+              navigate('/capture?mode=manual', { viewTransition: true })
+            }
+          />
+          <button
+            className="moments-settings-shortcut"
+            type="button"
+            aria-label="Open settings"
+            onClick={() => navigate('/settings', { viewTransition: true })}
+          >
+            <Icon name="settings" size={22} />
+          </button>
+        </div>
       ) : null}
       {showPrimaryNavigation ? <AppTabBar /> : null}
     </div>

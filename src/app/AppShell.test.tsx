@@ -65,7 +65,7 @@ function RouteSwitcher() {
     ['Moments', '/'],
     ['Journal', '/journal'],
     ['Capsule', '/capsule'],
-    ['Profile', '/profile'],
+    ['Settings', '/settings'],
     ['Panorama', '/memory/family-dinner'],
     ['Capture', '/capture?mode=manual'],
   ] as const
@@ -112,7 +112,7 @@ describe('AppShell', () => {
     for (const route of [
       'Journal',
       'Capsule',
-      'Profile',
+      'Settings',
       'Panorama',
       'Capture',
       'Moments',
@@ -156,7 +156,7 @@ describe('AppShell', () => {
     input.focus()
     expect(document.activeElement).toBe(input)
 
-    fireEvent.click(screen.getByRole('button', { name: 'Profile' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Settings' }))
 
     await waitFor(() => expect(document.activeElement).not.toBe(input))
     expect(container.querySelector('.app-viewport')).toHaveAttribute(
@@ -176,11 +176,28 @@ describe('AppShell', () => {
     )
   })
 
+  it('opens Settings from the shortcut directly below the 360 control', async () => {
+    const user = userEvent.setup()
+    renderShell('/', <LocationProbe />)
+
+    const shortcutGroup = screen.getByLabelText('Moments shortcuts')
+    const shortcuts = shortcutGroup.querySelectorAll('button')
+    expect(shortcuts).toHaveLength(2)
+    expect(shortcuts[0]).toHaveAccessibleName('Upload a 360 photo now')
+    expect(shortcuts[1]).toHaveAccessibleName('Open settings')
+
+    await user.click(screen.getByRole('button', { name: 'Open settings' }))
+    expect(screen.getByLabelText('Current route')).toHaveTextContent('/settings')
+  })
+
   it('hides the shortcut away from Memories', () => {
     renderShell('/capsule', 'Capsule')
 
     expect(
       screen.queryByRole('button', { name: 'Upload a 360 photo now' }),
+    ).not.toBeInTheDocument()
+    expect(
+      screen.queryByRole('button', { name: 'Open settings' }),
     ).not.toBeInTheDocument()
   })
 
@@ -189,6 +206,9 @@ describe('AppShell', () => {
 
     expect(
       screen.queryByRole('navigation', { name: 'Primary navigation' }),
+    ).not.toBeInTheDocument()
+    expect(
+      screen.queryByRole('button', { name: 'Open settings' }),
     ).not.toBeInTheDocument()
   })
 
@@ -201,6 +221,9 @@ describe('AppShell', () => {
     expect(
       screen.queryByRole('button', { name: 'Upload a 360 photo now' }),
     ).not.toBeInTheDocument()
+    expect(
+      screen.queryByRole('button', { name: 'Open settings' }),
+    ).not.toBeInTheDocument()
   })
 
   it('does not reveal app chrome while authentication is loading', () => {
@@ -211,6 +234,9 @@ describe('AppShell', () => {
     ).not.toBeInTheDocument()
     expect(
       screen.queryByRole('button', { name: 'Upload a 360 photo now' }),
+    ).not.toBeInTheDocument()
+    expect(
+      screen.queryByRole('button', { name: 'Open settings' }),
     ).not.toBeInTheDocument()
   })
 })

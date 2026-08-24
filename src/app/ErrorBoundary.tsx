@@ -10,7 +10,7 @@ export class ErrorBoundary extends Component<PropsWithChildren, ErrorBoundarySta
   }
 
   componentDidCatch(error: Error, info: ErrorInfo) {
-    console.error('KinSphere render failure', error, info.componentStack)
+    console.error('Bubble render failure', error, info.componentStack)
   }
 
   render() {
@@ -21,7 +21,7 @@ export class ErrorBoundary extends Component<PropsWithChildren, ErrorBoundarySta
           <h1>This memory could not be opened.</h1>
           <p>Your family content is safe. Close and reopen the app to try again.</p>
           <button type="button" onClick={() => window.location.reload()}>
-            Reload KinSphere
+            Reload Bubble
           </button>
         </div>
       )

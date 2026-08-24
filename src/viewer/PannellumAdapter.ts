@@ -261,7 +261,7 @@ export function createPannellumAdapter(
     }
 
     try {
-      // KinSphere owns the standards-based permission request above. The
+      // Bubble owns the standards-based permission request above. The
       // bundled runtime only attaches its deviceorientation listener, avoiding
       // a second, non-gesture iOS permission request.
       orientationViewer.startOrientation()

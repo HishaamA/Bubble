@@ -1,6 +1,6 @@
-import { render, screen, waitFor } from '@testing-library/react'
+import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { MemoryRouter, Route, Routes } from 'react-router-dom'
+import { MemoryRouter, Navigate, Route, Routes } from 'react-router-dom'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const persistence = vi.hoisted(() => ({
@@ -27,7 +27,7 @@ vi.mock('../auth', () => ({
 
 vi.mock('../../services/persistence', () => persistence)
 
-// ProfilePage owns the disclosure and summary; FamilySyncPanel's backend states
+// SettingsPage owns the disclosures and summary; FamilySyncPanel's backend states
 // have their own focused suite. Keep this test deterministic even when a local
 // developer has valid Supabase credentials in .env.local.
 vi.mock('./family-sync', () => ({
@@ -41,7 +41,7 @@ vi.mock('./family-sync', () => ({
   ),
 }))
 
-import { ProfilePage } from './ProfilePage'
+import { SettingsPage } from './ProfilePage'
 
 beforeEach(() => {
   vi.clearAllMocks()
@@ -66,26 +66,44 @@ beforeEach(() => {
   )
 })
 
-describe('ProfilePage', () => {
-  it('keeps family sharing accessible and updates preference state', async () => {
+describe('SettingsPage', () => {
+  it('keeps account and family settings accessible and updates preference state', async () => {
     const user = userEvent.setup()
     render(
-      <MemoryRouter initialEntries={['/profile']}>
+      <MemoryRouter initialEntries={['/settings']}>
         <Routes>
-          <Route path="/profile" element={<ProfilePage />} />
+          <Route path="/settings" element={<SettingsPage />} />
           <Route path="/login" element={<p>Signed-out destination</p>} />
         </Routes>
       </MemoryRouter>,
     )
 
-    expect(
-      screen.getByRole('heading', { name: 'Alice Ahmed' }),
-    ).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'Settings' })).toBeInTheDocument()
     expect(screen.getByText('alice@example.test')).toBeInTheDocument()
     expect(screen.getByRole('img', { name: 'Alice Ahmed profile' })).toHaveAttribute(
       'src',
       'https://images.example/alice.jpg',
     )
+
+    const profileSettings = screen.getByRole('button', {
+      name: 'Manage profile settings',
+    })
+    expect(profileSettings).toHaveAttribute('aria-expanded', 'false')
+    expect(
+      screen.queryByRole('region', { name: 'Profile details' }),
+    ).not.toBeInTheDocument()
+    await user.click(profileSettings)
+    expect(
+      screen.getByRole('button', { name: 'Close profile settings' }),
+    ).toHaveAttribute('aria-expanded', 'true')
+    const profileDetails = screen.getByRole('region', {
+      name: 'Profile details',
+    })
+    expect(within(profileDetails).getByText('Alice Ahmed')).toBeInTheDocument()
+    expect(
+      within(profileDetails).getByText('alice@example.test'),
+    ).toBeInTheDocument()
+    expect(within(profileDetails).getByText('Signed in')).toBeInTheDocument()
 
     const updates = screen.getByRole('switch', { name: 'Family updates' })
     expect(updates).toHaveAttribute('aria-checked', 'true')
@@ -125,5 +143,23 @@ describe('ProfilePage', () => {
     await user.click(screen.getByRole('button', { name: 'Sign out' }))
     expect(auth.signOut).toHaveBeenCalledTimes(1)
     expect(await screen.findByText('Signed-out destination')).toBeInTheDocument()
+  })
+
+  it('keeps the old profile address as a redirect to settings', async () => {
+    render(
+      <MemoryRouter initialEntries={['/profile']}>
+        <Routes>
+          <Route path="/settings" element={<SettingsPage />} />
+          <Route
+            path="/profile/*"
+            element={<Navigate to="/settings" replace />}
+          />
+        </Routes>
+      </MemoryRouter>,
+    )
+
+    expect(
+      await screen.findByRole('heading', { name: 'Settings' }),
+    ).toBeInTheDocument()
   })
 })

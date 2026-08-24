@@ -6,7 +6,7 @@ Accepted.
 
 ## Decision
 
-KinSphere uses a restrained, Apple-like dark visual system:
+Bubble uses a restrained, Apple-like dark visual system:
 
 - true black is the primary canvas;
 - interface chrome is white and neutral gray only;

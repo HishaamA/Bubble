@@ -108,7 +108,7 @@ describe('native event reminders', () => {
     expect(notification).toMatchObject({
       id: eventReminderNotificationId(event.id, 'user_a'),
       title: 'Family time soon',
-      body: 'A family event starts in one hour. Open KinSphere for the details.',
+      body: 'A family event starts in one hour. Open Bubble for the details.',
       sound: 'default',
       autoCancel: true,
       isExactNotification: true,
@@ -187,7 +187,7 @@ describe('native event reminders', () => {
         {
           id,
           title: 'Family time soon',
-          body: 'A family event starts in one hour. Open KinSphere for the details.',
+          body: 'A family event starts in one hour. Open Bubble for the details.',
           schedule: {
             at: new Date(new Date(event.startsAt).getTime() - reminderLeadTime),
           },

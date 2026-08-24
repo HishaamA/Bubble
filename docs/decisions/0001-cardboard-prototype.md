@@ -12,7 +12,7 @@ keeping the existing touch and flat-view panorama paths.
 
 ## Decision
 
-KinSphere will include a bounded Cardboard prototype for the existing two-scene
+Bubble will include a bounded Cardboard prototype for the existing two-scene
 memory flow. It duplicates the monoscopic 360 panorama into two side-by-side eye
 views, attempts fullscreen and landscape presentation, and uses the phone's
 orientation sensors after a user gesture. It does not claim WebXR stereoscopy,

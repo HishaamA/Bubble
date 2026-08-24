@@ -5,6 +5,7 @@ export type IconName =
   | 'capsules'
   | 'events'
   | 'profile'
+  | 'settings'
   | 'sparkles'
   | 'vr'
   | 'arrow'
@@ -83,6 +84,16 @@ export function Icon({ name, size = 24 }: IconProps) {
       <svg {...common}>
         <circle cx="12" cy="8" r="3.5" />
         <path d="M5.5 20a6.5 6.5 0 0 1 13 0" />
+      </svg>
+    )
+  }
+
+  if (name === 'settings') {
+    return (
+      <svg {...common}>
+        <path d="M4 7h3M11 7h9M4 17h9M17 17h3" />
+        <circle cx="9" cy="7" r="2" />
+        <circle cx="15" cy="17" r="2" />
       </svg>
     )
   }
