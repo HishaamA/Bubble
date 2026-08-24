@@ -7,7 +7,7 @@
 	<key>CFBundleDevelopmentRegion</key>
 	<string>en</string>
 	<key>CFBundleDisplayName</key>
-	<string>KinSphere</string>
+	<string>Bubble</string>
 	<key>CFBundleExecutable</key>
 	<string>$(EXECUTABLE_NAME)</string>
 	<key>CFBundleIdentifier</key>
@@ -25,13 +25,13 @@
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
 	<key>NSMotionUsageDescription</key>
-	<string>KinSphere uses device motion to let you look around panoramic memories and use Cardboard mode.</string>
+	<string>Bubble uses device motion to let you look around panoramic memories and use Cardboard mode.</string>
 	<key>NSCameraUsageDescription</key>
-	<string>KinSphere uses the camera to guide you through capturing overlapping frames for panoramic memories.</string>
+	<string>Bubble uses the camera to guide you through capturing overlapping frames for panoramic memories.</string>
 	<key>NSMicrophoneUsageDescription</key>
-	<string>KinSphere uses the microphone when you add a private voice note to a panoramic family memory.</string>
+	<string>Bubble uses the microphone when you add a private voice note to a panoramic family memory.</string>
 	<key>NSPhotoLibraryAddUsageDescription</key>
-	<string>KinSphere saves the family recap videos you choose to keep in your photo library.</string>
+	<string>Bubble saves the family recap videos you choose to keep in your photo library.</string>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>

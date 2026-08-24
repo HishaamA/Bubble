@@ -86,7 +86,7 @@ public class PanoramaCapturePlugin: CAPPlugin, CAPBridgedPlugin {
         guard let directoryValue = call.getString("directoryUrl"),
               let candidateURL = validatedCaptureDirectory(from: directoryValue) else {
             call.reject(
-                "directoryUrl must identify a KinSphere panorama capture directory.",
+                "directoryUrl must identify a Bubble panorama capture directory.",
                 "INVALID_DIRECTORY"
             )
             return

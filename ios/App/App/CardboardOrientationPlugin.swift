@@ -14,7 +14,7 @@ public final class CardboardOrientationPlugin: CAPPlugin, CAPBridgedPlugin {
         DispatchQueue.main.async { [weak self] in
             guard let controller = self?.bridge?.viewController as? AppBridgeViewController else {
                 call.reject(
-                    "The KinSphere app view is not available.",
+                    "The Bubble app view is not available.",
                     "ORIENTATION_CONTROLLER_UNAVAILABLE"
                 )
                 return
@@ -29,7 +29,7 @@ public final class CardboardOrientationPlugin: CAPPlugin, CAPBridgedPlugin {
         DispatchQueue.main.async { [weak self] in
             guard let controller = self?.bridge?.viewController as? AppBridgeViewController else {
                 call.reject(
-                    "The KinSphere app view is not available.",
+                    "The Bubble app view is not available.",
                     "ORIENTATION_CONTROLLER_UNAVAILABLE"
                 )
                 return
