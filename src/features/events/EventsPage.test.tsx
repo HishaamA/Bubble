@@ -334,6 +334,7 @@ describe('JournalEventsSection', () => {
   })
 
   it('toggles a device reminder only after an explicit action', async () => {
+    vi.spyOn(Date, 'now').mockReturnValue(dateFromToday(0, 12).getTime())
     const today = dateFromToday(0, 20)
     storeCreatedPlans([{
       id: 'dinner', title: 'Dinner', startsAt: today, location: 'Home', category: 'other',
