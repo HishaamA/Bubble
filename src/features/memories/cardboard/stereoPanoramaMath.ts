@@ -10,8 +10,12 @@ export interface StereoViewport {
   opticalCenter: number
 }
 
+export type StereoViewportProfile = 'ios-reference' | 'youtube-fallback'
+
 export const STEREO_LENS_WIDTH_FRACTION = 0.38
 export const STEREO_LENS_HEIGHT_FRACTION = 0.90
+export const YOUTUBE_FALLBACK_LENS_WIDTH_FRACTION = 0.40
+export const YOUTUBE_FALLBACK_LENS_HEIGHT_FRACTION = 1.0
 
 export function clampOpticalCenterShift(shift: number): number {
   if (!Number.isFinite(shift)) return 0
@@ -22,18 +26,31 @@ export function resolveStereoViewports(
   canvasWidth: number,
   canvasHeight: number,
   opticalCenterShift: number,
+  profile: StereoViewportProfile = 'ios-reference',
 ): readonly [StereoViewport, StereoViewport] {
   const width = Math.max(2, Math.floor(canvasWidth))
   const height = Math.max(1, Math.floor(canvasHeight))
+  const lensWidthFraction =
+    profile === 'youtube-fallback'
+      ? YOUTUBE_FALLBACK_LENS_WIDTH_FRACTION
+      : STEREO_LENS_WIDTH_FRACTION
+  const lensHeightFraction =
+    profile === 'youtube-fallback'
+      ? YOUTUBE_FALLBACK_LENS_HEIGHT_FRACTION
+      : STEREO_LENS_HEIGHT_FRACTION
+  const leftCenterFraction = profile === 'youtube-fallback' ? 0.30 : 0.25
   const eyeWidth = Math.max(
     1,
-    Math.floor(width * STEREO_LENS_WIDTH_FRACTION),
+    Math.floor(width * lensWidthFraction),
   )
   const eyeHeight = Math.max(
     1,
-    Math.floor(height * STEREO_LENS_HEIGHT_FRACTION),
+    Math.floor(height * lensHeightFraction),
   )
-  const leftEyeX = Math.max(0, Math.round(width * 0.25 - eyeWidth / 2))
+  const leftEyeX = Math.max(
+    0,
+    Math.round(width * leftCenterFraction - eyeWidth / 2),
+  )
   const rightEyeX = width - leftEyeX - eyeWidth
   const eyeY = Math.max(0, Math.floor((height - eyeHeight) / 2))
   const shiftNdc = clampOpticalCenterShift(opticalCenterShift) * 2
@@ -78,10 +95,80 @@ export function invertQuaternion(q: Quaternion): Quaternion {
   return [-x / lengthSquared, -y / lengthSquared, -z / lengthSquared, w / lengthSquared]
 }
 
-function normalizeQuaternion(q: Quaternion): Quaternion {
+export function normalizeQuaternion(q: Quaternion): Quaternion {
   const [x, y, z, w] = q
   const length = Math.hypot(x, y, z, w)
-  return length === 0 ? [0, 0, 0, 1] : [x / length, y / length, z / length, w / length]
+  return !Number.isFinite(length) || length === 0
+    ? [0, 0, 0, 1]
+    : [x / length, y / length, z / length, w / length]
+}
+
+export function quaternionDot(a: Quaternion, b: Quaternion): number {
+  return a[0] * b[0] + a[1] * b[1] + a[2] * b[2] + a[3] * b[3]
+}
+
+export function negateQuaternion(q: Quaternion): Quaternion {
+  return [-q[0], -q[1], -q[2], -q[3]]
+}
+
+/** q and -q encode the same rotation; keep interpolation on the short arc. */
+export function alignQuaternionHemisphere(
+  reference: Quaternion,
+  candidate: Quaternion,
+): Quaternion {
+  return quaternionDot(reference, candidate) < 0
+    ? negateQuaternion(candidate)
+    : candidate
+}
+
+export function quaternionAngularDistanceDegrees(
+  a: Quaternion,
+  b: Quaternion,
+): number {
+  const normalizedA = normalizeQuaternion(a)
+  const normalizedB = normalizeQuaternion(b)
+  const dot = Math.min(1, Math.max(0, Math.abs(quaternionDot(normalizedA, normalizedB))))
+  return 2 * Math.acos(dot) / DEGREES_TO_RADIANS
+}
+
+/** Pitch of the camera's forward ray, used to keep drag fallback upright. */
+export function quaternionViewPitchDegrees(q: Quaternion): number {
+  const [x, y, z, w] = normalizeQuaternion(q)
+  const forwardY = Math.max(-1, Math.min(1, 2 * (x * w - y * z)))
+  return Math.asin(forwardY) / DEGREES_TO_RADIANS
+}
+
+/** Numerically stable shortest-arc spherical interpolation. */
+export function slerpQuaternions(
+  from: Quaternion,
+  to: Quaternion,
+  amount: number,
+): Quaternion {
+  const start = normalizeQuaternion(from)
+  const end = normalizeQuaternion(alignQuaternionHemisphere(start, to))
+  const t = Math.max(0, Math.min(1, Number.isFinite(amount) ? amount : 0))
+  const dot = Math.max(-1, Math.min(1, quaternionDot(start, end)))
+
+  if (dot > 0.9995) {
+    return normalizeQuaternion([
+      start[0] + (end[0] - start[0]) * t,
+      start[1] + (end[1] - start[1]) * t,
+      start[2] + (end[2] - start[2]) * t,
+      start[3] + (end[3] - start[3]) * t,
+    ])
+  }
+
+  const theta = Math.acos(dot)
+  const sineTheta = Math.sin(theta)
+  if (Math.abs(sineTheta) < 1e-7) return start
+  const fromWeight = Math.sin((1 - t) * theta) / sineTheta
+  const toWeight = Math.sin(t * theta) / sineTheta
+  return normalizeQuaternion([
+    start[0] * fromWeight + end[0] * toWeight,
+    start[1] * fromWeight + end[1] * toWeight,
+    start[2] * fromWeight + end[2] * toWeight,
+    start[3] * fromWeight + end[3] * toWeight,
+  ])
 }
 
 function axisAngleQuaternion(x: number, y: number, z: number, radians: number): Quaternion {

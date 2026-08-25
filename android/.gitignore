@@ -3,6 +3,7 @@
 # Built application files
 *.apk
 *.aar
+!app/libs/cardboard-sdk-1.34.0.aar
 *.ap_
 *.aab
 

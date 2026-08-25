@@ -19,6 +19,7 @@ import {
   nativeCardboardOrientationAvailable,
   requestNativeCardboardLandscape,
   restoreNativeAppOrientation,
+  shouldRequestCardboardDomFullscreenFallback,
 } from './nativeCardboardOrientation'
 
 describe('native Cardboard orientation', () => {
@@ -26,7 +27,7 @@ describe('native Cardboard orientation', () => {
     capacitor.isNativePlatform.mockReset()
     capacitor.getPlatform.mockReset()
     capacitor.isPluginAvailable.mockReset().mockReturnValue(true)
-    orientationPlugin.requestLandscape.mockReset().mockResolvedValue(undefined)
+    orientationPlugin.requestLandscape.mockReset().mockResolvedValue({ immersive: true })
     orientationPlugin.restoreAppOrientation.mockReset().mockResolvedValue(undefined)
   })
 
@@ -51,6 +52,23 @@ describe('native Cardboard orientation', () => {
     await expect(restoreNativeAppOrientation()).resolves.toBe(false)
     expect(orientationPlugin.requestLandscape).not.toHaveBeenCalled()
     expect(orientationPlugin.restoreAppOrientation).not.toHaveBeenCalled()
+  })
+
+  it('does not report Android immersive mode from plugin presence alone', async () => {
+    capacitor.isNativePlatform.mockReturnValue(true)
+    capacitor.getPlatform.mockReturnValue('android')
+    orientationPlugin.requestLandscape.mockResolvedValue({ orientation: 'landscape' })
+
+    await expect(requestNativeCardboardLandscape()).resolves.toBe(false)
+  })
+
+  it('requests the gesture-bound DOM fallback only in the native Android app', () => {
+    capacitor.isNativePlatform.mockReturnValue(true)
+    capacitor.getPlatform.mockReturnValue('android')
+    expect(shouldRequestCardboardDomFullscreenFallback()).toBe(true)
+
+    capacitor.getPlatform.mockReturnValue('ios')
+    expect(shouldRequestCardboardDomFullscreenFallback()).toBe(false)
   })
 
   it('does not invoke the native plugin from the web app', async () => {

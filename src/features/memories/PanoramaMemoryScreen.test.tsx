@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from '@testing-library/react'
+import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import type { ReactNode } from 'react'
 import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom'
@@ -216,7 +216,7 @@ describe('PanoramaMemoryScreen lifecycle', () => {
     )
   })
 
-  it('uses the chosen memory for both Cardboard eyes after the Go gesture', async () => {
+  it('skips the chooser and uses the currently viewed memory for Cardboard', async () => {
     const user = userEvent.setup()
     render(
       <MemoryRouter initialEntries={['/memory/dinner']}>
@@ -230,12 +230,19 @@ describe('PanoramaMemoryScreen lifecycle', () => {
     await user.click(
       screen.getByRole('button', { name: 'Set up Cardboard VR view' }),
     )
-    await user.click(
-      screen.getByRole('radio', { name: /beach day, hishaam/i }),
-    )
-    await user.click(
-      screen.getByRole('button', { name: 'Continue with Beach day' }),
-    )
+    expect(
+      screen.queryByRole('heading', { name: 'Choose a moment' }),
+    ).not.toBeInTheDocument()
+    expect(
+      screen.queryByRole('radiogroup', {
+        name: 'Choose from available memories',
+      }),
+    ).not.toBeInTheDocument()
+    expect(
+      screen.getByRole('dialog', {
+        name: /turn your phone sideways|place your phone in cardboard/i,
+      }),
+    ).toBeVisible()
     const landscapeOverride = screen.queryByRole('button', {
       name: 'Use split view anyway',
     })
@@ -254,9 +261,9 @@ describe('PanoramaMemoryScreen lifecycle', () => {
       document.querySelectorAll('[data-panorama]').forEach((viewport) => {
         expect(viewport).toHaveAttribute(
           'data-panorama',
-          '/assets/panoramas/jordan-pond-demo.jpg',
+          '/assets/panoramas/sunday-dinner-demo.jpg',
         )
-        expect(viewport).toHaveAttribute('data-scene-title', 'Beach day')
+        expect(viewport).toHaveAttribute('data-scene-title', 'Sunday dinner')
       })
     })
   })
@@ -291,12 +298,6 @@ describe('PanoramaMemoryScreen lifecycle', () => {
     await user.click(
       screen.getByRole('button', { name: 'Set up Cardboard VR view' }),
     )
-    await user.click(
-      screen.getByRole('radio', { name: /beach day, hishaam/i }),
-    )
-    await user.click(
-      screen.getByRole('button', { name: 'Continue with Beach day' }),
-    )
     const landscapeOverride = screen.queryByRole('button', {
       name: 'Use split view anyway',
     })
@@ -323,7 +324,7 @@ describe('PanoramaMemoryScreen lifecycle', () => {
     )
   })
 
-  it('keeps a Moments-opened VR exit returning to the selected bubble', async () => {
+  it('keeps a Moments-opened VR exit returning to the viewed bubble', async () => {
     const user = userEvent.setup()
     render(
       <MemoryRouter initialEntries={['/memory/dinner']}>
@@ -337,12 +338,6 @@ describe('PanoramaMemoryScreen lifecycle', () => {
     await user.click(
       screen.getByRole('button', { name: 'Set up Cardboard VR view' }),
     )
-    await user.click(
-      screen.getByRole('radio', { name: /beach day, hishaam/i }),
-    )
-    await user.click(
-      screen.getByRole('button', { name: 'Continue with Beach day' }),
-    )
     const landscapeOverride = screen.queryByRole('button', {
       name: 'Use split view anyway',
     })
@@ -355,7 +350,7 @@ describe('PanoramaMemoryScreen lifecycle', () => {
     expect(
       await screen.findByRole('heading', { name: 'Moments bubbles' }),
     ).toBeVisible()
-    expect(screen.getByLabelText('Restored memory')).toHaveTextContent('beach')
+    expect(screen.getByLabelText('Restored memory')).toHaveTextContent('dinner')
   })
 
   it('closes a shortcut-launched VR chooser back to the Moments bubbles', async () => {
@@ -429,13 +424,19 @@ describe('PanoramaMemoryScreen lifecycle', () => {
     ).not.toBeInTheDocument()
   })
 
-  it('offers current shared uploads and keeps static fixture memories available', async () => {
-    const user = userEvent.setup()
+  it('keeps the homepage VR shortcut chooser populated with current uploads', async () => {
     const yesterday = new Date()
     yesterday.setDate(yesterday.getDate() - 1)
 
     render(
-      <MemoryRouter initialEntries={['/memory/dinner']}>
+      <MemoryRouter
+        initialEntries={[
+          {
+            pathname: '/memory/dinner',
+            state: { openVr: true, sourceMemoryId: 'dinner' },
+          },
+        ]}
+      >
         <Routes>
           <Route
             path="/memory/:memoryId"
@@ -494,10 +495,9 @@ describe('PanoramaMemoryScreen lifecycle', () => {
       </MemoryRouter>,
     )
 
-    await user.click(
-      screen.getByRole('button', { name: 'Set up Cardboard VR view' }),
-    )
-
+    expect(
+      await screen.findByRole('heading', { name: 'Choose a moment' }),
+    ).toBeVisible()
     expect(screen.getByText('Available memories')).toBeVisible()
     expect(
       screen.getByRole('radio', { name: 'Today together, Maya' }),
@@ -742,7 +742,7 @@ describe('PanoramaMemoryScreen lifecycle', () => {
     ).toBeVisible()
   })
 
-  it('opens a received family upload as the actual panorama scene', async () => {
+  it('opens an older received family upload as the actual panorama scene', async () => {
     const user = userEvent.setup()
     render(
       <MemoryRouter initialEntries={['/memory/shared-family-balcony']}>
@@ -801,13 +801,11 @@ describe('PanoramaMemoryScreen lifecycle', () => {
       screen.getByRole('button', { name: 'Set up Cardboard VR view' }),
     )
     expect(
-      screen.getByRole('radio', { name: 'Family balcony, Maya' }),
-    ).toHaveAttribute('aria-checked', 'true')
-    await user.click(
-      screen.getByRole('button', {
-        name: 'Continue with Family balcony',
-      }),
-    )
+      screen.queryByRole('heading', { name: 'Choose a moment' }),
+    ).not.toBeInTheDocument()
+    expect(
+      within(screen.getByRole('dialog')).getByText('Family balcony'),
+    ).toBeVisible()
     const landscapeOverride = screen.queryByRole('button', {
       name: 'Use split view anyway',
     })
@@ -901,7 +899,7 @@ describe('PanoramaMemoryScreen lifecycle', () => {
                     objectUrl: 'blob:missing-voice-panorama',
                     label: 'Family garden',
                     caption: 'A windy afternoon.',
-                    createdAt: new Date().toISOString(),
+                    createdAt: '2020-01-01T12:00:00.000Z',
                     width: 4000,
                     height: 2000,
                     source: 'manual',

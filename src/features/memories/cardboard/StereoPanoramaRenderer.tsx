@@ -9,13 +9,16 @@ import {
 } from 'react'
 import type { PanoramaOrientationStartOptions, PanoramaScene } from '../../../viewer'
 import {
+  CardboardPoseTracker,
+  type CardboardTrackingState,
+} from './cardboardPoseTracker'
+import {
   deviceOrientationQuaternion,
   evenPixelWidth,
   quaternionToMatrix3,
-  relativeDeviceViewQuaternion,
   resolveStereoViewports,
+  type StereoViewportProfile,
   viewQuaternion,
-  type Quaternion,
 } from './stereoPanoramaMath'
 import './StereoPanoramaRenderer.css'
 
@@ -30,8 +33,11 @@ export interface StereoPanoramaRendererProps {
   ariaLabel: string
   /** Fraction of each eye width; positive values move both centers inward. */
   opticalCenterShift?: number
+  viewportProfile?: StereoViewportProfile
+  horizontalFovOverride?: number
   onReady?: () => void
   onError?: (error: Error) => void
+  onTrackingStateChange?: (state: CardboardTrackingState) => void
 }
 
 type RendererStatus = 'loading' | 'ready' | 'fallback' | 'error'
@@ -194,7 +200,12 @@ export class StereoWebGlPanoramaRenderer {
     if (this.canvas.height !== height) this.canvas.height = height
   }
 
-  render(cameraRotation: Float32Array, horizontalFovDegrees: number, opticalCenterShift: number) {
+  render(
+    cameraRotation: Float32Array,
+    horizontalFovDegrees: number,
+    opticalCenterShift: number,
+    viewportProfile: StereoViewportProfile,
+  ) {
     if (this.destroyed || !this.textureReady) return
     // ResizeObserver and the native orientation settle timers own measurement;
     // never force layout from the animation loop once the buffer has dimensions.
@@ -204,6 +215,7 @@ export class StereoWebGlPanoramaRenderer {
       canvas.width,
       canvas.height,
       opticalCenterShift,
+      viewportProfile,
     )
     const eyeAspect = eyes[0].width / Math.max(eyes[0].height, 1)
     const hfov = Math.max(55, Math.min(110, horizontalFovDegrees))
@@ -254,64 +266,124 @@ export const StereoPanoramaRenderer = forwardRef<
   StereoPanoramaRendererHandle,
   StereoPanoramaRendererProps
 >(function StereoPanoramaRenderer(
-  { scene, ariaLabel, opticalCenterShift = 0, onReady, onError },
+  {
+    scene,
+    ariaLabel,
+    opticalCenterShift = 0,
+    viewportProfile = 'ios-reference',
+    horizontalFovOverride,
+    onReady,
+    onError,
+    onTrackingStateChange,
+  },
   forwardedRef,
 ) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const rendererRef = useRef<StereoWebGlPanoramaRenderer | null>(null)
-  const callbacksRef = useRef({ onReady, onError })
+  const callbacksRef = useRef({ onReady, onError, onTrackingStateChange })
   const frameRef = useRef<number | null>(null)
   const requestRef = useRef(0)
-  const orientationActiveRef = useRef(false)
   const orientationListenerRef = useRef<((event: DeviceOrientationEvent) => void) | null>(null)
+  const screenOrientationListenerRef = useRef<(() => void) | null>(null)
+  const visibilityListenerRef = useRef<(() => void) | null>(null)
   const pendingOrientationRef = useRef<PendingOrientationStart | null>(null)
-  const initialDeviceRef = useRef<Quaternion | null>(null)
-  const currentDeviceRef = useRef<Quaternion | null>(null)
-  const manualRef = useRef({ yaw: scene.yaw ?? 0, pitch: scene.pitch ?? 0 })
+  const [poseTracker] = useState(
+    () => new CardboardPoseTracker(
+      viewQuaternion(scene.yaw ?? 0, scene.pitch ?? 0),
+    ),
+  )
+  const notifiedTrackingStateRef = useRef<CardboardTrackingState>('waiting')
   const sceneViewRef = useRef({ yaw: scene.yaw ?? 0, pitch: scene.pitch ?? 0, hfov: scene.hfov ?? 92 })
   const centerShiftRef = useRef(opticalCenterShift)
+  const viewportProfileRef = useRef(viewportProfile)
+  const horizontalFovOverrideRef = useRef(horizontalFovOverride)
   const pointerRef = useRef<{ id: number; x: number; y: number } | null>(null)
   const [status, setStatus] = useState<RendererStatus>('loading')
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
 
-  useEffect(() => { callbacksRef.current = { onReady, onError } }, [onError, onReady])
+  useEffect(() => {
+    callbacksRef.current = { onReady, onError, onTrackingStateChange }
+  }, [onError, onReady, onTrackingStateChange])
   useEffect(() => { centerShiftRef.current = opticalCenterShift }, [opticalCenterShift])
+  useEffect(() => { viewportProfileRef.current = viewportProfile }, [viewportProfile])
+  useEffect(() => {
+    horizontalFovOverrideRef.current = horizontalFovOverride
+  }, [horizontalFovOverride])
   useEffect(() => {
     sceneViewRef.current = { yaw: scene.yaw ?? 0, pitch: scene.pitch ?? 0, hfov: scene.hfov ?? 92 }
-    manualRef.current = { yaw: scene.yaw ?? 0, pitch: scene.pitch ?? 0 }
-    initialDeviceRef.current = null
-    currentDeviceRef.current = null
-  }, [scene.id, scene.hfov, scene.pitch, scene.yaw])
+    poseTracker.reset(viewQuaternion(scene.yaw ?? 0, scene.pitch ?? 0))
+    notifiedTrackingStateRef.current = 'waiting'
+  }, [poseTracker, scene.id, scene.hfov, scene.pitch, scene.yaw])
+
+  const notifyTrackingState = useCallback((state: CardboardTrackingState) => {
+    if (notifiedTrackingStateRef.current === state) return
+    notifiedTrackingStateRef.current = state
+    callbacksRef.current.onTrackingStateChange?.(state)
+  }, [])
 
   const stopOrientation = useCallback(() => {
     pendingOrientationRef.current?.settle(false)
     pendingOrientationRef.current = null
     const listener = orientationListenerRef.current
     if (listener) window.removeEventListener('deviceorientation', listener)
+    const screenListener = screenOrientationListenerRef.current
+    if (screenListener) {
+      globalThis.screen?.orientation?.removeEventListener?.('change', screenListener)
+      window.removeEventListener('orientationchange', screenListener)
+    }
+    const visibilityListener = visibilityListenerRef.current
+    if (visibilityListener) {
+      document.removeEventListener('visibilitychange', visibilityListener)
+    }
     orientationListenerRef.current = null
-    orientationActiveRef.current = false
-    initialDeviceRef.current = null
-    currentDeviceRef.current = null
-  }, [])
+    screenOrientationListenerRef.current = null
+    visibilityListenerRef.current = null
+    poseTracker.stopTracking()
+    notifiedTrackingStateRef.current = 'waiting'
+  }, [poseTracker])
 
   const startOrientation = useCallback(async (_options?: PanoramaOrientationStartOptions) => {
     if (!rendererRef.current || typeof globalThis.DeviceOrientationEvent === 'undefined') return false
     stopOrientation()
+    poseTracker.prepareForTracking()
     return new Promise<boolean>((resolve) => {
       let settled = false
       let timeout = 0
       const listener = (event: DeviceOrientationEvent) => {
-        if (event.alpha === null || event.beta === null || event.gamma === null) return
+        if (
+          event.alpha === null ||
+          event.beta === null ||
+          event.gamma === null ||
+          !Number.isFinite(event.alpha) ||
+          !Number.isFinite(event.beta) ||
+          !Number.isFinite(event.gamma)
+        ) return
+        const receiptTime = performance.now()
+        const screenAngle = screenOrientationAngle()
         const sample = deviceOrientationQuaternion(
           event.alpha,
           event.beta,
           event.gamma,
-          screenOrientationAngle(),
+          screenAngle,
         )
-        initialDeviceRef.current ??= sample
-        currentDeviceRef.current = sample
-        orientationActiveRef.current = true
+        const state = poseTracker.sample(
+          sample,
+          screenAngle,
+          Number.isFinite(event.timeStamp) ? event.timeStamp : receiptTime,
+          receiptTime,
+        )
+        if (state) notifyTrackingState(state)
         settle(true)
+      }
+      const handleScreenOrientationChange = () => {
+        poseTracker.markScreenOrientationChanged()
+      }
+      const handleVisibilityChange = () => {
+        if (document.visibilityState !== 'hidden') {
+          poseTracker.markScreenOrientationChanged()
+          return
+        }
+        if (poseTracker.markStale()) notifyTrackingState('stale')
       }
       const settle = (started: boolean) => {
         if (settled) return
@@ -325,19 +397,40 @@ export const StereoPanoramaRenderer = forwardRef<
           if (orientationListenerRef.current === listener) {
             orientationListenerRef.current = null
           }
-          orientationActiveRef.current = false
-          initialDeviceRef.current = null
-          currentDeviceRef.current = null
+          globalThis.screen?.orientation?.removeEventListener?.(
+            'change',
+            handleScreenOrientationChange,
+          )
+          window.removeEventListener(
+            'orientationchange',
+            handleScreenOrientationChange,
+          )
+          document.removeEventListener(
+            'visibilitychange',
+            handleVisibilityChange,
+          )
+          screenOrientationListenerRef.current = null
+          visibilityListenerRef.current = null
+          poseTracker.stopTracking()
+          notifiedTrackingStateRef.current = 'waiting'
         }
         resolve(started)
       }
 
       orientationListenerRef.current = listener
+      screenOrientationListenerRef.current = handleScreenOrientationChange
+      visibilityListenerRef.current = handleVisibilityChange
       pendingOrientationRef.current = { settle }
       window.addEventListener('deviceorientation', listener)
+      globalThis.screen?.orientation?.addEventListener?.(
+        'change',
+        handleScreenOrientationChange,
+      )
+      window.addEventListener('orientationchange', handleScreenOrientationChange)
+      document.addEventListener('visibilitychange', handleVisibilityChange)
       timeout = window.setTimeout(() => settle(false), 1500)
     })
-  }, [stopOrientation])
+  }, [notifyTrackingState, poseTracker, stopOrientation])
 
   useImperativeHandle(forwardedRef, () => ({
     startOrientation,
@@ -367,12 +460,16 @@ export const StereoPanoramaRenderer = forwardRef<
       const renderer = rendererRef.current
       if (!renderer) return
       const view = sceneViewRef.current
-      const first = initialDeviceRef.current
-      const current = currentDeviceRef.current
-      const pose = orientationActiveRef.current && first && current
-        ? relativeDeviceViewQuaternion(viewQuaternion(view.yaw, view.pitch), first, current)
-        : viewQuaternion(manualRef.current.yaw, manualRef.current.pitch)
-      renderer.render(quaternionToMatrix3(pose), view.hfov, centerShiftRef.current)
+      if (poseTracker.updateStaleness(performance.now())) {
+        notifyTrackingState('stale')
+      }
+      const pose = poseTracker.getPose()
+      renderer.render(
+        quaternionToMatrix3(pose),
+        horizontalFovOverrideRef.current ?? view.hfov,
+        centerShiftRef.current,
+        viewportProfileRef.current,
+      )
       frameRef.current = window.requestAnimationFrame(draw)
     }
     frameRef.current = window.requestAnimationFrame(draw)
@@ -384,7 +481,7 @@ export const StereoPanoramaRenderer = forwardRef<
       rendererRef.current?.destroy()
       rendererRef.current = null
     }
-  }, [stopOrientation])
+  }, [notifyTrackingState, poseTracker, stopOrientation])
 
   useEffect(() => {
     const renderer = rendererRef.current
@@ -427,10 +524,10 @@ export const StereoPanoramaRenderer = forwardRef<
   }, [scene.panorama])
 
   const pointerDown = useCallback((event: ReactPointerEvent<HTMLCanvasElement>) => {
-    if (orientationActiveRef.current) return
+    if (poseTracker.getState() === 'active') return
     pointerRef.current = { id: event.pointerId, x: event.clientX, y: event.clientY }
     event.currentTarget.setPointerCapture?.(event.pointerId)
-  }, [])
+  }, [poseTracker])
   const pointerMove = useCallback((event: ReactPointerEvent<HTMLCanvasElement>) => {
     const pointer = pointerRef.current
     if (!pointer || pointer.id !== event.pointerId) return
@@ -438,9 +535,8 @@ export const StereoPanoramaRenderer = forwardRef<
     const dy = event.clientY - pointer.y
     pointer.x = event.clientX
     pointer.y = event.clientY
-    manualRef.current.yaw -= dx * 0.16
-    manualRef.current.pitch = Math.max(-85, Math.min(85, manualRef.current.pitch + dy * 0.14))
-  }, [])
+    poseTracker.applyManualDelta(-dx * 0.16, dy * 0.14)
+  }, [poseTracker])
   const pointerEnd = useCallback((event: ReactPointerEvent<HTMLCanvasElement>) => {
     if (pointerRef.current?.id !== event.pointerId) return
     pointerRef.current = null

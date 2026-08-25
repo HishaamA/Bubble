@@ -28,6 +28,7 @@ export type CardboardSetupFlowProps = {
   open: boolean
   choices: readonly CardboardMemoryChoice[]
   selectedMemoryId: string
+  allowMemorySelection?: boolean
   busy?: boolean
   error?: string | null
   onSelectMemory: (memoryId: string) => void
@@ -80,13 +81,16 @@ function CardboardSetupContents({
   open,
   choices,
   selectedMemoryId,
+  allowMemorySelection = true,
   busy = false,
   error,
   onSelectMemory,
   onGo,
   onClose,
 }: CardboardSetupFlowProps) {
-  const [step, setStep] = useState<CardboardSetupStep>('choose')
+  const [step, setStep] = useState<CardboardSetupStep>(() =>
+    allowMemorySelection ? 'choose' : 'rotate',
+  )
   const [forceLandscape, setForceLandscape] = useState(false)
   const landscape = useLandscapeOrientation()
   const closeButtonRef = useRef<HTMLButtonElement>(null)
@@ -104,6 +108,16 @@ function CardboardSetupContents({
 
   const selectedChoice =
     choices.find(({ id }) => id === selectedMemoryId) ?? choices[0]
+  const stepNumber = allowMemorySelection
+    ? step === 'choose'
+      ? 1
+      : step === 'rotate'
+        ? 2
+        : 3
+    : step === 'rotate'
+      ? 1
+      : 2
+  const stepCount = allowMemorySelection ? 3 : 2
 
   useEffect(() => {
     if (step !== 'rotate' || !landscape) return
@@ -150,9 +164,7 @@ function CardboardSetupContents({
       <header className="cardboard-setup__header">
         <div>
           <p>Cardboard VR</p>
-          <span>
-            {step === 'choose' ? '1' : step === 'rotate' ? '2' : '3'} of 3
-          </span>
+          <span>{stepNumber} of {stepCount}</span>
         </div>
         <button
           ref={closeButtonRef}
@@ -165,7 +177,7 @@ function CardboardSetupContents({
         </button>
       </header>
 
-      {step === 'choose' ? (
+      {allowMemorySelection && step === 'choose' ? (
         <div className="cardboard-setup__step cardboard-setup__step--choose">
           <div className="cardboard-setup__copy">
             <p className="cardboard-setup__eyebrow">Available memories</p>
@@ -272,17 +284,19 @@ function CardboardSetupContents({
           >
             {busy ? 'Starting…' : 'Go'}
           </button>
-          <button
-            className="cardboard-setup__back"
-            type="button"
-            disabled={busy}
-            onClick={() => {
-              setForceLandscape(false)
-              setStep('choose')
-            }}
-          >
-            Choose another memory
-          </button>
+          {allowMemorySelection ? (
+            <button
+              className="cardboard-setup__back"
+              type="button"
+              disabled={busy}
+              onClick={() => {
+                setForceLandscape(false)
+                setStep('choose')
+              }}
+            >
+              Choose another memory
+            </button>
+          ) : null}
         </div>
       ) : null}
     </section>

@@ -30,8 +30,10 @@ const choices: readonly CardboardMemoryChoice[] = [
 
 function SetupHarness({
   onGo = vi.fn(),
+  allowMemorySelection = true,
 }: {
   onGo?: (options?: { forceLandscape?: boolean }) => void
+  allowMemorySelection?: boolean
 }) {
   const [selectedMemoryId, setSelectedMemoryId] = useState('dinner')
   return (
@@ -39,6 +41,7 @@ function SetupHarness({
       open
       choices={choices}
       selectedMemoryId={selectedMemoryId}
+      allowMemorySelection={allowMemorySelection}
       onSelectMemory={setSelectedMemoryId}
       onGo={onGo}
       onClose={vi.fn()}
@@ -133,5 +136,36 @@ describe('CardboardSetupFlow', () => {
 
     await user.click(screen.getByRole('button', { name: 'Go' }))
     expect(onGo).toHaveBeenCalledWith({ forceLandscape: false })
+  })
+
+  it('starts with the current memory when selection is disabled', async () => {
+    const user = userEvent.setup()
+    const onGo = vi.fn()
+    render(<SetupHarness allowMemorySelection={false} onGo={onGo} />)
+
+    expect(
+      screen.queryByRole('heading', { name: 'Choose a moment' }),
+    ).not.toBeInTheDocument()
+    expect(
+      screen.queryByRole('radiogroup', {
+        name: 'Choose from available memories',
+      }),
+    ).not.toBeInTheDocument()
+    expect(
+      screen.getByRole('heading', { name: 'Turn your phone sideways' }),
+    ).toBeVisible()
+    expect(screen.getByText('Sunday dinner')).toBeVisible()
+    expect(screen.getByText('1 of 2')).toBeVisible()
+
+    await user.click(
+      screen.getByRole('button', { name: 'Use split view anyway' }),
+    )
+
+    expect(
+      screen.queryByRole('button', { name: 'Choose another memory' }),
+    ).not.toBeInTheDocument()
+    expect(screen.getByText('2 of 2')).toBeVisible()
+    await user.click(screen.getByRole('button', { name: 'Go' }))
+    expect(onGo).toHaveBeenCalledWith({ forceLandscape: true })
   })
 })

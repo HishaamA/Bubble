@@ -6,6 +6,7 @@ import {
   useRef,
   useState,
 } from 'react'
+import { Capacitor } from '@capacitor/core'
 import { createPortal } from 'react-dom'
 import type { PanoramaScene } from '../../../viewer'
 import './CardboardViewer.css'
@@ -17,6 +18,7 @@ import {
   nativeCardboardOrientationAvailable,
   requestNativeCardboardLandscape,
   restoreNativeAppOrientation,
+  shouldRequestCardboardDomFullscreenFallback,
 } from './nativeCardboardOrientation'
 import { useLandscapeOrientation } from './useLandscapeOrientation'
 
@@ -276,6 +278,7 @@ export const CardboardViewer = forwardRef<
   const entryPromiseRef = useRef<Promise<CardboardEntryResult> | null>(null)
   const exitPromiseRef = useRef<Promise<void> | null>(null)
   const focusFrameRef = useRef<number | null>(null)
+  const settleResizeTimersRef = useRef<number[]>([])
   const motionActiveRef = useRef(false)
   const viewerGenerationRef = useRef(0)
   const mountedScenesRef = useRef(scenes)
@@ -296,6 +299,7 @@ export const CardboardViewer = forwardRef<
   >('not-required')
   const [motionStatus, setMotionStatus] = useState<MotionStatus>('idle')
   const [fullscreenAvailable, setFullscreenAvailable] = useState(true)
+  const [presentationReady, setPresentationReady] = useState(false)
   const [landscapeOverride, setLandscapeOverride] = useState(false)
   const [currentSceneId, setCurrentSceneId] = useState(resolvedInitialSceneId)
   const viewerReady = readyScenes === scenes
@@ -303,6 +307,8 @@ export const CardboardViewer = forwardRef<
     scenes.find(({ id }) => id === currentSceneId) ?? scenes[0]
   const forceLandscape = active && landscapeOverride && !landscape
   const motionFallbackMessage = MOTION_FALLBACK_MESSAGES[motionStatus]
+  const androidWebFallback =
+    Capacitor.isNativePlatform() && Capacitor.getPlatform() === 'android'
 
   useEffect(() => {
     callbacksRef.current = { onActiveChange, onSceneChange, onExit }
@@ -327,6 +333,15 @@ export const CardboardViewer = forwardRef<
   const resizeStereoViewer = useCallback(() => {
     stereoViewerRef.current?.resize()
   }, [])
+
+  const scheduleSettledViewerResizes = useCallback(() => {
+    settleResizeTimersRef.current.forEach(window.clearTimeout)
+    settleResizeTimersRef.current = [0, 100, 300].map((delay) =>
+      window.setTimeout(() => {
+        resizeStereoViewer()
+      }, delay),
+    )
+  }, [resizeStereoViewer])
 
   useEffect(() => {
     if (mountedScenesRef.current === scenes) return
@@ -358,6 +373,8 @@ export const CardboardViewer = forwardRef<
         window.cancelAnimationFrame(focusFrameRef.current)
         focusFrameRef.current = null
       }
+      settleResizeTimersRef.current.forEach(window.clearTimeout)
+      settleResizeTimersRef.current = []
 
       const fullscreenRoot = fullscreenRootRef.current
       const ownedFullscreen = fullscreenOwnedRef.current
@@ -400,6 +417,16 @@ export const CardboardViewer = forwardRef<
     setMotionStatus(started ? 'active' : 'unavailable')
   }, [])
 
+  const handleTrackingStateChange = useCallback(
+    (state: 'waiting' | 'active' | 'stale') => {
+      if (!activeRef.current || state === 'waiting') return
+      const activeTracking = state === 'active'
+      motionActiveRef.current = activeTracking
+      setMotionStatus(activeTracking ? 'active' : 'unavailable')
+    },
+    [],
+  )
+
   const exit = useCallback((): Promise<void> => {
     if (exitPromiseRef.current) return exitPromiseRef.current
     if (!activeRef.current) return Promise.resolve()
@@ -415,7 +442,10 @@ export const CardboardViewer = forwardRef<
       setPermission('not-required')
       setMotionStatus('idle')
       setLandscapeOverride(false)
+      setPresentationReady(false)
     }
+    settleResizeTimersRef.current.forEach(window.clearTimeout)
+    settleResizeTimersRef.current = []
     permissionRef.current = 'not-required'
 
     // Leave the synthetic panorama host route immediately. Native orientation
@@ -482,6 +512,7 @@ export const CardboardViewer = forwardRef<
       setMotionStatus('preparing')
       setPermission('checking')
       setFullscreenAvailable(true)
+      setPresentationReady(false)
       setLandscapeOverride(options.forceLandscape === true)
       setActive(true)
     }
@@ -490,9 +521,12 @@ export const CardboardViewer = forwardRef<
     // These calls begin inside the originating click. This is important for
     // fullscreen, native rotation, and iOS' motion permission prompt.
     const nativeOrientationCapable = nativeCardboardOrientationAvailable()
+    const nativeDomFullscreenFallback =
+      shouldRequestCardboardDomFullscreenFallback()
     const nativeOrientationRequest = requestNativeCardboardLandscape()
     const permissionRequest = requestMotionPermission()
-    const fullscreenRequest = !nativeOrientationCapable && fullscreenRoot
+    const fullscreenRequest =
+      (!nativeOrientationCapable || nativeDomFullscreenFallback) && fullscreenRoot
       ? requestElementFullscreen(fullscreenRoot)
       : Promise.resolve(false)
 
@@ -532,7 +566,7 @@ export const CardboardViewer = forwardRef<
       }
 
       fullscreenOwnedRef.current = fullscreen
-      setFullscreenAvailable(fullscreen || nativeOrientationCapable)
+      if (!nativeOrientationCapable) setFullscreenAvailable(fullscreen)
       if (fullscreen) {
         await lockLandscape()
         if (!activeRef.current || !mountedRef.current) {
@@ -557,6 +591,10 @@ export const CardboardViewer = forwardRef<
           }
         }
 
+        if (entryIsCurrent && nativeOrientationCapable) {
+          setFullscreenAvailable(requested || fullscreenOwnedRef.current)
+        }
+
         return requested
       },
     )
@@ -565,17 +603,27 @@ export const CardboardViewer = forwardRef<
       settledPermission,
       settledFullscreen,
       settledNativeOrientation,
-    ]).then(([motionPermission, fullscreen]) => ({
-      fullscreen,
-      motionPermission,
-    })).finally(() => {
+    ]).then(([motionPermission, fullscreen, nativePresentation]) => {
+      if (
+        activeRef.current &&
+        requestedSession === sessionRef.current &&
+        mountedRef.current
+      ) {
+        setPresentationReady(true)
+        scheduleSettledViewerResizes()
+      }
+      return {
+        fullscreen: fullscreen || nativePresentation,
+        motionPermission,
+      }
+    }).finally(() => {
       if (entryPromiseRef.current === entryPromise) {
         entryPromiseRef.current = null
       }
     })
     entryPromiseRef.current = entryPromise
     return entryPromise
-  }, [])
+  }, [scheduleSettledViewerResizes])
 
   useImperativeHandle(
     forwardedRef,
@@ -587,6 +635,7 @@ export const CardboardViewer = forwardRef<
     if (
       !active ||
       !viewerReady ||
+      !presentationReady ||
       permission === 'checking' ||
       motionAttemptedRef.current
     ) {
@@ -596,7 +645,7 @@ export const CardboardViewer = forwardRef<
     if (permission !== 'granted' && permission !== 'not-required') return
 
     void startPrimaryViewer(permission === 'granted')
-  }, [active, permission, startPrimaryViewer, viewerReady])
+  }, [active, permission, presentationReady, startPrimaryViewer, viewerReady])
 
   useEffect(() => {
     if (!active) return
@@ -681,7 +730,7 @@ export const CardboardViewer = forwardRef<
   return createPortal(
     <section
       ref={rootRef}
-      className={`ks-cardboard${active ? ' ks-cardboard--active' : ''}${forceLandscape ? ' ks-cardboard--forced-landscape' : ''}`}
+      className={`ks-cardboard${active ? ' ks-cardboard--active' : ''}${forceLandscape ? ' ks-cardboard--forced-landscape' : ''}${androidWebFallback ? ' ks-cardboard--android-fallback' : ''}`}
       role="dialog"
       aria-modal={active ? true : undefined}
       aria-label={ariaLabel}
@@ -698,7 +747,12 @@ export const CardboardViewer = forwardRef<
                 scene={activeScene}
                 ariaLabel={`${ariaLabel}, synchronized left and right eye panorama`}
                 opticalCenterShift={0}
+                viewportProfile={
+                  androidWebFallback ? 'youtube-fallback' : 'ios-reference'
+                }
+                horizontalFovOverride={androidWebFallback ? 80 : undefined}
                 onReady={() => setReadyScenes(scenes)}
+                onTrackingStateChange={handleTrackingStateChange}
               />
             ) : (
               <p className="ks-cardboard__missing-scene" role="alert">

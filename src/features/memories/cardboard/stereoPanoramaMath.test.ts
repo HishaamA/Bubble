@@ -51,6 +51,20 @@ describe('stereo panorama geometry', () => {
     expect(right.x + right.width).toBe(1170 - left.x)
   })
 
+  it('matches the 1600 by 736 iOS headset reference geometry exactly', () => {
+    expect(resolveStereoViewports(1600, 736, 0)).toEqual([
+      { x: 96, y: 37, width: 608, height: 662, opticalCenter: 0 },
+      { x: 896, y: 37, width: 608, height: 662, opticalCenter: -0 },
+    ])
+  })
+
+  it('matches the measured YouTube fallback eye centers on Android', () => {
+    expect(resolveStereoViewports(1600, 720, 0, 'youtube-fallback')).toEqual([
+      { x: 160, y: 0, width: 640, height: 720, opticalCenter: 0 },
+      { x: 800, y: 0, width: 640, height: 720, opticalCenter: -0 },
+    ])
+  })
+
   it('keeps tiny buffers valid and symmetric', () => {
     expect(resolveStereoViewports(2, 1, 0)).toEqual([
       { x: 0, y: 0, width: 1, height: 1, opticalCenter: 0 },

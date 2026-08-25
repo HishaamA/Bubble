@@ -61,4 +61,30 @@ public final class CardboardOrientationPluginTest {
             )
         );
     }
+
+    @Test
+    public void restoresThePortraitAppAfterAnUnspecifiedOrSensorSession() {
+        assertEquals(
+            ActivityInfo.SCREEN_ORIENTATION_PORTRAIT,
+            CardboardOrientationPlugin.normalizedRestoreOrientation(
+                ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
+            )
+        );
+        assertEquals(
+            ActivityInfo.SCREEN_ORIENTATION_PORTRAIT,
+            CardboardOrientationPlugin.normalizedRestoreOrientation(
+                ActivityInfo.SCREEN_ORIENTATION_FULL_SENSOR
+            )
+        );
+    }
+
+    @Test
+    public void preservesAnExplicitPriorOrientation() {
+        assertEquals(
+            ActivityInfo.SCREEN_ORIENTATION_REVERSE_PORTRAIT,
+            CardboardOrientationPlugin.normalizedRestoreOrientation(
+                ActivityInfo.SCREEN_ORIENTATION_REVERSE_PORTRAIT
+            )
+        );
+    }
 }

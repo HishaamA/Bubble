@@ -20,17 +20,20 @@ const stereoMocks = vi.hoisted(() => ({
     scene: PanoramaScene
     ariaLabel: string
     opticalCenterShift?: number
+    onTrackingStateChange?: (state: 'waiting' | 'active' | 'stale') => void
   },
 }))
 
 const nativeOrientationMocks = vi.hoisted(() => ({
   available: vi.fn(() => false),
+  domFullscreenFallback: vi.fn(() => false),
   requestLandscape: vi.fn(() => Promise.resolve(false)),
   restoreAppOrientation: vi.fn(() => Promise.resolve(false)),
 }))
 
 vi.mock('./nativeCardboardOrientation', () => ({
   nativeCardboardOrientationAvailable: nativeOrientationMocks.available,
+  shouldRequestCardboardDomFullscreenFallback: nativeOrientationMocks.domFullscreenFallback,
   requestNativeCardboardLandscape: nativeOrientationMocks.requestLandscape,
   restoreNativeAppOrientation: nativeOrientationMocks.restoreAppOrientation,
 }))
@@ -43,6 +46,7 @@ vi.mock('./StereoPanoramaRenderer', async () => {
     ariaLabel: string
     opticalCenterShift?: number
     onReady?: () => void
+    onTrackingStateChange?: (state: 'waiting' | 'active' | 'stale') => void
   }
 
   return {
@@ -152,6 +156,7 @@ describe('CardboardViewer', () => {
     stereoMocks.readyCallback = null
     stereoMocks.lastProps = null
     nativeOrientationMocks.available.mockReturnValue(false)
+    nativeOrientationMocks.domFullscreenFallback.mockReturnValue(false)
     nativeOrientationMocks.requestLandscape.mockResolvedValue(false)
     nativeOrientationMocks.restoreAppOrientation.mockResolvedValue(false)
     fullscreenElement = null
@@ -230,6 +235,18 @@ describe('CardboardViewer', () => {
       screen.queryByRole('button', { name: /enable motion/i }),
     ).not.toBeInTheDocument()
     expect(document.querySelector('.ks-cardboard__status-panel')).toBeNull()
+  })
+
+  it('offers drag guidance only while tracking is stale and clears it on recovery', async () => {
+    const ref = createRef<CardboardViewerHandle>()
+    render(<CardboardViewer ref={ref} scenes={scenes} />)
+    await enterViewer(ref)
+
+    act(() => stereoMocks.lastProps?.onTrackingStateChange?.('stale'))
+    expect(screen.getByRole('status')).toHaveTextContent(/synchronized drag/i)
+
+    act(() => stereoMocks.lastProps?.onTrackingStateChange?.('active'))
+    expect(screen.queryByText(/synchronized drag/i)).not.toBeInTheDocument()
   })
 
   it('uses one stereo renderer with both reticles geometrically centered', async () => {
@@ -329,6 +346,45 @@ describe('CardboardViewer', () => {
     )
 
     expect(nativeOrientationMocks.restoreAppOrientation).toHaveBeenCalledOnce()
+  })
+
+  it('uses gesture-bound DOM fullscreen as an Android native fallback', async () => {
+    nativeOrientationMocks.available.mockReturnValue(true)
+    nativeOrientationMocks.domFullscreenFallback.mockReturnValue(true)
+    nativeOrientationMocks.requestLandscape.mockResolvedValue(false)
+    const ref = createRef<CardboardViewerHandle>()
+    render(<CardboardViewer ref={ref} scenes={scenes} />)
+
+    let result: Awaited<ReturnType<CardboardViewerHandle['enter']>> | undefined
+    await act(async () => {
+      result = await ref.current?.enter()
+    })
+
+    expect(HTMLElement.prototype.requestFullscreen).toHaveBeenCalledOnce()
+    expect(result?.fullscreen).toBe(true)
+  })
+
+  it('waits for native landscape to settle before starting head tracking', async () => {
+    nativeOrientationMocks.available.mockReturnValue(true)
+    let finishLandscape: ((value: boolean) => void) | undefined
+    nativeOrientationMocks.requestLandscape.mockImplementationOnce(
+      () => new Promise<boolean>((resolve) => { finishLandscape = resolve }),
+    )
+    const ref = createRef<CardboardViewerHandle>()
+    render(<CardboardViewer ref={ref} scenes={scenes} />)
+
+    let entry: Promise<unknown> | undefined
+    await act(async () => {
+      entry = ref.current?.enter()
+      await Promise.resolve()
+    })
+    expect(stereoMocks.startOrientation).not.toHaveBeenCalled()
+
+    await act(async () => {
+      finishLandscape?.(true)
+      await entry
+    })
+    await waitFor(() => expect(stereoMocks.startOrientation).toHaveBeenCalledOnce())
   })
 
   it('stops motion and closes through the single Exit control', async () => {

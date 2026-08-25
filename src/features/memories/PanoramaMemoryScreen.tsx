@@ -26,6 +26,7 @@ import {
   type CardboardEntryOptions,
   type CardboardViewerHandle,
 } from './cardboard'
+import { presentNativeCardboardPanorama } from './cardboard/nativeCardboardPanorama'
 import { memories } from './memories'
 import type {
   PanoramaAnnotation,
@@ -428,24 +429,6 @@ export function PanoramaMemoryScreen({
     window.speechSynthesis.speak(note)
   }, [])
 
-  const enterCardboard = useCallback(async (options?: CardboardEntryOptions) => {
-    if (vrEntering || cardboardActive) return
-
-    setVrEntering(true)
-    setCommentsOpen(false)
-    setVrError(null)
-    try {
-      await cardboardRef.current?.enter(options)
-      setVrSetupOpen(false)
-    } catch {
-      setVrError(
-        'Cardboard view could not start. The panorama is still available to drag.',
-      )
-    } finally {
-      setVrEntering(false)
-    }
-  }, [cardboardActive, vrEntering])
-
   const openVrSetup = useCallback(() => {
     setSelectedVrMemoryId(memory.id)
     setVrError(null)
@@ -461,7 +444,8 @@ export function PanoramaMemoryScreen({
           .filter(
             (moment): moment is PanoramaMoment & { objectUrl: string } =>
               Boolean(moment.objectUrl) &&
-              isSameLocalDay(moment.createdAt, today),
+              (isSameLocalDay(moment.createdAt, today) ||
+                moment.id === sharedMomentId),
           )
           .map((moment) => ({
             id: `shared-${moment.id}`,
@@ -481,7 +465,7 @@ export function PanoramaMemoryScreen({
         })),
       ]
     },
-    [sharedMoments],
+    [sharedMomentId, sharedMoments],
   )
 
   const selectedVrChoice =
@@ -547,6 +531,45 @@ export function PanoramaMemoryScreen({
       },
     ]
   }, [openAnnotation, selectedVrSharedMoment, selectedVrStaticMemory])
+
+  const enterCardboard = useCallback(async (options?: CardboardEntryOptions) => {
+    if (vrEntering || cardboardActive) return
+
+    setVrEntering(true)
+    setCommentsOpen(false)
+    setVrError(null)
+    try {
+      const nativeScene = cardboardScenes[0]
+      const nativeOpened = nativeScene
+        ? await presentNativeCardboardPanorama({
+            scene: nativeScene,
+            sourceBlob: selectedVrSharedMoment?.blob,
+          })
+        : false
+
+      if (!nativeOpened) {
+        await cardboardRef.current?.enter(options)
+      }
+      // A direct VR route intentionally hides the regular panorama screen. Keep
+      // its setup sheet mounted behind the native Activity so there is a usable
+      // destination when the headset close button returns to the WebView.
+      if (!nativeOpened || !requestedOpenVr) {
+        setVrSetupOpen(false)
+      }
+    } catch {
+      setVrError(
+        'Cardboard view could not start. The panorama is still available to drag.',
+      )
+    } finally {
+      setVrEntering(false)
+    }
+  }, [
+    cardboardActive,
+    cardboardScenes,
+    requestedOpenVr,
+    selectedVrSharedMoment,
+    vrEntering,
+  ])
 
   const scenes = useMemo<PanoramaScene[]>(
     () => {
@@ -723,6 +746,7 @@ export function PanoramaMemoryScreen({
         open={vrSetupOpen && !cardboardActive}
         choices={vrChoices}
         selectedMemoryId={selectedVrChoice?.id ?? ''}
+        allowMemorySelection={requestedOpenVr}
         busy={vrEntering}
         error={vrError}
         onSelectMemory={(memoryId) => {

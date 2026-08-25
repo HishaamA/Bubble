@@ -52,6 +52,28 @@
   pointer-events: none;
 }
 
+/* If the official native Android renderer cannot launch, keep the web
+   fallback close to YouTube's measured 30% / 70% optical centers. The iOS
+   reference layout remains unchanged. */
+.ks-cardboard--android-fallback .ks-cardboard__eyes {
+  display: block;
+}
+
+.ks-cardboard--android-fallback .ks-cardboard__eye {
+  position: absolute;
+  inset-block-start: 0;
+  inline-size: 40%;
+  block-size: 100%;
+}
+
+.ks-cardboard--android-fallback .ks-cardboard__eye--left {
+  inset-inline-start: 10%;
+}
+
+.ks-cardboard--android-fallback .ks-cardboard__eye--right {
+  inset-inline-end: 10%;
+}
+
 .ks-cardboard__eyes .ks-stereo-panorama {
   z-index: 1;
 }
