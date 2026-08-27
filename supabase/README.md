@@ -147,6 +147,30 @@ submissions serialize per user/circle pair, and rescans and approvals lock an
 existing join request before its invite so the two RPCs use the same concurrency
 order.
 
+## Persistent family groups
+
+The primary Bubble onboarding flow uses one durable, rotatable family code in
+the form `BUB-XXXX-XXXX-XXXX-XXXX-XXXX-XXXX`. PostgreSQL generates 96 random
+bits for each code. The backing `family_share_codes` table has RLS enabled and
+no client table grants, so a signed-in app can obtain or use a code only through
+the guarded family RPCs. Existing circles are backfilled during migration.
+
+`create_family_with_share_code` atomically creates the circle, approved owner
+membership, and code. `join_family_by_share_code` normalizes pasted lowercase
+codes, directly creates an approved membership, and is idempotent when the same
+person retries the same family. The one-approved-family unique index still
+rejects joining or creating another family. Every approved member can retrieve
+the current code to share it; only the owner can rotate it. A member may leave
+without deleting family data. A sole owner may delete an empty family, while an
+owner with other members must transfer ownership first.
+
+`get_current_family` and `list_current_family_members` resolve the family from
+the verified Clerk subject rather than accepting a user or circle ID from the
+client. That means signing out clears only Clerk's local session; signing back
+in with the same Clerk subject resolves the same Supabase profile, membership,
+roster, code, and family-owned media. The older `ks1_...` approval-request path
+remains available only for already issued links during migration.
+
 ## Clerk authentication and event reminders
 
 The client uses Clerk sessions with Supabase's native third-party auth support.
