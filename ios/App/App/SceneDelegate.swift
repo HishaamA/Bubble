@@ -19,6 +19,7 @@ final class AppBridgeViewController: CAPBridgeViewController {
         bridge?.registerPluginInstance(PanoramaCapturePlugin())
         bridge?.registerPluginInstance(CardboardOrientationPlugin())
         bridge?.registerPluginInstance(CapsuleRecapPlugin())
+        bridge?.registerPluginInstance(NativeWebAuthPlugin())
     }
 
     override func viewDidAppear(_ animated: Bool) {

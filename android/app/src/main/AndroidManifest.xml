@@ -28,6 +28,19 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
 
+            <!-- Return Google OAuth to the existing Bubble activity so
+                 Capacitor's App plugin can emit the appUrlOpen event. -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+
+                <data
+                    android:host="callback"
+                    android:scheme="@string/custom_url_scheme" />
+            </intent-filter>
+
         </activity>
 
         <activity

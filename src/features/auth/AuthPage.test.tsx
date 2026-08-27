@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react'
+import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import {
   MemoryRouter,
@@ -12,12 +12,16 @@ import { AuthProvider, RequireAuthentication } from './AuthProvider'
 import type { AuthContextValue } from './authContext'
 import type { AuthUser } from './types'
 
+const authPlatformMocks = vi.hoisted(() => ({ native: false }))
+
 const clerkMocks = vi.hoisted(() => ({
   signIn: {
     status: 'needs_first_factor',
+    isTransferable: false,
     existingSession: undefined as { sessionId: string } | undefined,
     supportedSecondFactors: [] as Array<{ strategy: string }>,
     create: vi.fn(),
+    sso: vi.fn(),
     emailCode: {
       sendCode: vi.fn(),
       verifyCode: vi.fn(),
@@ -37,16 +41,26 @@ const clerkMocks = vi.hoisted(() => ({
     reset: vi.fn(),
   },
   client: {
+    lastActiveSessionId: null as string | null,
     sessions: [] as Array<{ id: string }>,
     signedInSessions: [] as Array<{
       id: string
+      status?: 'active' | 'pending'
       user: null | {
         emailAddresses: Array<{ emailAddress: string }>
       }
     }>,
     reload: vi.fn(),
+    signIn: {
+      authenticateWithRedirect: vi.fn(),
+    },
   },
   setActive: vi.fn(),
+}))
+
+vi.mock('./nativeOAuthTransport', () => ({
+  isNativeOAuthPlatform: () => authPlatformMocks.native,
+  NATIVE_OAUTH_CALLBACK_URL: 'com.simerfamily.kinsphere://callback',
 }))
 
 vi.mock('@clerk/react', () => ({
@@ -96,15 +110,20 @@ function LoginDestination() {
 
 beforeEach(() => {
   vi.clearAllMocks()
+  authPlatformMocks.native = false
   clerkMocks.signIn.status = 'needs_first_factor'
+  clerkMocks.signIn.isTransferable = false
   clerkMocks.signIn.existingSession = undefined
   clerkMocks.signIn.supportedSecondFactors = []
   clerkMocks.signUp.status = 'missing_requirements'
   clerkMocks.signUp.missingFields = []
+  clerkMocks.client.lastActiveSessionId = null
   clerkMocks.client.sessions = []
   clerkMocks.client.signedInSessions = []
   clerkMocks.client.reload.mockResolvedValue(clerkMocks.client)
+  clerkMocks.client.signIn.authenticateWithRedirect.mockResolvedValue(undefined)
   clerkMocks.signIn.create.mockResolvedValue({ error: null })
+  clerkMocks.signIn.sso.mockResolvedValue({ error: null })
   clerkMocks.signIn.emailCode.sendCode.mockResolvedValue({ error: null })
   clerkMocks.signIn.emailCode.verifyCode.mockResolvedValue({ error: null })
   clerkMocks.signIn.mfa.sendEmailCode.mockResolvedValue({ error: null })
@@ -119,6 +138,7 @@ beforeEach(() => {
 
 afterEach(() => {
   window.sessionStorage.clear()
+  vi.restoreAllMocks()
 })
 
 describe('AuthPage', () => {
@@ -137,7 +157,7 @@ describe('AuthPage', () => {
     expect(screen.queryByText(/local preview/i)).not.toBeInTheDocument()
   })
 
-  it('opens one email-only flow inside the app', async () => {
+  it('opens Google and email choices inside the app', async () => {
     const user = userEvent.setup()
     render(
       <AuthProvider value={authValue('signed-out')}>
@@ -154,13 +174,218 @@ describe('AuthPage', () => {
     await user.click(screen.getByRole('button', { name: 'Get started' }))
 
     expect(screen.getByRole('dialog')).toBeInTheDocument()
-    expect(screen.getByRole('heading', { name: 'Continue with email' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'Choose how to continue' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Continue with Google' })).toBeInTheDocument()
     expect(screen.getByLabelText('Email address')).toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: /google/i })).not.toBeInTheDocument()
     expect(screen.queryByLabelText(/phone/i)).not.toBeInTheDocument()
     expect(screen.queryByLabelText(/password/i)).not.toBeInTheDocument()
     expect(screen.queryByText(/development mode/i)).not.toBeInTheDocument()
     expect(window.sessionStorage.getItem('kinsphere.auth.returnTo')).toBeNull()
+  })
+
+  it('uses a Google popup, preserves the return route, and finalizes sign-in', async () => {
+    const user = userEvent.setup()
+    const popupState = { closed: false }
+    const popup = {
+      get closed() {
+        return popupState.closed
+      },
+      close: vi.fn(() => {
+        popupState.closed = true
+      }),
+      location: { href: 'about:blank' },
+    } as unknown as Window
+    vi.spyOn(window, 'open').mockReturnValue(popup)
+    clerkMocks.signIn.sso.mockImplementation(async () => {
+      clerkMocks.signIn.status = 'complete'
+      return { error: null }
+    })
+
+    render(
+      <AuthProvider value={authValue('signed-out')}>
+        <MemoryRouter
+          initialEntries={[
+            { pathname: '/login', state: { returnTo: '/journal?view=list' } },
+          ]}
+        >
+          <AuthPage />
+        </MemoryRouter>
+      </AuthProvider>,
+    )
+
+    await user.click(screen.getByRole('button', { name: 'Get started' }))
+    await user.click(screen.getByRole('button', { name: 'Continue with Google' }))
+
+    await waitFor(() => expect(clerkMocks.signIn.finalize).toHaveBeenCalledOnce())
+    expect(clerkMocks.signIn.sso).toHaveBeenCalledWith({
+      strategy: 'oauth_google',
+      redirectCallbackUrl: expect.stringMatching(/\/#\/login$/),
+      redirectUrl: expect.stringMatching(/\/#\/login$/),
+      popup,
+    })
+    expect(window.sessionStorage.getItem('kinsphere.auth.returnTo')).toBe(
+      '/journal?view=list',
+    )
+    expect(popup.close).toHaveBeenCalledOnce()
+  })
+
+  it('returns to the sign-in choices when Google is cancelled', async () => {
+    const user = userEvent.setup()
+    const popupState = { closed: false }
+    const popup = {
+      get closed() {
+        return popupState.closed
+      },
+      close: vi.fn(() => {
+        popupState.closed = true
+      }),
+      location: { href: 'about:blank' },
+    } as unknown as Window
+    vi.spyOn(window, 'open').mockReturnValue(popup)
+    clerkMocks.signIn.sso.mockRejectedValue({ code: 'AUTH_CANCELLED' })
+
+    render(
+      <AuthProvider value={authValue('signed-out')}>
+        <MemoryRouter initialEntries={['/login']}>
+          <AuthPage />
+        </MemoryRouter>
+      </AuthProvider>,
+    )
+
+    await user.click(screen.getByRole('button', { name: 'Get started' }))
+    await user.click(screen.getByRole('button', { name: 'Continue with Google' }))
+
+    await waitFor(() =>
+      expect(
+        screen.getByRole('button', { name: 'Continue with Google' }),
+      ).toBeEnabled(),
+    )
+    expect(screen.queryByText(/could not complete/i)).not.toBeInTheDocument()
+    expect(screen.getByLabelText('Email address')).toBeEnabled()
+  })
+
+  it('transfers a new Google identity into sign-up and finalizes it', async () => {
+    const user = userEvent.setup()
+    const popupState = { closed: false }
+    const popup = {
+      get closed() {
+        return popupState.closed
+      },
+      close: vi.fn(() => {
+        popupState.closed = true
+      }),
+      location: { href: 'about:blank' },
+    } as unknown as Window
+    vi.spyOn(window, 'open').mockReturnValue(popup)
+    clerkMocks.signIn.sso.mockImplementation(async () => {
+      clerkMocks.signIn.isTransferable = true
+      return { error: null }
+    })
+    clerkMocks.signUp.create.mockImplementation(async () => {
+      clerkMocks.signUp.status = 'complete'
+      return { error: null }
+    })
+
+    render(
+      <AuthProvider value={authValue('signed-out')}>
+        <MemoryRouter initialEntries={['/login']}>
+          <AuthPage />
+        </MemoryRouter>
+      </AuthProvider>,
+    )
+
+    await user.click(screen.getByRole('button', { name: 'Get started' }))
+    await user.click(screen.getByRole('button', { name: 'Continue with Google' }))
+
+    await waitFor(() => expect(clerkMocks.signUp.finalize).toHaveBeenCalledOnce())
+    expect(clerkMocks.signUp.create).toHaveBeenCalledWith({ transfer: true })
+  })
+
+  it('closes native Google auth only after Clerk activates a session', async () => {
+    const user = userEvent.setup()
+    authPlatformMocks.native = true
+    clerkMocks.client.signIn.authenticateWithRedirect.mockImplementation(
+      async () => {
+        clerkMocks.client.lastActiveSessionId = 'sess_google'
+        clerkMocks.client.signedInSessions = [
+          { id: 'sess_google', status: 'active', user: null },
+        ]
+      },
+    )
+
+    render(
+      <AuthProvider value={authValue('signed-out')}>
+        <MemoryRouter initialEntries={['/login']}>
+          <AuthPage />
+        </MemoryRouter>
+      </AuthProvider>,
+    )
+
+    await user.click(screen.getByRole('button', { name: 'Get started' }))
+    await user.click(screen.getByRole('button', { name: 'Continue with Google' }))
+
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+    expect(
+      clerkMocks.client.signIn.authenticateWithRedirect,
+    ).toHaveBeenCalledWith(
+      expect.objectContaining({
+        strategy: 'oauth_google',
+        redirectUrl: 'com.simerfamily.kinsphere://callback',
+      }),
+    )
+  })
+
+  it('keeps native Google auth open when Clerk does not activate a session', async () => {
+    const user = userEvent.setup()
+    authPlatformMocks.native = true
+
+    render(
+      <AuthProvider value={authValue('signed-out')}>
+        <MemoryRouter initialEntries={['/login']}>
+          <AuthPage />
+        </MemoryRouter>
+      </AuthProvider>,
+    )
+
+    await user.click(screen.getByRole('button', { name: 'Get started' }))
+    await user.click(screen.getByRole('button', { name: 'Continue with Google' }))
+
+    expect(
+      await screen.findByText(/could not finish signing you in/i),
+    ).toBeInTheDocument()
+    expect(screen.getByRole('dialog')).toBeInTheDocument()
+    expect(
+      screen.getByRole('button', { name: 'Continue with Google' }),
+    ).toBeEnabled()
+  })
+
+  it('keeps native Google auth open for a pending Clerk session', async () => {
+    const user = userEvent.setup()
+    authPlatformMocks.native = true
+    clerkMocks.client.signIn.authenticateWithRedirect.mockImplementation(
+      async () => {
+        clerkMocks.client.lastActiveSessionId = 'sess_pending'
+        clerkMocks.client.signedInSessions = [
+          { id: 'sess_pending', status: 'pending', user: null },
+        ]
+      },
+    )
+
+    render(
+      <AuthProvider value={authValue('signed-out')}>
+        <MemoryRouter initialEntries={['/login']}>
+          <AuthPage />
+        </MemoryRouter>
+      </AuthProvider>,
+    )
+
+    await user.click(screen.getByRole('button', { name: 'Get started' }))
+    await user.click(screen.getByRole('button', { name: 'Continue with Google' }))
+
+    expect(
+      await screen.findByText(/could not finish signing you in/i),
+    ).toBeInTheDocument()
+    expect(screen.getByRole('dialog')).toBeInTheDocument()
   })
 
   it('sends an email code and preserves a safe return route', async () => {

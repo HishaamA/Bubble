@@ -8,6 +8,9 @@ const config: CapacitorConfig = {
     androidScheme: 'https',
   },
   plugins: {
+    CapacitorHttp: {
+      enabled: true,
+    },
     LocalNotifications: {
       smallIcon: 'ic_stat_kinsphere',
       iconColor: '#DCAE7C',
