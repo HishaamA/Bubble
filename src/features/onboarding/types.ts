@@ -4,6 +4,9 @@ export type FamilyMembership = {
   familyId: string
   familyName: string
   role: 'owner' | 'member'
+  ownerId?: string
+  memberCount?: number
+  shareCode?: string | null
 }
 
 export type FamilyAccessSnapshot =
@@ -18,8 +21,6 @@ export type FamilyAccessActor = {
 
 export type FamilyOnboardingAdapter = {
   configured: boolean
-  readTutorial: (actor: FamilyAccessActor) => Promise<boolean>
-  completeTutorial: (actor: FamilyAccessActor) => Promise<void>
   loadAccess: (actor: FamilyAccessActor) => Promise<FamilyAccessSnapshot>
   createFamily: (
     actor: FamilyAccessActor,

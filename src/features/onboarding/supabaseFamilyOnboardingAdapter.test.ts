@@ -19,6 +19,8 @@ const actor = {
   getToken: async () => 'clerk-token',
 }
 
+const shareCode = 'BUB-1234-5678-90AB-CDEF-1234-5678'
+
 beforeEach(() => {
   vi.clearAllMocks()
   mocks.readFamilyMembership.mockResolvedValue({
@@ -27,6 +29,9 @@ beforeEach(() => {
     circleId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
     circleName: 'The Ahmed family',
     role: 'owner',
+    ownerId: '10000000-0000-4000-8000-000000000001',
+    memberCount: 1,
+    shareCode,
   })
 })
 
@@ -40,29 +45,78 @@ describe('supabaseFamilyOnboardingAdapter', () => {
         familyId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
         familyName: 'The Ahmed family',
         role: 'owner',
+        ownerId: '10000000-0000-4000-8000-000000000001',
+        memberCount: 1,
+        shareCode,
       },
     })
   })
 
   it('creates and joins through database-backed workflows', async () => {
-    await supabaseFamilyOnboardingAdapter.createFamily(
-      actor,
-      'The Ahmed family',
-    )
+    mocks.createFamily.mockResolvedValue({
+      id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+      name: 'The Ahmed family',
+      role: 'owner',
+      ownerId: '10000000-0000-4000-8000-000000000001',
+      memberCount: 1,
+      shareCode,
+    })
+    await expect(
+      supabaseFamilyOnboardingAdapter.createFamily(
+        actor,
+        'The Ahmed family',
+      ),
+    ).resolves.toEqual({
+      kind: 'member',
+      membership: {
+        familyId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+        familyName: 'The Ahmed family',
+        role: 'owner',
+        ownerId: '10000000-0000-4000-8000-000000000001',
+        memberCount: 1,
+        shareCode,
+      },
+    })
     expect(mocks.createFamily).toHaveBeenCalledWith('The Ahmed family')
 
-    mocks.readFamilyMembership.mockResolvedValue({
-      kind: 'unjoined',
-      userId: '10000000-0000-4000-8000-000000000001',
-      pendingRequestId: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
+    mocks.joinFamilyByCode.mockResolvedValue({
+      id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+      name: 'The Ahmed family',
+      role: 'member',
+      ownerId: '10000000-0000-4000-8000-000000000001',
+      memberCount: 2,
+      shareCode,
     })
+    await expect(
+      supabaseFamilyOnboardingAdapter.joinFamily(
+        actor,
+        shareCode,
+      ),
+    ).resolves.toEqual({
+      kind: 'member',
+      membership: {
+        familyId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+        familyName: 'The Ahmed family',
+        role: 'member',
+        ownerId: '10000000-0000-4000-8000-000000000001',
+        memberCount: 2,
+        shareCode,
+      },
+    })
+    expect(mocks.joinFamilyByCode).toHaveBeenCalledTimes(1)
+  })
+
+  it('keeps a legacy one-use invite in the approval flow', async () => {
+    mocks.joinFamilyByCode.mockResolvedValue({
+      requestId: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
+    })
+
     await expect(
       supabaseFamilyOnboardingAdapter.joinFamily(
         actor,
         `ks1_${'a'.repeat(64)}`,
       ),
     ).resolves.toEqual({ kind: 'pending', familyName: null })
-    expect(mocks.joinFamilyByCode).toHaveBeenCalledTimes(1)
   })
 
   it('rejects a stale actor before making a database request', async () => {

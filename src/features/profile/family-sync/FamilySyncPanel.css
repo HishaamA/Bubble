@@ -544,19 +544,66 @@
 
 .family-sync__invite output {
   display: block;
-  padding: 0.72rem;
+  padding: 0.9rem 0.72rem;
   overflow-wrap: anywhere;
   border: 1px solid rgba(255, 255, 255, 0.12);
   border-radius: 0.65rem;
-  color: rgba(255, 255, 255, 0.82);
+  color: rgba(255, 255, 255, 0.94);
   background: #0a0a0a;
-  font-size: 0.72rem;
+  font-size: clamp(0.67rem, 2.6vw, 0.78rem);
+  font-weight: 650;
+  letter-spacing: 0.035em;
   line-height: 1.5;
+  text-align: center;
   user-select: all;
 }
 
-.family-sync__invite .family-sync__share {
-  justify-self: start;
+.family-sync__code-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.5rem;
+}
+
+.family-sync__code-actions > button {
+  width: 100%;
+}
+
+.family-sync__rotate-code {
+  width: fit-content;
+  min-height: 2.25rem;
+  padding: 0.35rem 0;
+  border: 0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.3);
+  border-radius: 0;
+  color: rgba(255, 255, 255, 0.6);
+  background: transparent;
+  font-size: 0.66rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.family-sync__rotation-confirmation {
+  display: grid;
+  gap: 0.6rem;
+  padding: 0.75rem 0;
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.family-sync__rotation-confirmation > p {
+  color: rgba(255, 255, 255, 0.68);
+  font-size: 0.68rem;
+  line-height: 1.5;
+}
+
+.family-sync__rotation-confirmation > div {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.5rem;
+}
+
+.family-sync__rotation-confirmation .family-sync__text-button {
+  justify-self: stretch;
 }
 
 .family-sync__invite small {

@@ -6,7 +6,9 @@ export {
   toFamilySyncErrorMessage,
 } from './familySyncAdapter'
 export {
+  getFamilyCodeMessage,
   getFamilyInviteMessage,
+  shareFamilyCode,
   shareFamilyInvite,
 } from './shareFamilyInvite'
 export type {
@@ -19,5 +21,6 @@ export type {
 } from './types'
 export type {
   FamilyInviteShareResult,
+  ShareFamilyCode,
   ShareFamilyInvite,
 } from './shareFamilyInvite'

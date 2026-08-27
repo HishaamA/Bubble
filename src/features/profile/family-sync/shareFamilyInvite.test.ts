@@ -1,6 +1,8 @@
 import { describe, expect, it, vi } from 'vitest'
 import {
+  getFamilyCodeMessage,
   getFamilyInviteMessage,
+  shareFamilyCode,
   shareFamilyInvite,
 } from './shareFamilyInvite'
 import type { CreatedCircleInvite } from './types'
@@ -13,6 +15,19 @@ const invite: CreatedCircleInvite = {
 }
 
 describe('shareFamilyInvite', () => {
+  it('shares the persistent family code with the same private wording', async () => {
+    const share = vi.fn(async () => undefined)
+    const code = 'BUB-AAAA-BBBB-CCCC-DDDD-EEEE-FFFF'
+
+    await expect(
+      shareFamilyCode(code, 'Ahmed family', { share }),
+    ).resolves.toBe('shared')
+    expect(share).toHaveBeenCalledWith({
+      title: 'Join Ahmed family',
+      text: getFamilyCodeMessage(code, 'Ahmed family'),
+    })
+  })
+
   it('uses the native share sheet when the device supports it', async () => {
     const share = vi.fn(async () => undefined)
 

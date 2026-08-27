@@ -54,8 +54,6 @@ describe('member-scoped data cache', () => {
     let current = member('family_A')
     const adapter: FamilyOnboardingAdapter = {
       configured: true,
-      readTutorial: vi.fn(async () => true),
-      completeTutorial: vi.fn(async () => undefined),
       loadAccess: vi.fn(async () => current),
       createFamily: vi.fn(async () => current),
       joinFamily: vi.fn(async () => current),

@@ -4,10 +4,19 @@ import { toFamilySyncErrorMessage } from './familySyncAdapter'
 describe('toFamilySyncErrorMessage', () => {
   it('turns invite failures into useful messages without echoing credentials', () => {
     expect(toFamilySyncErrorMessage(new Error('invalid_invite_code'))).toBe(
-      'That invite code is not valid.',
+      'That family code is not valid.',
     )
     expect(toFamilySyncErrorMessage(new Error('invite_not_available'))).toBe(
       'That invite has expired, was revoked, or has already been used.',
+    )
+  })
+
+  it('explains invalid persistent family codes without exposing them', () => {
+    expect(toFamilySyncErrorMessage(new Error('family_code_not_found'))).toBe(
+      'That family code is not valid.',
+    )
+    expect(toFamilySyncErrorMessage(new Error('invalid_family_code'))).toBe(
+      'That family code is not valid.',
     )
   })
 

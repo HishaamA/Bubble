@@ -13,20 +13,20 @@ import {
   toFamilySyncErrorMessage,
 } from './familySyncAdapter'
 import type {
-  CreatedCircleInvite,
   FamilySyncAdapter,
   FamilySyncSnapshot,
 } from './types'
 import {
-  shareFamilyInvite,
-  type ShareFamilyInvite,
+  shareFamilyCode,
+  type ShareFamilyCode,
 } from './shareFamilyInvite'
 import './FamilySyncPanel.css'
 
 type FamilySyncPanelProps = {
   adapter?: FamilySyncAdapter
   onSnapshotChange?: (snapshot: FamilySyncSnapshot) => void
-  shareInvite?: ShareFamilyInvite
+  shareCode?: ShareFamilyCode
+  copyCode?: (code: string) => Promise<void>
 }
 
 type ChangeResult<T> =
@@ -44,12 +44,20 @@ function formatDate(value: string) {
   }).format(date)
 }
 
+function snapshotIdentity(snapshot: FamilySyncSnapshot) {
+  if (snapshot.kind === 'connected') {
+    return `${snapshot.person.id}:${snapshot.circle.id}`
+  }
+  if (snapshot.kind === 'unjoined') return `${snapshot.person.id}:unjoined`
+  return snapshot.kind
+}
+
 function LocalOnlyState() {
   return (
     <div className="family-sync__state family-sync__state--local">
       <div>
         <h3>Family groups need a connection</h3>
-        <p>Connect Bubble to securely create a group and share invite codes.</p>
+        <p>Connect Bubble to securely create a group and share its family code.</p>
         <Link
           className="family-sync__auth-link"
           to="/login"
@@ -65,21 +73,25 @@ function LocalOnlyState() {
 export function FamilySyncPanel({
   adapter = familySyncAdapter,
   onSnapshotChange,
-  shareInvite = shareFamilyInvite,
+  shareCode = shareFamilyCode,
+  copyCode = async (code) => {
+    if (!navigator.clipboard) throw new Error('clipboard_unavailable')
+    await navigator.clipboard.writeText(code)
+  },
 }: FamilySyncPanelProps) {
   const headingId = useId()
   const messageId = useId()
   const loadVersion = useRef(0)
+  const loadedIdentity = useRef<string | null>(null)
   const [snapshot, setSnapshot] = useState<FamilySyncSnapshot | null>(null)
   const [loading, setLoading] = useState(true)
   const [busy, setBusy] = useState(false)
   const [sharing, setSharing] = useState(false)
+  const [confirmingRotation, setConfirmingRotation] = useState(false)
   const [error, setError] = useState('')
   const [message, setMessage] = useState('')
   const [circleName, setCircleName] = useState('')
   const [inviteCode, setInviteCode] = useState('')
-  const [generatedInvite, setGeneratedInvite] =
-    useState<CreatedCircleInvite | null>(null)
 
   const refresh = useCallback(
     async (showLoading: boolean) => {
@@ -88,14 +100,16 @@ export function FamilySyncPanel({
       try {
         const nextSnapshot = await adapter.loadSnapshot()
         if (version !== loadVersion.current) return
+        const nextIdentity = snapshotIdentity(nextSnapshot)
+        if (
+          loadedIdentity.current !== null &&
+          loadedIdentity.current !== nextIdentity
+        ) {
+          setConfirmingRotation(false)
+        }
+        loadedIdentity.current = nextIdentity
         setSnapshot(nextSnapshot)
         onSnapshotChange?.(nextSnapshot)
-        setGeneratedInvite((current) =>
-          nextSnapshot.kind === 'connected' &&
-          current?.circleId === nextSnapshot.circle.id
-            ? current
-            : null,
-        )
         setError('')
       } catch (reason) {
         if (version !== loadVersion.current) return
@@ -153,37 +167,44 @@ export function FamilySyncPanel({
     }
     const result = await runChange(
       () => adapter.createCircle(name),
-      `${name} is ready. Create a private code to invite someone.`,
+      `${name} is ready. Your family code is saved below.`,
     )
     if (result.ok) setCircleName('')
   }
 
   async function handleJoinCircle(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
-    const code = inviteCode.trim().toLowerCase()
-    if (!/^ks1_[0-9a-f]{64}$/.test(code)) {
-      setError('Enter the complete private family code.')
+    const enteredCode = inviteCode.trim()
+    const persistentCode = enteredCode.toUpperCase()
+    const legacyCode = enteredCode.toLowerCase()
+    const isPersistentCode = /^BUB-[0-9A-F]{4}(-[0-9A-F]{4}){5}$/.test(
+      persistentCode,
+    )
+    const isLegacyCode = /^ks1_[0-9a-f]{64}$/.test(legacyCode)
+    if (!isPersistentCode && !isLegacyCode) {
+      setError('Enter the complete family code, including the dashes.')
       return
     }
+    const code = isPersistentCode ? persistentCode : legacyCode
     const result = await runChange(
       () => adapter.requestCircleJoin(code),
-      'Your request was sent to the family group owner.',
+      isPersistentCode
+        ? 'You are now connected to your family.'
+        : 'Your request was sent. A family owner can approve it in Settings.',
     )
     if (result.ok) setInviteCode('')
   }
 
-  async function handleShareInvite(circleName: string) {
-    if (!generatedInvite) return
-
+  async function handleShareCode(code: string, circleName: string) {
     setSharing(true)
     setError('')
     setMessage('')
     try {
-      const result = await shareInvite(generatedInvite, circleName)
+      const result = await shareCode(code, circleName)
       if (result === 'shared') {
-        setMessage('The private family code is ready in your share sheet.')
+        setMessage('Your family code is ready in the share sheet.')
       } else if (result === 'copied') {
-        setMessage('The private family code was copied. Send it to someone you trust.')
+        setMessage('Your family code was copied.')
       }
     } catch {
       setError('Sharing is unavailable here. Select the code and copy it manually.')
@@ -192,20 +213,26 @@ export function FamilySyncPanel({
     }
   }
 
-  async function handleCreateInvite(circleId: string) {
-    setBusy(true)
+  async function handleCopyCode(code: string) {
+    setSharing(true)
     setError('')
     setMessage('')
-    setGeneratedInvite(null)
     try {
-      const created = await adapter.createCircleInvite(circleId)
-      setGeneratedInvite(created)
-      setMessage('A one-use invite is ready. Share it privately.')
-    } catch (reason) {
-      setError(toFamilySyncErrorMessage(reason))
+      await copyCode(code)
+      setMessage('Your family code was copied.')
+    } catch {
+      setError('Copying is unavailable here. Press and hold the code to copy it.')
     } finally {
-      setBusy(false)
+      setSharing(false)
     }
+  }
+
+  async function handleRotateCode(circleId: string) {
+    const result = await runChange(
+      () => adapter.rotateFamilyCode(circleId),
+      'A new family code is ready. The previous code no longer works.',
+    )
+    if (result.ok) setConfirmingRotation(false)
   }
 
   async function handleDecision(
@@ -255,7 +282,7 @@ export function FamilySyncPanel({
         <div className="family-sync__auth">
           <div className="family-sync__intro">
             <h3>Keep your family close</h3>
-            <p>Sign in with Google, Apple, or your phone to create or join a family.</p>
+            <p>Sign in securely to create or join a family.</p>
           </div>
           <Link
             className="family-sync__auth-link"
@@ -265,7 +292,7 @@ export function FamilySyncPanel({
             Sign in or create an account
           </Link>
           <p className="family-sync__privacy-note">
-            Only people your family approves can join.
+            Your account keeps your family details connected across devices.
           </p>
         </div>
       ) : null}
@@ -288,8 +315,8 @@ export function FamilySyncPanel({
               <div>
                 <h3>Waiting for your family</h3>
                 <p>
-                  Sent {formatDate(snapshot.pendingRequest.createdAt)}. Moments will
-                  appear once the circle owner lets you in.
+                  A previous invite was sent {formatDate(snapshot.pendingRequest.createdAt)}.
+                  Check again to see whether it was approved.
                 </p>
               </div>
               <button
@@ -305,7 +332,7 @@ export function FamilySyncPanel({
             <div className="family-sync__choice-grid">
               <form className="family-sync__option" onSubmit={handleCreateCircle}>
                 <h3>Create a family group</h3>
-                <p>Make a private home for your moments. You decide who joins.</p>
+                <p>Make a private home and share its saved code with your family.</p>
                 <label>
                   <span>Family group name</span>
                   <input
@@ -324,7 +351,7 @@ export function FamilySyncPanel({
 
               <form className="family-sync__option" onSubmit={handleJoinCircle}>
                 <h3>Join with a code</h3>
-                <p>Enter the private code your family group owner sent you.</p>
+                <p>Enter the code shown in a family member's Bubble settings.</p>
                 <label>
                   <span>Family code</span>
                   <input
@@ -332,15 +359,15 @@ export function FamilySyncPanel({
                     value={inviteCode}
                     onChange={(event) => setInviteCode(event.target.value)}
                     autoComplete="off"
-                    autoCapitalize="none"
+                    autoCapitalize="characters"
                     spellCheck={false}
                     required
                     disabled={busy}
-                    placeholder="ks1_…"
+                    placeholder="BUB-1234-ABCD-5678-90EF-1234-ABCD"
                   />
                 </label>
                 <button className="family-sync__primary" type="submit" disabled={busy}>
-                  Ask to join
+                  Join family
                 </button>
               </form>
             </div>
@@ -366,51 +393,89 @@ export function FamilySyncPanel({
             </div>
           </article>
 
-          {snapshot.circle.role === 'owner' ? (
-            <section className="family-sync__owner-tools" aria-labelledby={`${headingId}-invite`}>
-              <div className="family-sync__subheading">
-                <div>
-                  <h3 id={`${headingId}-invite`}>Invite someone you love</h3>
-                  <p>Create a private code for one family member.</p>
-                </div>
+          <section className="family-sync__owner-tools" aria-labelledby={`${headingId}-invite`}>
+            <div className="family-sync__subheading">
+              <div>
+                <h3 id={`${headingId}-invite`}>Invite your family</h3>
+                <p>This code stays in Settings, ready whenever you need it.</p>
+              </div>
+            </div>
+
+            <div className="family-sync__invite">
+              <span id={`${headingId}-invite-code`}>Family code</span>
+              <output aria-labelledby={`${headingId}-invite-code`}>
+                {snapshot.circle.shareCode}
+              </output>
+              <div className="family-sync__code-actions">
                 <button
                   className="family-sync__secondary"
                   type="button"
-                  disabled={busy}
-                  onClick={() => void handleCreateInvite(snapshot.circle.id)}
+                  disabled={busy || sharing}
+                  onClick={() => void handleCopyCode(snapshot.circle.shareCode)}
                 >
-                  {busy ? 'Creating…' : 'Create code'}
+                  Copy code
+                </button>
+                <button
+                  className="family-sync__share"
+                  type="button"
+                  disabled={busy || sharing}
+                  aria-label={`Share family code for ${snapshot.circle.name}`}
+                  onClick={() =>
+                    void handleShareCode(
+                      snapshot.circle.shareCode,
+                      snapshot.circle.name,
+                    )
+                  }
+                >
+                  <span aria-hidden="true">↗</span>
+                  {sharing ? 'Opening…' : 'Share code'}
                 </button>
               </div>
-
-              {generatedInvite ? (
-                <div className="family-sync__invite">
-                  <span id={`${headingId}-invite-code`}>Private family code</span>
-                  <output aria-labelledby={`${headingId}-invite-code`}>
-                    {generatedInvite.code}
-                  </output>
+              {snapshot.circle.role === 'owner' ? (
+                confirmingRotation ? (
+                  <div
+                    className="family-sync__rotation-confirmation"
+                    role="group"
+                    aria-label="Confirm family code rotation"
+                  >
+                    <p>
+                      Replace this code? The old code will stop working immediately.
+                    </p>
+                    <div>
+                      <button
+                        className="family-sync__text-button"
+                        type="button"
+                        disabled={busy || sharing}
+                        onClick={() => setConfirmingRotation(false)}
+                      >
+                        Keep current code
+                      </button>
+                      <button
+                        className="family-sync__secondary"
+                        type="button"
+                        disabled={busy || sharing}
+                        onClick={() => void handleRotateCode(snapshot.circle.id)}
+                      >
+                        Create new code
+                      </button>
+                    </div>
+                  </div>
+                ) : (
                   <button
-                    className="family-sync__share"
+                    className="family-sync__rotate-code"
                     type="button"
                     disabled={busy || sharing}
-                    aria-label={`Share invite code for ${snapshot.circle.name}`}
-                    onClick={() => void handleShareInvite(snapshot.circle.name)}
+                    onClick={() => setConfirmingRotation(true)}
                   >
-                    <span aria-hidden="true">↗</span>
-                    {sharing ? 'Opening…' : 'Share code'}
+                    Replace family code
                   </button>
-                  <small>
-                    One person can use it before {formatDate(generatedInvite.expiresAt)}.
-                    You approve them before any moments are shared.
-                  </small>
-                </div>
+                )
               ) : null}
-            </section>
-          ) : (
-            <p className="family-sync__member-note">
-              Your circle owner can invite and approve family members.
-            </p>
-          )}
+              <small>
+                Anyone with this code can join. Share it only with your family.
+              </small>
+            </div>
+          </section>
 
           {snapshot.circle.role === 'owner' ? (
             <section className="family-sync__requests" aria-labelledby={`${headingId}-requests`}>

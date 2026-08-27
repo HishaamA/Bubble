@@ -20,7 +20,6 @@ const FAMILY_SYNC_REFRESH_EVENT = 'kinsphere:family-sync-refresh'
 export type FamilyOnboardingStatus =
   | 'idle'
   | 'loading'
-  | 'tutorial'
   | 'needs-family'
   | 'pending'
   | 'member'
@@ -33,9 +32,10 @@ type FamilyOnboardingContextValue = {
   error: string
   refreshing: boolean
   refresh: () => Promise<void>
-  completeTutorial: () => Promise<boolean>
-  createFamily: (familyName: string) => Promise<void>
-  joinFamily: (inviteCode: string) => Promise<void>
+  createFamily: (
+    familyName: string,
+  ) => Promise<FamilyAccessSnapshot | null>
+  joinFamily: (inviteCode: string) => Promise<FamilyAccessSnapshot | null>
 }
 
 const FamilyOnboardingContext =
@@ -54,7 +54,11 @@ export function toFamilyOnboardingMessage(reason: unknown) {
       : ''
   const message = raw.toLowerCase()
 
-  if (message.includes('invalid_invite_code')) {
+  if (
+    message.includes('invalid_invite_code') ||
+    message.includes('invalid_family_code') ||
+    message.includes('family_code_not_found')
+  ) {
     return 'That family code is not valid.'
   }
   if (message.includes('invite_not_available')) {
@@ -145,17 +149,7 @@ export function FamilyOnboardingProvider({
     setRefreshing(true)
     setError('')
     try {
-      const actor = { userId: user.id, getToken }
-      const tutorialCompleted = await adapter.readTutorial(actor)
-      if (version !== requestVersion.current) return
-      if (!tutorialCompleted) {
-        setSnapshot(null)
-        updateStatus('tutorial')
-        resolveUser(user.id)
-        return
-      }
-
-      const next = await adapter.loadAccess(actor)
+      const next = await adapter.loadAccess({ userId: user.id, getToken })
       if (version !== requestVersion.current) return
       setSnapshot(next)
       updateStatus(statusFor(next))
@@ -219,12 +213,13 @@ export function FamilyOnboardingProvider({
       setError('')
       try {
         const next = await operation({ userId: user.id, getToken })
-        if (version !== requestVersion.current) return
+        if (version !== requestVersion.current) return null
         setSnapshot(next)
         updateStatus(statusFor(next))
         resolveUser(user.id)
+        return next
       } catch (reason) {
-        if (version !== requestVersion.current) return
+        if (version !== requestVersion.current) return null
         const message = toFamilyOnboardingMessage(reason)
         updateStatus('needs-family')
         setError(message)
@@ -244,35 +239,6 @@ export function FamilyOnboardingProvider({
       run((actor) => adapter.joinFamily(actor, inviteCode)),
     [adapter, run],
   )
-  const completeTutorial = useCallback(async () => {
-    if (!user || authStatus !== 'signed-in') {
-      throw new Error('Sign in before completing the tutorial.')
-    }
-    if (!adapter.configured) {
-      throw new Error('Family onboarding is not connected for this build.')
-    }
-
-    const version = ++requestVersion.current
-    const actor = { userId: user.id, getToken }
-    updateStatus('loading')
-    setRefreshing(false)
-    setError('')
-    try {
-      await adapter.completeTutorial(actor)
-      const next = await adapter.loadAccess(actor)
-      if (version !== requestVersion.current) return false
-      setSnapshot(next)
-      updateStatus(statusFor(next))
-      resolveUser(user.id)
-      return true
-    } catch (reason) {
-      if (version !== requestVersion.current) return false
-      updateStatus('tutorial')
-      setError(toFamilyOnboardingMessage(reason))
-      throw reason
-    }
-  }, [adapter, authStatus, getToken, resolveUser, updateStatus, user])
-
   const value = useMemo(
     () => ({
       status:
@@ -283,13 +249,11 @@ export function FamilyOnboardingProvider({
       error,
       refreshing,
       refresh,
-      completeTutorial,
       createFamily,
       joinFamily,
     }),
     [
       authStatus,
-      completeTutorial,
       createFamily,
       error,
       joinFamily,

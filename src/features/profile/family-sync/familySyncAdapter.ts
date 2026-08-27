@@ -8,9 +8,10 @@ import {
   bootstrapCurrentClerkProfile,
   createFamily,
   joinFamilyByCode,
+  readFamilyMembership,
+  rotateFamilyShareCode,
 } from '../../../services/persistence'
 import type {
-  CreatedCircleInvite,
   FamilySyncAdapter,
   FamilySyncPerson,
   FamilySyncSnapshot,
@@ -56,8 +57,12 @@ export function toFamilySyncErrorMessage(reason: unknown) {
   if (message.includes('user already registered')) {
     return 'An account already exists for that email.'
   }
-  if (message.includes('invalid_invite_code')) {
-    return 'That invite code is not valid.'
+  if (
+    message.includes('invalid_invite_code') ||
+    message.includes('invalid_family_code') ||
+    message.includes('family_code_not_found')
+  ) {
+    return 'That family code is not valid.'
   }
   if (message.includes('invite_not_available')) {
     return 'That invite has expired, was revoked, or has already been used.'
@@ -107,18 +112,8 @@ async function loadSnapshot(): Promise<FamilySyncSnapshot> {
   const authenticated = await getAuthenticatedPerson()
   if (!authenticated) return { kind: 'signed-out' }
 
-  const { data: membershipData, error: membershipError } = await client
-    .from('circle_members')
-    .select('circle_id,role')
-    .eq('user_id', authenticated.userId)
-    .eq('status', 'approved')
-    .order('created_at', { ascending: true })
-    .limit(1)
-    .maybeSingle()
-  if (membershipError) throw membershipError
-
-  const membership = asRecord(membershipData)
-  if (!membership) {
+  const membership = await readFamilyMembership()
+  if (membership.kind !== 'member') {
     const { data: pendingData, error: pendingError } = await client
       .from('join_requests')
       .select('id,created_at')
@@ -142,21 +137,11 @@ async function loadSnapshot(): Promise<FamilySyncSnapshot> {
     }
   }
 
-  const circleId = requireString(membership, 'circle_id')
-  const role = membership.role === 'owner' ? 'owner' : 'member'
-  const [circleResult, membersResult] = await Promise.all([
-    client.from('circles').select('id,name').eq('id', circleId).single(),
-    client
-      .from('circle_members')
-      .select('user_id', { count: 'exact', head: true })
-      .eq('circle_id', circleId)
-      .eq('status', 'approved'),
-  ])
-  if (circleResult.error) throw circleResult.error
-  if (membersResult.error) throw membersResult.error
-
-  const circle = asRecord(circleResult.data)
-  if (!circle) throw new Error('Family circle details could not be loaded.')
+  const circleId = membership.circleId
+  const role = membership.role
+  if (!membership.shareCode) {
+    throw new Error('The family share code could not be loaded.')
+  }
 
   let pendingRequests: Array<{
     id: string
@@ -189,9 +174,10 @@ async function loadSnapshot(): Promise<FamilySyncSnapshot> {
     person: authenticated.person,
     circle: {
       id: circleId,
-      name: requireString(circle, 'name'),
+      name: membership.circleName,
       role,
-      memberCount: membersResult.count ?? 1,
+      memberCount: membership.memberCount,
+      shareCode: membership.shareCode,
     },
     pendingRequests,
   }
@@ -224,26 +210,8 @@ export const familySyncAdapter: FamilySyncAdapter = {
     await joinFamilyByCode(inviteCode)
   },
 
-  async createCircleInvite(circleId): Promise<CreatedCircleInvite> {
-    const client = getSupabaseClient()
-    if (!client) throw new Error('Family Sync is not configured.')
-    const { data, error } = await client.rpc('create_circle_invite', {
-      p_circle_id: circleId,
-      p_expires_in: '7 days',
-      p_max_uses: 1,
-    })
-    if (error) throw error
-
-    const record = asRecord(Array.isArray(data) ? data[0] : data)
-    if (!record) throw new Error('The invite could not be created.')
-
-    return {
-      circleId,
-      code: requireString(record, 'invite_code'),
-      expiresAt: requireString(record, 'expires_at'),
-      maxUses:
-        typeof record.max_uses === 'number' ? record.max_uses : 1,
-    }
+  async rotateFamilyCode(circleId) {
+    return rotateFamilyShareCode(circleId)
   },
 
   async decideJoinRequest(requestId, decision) {

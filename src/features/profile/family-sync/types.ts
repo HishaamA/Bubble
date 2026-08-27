@@ -29,6 +29,7 @@ export type FamilySyncSnapshot =
         name: string
         role: 'owner' | 'member'
         memberCount: number
+        shareCode: string
       }
       pendingRequests: FamilySyncPendingRequest[]
     }
@@ -56,7 +57,7 @@ export type FamilySyncAdapter = {
   signOut: () => Promise<void>
   createCircle: (name: string) => Promise<void>
   requestCircleJoin: (inviteCode: string) => Promise<void>
-  createCircleInvite: (circleId: string) => Promise<CreatedCircleInvite>
+  rotateFamilyCode: (circleId: string) => Promise<string>
   decideJoinRequest: (
     requestId: string,
     decision: 'approved' | 'rejected',

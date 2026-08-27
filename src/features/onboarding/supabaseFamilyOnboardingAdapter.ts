@@ -5,9 +5,7 @@ import {
 import {
   createFamily,
   joinFamilyByCode,
-  markTutorialComplete,
   readFamilyMembership,
-  readOnboardingState,
 } from '../../services/persistence'
 import type {
   FamilyAccessActor,
@@ -31,6 +29,9 @@ async function loadSnapshot(): Promise<FamilyAccessSnapshot> {
         familyId: membership.circleId,
         familyName: membership.circleName,
         role: membership.role,
+        ownerId: membership.ownerId,
+        memberCount: membership.memberCount,
+        shareCode: membership.shareCode,
       },
     }
   }
@@ -42,16 +43,6 @@ async function loadSnapshot(): Promise<FamilyAccessSnapshot> {
 export const supabaseFamilyOnboardingAdapter: FamilyOnboardingAdapter = {
   configured: Boolean(getSupabaseClient()),
 
-  async readTutorial(actor) {
-    requireMatchingActor(actor)
-    return (await readOnboardingState()).completed
-  },
-
-  async completeTutorial(actor) {
-    requireMatchingActor(actor)
-    await markTutorialComplete()
-  },
-
   async loadAccess(actor) {
     requireMatchingActor(actor)
     return loadSnapshot()
@@ -59,13 +50,36 @@ export const supabaseFamilyOnboardingAdapter: FamilyOnboardingAdapter = {
 
   async createFamily(actor, familyName) {
     requireMatchingActor(actor)
-    await createFamily(familyName)
-    return loadSnapshot()
+    const family = await createFamily(familyName)
+    return {
+      kind: 'member',
+      membership: {
+        familyId: family.id,
+        familyName: family.name,
+        role: family.role,
+        ownerId: family.ownerId,
+        memberCount: family.memberCount,
+        shareCode: family.shareCode,
+      },
+    }
   },
 
   async joinFamily(actor, inviteCode) {
     requireMatchingActor(actor)
-    await joinFamilyByCode(inviteCode)
-    return loadSnapshot()
+    const family = await joinFamilyByCode(inviteCode)
+    if ('requestId' in family) {
+      return { kind: 'pending', familyName: null }
+    }
+    return {
+      kind: 'member',
+      membership: {
+        familyId: family.id,
+        familyName: family.name,
+        role: family.role,
+        ownerId: family.ownerId,
+        memberCount: family.memberCount,
+        shareCode: family.shareCode,
+      },
+    }
   },
 }

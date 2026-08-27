@@ -14,12 +14,8 @@ function createAdapter(initialSnapshot: FamilySyncSnapshot) {
     signOut: vi.fn(async () => undefined),
     createCircle: vi.fn(async () => undefined),
     requestCircleJoin: vi.fn(async () => undefined),
-    createCircleInvite: vi.fn(async (circleId) => ({
-      circleId,
-      code: `ks1_${'a'.repeat(64)}`,
-      expiresAt: '2026-09-02T12:00:00.000Z',
-      maxUses: 1,
-    })),
+    rotateFamilyCode: vi.fn(async () =>
+      'BUB-FFFF-EEEE-DDDD-CCCC-BBBB-AAAA'),
     decideJoinRequest: vi.fn(async () => undefined),
   }
   return {
@@ -50,7 +46,7 @@ describe('FamilySyncPanel', () => {
         name: 'Family groups need a connection',
       }),
     ).toBeInTheDocument()
-    expect(screen.getByText(/share invite codes/i)).toBeInTheDocument()
+    expect(screen.getByText(/share its family code/i)).toBeInTheDocument()
     expect(
       screen.getByRole('link', { name: 'Open secure sign-in' }),
     ).toHaveAttribute('href', '/login')
@@ -83,6 +79,7 @@ describe('FamilySyncPanel', () => {
           name: 'Ahmed family',
           role: 'owner',
           memberCount: 1,
+          shareCode: 'BUB-1111-2222-3333-4444-5555-6666',
         },
         pendingRequests: [],
       })
@@ -99,37 +96,74 @@ describe('FamilySyncPanel', () => {
     expect(screen.getByText(/1 member · owner/i)).toBeInTheDocument()
   })
 
-  it('submits a private invite code and shows the pending state', async () => {
+  it('joins a family immediately with its persistent code', async () => {
     const user = userEvent.setup()
     const setup = createAdapter({
       kind: 'unjoined',
       person,
       pendingRequest: null,
     })
-    const code = `ks1_${'b'.repeat(64)}`
+    const code = 'BUB-ABCD-1234-EF56-7890-ABCD-1234'
+    setup.adapter.requestCircleJoin = vi.fn(async () => {
+      setup.setSnapshot({
+        kind: 'connected',
+        person,
+        circle: {
+          id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+          name: 'Ahmed family',
+          role: 'member',
+          memberCount: 4,
+          shareCode: code,
+        },
+        pendingRequests: [],
+      })
+    })
+
+    renderPanel(<FamilySyncPanel adapter={setup.adapter} />)
+    await user.type(await screen.findByLabelText('Family code'), code)
+    await user.click(screen.getByRole('button', { name: 'Join family' }))
+
+    expect(setup.adapter.requestCircleJoin).toHaveBeenCalledWith(code)
+    expect(
+      await screen.findByRole('heading', { name: 'Ahmed family' }),
+    ).toBeInTheDocument()
+    expect(screen.getByText(/4 members · member/i)).toBeInTheDocument()
+  })
+
+  it('keeps legacy invite codes working as approval requests', async () => {
+    const user = userEvent.setup()
+    const setup = createAdapter({
+      kind: 'unjoined',
+      person,
+      pendingRequest: null,
+    })
+    const enteredCode = `KS1_${'A'.repeat(64)}`
+    const normalizedCode = enteredCode.toLowerCase()
     setup.adapter.requestCircleJoin = vi.fn(async () => {
       setup.setSnapshot({
         kind: 'unjoined',
         person,
         pendingRequest: {
-          id: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
+          id: 'cccccccc-cccc-4ccc-8ccc-cccccccccccc',
           createdAt: '2026-08-26T12:00:00.000Z',
         },
       })
     })
 
     renderPanel(<FamilySyncPanel adapter={setup.adapter} />)
-    await user.type(await screen.findByLabelText('Family code'), code)
-    await user.click(screen.getByRole('button', { name: 'Ask to join' }))
+    await user.type(await screen.findByLabelText('Family code'), enteredCode)
+    await user.click(screen.getByRole('button', { name: 'Join family' }))
 
-    expect(setup.adapter.requestCircleJoin).toHaveBeenCalledWith(code)
+    expect(setup.adapter.requestCircleJoin).toHaveBeenCalledWith(normalizedCode)
     expect(
-      await screen.findByRole('heading', { name: 'Waiting for your family' }),
+      await screen.findByText(/request was sent/i),
     ).toBeInTheDocument()
-    expect(screen.getByText(/moments will appear once/i)).toBeInTheDocument()
+    expect(
+      screen.getByRole('heading', { name: 'Waiting for your family' }),
+    ).toBeInTheDocument()
   })
 
-  it('keeps a generated invite visible and lets an owner approve a request', async () => {
+  it('keeps the persistent code visible, copies and shares it, and handles legacy requests', async () => {
     const user = userEvent.setup()
     const pendingRequest = {
       id: 'cccccccc-cccc-4ccc-8ccc-cccccccccccc',
@@ -144,11 +178,13 @@ describe('FamilySyncPanel', () => {
         name: 'Ahmed family',
         role: 'owner',
         memberCount: 1,
+        shareCode: 'BUB-AAAA-BBBB-CCCC-DDDD-EEEE-FFFF',
       },
       pendingRequests: [pendingRequest],
     }
     const setup = createAdapter(connected)
-    const shareInvite = vi.fn(async () => 'shared' as const)
+    const shareCode = vi.fn(async () => 'shared' as const)
+    const copyCode = vi.fn(async () => undefined)
     setup.adapter.decideJoinRequest = vi.fn(async () => {
       setup.setSnapshot({ ...connected, pendingRequests: [] })
     })
@@ -156,28 +192,30 @@ describe('FamilySyncPanel', () => {
     renderPanel(
       <FamilySyncPanel
         adapter={setup.adapter}
-        shareInvite={shareInvite}
+        shareCode={shareCode}
+        copyCode={copyCode}
       />,
     )
-    await user.click(
-      await screen.findByRole('button', { name: 'Create code' }),
-    )
 
-    const generatedCode = `ks1_${'a'.repeat(64)}`
-    expect(screen.getByText(generatedCode)).toBeInTheDocument()
-    expect(screen.getByText(/one person can use it/i)).toBeInTheDocument()
+    const familyCode = 'BUB-AAAA-BBBB-CCCC-DDDD-EEEE-FFFF'
+    expect(await screen.findByText(familyCode)).toBeInTheDocument()
+    expect(screen.getByText(/code stays in settings/i)).toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: 'Copy code' }))
+    expect(copyCode).toHaveBeenCalledWith(familyCode)
+    expect(await screen.findByText(/family code was copied/i)).toBeInTheDocument()
 
     await user.click(
       screen.getByRole('button', {
-        name: 'Share invite code for Ahmed family',
+        name: 'Share family code for Ahmed family',
       }),
     )
-    expect(shareInvite).toHaveBeenCalledWith(
-      expect.objectContaining({ code: generatedCode }),
+    expect(shareCode).toHaveBeenCalledWith(
+      familyCode,
       'Ahmed family',
     )
     expect(
-      await screen.findByText(/ready in your share sheet/i),
+      await screen.findByText(/ready in the share sheet/i),
     ).toBeInTheDocument()
 
     await user.click(
@@ -190,5 +228,78 @@ describe('FamilySyncPanel', () => {
     await waitFor(() => {
       expect(screen.getByText('No one is waiting to join.')).toBeInTheDocument()
     })
+  })
+
+  it('lets every connected family member retrieve the saved code', async () => {
+    const familyCode = 'BUB-9999-8888-7777-6666-5555-4444'
+    const setup = createAdapter({
+      kind: 'connected',
+      person,
+      circle: {
+        id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+        name: 'Ahmed family',
+        role: 'member',
+        memberCount: 5,
+        shareCode: familyCode,
+      },
+      pendingRequests: [],
+    })
+
+    renderPanel(<FamilySyncPanel adapter={setup.adapter} />)
+
+    expect(await screen.findByText(familyCode)).toBeInTheDocument()
+    expect(
+      screen.getByRole('button', { name: 'Share family code for Ahmed family' }),
+    ).toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: 'Join requests' })).toBeNull()
+    expect(
+      screen.queryByRole('button', { name: 'Replace family code' }),
+    ).toBeNull()
+  })
+
+  it('lets the owner confirm and rotate the saved family code', async () => {
+    const user = userEvent.setup()
+    const currentCode = 'BUB-AAAA-BBBB-CCCC-DDDD-EEEE-FFFF'
+    const nextCode = 'BUB-FFFF-EEEE-DDDD-CCCC-BBBB-AAAA'
+    const connected: FamilySyncSnapshot = {
+      kind: 'connected',
+      person,
+      circle: {
+        id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+        name: 'Ahmed family',
+        role: 'owner',
+        memberCount: 3,
+        shareCode: currentCode,
+      },
+      pendingRequests: [],
+    }
+    const setup = createAdapter(connected)
+    setup.adapter.rotateFamilyCode = vi.fn(async () => {
+      setup.setSnapshot({
+        ...connected,
+        circle: { ...connected.circle, shareCode: nextCode },
+      })
+      return nextCode
+    })
+
+    renderPanel(<FamilySyncPanel adapter={setup.adapter} />)
+
+    await user.click(
+      await screen.findByRole('button', { name: 'Replace family code' }),
+    )
+    expect(
+      screen.getByRole('group', { name: 'Confirm family code rotation' }),
+    ).toBeInTheDocument()
+    expect(setup.adapter.rotateFamilyCode).not.toHaveBeenCalled()
+
+    await user.click(screen.getByRole('button', { name: 'Create new code' }))
+
+    expect(setup.adapter.rotateFamilyCode).toHaveBeenCalledWith(
+      connected.circle.id,
+    )
+    expect(await screen.findByText(nextCode)).toBeInTheDocument()
+    expect(
+      screen.getByText(/previous code no longer works/i),
+    ).toBeInTheDocument()
   })
 })

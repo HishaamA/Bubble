@@ -43,7 +43,37 @@ export type FamilyMembershipState =
       circleId: string
       circleName: string
       role: 'owner' | 'member'
+      ownerId: string
+      memberCount: number
+      shareCode: string
     }
+
+export type FamilyMember = {
+  familyId: string
+  userId: string
+  displayName: string
+  avatarPath: string | null
+  role: 'owner' | 'member'
+  joinedAt: string
+}
+
+export type CreatedFamily = {
+  id: string
+  name: string
+  role: 'owner'
+  ownerId: string
+  memberCount: number
+  shareCode: string
+}
+
+export type JoinedFamily = {
+  id: string
+  name: string
+  role: 'owner' | 'member'
+  ownerId: string
+  memberCount: number
+  shareCode: string
+}
 
 function asRecord(value: unknown): UnknownRecord | null {
   return value && typeof value === 'object' ? (value as UnknownRecord) : null
@@ -64,6 +94,37 @@ function requiredString(record: UnknownRecord, key: string) {
 function optionalString(record: UnknownRecord, key: string) {
   const value = record[key]
   return typeof value === 'string' && value ? value : null
+}
+
+function requiredNumber(record: UnknownRecord, key: string) {
+  const value = record[key]
+  if (typeof value !== 'number' || !Number.isFinite(value)) {
+    throw new Error('Supabase returned incomplete family data.')
+  }
+  return value
+}
+
+function familyRole(record: UnknownRecord): 'owner' | 'member' {
+  const role = record.family_role
+  if (role !== 'owner' && role !== 'member') {
+    throw new Error('Supabase returned an invalid family role.')
+  }
+  return role
+}
+
+function familyFromRecord(record: UnknownRecord) {
+  return {
+    id: requiredString(record, 'family_id'),
+    name: requiredString(record, 'family_name'),
+    role: familyRole(record),
+    ownerId: requiredString(record, 'owner_id'),
+    memberCount: requiredNumber(record, 'member_count'),
+    shareCode: requiredString(record, 'share_code'),
+  }
+}
+
+export function normalizeFamilyShareCode(value: string) {
+  return value.trim().toUpperCase()
 }
 
 function profilePreferencesFromRecord(
@@ -200,18 +261,13 @@ export async function updateProfilePreferences(
 export async function readFamilyMembership(): Promise<FamilyMembershipState> {
   const { client } = requireAuthenticatedClient()
   const profile = await bootstrapCurrentClerkProfile()
-  const { data: membershipData, error: membershipError } = await client
-    .from('circle_members')
-    .select('circle_id,role')
-    .eq('user_id', profile.userId)
-    .eq('status', 'approved')
-    .order('created_at', { ascending: true })
-    .limit(1)
-    .maybeSingle()
-  if (membershipError) throw membershipError
+  const { data: familyData, error: familyError } = await client.rpc(
+    'get_current_family',
+  )
+  if (familyError) throw familyError
 
-  const membership = asRecord(membershipData)
-  if (!membership) {
+  const familyRecord = firstRecord(familyData)
+  if (!familyRecord) {
     const { data: pendingData, error: pendingError } = await client
       .from('join_requests')
       .select('id')
@@ -229,61 +285,148 @@ export async function readFamilyMembership(): Promise<FamilyMembershipState> {
     }
   }
 
-  const circleId = requiredString(membership, 'circle_id')
-  const { data: circleData, error: circleError } = await client
-    .from('circles')
-    .select('name')
-    .eq('id', circleId)
-    .single()
-  if (circleError) throw circleError
-  const circle = asRecord(circleData)
-  if (!circle) throw new Error('The family group could not be loaded.')
+  const family = familyFromRecord(familyRecord)
 
   return {
     kind: 'member',
     userId: profile.userId,
-    circleId,
-    circleName: requiredString(circle, 'name'),
-    role: membership.role === 'owner' ? 'owner' : 'member',
+    circleId: family.id,
+    circleName: family.name,
+    role: family.role,
+    ownerId: family.ownerId,
+    memberCount: family.memberCount,
+    shareCode: family.shareCode,
   }
 }
 
-export async function createFamily(name: string) {
+export async function createFamily(name: string): Promise<CreatedFamily> {
   const normalizedName = name.trim()
   if (!normalizedName || normalizedName.length > 80) {
     throw new Error('Give your family a name of 80 characters or fewer.')
   }
 
   const { client } = requireAuthenticatedClient()
-  const profile = await bootstrapCurrentClerkProfile()
-  const { data, error } = await client
-    .from('circles')
-    .insert({ name: normalizedName, owner_id: profile.userId })
-    .select('id,name')
-    .single()
+  await bootstrapCurrentClerkProfile()
+  const { data, error } = await client.rpc(
+    'create_family_with_share_code',
+    { p_name: normalizedName },
+  )
   if (error) throw error
-  const circle = asRecord(data)
-  if (!circle) throw new Error('The family group could not be created.')
+  const record = firstRecord(data)
+  if (!record) throw new Error('The family group could not be created.')
+  const family = familyFromRecord(record)
+  if (family.role !== 'owner' || !family.shareCode) {
+    throw new Error('The new family share code could not be created.')
+  }
   return {
-    id: requiredString(circle, 'id'),
-    name: requiredString(circle, 'name'),
+    id: family.id,
+    name: family.name,
+    role: 'owner',
+    ownerId: family.ownerId,
+    memberCount: family.memberCount,
+    shareCode: family.shareCode,
   }
 }
 
-export async function joinFamilyByCode(inviteCode: string) {
-  const normalizedCode = inviteCode.trim().toLowerCase()
-  if (!/^ks1_[0-9a-f]{64}$/.test(normalizedCode)) {
-    throw new Error('invalid_invite_code')
-  }
-
+export async function joinFamilyByCode(
+  inviteCode: string,
+): Promise<JoinedFamily | { requestId: string }> {
+  const normalizedCode = normalizeFamilyShareCode(inviteCode)
   const { client } = requireAuthenticatedClient()
   await bootstrapCurrentClerkProfile()
+
+  if (/^BUB-[0-9A-F]{4}(-[0-9A-F]{4}){5}$/.test(normalizedCode)) {
+    const { data, error } = await client.rpc(
+      'join_family_by_share_code',
+      { p_share_code: normalizedCode },
+    )
+    if (error) throw error
+    const record = firstRecord(data)
+    if (!record) throw new Error('The family could not be joined.')
+    const family = familyFromRecord(record)
+    return {
+      id: family.id,
+      name: family.name,
+      role: family.role,
+      ownerId: family.ownerId,
+      memberCount: family.memberCount,
+      shareCode: family.shareCode,
+    }
+  }
+
+  // Keep previously issued invite links functional during the transition.
+  const legacyCode = inviteCode.trim().toLowerCase()
+  if (!/^ks1_[0-9a-f]{64}$/.test(legacyCode)) {
+    throw new Error('invalid_family_code')
+  }
   const { data, error } = await client.rpc('request_circle_join', {
-    p_invite_code: normalizedCode,
+    p_invite_code: legacyCode,
   })
   if (error) throw error
   if (typeof data !== 'string') {
     throw new Error('The family join request could not be saved.')
   }
   return { requestId: data }
+}
+
+export async function readFamilyMembers(): Promise<FamilyMember[]> {
+  const { client } = requireAuthenticatedClient()
+  await bootstrapCurrentClerkProfile()
+  const { data, error } = await client.rpc(
+    'list_current_family_members',
+  )
+  if (error) throw error
+
+  if (!Array.isArray(data)) return []
+  return data.map((value) => {
+    const member = asRecord(value)
+    if (!member) throw new Error('A family member could not be loaded.')
+    const role = familyRole(member)
+    return {
+      familyId: requiredString(member, 'family_id'),
+      userId: requiredString(member, 'user_id'),
+      displayName: requiredString(member, 'display_name'),
+      avatarPath: optionalString(member, 'avatar_path'),
+      role,
+      joinedAt: requiredString(member, 'joined_at'),
+    }
+  })
+}
+
+export async function readFamilyShareCode(circleId: string) {
+  const { client } = requireAuthenticatedClient()
+  await bootstrapCurrentClerkProfile()
+  const { data, error } = await client.rpc(
+    'get_or_create_family_share_code',
+    { p_circle_id: circleId },
+  )
+  if (error) throw error
+  if (typeof data !== 'string' || !data) {
+    throw new Error('The family share code could not be loaded.')
+  }
+  return data
+}
+
+export async function rotateFamilyShareCode(circleId: string) {
+  const { client } = requireAuthenticatedClient()
+  await bootstrapCurrentClerkProfile()
+  const { data, error } = await client.rpc('rotate_family_share_code', {
+    p_circle_id: circleId,
+  })
+  if (error) throw error
+  if (typeof data !== 'string' || !data) {
+    throw new Error('The family share code could not be rotated.')
+  }
+  return data
+}
+
+export async function leaveFamily() {
+  const { client } = requireAuthenticatedClient()
+  await bootstrapCurrentClerkProfile()
+  const { data, error } = await client.rpc('leave_current_family')
+  if (error) throw error
+  if (typeof data !== 'boolean') {
+    throw new Error('The family membership could not be updated.')
+  }
+  return data
 }
