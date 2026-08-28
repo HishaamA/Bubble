@@ -1301,11 +1301,11 @@ function createDemoFamilyPlans(anchorTimestamp: number): FamilyEvent[] {
       category: 'other',
       demoPresentation: {
         attendees: [
-          { name: 'Mum', initials: 'MU', avatar: '/assets/journal/demo/demo-person-mum.png' },
-          { name: 'Maya', initials: 'MA', avatar: '/assets/journal/demo/demo-person-maya.png' },
-          { name: 'Sara', initials: 'SA', avatar: '/assets/journal/demo/demo-person-mum.png' },
-          { name: 'Hishaam', initials: 'HI', avatar: '/assets/journal/demo/demo-person-granddad.png' },
-          { name: 'Rami', initials: 'RA', avatar: '/assets/journal/demo/demo-person-maya.png' },
+          { name: 'Mum', initials: 'MU' },
+          { name: 'Maya', initials: 'MA' },
+          { name: 'Sara', initials: 'SA' },
+          { name: 'Hishaam', initials: 'HI' },
+          { name: 'Rami', initials: 'RA' },
         ],
         additionalAttendees: 2,
         checklist: [
@@ -1325,11 +1325,11 @@ function createDemoFamilyPlans(anchorTimestamp: number): FamilyEvent[] {
       category: 'anniversary',
       demoPresentation: {
         attendees: [
-          { name: 'Grandad', initials: 'GR', avatar: '/assets/journal/demo/demo-person-granddad.png' },
-          { name: 'Mum', initials: 'MU', avatar: '/assets/journal/demo/demo-person-mum.png' },
-          { name: 'Maya', initials: 'MA', avatar: '/assets/journal/demo/demo-person-maya.png' },
-          { name: 'Sara', initials: 'SA', avatar: '/assets/journal/demo/demo-person-mum.png' },
-          { name: 'Hishaam', initials: 'HI', avatar: '/assets/journal/demo/demo-person-granddad.png' },
+          { name: 'Grandad', initials: 'GR' },
+          { name: 'Mum', initials: 'MU' },
+          { name: 'Maya', initials: 'MA' },
+          { name: 'Sara', initials: 'SA' },
+          { name: 'Hishaam', initials: 'HI' },
         ],
         additionalAttendees: 1,
         checklist: [
@@ -1349,10 +1349,10 @@ function createDemoFamilyPlans(anchorTimestamp: number): FamilyEvent[] {
       category: 'travel',
       demoPresentation: {
         attendees: [
-          { name: 'Mum', initials: 'MU', avatar: '/assets/journal/demo/demo-person-mum.png' },
-          { name: 'Maya', initials: 'MA', avatar: '/assets/journal/demo/demo-person-maya.png' },
-          { name: 'Sara', initials: 'SA', avatar: '/assets/journal/demo/demo-person-mum.png' },
-          { name: 'Rami', initials: 'RA', avatar: '/assets/journal/demo/demo-person-granddad.png' },
+          { name: 'Mum', initials: 'MU' },
+          { name: 'Maya', initials: 'MA' },
+          { name: 'Sara', initials: 'SA' },
+          { name: 'Rami', initials: 'RA' },
         ],
         additionalAttendees: 3,
         checklist: [

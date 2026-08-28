@@ -21,22 +21,8 @@ const realPhoto: JournalPhoto = {
 }
 
 describe('demo Journal photos', () => {
-  it('uses stable local assets that stay eligible for the normal photo and face pipeline', () => {
-    expect(demoJournalPhotos).toHaveLength(9)
-    expect(demoJournalPhotos).toEqual(expect.arrayContaining([
-      expect.objectContaining({
-        id: 'demo-journal-park-picnic',
-        image: '/assets/journal/demo/demo-park-picnic.jpg',
-        thumbnail: '/assets/journal/demo/demo-park-picnic.jpg',
-        width: 418,
-        height: 418,
-        syncStatus: 'synced',
-      }),
-    ]))
-    expect(demoJournalPhotos.every(({ image, thumbnail }) =>
-      typeof image === 'string' && image.startsWith('/assets/') &&
-      typeof thumbnail === 'string' && thumbnail.startsWith('/assets/'),
-    )).toBe(true)
+  it('does not seed generated photos into an empty account', () => {
+    expect(demoJournalPhotos).toEqual([])
   })
 
   it('returns the real collection unchanged outside demo mode', () => {
@@ -44,15 +30,8 @@ describe('demo Journal photos', () => {
     expect(withDemoJournalPhotos(photos, false)).toBe(photos)
   })
 
-  it('adds demo entries in memory while preserving a real record on collision', () => {
-    const collision = {
-      ...realPhoto,
-      id: demoJournalPhotos[0]?.id ?? 'demo-journal-dumpling-night',
-    }
-    const merged = withDemoJournalPhotos([realPhoto, collision], true)
-
-    expect(merged).toHaveLength(demoJournalPhotos.length + 1)
-    expect(merged.find(({ id }) => id === collision.id)).toBe(collision)
-    expect(merged[0]).toBe(realPhoto)
+  it('keeps the real collection unchanged in demo mode', () => {
+    const photos = [realPhoto]
+    expect(withDemoJournalPhotos(photos, true)).toBe(photos)
   })
 })

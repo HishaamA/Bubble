@@ -128,7 +128,7 @@ describe('JournalRoute', () => {
     expect(journalProps.capsuleCacheNamespace).toBe('family:ahmed')
   })
 
-  it('adds local preview photos in demo mode without replacing supplied photos', () => {
+  it('keeps supplied photos unchanged in demo mode', () => {
     routeMocks.developmentPreview = true
 
     render(
@@ -142,17 +142,10 @@ describe('JournalRoute', () => {
       openAllPhotosByDefault: boolean
     }
     expect(journalProps.openAllPhotosByDefault).toBe(true)
-    expect(journalProps.journalPhotos).toHaveLength(10)
-    expect(journalProps.journalPhotos).toContain(directPhoto)
-    expect(journalProps.journalPhotos).toEqual(expect.arrayContaining([
-      expect.objectContaining({
-        id: 'demo-journal-park-picnic',
-        image: '/assets/journal/demo/demo-park-picnic.jpg',
-      }),
-    ]))
+    expect(journalProps.journalPhotos).toEqual([directPhoto])
   })
 
-  it('uses the same demo-only collection when a preview photo is opened', () => {
+  it('keeps an empty account empty when a preview photo route is opened', () => {
     routeMocks.developmentPreview = true
 
     render(
@@ -165,10 +158,7 @@ describe('JournalRoute', () => {
     const viewerProps = routeMocks.capsulePhotoViewer.mock.lastCall?.[0] as {
       journalPhotos: JournalPhoto[]
     }
-    expect(viewerProps.journalPhotos).toHaveLength(9)
-    expect(viewerProps.journalPhotos.every(({ image }) =>
-      typeof image === 'string' && image.startsWith('/assets/journal/demo/'),
-    )).toBe(true)
+    expect(viewerProps.journalPhotos).toEqual([])
   })
 
   it('keeps shared 360 moments connected to Memories', () => {

@@ -115,9 +115,6 @@ describe('JournalPage', () => {
     expect(screen.queryByText('Mountain day at golden hour')).not.toBeInTheDocument()
     expect(screen.queryByText('Dinner that lasted all evening')).not.toBeInTheDocument()
     expect(container.querySelector('.journal-week')).not.toBeInTheDocument()
-    expect(
-      container.querySelector('img[src="/assets/journal/family-memory-grid-v1.png"]'),
-    ).not.toBeInTheDocument()
   })
 
   it('mounts only the selected People, Plans, or Flights section', async () => {

@@ -506,7 +506,7 @@ describe('PanoramaMemoryScreen lifecycle', () => {
       screen.queryByRole('radio', { name: 'Yesterday together, Maya' }),
     ).not.toBeInTheDocument()
     expect(
-      screen.getByRole('radio', { name: /beach day, hishaam/i }),
+      screen.getByRole('radio', { name: /sunday dinner, mum/i }),
     ).toBeVisible()
   })
 

@@ -84,7 +84,7 @@ describe('MemoryConstellation', () => {
     expect(screen.getByRole('heading', { name: 'Moments' })).toBeInTheDocument()
     expect(screen.getByText('Wednesday, August 26')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /open sunday dinner memory/i })).toBeInTheDocument()
-    expect(screen.getAllByRole('button', { name: /open .* memory/i })).toHaveLength(10)
+    expect(screen.getAllByRole('button', { name: /open .* memory/i })).toHaveLength(1)
     expect(screen.queryByText('Today’s Relay')).not.toBeInTheDocument()
     expect(document.querySelector('.memory-bubble--featured')).not.toBeInTheDocument()
     const dinner = screen.getByRole('button', {
@@ -101,7 +101,7 @@ describe('MemoryConstellation', () => {
       document.querySelectorAll<SVGPathElement>('.memory-bubble__arc-path'),
       ({ id }) => id,
     )
-    expect(arcPathIds).toHaveLength(20)
+    expect(arcPathIds).toHaveLength(2)
     expect(new Set(arcPathIds)).toHaveProperty('size', arcPathIds.length)
     expect(
       memories.every(
@@ -210,9 +210,9 @@ describe('MemoryConstellation', () => {
     )
 
     expect(screen.getByRole('button', {
-      name: /open sunset walk memory/i,
+      name: /open sunday dinner memory/i,
     })).toBeInTheDocument()
-    expect(document.querySelectorAll('.memory-bubble')).toHaveLength(11)
+    expect(document.querySelectorAll('.memory-bubble')).toHaveLength(2)
 
     view.rerender(
       <MemoryRouter>
@@ -221,9 +221,9 @@ describe('MemoryConstellation', () => {
     )
 
     expect(screen.getByRole('button', {
-      name: /open sunset walk memory/i,
+      name: /open sunday dinner memory/i,
     })).toBeInTheDocument()
-    expect(document.querySelectorAll('.memory-bubble')).toHaveLength(10)
+    expect(document.querySelectorAll('.memory-bubble')).toHaveLength(1)
   })
 
   it('keeps a touch tap targeted at the shared open button during pointer capture', () => {
@@ -759,7 +759,7 @@ describe('MemoryConstellation', () => {
     expect(dinner.style.getPropertyValue('--bubble-left')).toBe('31.25%')
   })
 
-  it('opens with a random memory already enlarged at the center', () => {
+  it('opens with the remaining Sunday dinner memory enlarged at the center', () => {
     vi.useFakeTimers()
     const random = vi.spyOn(Math, 'random').mockReturnValue(0.21)
     render(
@@ -790,10 +790,10 @@ describe('MemoryConstellation', () => {
         offsetHeight: { configurable: true, value: 80 },
       })
     })
-    const beach = screen.getByRole('button', {
-      name: /open beach day memory/i,
+    const dinner = screen.getByRole('button', {
+      name: /open sunday dinner memory/i,
     })
-    Object.defineProperties(beach, {
+    Object.defineProperties(dinner, {
       offsetLeft: { configurable: true, value: 500 },
       offsetTop: { configurable: true, value: 408 },
     })
@@ -801,10 +801,10 @@ describe('MemoryConstellation', () => {
     vi.advanceTimersByTime(20)
 
     expect(random).toHaveBeenCalledTimes(1)
-    expect(beach).toHaveAttribute('data-center-focus', 'true')
+    expect(dinner).toHaveAttribute('data-center-focus', 'true')
     expect(
       Number(
-        beach
+        dinner
           .querySelector<HTMLElement>('.memory-bubble__motion')
           ?.style.getPropertyValue('--bubble-center-scale'),
       ),
@@ -815,7 +815,7 @@ describe('MemoryConstellation', () => {
     })
   })
 
-  it('centers and enlarges a random memory after navigating back to Moments', () => {
+  it('centers and enlarges Sunday dinner after navigating back to Moments', () => {
     vi.useFakeTimers()
     const random = vi.spyOn(Math, 'random').mockReturnValue(0.21)
     render(
@@ -855,10 +855,10 @@ describe('MemoryConstellation', () => {
         offsetHeight: { configurable: true, value: 80 },
       })
     })
-    const beach = screen.getByRole('button', {
-      name: /open beach day memory/i,
+    const dinner = screen.getByRole('button', {
+      name: /open sunday dinner memory/i,
     })
-    Object.defineProperties(beach, {
+    Object.defineProperties(dinner, {
       offsetLeft: { configurable: true, value: 500 },
       offsetTop: { configurable: true, value: 408 },
     })
@@ -874,11 +874,11 @@ describe('MemoryConstellation', () => {
     )
     // React Router may also use Math.random while creating the new history key.
     expect(random).toHaveBeenCalled()
-    expect(beach).toHaveAttribute('data-center-focus', 'true')
+    expect(dinner).toHaveAttribute('data-center-focus', 'true')
     expect(bubbleScales.some((scale) => scale > 1)).toBe(true)
     expect(
       Number(
-        beach
+        dinner
           .querySelector<HTMLElement>('.memory-bubble__motion')
           ?.style.getPropertyValue('--bubble-center-scale'),
       ),
@@ -943,7 +943,7 @@ describe('MemoryConstellation', () => {
     vi.spyOn(Math, 'random').mockReturnValue(0.45)
     render(
       <MemoryRouter>
-        <MemoryConstellation />
+        <MemoryConstellation sharedMoments={[sharedMoment]} />
       </MemoryRouter>,
     )
 
@@ -969,10 +969,7 @@ describe('MemoryConstellation', () => {
       toJSON: () => ({}),
     })
 
-    const bubbleButtons = screen.getAllByRole('button', {
-      name: /open .* memory/i,
-    })
-    bubbleButtons.forEach((bubble) => {
+    document.querySelectorAll<HTMLElement>('.memory-bubble').forEach((bubble) => {
       Object.defineProperties(bubble, {
         offsetLeft: { configurable: true, value: 20 },
         offsetTop: { configurable: true, value: 20 },
@@ -983,23 +980,24 @@ describe('MemoryConstellation', () => {
     const dinner = screen.getByRole('button', {
       name: /open sunday dinner memory/i,
     })
-    const beach = screen.getByRole('button', {
-      name: /open beach day memory/i,
-    })
+    const sharedBubble = screen.getByRole('button', {
+      name: /open family balcony shared by maya/i,
+    }).closest<HTMLElement>('.memory-bubble')
+    if (!sharedBubble) throw new Error('Expected the shared memory bubble.')
     Object.defineProperties(dinner, {
       offsetLeft: { configurable: true, value: 320 },
       offsetTop: { configurable: true, value: 408 },
     })
-    Object.defineProperties(beach, {
+    Object.defineProperties(sharedBubble as HTMLElement, {
       offsetLeft: { configurable: true, value: 520 },
       offsetTop: { configurable: true, value: 408 },
     })
 
     vi.advanceTimersByTime(20)
     expect(dinner).toHaveAttribute('data-center-focus', 'true')
-    expect(beach).toHaveAttribute('data-center-focus', 'false')
+    expect(sharedBubble).toHaveAttribute('data-center-focus', 'false')
     expect(dinner.style.getPropertyValue('--bubble-size')).toBe(
-      beach.style.getPropertyValue('--bubble-size'),
+      sharedBubble?.style.getPropertyValue('--bubble-size'),
     )
     expect(
       Number(
@@ -1027,10 +1025,10 @@ describe('MemoryConstellation', () => {
     vi.advanceTimersByTime(20)
 
     expect(dinner).toHaveAttribute('data-center-focus', 'false')
-    expect(beach).toHaveAttribute('data-center-focus', 'true')
+    expect(sharedBubble).toHaveAttribute('data-center-focus', 'true')
     expect(
       Number(
-        beach
+        sharedBubble
           .querySelector<HTMLElement>('.memory-bubble__motion')
           ?.style.getPropertyValue('--bubble-center-scale'),
       ),

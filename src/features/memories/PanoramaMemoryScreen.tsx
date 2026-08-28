@@ -36,8 +36,6 @@ import type {
 
 const DEMO_VOICE_NOTE =
   'Sunday dinner always sounds like this: everyone talking, everyone laughing, and nobody ready to leave.'
-const MEMORY_SPRITE_WIDTH = 1536
-
 function CommentsIcon() {
   return (
     <svg viewBox="0 0 24 24" aria-hidden="true">
@@ -156,11 +154,10 @@ export function PanoramaMemoryScreen({
           year: 'numeric',
         }).format(new Date(sharedMoment.createdAt)),
       }
-    : staticMemory ?? memories[4]
+    : staticMemory ?? memories[0]
   const returnTo = requestedReturnTo === '/journal' ? '/journal' : '/'
   const returnLabel =
     returnTo === '/journal' ? 'Back to journal' : 'Back to memories'
-  const isDinnerMemory = !sharedMoment && memory.id === 'dinner'
   const sharedMemoryMissing = Boolean(sharedMomentId && !sharedMoment)
   const canEditMemoryPoints = Boolean(
     sharedMoment?.ownedByCurrentUser === true &&
@@ -457,11 +454,7 @@ export function PanoramaMemoryScreen({
           id: candidate.id,
           label: candidate.label,
           sender: candidate.sender,
-          thumbnailUrl: '/assets/design/bubble-ui-reference.png',
-          crop: {
-            ...candidate.crop,
-            sourceWidth: MEMORY_SPRITE_WIDTH,
-          },
+          thumbnailUrl: candidate.thumbnail,
         })),
       ]
     },
@@ -510,21 +503,16 @@ export function PanoramaMemoryScreen({
       ]
     }
 
-    const selectedMemory = selectedVrStaticMemory ?? memories[4]
-    const selectedIsDinner = selectedMemory.id === 'dinner'
+    const selectedMemory = selectedVrStaticMemory ?? memories[0]
     return [
       {
         id: `cardboard-${selectedMemory.id}`,
-        panorama: selectedIsDinner
-          ? '/assets/panoramas/sunday-dinner-demo.jpg'
-          : '/assets/panoramas/jordan-pond-demo.jpg',
-        alt: selectedIsDinner
-          ? 'A warm panoramic family dinner around a candlelit table.'
-          : `${selectedMemory.label}, shown as a wide family panorama.`,
+        panorama: '/assets/panoramas/sunday-dinner-demo.jpg',
+        alt: 'A warm panoramic family dinner around a candlelit table.',
         title: selectedMemory.label,
         description: `A family moment shared by ${selectedMemory.sender}.`,
-        pitch: selectedIsDinner ? -2 : 0,
-        yaw: selectedIsDinner ? 12 : 0,
+        pitch: -2,
+        yaw: 12,
         hfov: 104,
         minHfov: 52,
         maxHfov: 120,
@@ -602,17 +590,11 @@ export function PanoramaMemoryScreen({
 
       return [
         {
-        id: 'jordan-pond',
-        panorama: isDinnerMemory
-          ? '/assets/panoramas/sunday-dinner-demo.jpg'
-          : '/assets/panoramas/jordan-pond-demo.jpg',
-        alt: isDinnerMemory
-          ? 'A warm panoramic family dinner around a candlelit table.'
-          : 'A wide panoramic view of Jordan Pond and the surrounding mountains.',
+        id: 'sunday-dinner',
+        panorama: '/assets/panoramas/sunday-dinner-demo.jpg',
+        alt: 'A warm panoramic family dinner around a candlelit table.',
         title: memory.label,
-        description: isDinnerMemory
-          ? 'A bundled concept panorama for the first Bubble memory flow.'
-          : 'A bundled local panorama used for the first Bubble viewer proof.',
+        description: 'A bundled concept panorama for the first Bubble memory flow.',
         pitch: -2,
         yaw: 12,
         hfov: 104,
@@ -627,34 +609,11 @@ export function PanoramaMemoryScreen({
             label: 'Play the chair voice note',
             onActivate: playVoiceNote,
           },
-          {
-            id: 'doorway-alma',
-            kind: 'scene',
-            pitch: -2,
-            yaw: 34,
-            label: 'Enter the second memory',
-            sceneId: 'alma-courtyard',
-            targetPitch: 2,
-            targetYaw: -26,
-            targetHfov: 100,
-          },
         ],
-        },
-        {
-        id: 'alma-courtyard',
-        panorama: '/assets/panoramas/alma-demo.jpg',
-        alt: 'A panoramic view of the ALMA radio telescope array beneath a clear blue sky.',
-        title: 'The next room',
-        description: 'The doorway links to exactly one second bundled panorama.',
-        pitch: 2,
-        yaw: -26,
-        hfov: 100,
-        minHfov: 52,
-        maxHfov: 120,
         },
       ]
     },
-    [isDinnerMemory, memory.label, openAnnotation, playVoiceNote, sharedMoment],
+    [memory.label, openAnnotation, playVoiceNote, sharedMoment],
   )
 
   const initialSceneId = scenes[0]?.id

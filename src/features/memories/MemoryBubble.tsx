@@ -4,8 +4,6 @@ import type { BubblePlacement } from './bubblePlacement'
 import { MemoryArcLabels } from './MemoryArcLabels'
 import type { Memory } from './memories'
 
-const SPRITE_WIDTH = 1536
-
 type MemoryBubbleProps = {
   memory: Memory
   order: number
@@ -23,12 +21,6 @@ export function MemoryBubble({
   pickedUp = false,
   onOpen,
 }: MemoryBubbleProps) {
-  const spriteScale = SPRITE_WIDTH / memory.crop.diameter
-  const spriteStyle: CSSProperties = {
-    width: `${spriteScale * 100}%`,
-    left: `${(-memory.crop.left / memory.crop.diameter) * 100}%`,
-    top: `${(-memory.crop.top / memory.crop.diameter) * 100}%`,
-  }
   const bubbleStyle = {
     '--bubble-top': placement ? `${placement.top}%` : memory.position.top,
     '--bubble-left': placement ? `${placement.left}%` : memory.position.left,
@@ -69,10 +61,9 @@ export function MemoryBubble({
         <span className="memory-bubble__motion" style={motionStyle}>
           <span className="memory-bubble__image" aria-hidden="true">
             <img
-              src="/assets/design/bubble-ui-reference.png"
+              src={memory.thumbnail}
               alt=""
               draggable="false"
-              style={spriteStyle}
             />
           </span>
           <MemoryArcLabels title={memory.label} sender={memory.sender} />
