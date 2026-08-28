@@ -55,6 +55,8 @@ final class PanoramaCaptureViewController: UIViewController, ARSessionDelegate {
     private let ciContext = CIContext(options: [.cacheIntermediates: false])
     private let lifecycleLock = NSLock()
     private let orientationLock = NSLock()
+    private let maximumCaptureOriginDistance: Float = 0.12
+    private let autofocusSettlingDelay: TimeInterval = 0.22
 
     private let headerMaterial = UIVisualEffectView(effect: UIBlurEffect(style: .systemUltraThinMaterialDark))
     private let cancelButton = UIButton(type: .system)
@@ -103,7 +105,8 @@ final class PanoramaCaptureViewController: UIViewController, ARSessionDelegate {
 
     override var prefersStatusBarHidden: Bool { true }
     override var prefersHomeIndicatorAutoHidden: Bool { true }
-    override var supportedInterfaceOrientations: UIInterfaceOrientationMask { .allButUpsideDown }
+    override var shouldAutorotate: Bool { false }
+    override var supportedInterfaceOrientations: UIInterfaceOrientationMask { .portrait }
 
     init(options: PanoramaCaptureOptions) throws {
         self.options = options
@@ -487,7 +490,6 @@ final class PanoramaCaptureViewController: UIViewController, ARSessionDelegate {
         let trackingIsNormal: Bool
         if case .normal = frame.camera.trackingState {
             trackingIsNormal = true
-            anchorCaptureOriginIfNeeded(to: transform)
         } else {
             trackingIsNormal = false
         }
@@ -513,6 +515,7 @@ final class PanoramaCaptureViewController: UIViewController, ARSessionDelegate {
         }
         let direction = remainingTargetCount <= 6 &&
             !isAligned &&
+            pivotDistance <= maximumCaptureOriginDistance &&
             !orientationState.isTransitioning
             ? guidanceDirection(
                 to: targets[candidate.index].direction,
@@ -531,6 +534,7 @@ final class PanoramaCaptureViewController: UIViewController, ARSessionDelegate {
             (motionIsSteady || canGraceBriefTremor) &&
             !isSavingFrame &&
             !orientationState.isTransitioning &&
+            pivotDistance <= maximumCaptureOriginDistance &&
             frame.timestamp >= captureCooldownUntil
 
         if canCapture {
@@ -550,18 +554,19 @@ final class PanoramaCaptureViewController: UIViewController, ARSessionDelegate {
                 )
             }
 
-            if motionIsSteady {
-                considerStableFrame(
-                    frame: frame,
-                    cameraTransform: transform,
-                    interfaceOrientation: orientationState.orientation,
-                    targetIndex: candidate.index
-                )
-            }
-
             if let steadyStartTimestamp {
                 let elapsed = max(0, frame.timestamp - steadyStartTimestamp)
                 steadyProgress = min(1, Float(elapsed / options.steadyDuration))
+                if motionIsSteady, elapsed >= autofocusSettlingDelay {
+                    // Give autofocus and auto-exposure a moment to settle, then
+                    // keep the sharpest synchronized AR frame from the hold.
+                    considerStableFrame(
+                        frame: frame,
+                        cameraTransform: transform,
+                        interfaceOrientation: orientationState.orientation,
+                        targetIndex: candidate.index
+                    )
+                }
                 if motionIsSteady,
                    elapsed >= options.steadyDuration,
                    let snapshot = bestStableSnapshot {
@@ -611,6 +616,19 @@ final class PanoramaCaptureViewController: UIViewController, ARSessionDelegate {
     }
 
     func sessionInterruptionEnded(_ session: ARSession) {
+        // Resetting ARKit establishes a new world coordinate frame. Mixing
+        // frames captured before and after that reset creates a torn sphere,
+        // so require a clean retake once any image has already been accepted.
+        guard capturedFrames.isEmpty else {
+            DispatchQueue.main.async { [weak self] in
+                self?.complete(.failure(
+                    message: "The camera session was interrupted. Retake the panorama so every view stays aligned.",
+                    code: "CAPTURE_INTERRUPTED_RESTART_REQUIRED"
+                ))
+            }
+            return
+        }
+
         targetFieldIsAnchored = false
         captureOriginPosition = nil
         resetSteadiness()
@@ -780,6 +798,10 @@ final class PanoramaCaptureViewController: UIViewController, ARSessionDelegate {
         transform: simd_float4x4,
         timestamp: TimeInterval
     ) {
+        // The user's first aligned hold defines the optical pivot. Anchoring at
+        // session startup would incorrectly use the phone's lower/resting
+        // position before it has been raised to capture height.
+        anchorCaptureOriginIfNeeded(to: transform)
         alignedTargetIndex = targetIndex
         steadyStartTimestamp = timestamp
         steadyAnchorTransform = transform
@@ -1129,10 +1151,8 @@ final class PanoramaCaptureViewController: UIViewController, ARSessionDelegate {
                 self.guidanceLabel.text = trackingMessage
             } else if targetIndex == nil {
                 self.guidanceLabel.text = "Capture complete"
-            } else if pivotDistance > 0.35 {
-                // Advisory only: a hard session-wide pivot gate can deadlock
-                // normal ceiling and floor capture for less-steady users.
-                self.guidanceLabel.text = "Keep the iPhone near one spot"
+            } else if pivotDistance > self.maximumCaptureOriginDistance {
+                self.guidanceLabel.text = "Move the iPhone back to the starting point"
             } else if !isAligned {
                 self.guidanceLabel.text = direction == nil
                     ? "Move a dot into the circle"
