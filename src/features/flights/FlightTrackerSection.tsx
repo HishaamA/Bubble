@@ -1105,26 +1105,22 @@ function FlightTrackerBody({
         </div>
       ) : (
         <ul className="flight-list">
-          {flights.map((flight, index) => {
+          {flights.map((flight) => {
             const departure = flightDepartureTime(flight.snapshot)
             const arrival = flightArrivalTime(flight.snapshot)
             const quality = effectiveFlightDataQuality(flight.snapshot, now)
             const cancelled = isFlightCancelled(flight.snapshot)
-            const featured = index === 0
             const duration = formatDuration(departure, arrival)
             const expanded = expandedFlightId === flight.id
             return (
-              <li className={featured ? 'flight-list__featured' : 'flight-list__compact'} key={flight.id}>
+              <li className="flight-list__featured" key={flight.id}>
                 <article
-                  className={featured
-                    ? 'flight-card flight-card--featured'
-                    : 'flight-card flight-card--compact'}
+                  className="flight-card flight-card--featured"
                   data-cancelled={cancelled ? 'true' : 'false'}
                   data-expanded={expanded ? 'true' : 'false'}
                 >
                   {flightToolbar(flight, cancelled)}
-                  {featured ? (
-                    <>
+                  <>
                     <div className="flight-card__topline">
                       <div className="flight-card__identity">
                         <span className="flight-card__traveler">{flight.travelerName}</span>
@@ -1168,35 +1164,7 @@ function FlightTrackerBody({
                       data-destination={flight.snapshot.destination.code}
                       aria-hidden="true"
                     />
-                    </>
-                  ) : (
-                    <div
-                      className="flight-card__compact-open"
-                    >
-                      <span className="flight-card__compact-route">
-                        <span>
-                          <strong>{flight.snapshot.origin.code}</strong>
-                          <span className="flight-card__compact-number">{flight.flightNumber}</span>
-                          <small>{airportPlace(flight.snapshot, 'origin')}</small>
-                        </span>
-                        <FlightRouteMark compact />
-                        <span>
-                          <strong>{flight.snapshot.destination.code}</strong>
-                          <small>{airportPlace(flight.snapshot, 'destination')}</small>
-                        </span>
-                      </span>
-                      <span className="flight-card__compact-date">
-                        <small>{formatDayMonth(flight.travelDate)}</small>
-                        <strong>{formatTicketTime(departure, flight.snapshot.origin.timeZone) ?? 'Not available'}</strong>
-                      </span>
-                      <span className="flight-card__compact-meta">
-                        <span className="flight-quality" data-quality={cancelled ? 'cancelled' : quality}>
-                          {cancelled ? 'Cancelled' : qualityLabel(quality)}
-                        </span>
-                        <span>{duration} · Direct</span>
-                      </span>
-                    </div>
-                  )}
+                  </>
                   <button
                     type="button"
                     className="flight-card__expand"

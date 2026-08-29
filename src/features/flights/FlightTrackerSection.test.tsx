@@ -257,13 +257,21 @@ describe('FlightTrackerSection', () => {
     expect(screen.getByText('SV301')).toBeInTheDocument()
   })
 
-  it('expands a compact ticket in place and uses the paper-plane control to add a flight', async () => {
+  it('renders every flight as a full ticket and expands later flights in place', async () => {
     identityMocks.isDevelopmentPreview = true
-    render(<FlightTrackerSection now={new Date('2026-08-29T12:00:00Z')} />)
+    const { container } = render(
+      <FlightTrackerSection now={new Date('2026-08-29T12:00:00Z')} />,
+    )
     const user = userEvent.setup()
 
     expect(screen.getByText('7h 35m · Direct')).toBeInTheDocument()
     expect(screen.getByText('3h 10m · Direct')).toBeInTheDocument()
+    expect(container.querySelectorAll('.flight-list__featured')).toHaveLength(2)
+    expect(container.querySelectorAll('.flight-card--featured')).toHaveLength(2)
+    expect(container.querySelector('.flight-list__compact')).not.toBeInTheDocument()
+    expect(container.querySelector('.flight-card--compact')).not.toBeInTheDocument()
+    expect(container.querySelectorAll('.flight-card__route')).toHaveLength(2)
+    expect(container.querySelectorAll('.flight-progress')).toHaveLength(2)
     await user.click(screen.getByRole('button', { name: 'Show all info for SV301' }))
     expect(screen.getByRole('region', { name: 'SV301 full flight information' }))
       .toBeInTheDocument()

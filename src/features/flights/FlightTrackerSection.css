@@ -1659,11 +1659,20 @@
 }
 
 .flight-map {
+  --flight-map-surface: var(--theme-surface-deep, var(--theme-canvas-deep, var(--plum-950, #180611)));
+  --flight-map-land: var(--theme-surface, var(--theme-canvas-soft, var(--plum-800, #3a102b)));
+  --flight-map-border: var(--theme-line, rgba(255, 231, 206, 0.2));
+  --flight-map-route: var(--theme-accent, var(--sun, #efb43d));
+  --flight-map-label: var(--theme-on-canvas, var(--theme-paper, var(--paper, #fff1d2)));
+  --flight-map-caption: var(--theme-on-canvas-muted, rgba(255, 238, 218, 0.62));
+  --flight-map-alert: var(--theme-coral, var(--coral, #ed735d));
+  isolation: isolate;
   margin: 1rem 0 0;
   padding: 0.78rem;
-  border: 1px solid rgba(230, 189, 130, 0.12);
+  border: 1px solid var(--flight-map-border);
   border-radius: 1.05rem;
-  background: #090807;
+  color: var(--flight-map-label);
+  background: var(--flight-map-surface);
 }
 
 .flight-map svg {
@@ -1673,27 +1682,30 @@
 }
 
 .flight-map__land {
-  fill: rgba(230, 189, 130, 0.07);
-  stroke: rgba(230, 189, 130, 0.13);
+  fill: var(--flight-map-land);
+  fill-opacity: 0.48;
+  stroke: var(--flight-map-border);
+  stroke-opacity: 0.62;
   stroke-width: 0.7;
 }
 
 .flight-map__route {
   fill: none;
-  stroke: rgba(230, 189, 130, 0.68);
+  stroke: var(--flight-map-route);
+  stroke-opacity: 0.88;
   stroke-dasharray: 3 3;
   stroke-linecap: round;
   stroke-width: 1.25;
 }
 
 .flight-map__airport {
-  fill: #090807;
-  stroke: rgba(230, 189, 130, 0.9);
+  fill: var(--flight-map-surface);
+  stroke: var(--flight-map-route);
   stroke-width: 1.3;
 }
 
 .flight-map__plane {
-  fill: #e6bd82;
+  fill: var(--flight-map-route);
   filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.45));
 }
 
@@ -1701,7 +1713,7 @@
   display: flex;
   margin-top: -0.25rem;
   justify-content: space-between;
-  color: rgba(255, 245, 235, 0.72);
+  color: var(--flight-map-label);
   font-size: 0.65rem;
   font-weight: 680;
   letter-spacing: 0.04em;
@@ -1709,7 +1721,7 @@
 
 .flight-map figcaption {
   margin-top: 0.55rem;
-  color: rgba(255, 242, 229, 0.37);
+  color: var(--flight-map-caption);
   font-size: 0.62rem;
   line-height: 1.42;
 }
@@ -1719,12 +1731,12 @@
   min-height: 9rem;
   place-content: center;
   gap: 0.35rem;
-  color: rgba(239, 170, 160, 0.86);
+  color: var(--flight-map-alert);
   text-align: center;
 }
 
 .flight-map--cancelled span {
-  color: rgba(255, 242, 229, 0.42);
+  color: var(--flight-map-caption);
   font-size: 0.58rem;
 }
 
@@ -2048,17 +2060,14 @@
 .flight-detail__times dt,
 .flight-detail__times span,
 .flight-detail__times small,
-.flight-detail__updated,
-.flight-map figcaption,
-.flight-map--cancelled span {
+.flight-detail__updated {
   color: var(--flight-muted);
 }
 
 .flight-field > span,
 .flight-choice__header h3,
 .flight-choice__route strong,
-.flight-detail__times dd,
-.flight-map__codes {
+.flight-detail__times dd {
   color: var(--flight-ink);
 }
 
@@ -2098,29 +2107,6 @@
   border-radius: 0.5rem 0.68rem 0.46rem 0.62rem;
   color: var(--flight-ink);
   background: rgba(111, 168, 199, 0.24);
-}
-
-.flight-map {
-  border-color: rgba(23, 59, 99, 0.2);
-  background: #e8efdc;
-}
-
-.flight-map__land {
-  fill: rgba(126, 161, 115, 0.17);
-  stroke: rgba(23, 59, 99, 0.13);
-}
-
-.flight-map__route {
-  stroke: #b26424;
-}
-
-.flight-map__airport {
-  fill: #fff6df;
-  stroke: #173b63;
-}
-
-.flight-map__plane {
-  fill: #e66f55;
 }
 
 .flight-detail__actions .flight-detail__notify,
@@ -2215,29 +2201,6 @@
   background: rgba(216, 143, 164, 0.22);
 }
 
-.flight-map {
-  border-color: rgba(75, 24, 50, 0.22);
-  background: #dfe8d2;
-}
-
-.flight-map__land {
-  fill: rgba(118, 153, 92, 0.18);
-  stroke: rgba(53, 17, 41, 0.14);
-}
-
-.flight-map__route {
-  stroke: #b94966;
-}
-
-.flight-map__airport {
-  fill: #fff0d1;
-  stroke: #351129;
-}
-
-.flight-map__plane {
-  fill: #ed725e;
-}
-
 .flight-detail__actions .flight-detail__notify,
 .flight-detail__actions .flight-detail__notify[aria-pressed='true'] {
   color: #351129;
@@ -2251,5 +2214,87 @@
 
   .flight-detail__panel {
     border-color: rgba(255, 239, 216, 0.7);
+  }
+}
+
+/* Journal ticket rhythm ---------------------------------------------------
+   The compact tickets previously reserved a full toolbar row and then a
+   second oversized row for the disclosure control. Keep every control easy
+   to reach, but let the content determine the ticket height. Expanded detail
+   paper now reaches the ticket's lower edge instead of ending above it. */
+.journal-page[data-section='flights'] .flight-tracker .flight-list .flight-card--compact {
+  min-height: 0;
+}
+
+.journal-page[data-section='flights'] .flight-tracker .flight-list .flight-card--compact .flight-card__compact-open {
+  min-height: 0;
+  padding-top: 0.95rem;
+  padding-bottom: 0.42rem;
+  gap: 0.4rem 0.58rem;
+}
+
+.journal-page[data-section='flights'] .flight-tracker .flight-list .flight-card--compact .flight-card__compact-meta {
+  min-height: 1.5rem;
+  gap: 0.65rem;
+}
+
+.journal-page[data-section='flights'] .flight-tracker .flight-list .flight-card > .flight-card__expand {
+  min-width: 2.75rem;
+  min-height: 2.75rem;
+}
+
+.journal-page[data-section='flights'] .flight-tracker .flight-list .flight-card--compact > .flight-card__expand {
+  width: 2.35rem;
+  height: 2.35rem;
+  margin-top: 0.18rem;
+  margin-bottom: 0.48rem;
+}
+
+.journal-page[data-section='flights'] .flight-tracker .flight-list .flight-card[data-expanded='true'] > .flight-card__expand {
+  margin-bottom: 0.9rem;
+}
+
+.journal-page[data-section='flights'] .flight-tracker .flight-list .flight-card[data-expanded='true'] {
+  clip-path: none;
+}
+
+.journal-page[data-section='flights'] .flight-tracker .flight-list .flight-card[data-expanded='true'] > .flight-card__details {
+  box-sizing: border-box;
+  width: auto;
+  max-width: none;
+}
+
+.journal-page[data-section='flights'] .flight-tracker .flight-list .flight-card--featured[data-expanded='true'] > .flight-card__details {
+  margin-right: -1.15rem;
+  margin-bottom: -1.05rem;
+  margin-left: -1.15rem;
+  padding: 1rem 1.15rem 1.2rem;
+  border-radius: 0;
+}
+
+.journal-page[data-section='flights'] .flight-tracker .flight-list .flight-card--compact[data-expanded='true'] > .flight-card__details {
+  margin: 0;
+  padding: 1rem 1rem 1.15rem;
+  border-radius: 0;
+}
+
+@media (max-width: 26.875rem) {
+  .journal-page[data-section='flights'] .flight-tracker .flight-list .flight-card--compact .flight-card__compact-open {
+    padding: clamp(1.95rem, 8.6vw, 2.3rem) clamp(0.58rem, 2.8vw, 0.74rem) 0.45rem;
+  }
+
+  .journal-page[data-section='flights'] .flight-tracker .flight-list .flight-card--compact > .flight-card__expand {
+    width: clamp(2.1rem, 9.4vw, 2.35rem);
+    height: clamp(2.1rem, 9.4vw, 2.35rem);
+    margin-top: 0.12rem;
+  }
+
+  .journal-page[data-section='flights'] .flight-tracker .flight-list .flight-card--featured[data-expanded='true'] > .flight-card__details {
+    margin-right: calc(-1 * clamp(0.68rem, 3.1vw, 0.84rem));
+    margin-bottom: calc(-1 * clamp(0.64rem, 3vw, 0.8rem));
+    margin-left: calc(-1 * clamp(0.68rem, 3.1vw, 0.84rem));
+    padding-right: clamp(0.76rem, 3.4vw, 0.92rem);
+    padding-bottom: clamp(1rem, 4.5vw, 1.2rem);
+    padding-left: clamp(0.76rem, 3.4vw, 0.92rem);
   }
 }
