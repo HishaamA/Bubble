@@ -13,6 +13,8 @@ type MemoryBubbleProps = {
   onOpen: (memory: Memory, event: MouseEvent<HTMLButtonElement>) => void
 }
 
+const BUBBLE_ACCENTS = ['coral', 'sage', 'sky', 'sun', 'lavender'] as const
+
 export function MemoryBubble({
   memory,
   order,
@@ -50,6 +52,7 @@ export function MemoryBubble({
       id={`memory-${memory.id}`}
       data-memory-id={memory.id}
       data-memory-label={memory.label}
+      data-bubble-accent={BUBBLE_ACCENTS[order % BUBBLE_ACCENTS.length]}
       data-picked-up={pickedUp ? 'true' : 'false'}
       data-entry-focus={entryFocused ? 'true' : 'false'}
       className="memory-bubble"

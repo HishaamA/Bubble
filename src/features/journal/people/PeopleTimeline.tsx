@@ -10,6 +10,7 @@ import {
 } from 'react'
 import { Link } from 'react-router-dom'
 import { TimelinePhotoImage } from './TimelinePhotoImage'
+import { PersonScrapbookPage } from './PersonScrapbookPage'
 import { scanReferencePortrait, scanTimelineFaces } from './faceRecognition'
 import {
   createFaceReviewCandidates,
@@ -25,6 +26,7 @@ import {
   loadPeopleTimelineState,
   savePeopleTimelineState,
 } from './peopleTimelineStore'
+import { removePersonScrapbookProfile } from './personScrapbookStore'
 import {
   FACE_SCAN_REVISION,
   FAMILY_PERSON_ID,
@@ -178,6 +180,9 @@ export function PeopleTimeline({
   focusMemoryId,
   onUploadPhotos,
   photoImportProgress,
+  personAlbumOpen = false,
+  onOpenPersonAlbum,
+  onClosePersonAlbum,
 }: PeopleTimelineProps) {
   const [timelineState, setTimelineState] = useState(emptyPeopleTimelineState)
   const [cacheReady, setCacheReady] = useState(false)
@@ -209,12 +214,12 @@ export function PeopleTimeline({
   const [photoImportMessage, setPhotoImportMessage] = useState('')
   const [photoImportError, setPhotoImportError] = useState(false)
   const [postponedFaceReviews, setPostponedFaceReviews] = useState<string[]>([])
-  const [peopleGuideOpen, setPeopleGuideOpen] = useState(false)
   const saveQueue = useRef(Promise.resolve())
   const scanController = useRef<AbortController | null>(null)
   const scanSavedPhotoCount = useRef(0)
   const timelineStateRef = useRef(timelineState)
   const photoLinkRef = useRef<HTMLAnchorElement>(null)
+  const photoFigureRef = useRef<HTMLElement>(null)
   const restoredPersonSignature = useRef('')
   const restoredFocusSignature = useRef('')
   const restoredLinkFocusSignature = useRef('')
@@ -315,6 +320,15 @@ export function PeopleTimeline({
     }
     return previews
   }, [effectivePeopleByPhoto, timelinePhotos, timelineState.people])
+  const faceMatchedAlbums = useMemo(() => timelineState.people.flatMap((person) => {
+    const matchingPhotos = timelinePhotos.filter(({ key }) =>
+      effectivePeopleByPhoto.get(key)?.has(person.id),
+    )
+    const preview = matchingPhotos[0]
+    return preview
+      ? [{ person, preview, photoCount: matchingPhotos.length }]
+      : []
+  }), [effectivePeopleByPhoto, timelinePhotos, timelineState.people])
   const familyPhotoKeys = useMemo(() => new Set(
     timelinePhotos
       .filter((photo) => {
@@ -344,6 +358,18 @@ export function PeopleTimeline({
         )
     return sortTimelinePhotos(relevantPhotos, timelineState.dateOverrides)
   }, [actionableReviewMatches, effectivePeopleByPhoto, familyPhotoKeys, selectedPersonId, timelinePhotos, timelineState.dateOverrides])
+  const scrapbookPerson = personAlbumOpen && initialPersonId
+    ? timelineState.people.find(({ id }) => id === initialPersonId)
+    : undefined
+  const scrapbookPhotos = useMemo(() => {
+    if (!scrapbookPerson) return []
+    return sortTimelinePhotos(
+      timelinePhotos.filter((photo) =>
+        effectivePeopleByPhoto.get(photo.key)?.has(scrapbookPerson.id),
+      ),
+      timelineState.dateOverrides,
+    )
+  }, [effectivePeopleByPhoto, scrapbookPerson, timelinePhotos, timelineState.dateOverrides])
   const activeIndex = Math.max(
     0,
     activePhotoKey
@@ -512,7 +538,8 @@ export function PeopleTimeline({
 
     const frame = window.requestAnimationFrame(() => {
       restoredLinkFocusSignature.current = focusSignature
-      photoLinkRef.current?.focus({ preventScroll: true })
+      const photoSurface = photoLinkRef.current ?? photoFigureRef.current
+      photoSurface?.focus({ preventScroll: true })
     })
     return () => window.cancelAnimationFrame(frame)
   }, [cacheNamespace, displayedPhoto, focusMemoryId, selectedPersonId])
@@ -532,6 +559,14 @@ export function PeopleTimeline({
     setConfirmingDelete(false)
     setReferencePortraits([])
     setManageError('')
+  }
+
+  function openPersonAlbum(personId: string) {
+    if (onOpenPersonAlbum) {
+      onOpenPersonAlbum(personId)
+      return
+    }
+    choosePerson(personId)
   }
 
   function openAddPerson() {
@@ -753,6 +788,7 @@ export function PeopleTimeline({
 
   function deleteSelectedPerson() {
     if (!selectedPerson) return
+    removePersonScrapbookProfile(cacheNamespace, selectedPerson.id)
     updateTimelineState((current) => {
       const faceProfiles = { ...current.faceProfiles }
       delete faceProfiles[selectedPerson.id]
@@ -1066,6 +1102,44 @@ export function PeopleTimeline({
   ])
 
   const rootClassName = ['people-timeline', className].filter(Boolean).join(' ')
+  const isNamedPersonAlbum = Boolean(selectedPerson)
+  const isFaceReview = selectedPersonId === FACE_REVIEW_PERSON_ID
+
+  if (personAlbumOpen) {
+    if (!cacheReady) {
+      return (
+        <section className={`${rootClassName} people-timeline--scrapbook-route`}>
+          <div className="people-timeline__empty" role="status">
+            <p>Opening the scrapbook…</p>
+          </div>
+        </section>
+      )
+    }
+
+    if (!scrapbookPerson) {
+      return (
+        <section className={`${rootClassName} people-timeline--scrapbook-route`}>
+          <div className="people-timeline__empty">
+            <p className="people-timeline__empty-title">This scrapbook is not available</p>
+            <p>The family member may have been removed or renamed on this device.</p>
+            {onClosePersonAlbum ? (
+              <button type="button" onClick={onClosePersonAlbum}>Back to Photo Journal</button>
+            ) : null}
+          </div>
+        </section>
+      )
+    }
+
+    return (
+      <PersonScrapbookPage
+        person={scrapbookPerson}
+        photos={scrapbookPhotos}
+        cacheNamespace={cacheNamespace}
+        dateOverrides={timelineState.dateOverrides}
+        onBack={onClosePersonAlbum}
+      />
+    )
+  }
 
   return (
     <section className={rootClassName} aria-labelledby="people-timeline-title">
@@ -1102,6 +1176,7 @@ export function PeopleTimeline({
             {setupPeople.map((person) => {
               const preview = person ? personPreviewById.get(person.id) : undefined
               const ready = enrolledPersonIds.has(person.id)
+              const hasAlbum = Boolean(preview)
               return (
                 <button
                   key={person.id}
@@ -1109,9 +1184,11 @@ export function PeopleTimeline({
                   className="people-timeline__setup-person"
                   data-ready={ready ? 'true' : 'false'}
                   data-needs-face={ready ? 'false' : 'true'}
-                  aria-label={ready ? person.name : `${person.name}, face photo needed`}
+                  aria-label={ready || hasAlbum ? person.name : `${person.name}, face photo needed`}
                   aria-pressed={selectedPersonId === person.id}
-                  onClick={() => ready ? choosePerson(person.id) : startManagingPerson(person)}
+                  onClick={() => ready || hasAlbum
+                    ? openPersonAlbum(person.id)
+                    : startManagingPerson(person)}
                 >
                   <span className="people-timeline__setup-circle">
                     {preview ? (
@@ -1158,21 +1235,6 @@ export function PeopleTimeline({
             <div className="people-timeline__setup-copy">
               <h3 id="people-setup-title">Create your people</h3>
               <p>Add two family members to start grouping the photos they share.</p>
-              <div>
-                <button
-                  type="button"
-                  className="people-timeline__setup-help"
-                  aria-expanded={peopleGuideOpen}
-                  onClick={() => setPeopleGuideOpen((current) => !current)}
-                >
-                  How it works
-                </button>
-              </div>
-              {peopleGuideOpen ? (
-                <p className="people-timeline__setup-detail" role="status">
-                  Choose a few clear solo photos for each person. Bubble turns them into a private face profile, discards the originals, and matches future family photos only on this device.
-                </p>
-              ) : null}
             </div>
           ) : null}
         </section>
@@ -1227,6 +1289,74 @@ export function PeopleTimeline({
           </button>
         ) : null}
       </div>
+
+      {cacheReady ? (
+        <section
+          className="people-timeline__albums"
+          aria-labelledby="people-albums-title"
+        >
+          <header className="people-timeline__albums-header">
+            <div>
+              <h3 id="people-albums-title">Face-matched albums</h3>
+              <p>
+                <span aria-hidden="true">♙</span>
+                On-device · private
+              </p>
+            </div>
+            {faceMatchedAlbums.length > 2 ? (
+              <button type="button" onClick={() => choosePerson(REVIEW_PERSON_ID)}>
+                See all <span aria-hidden="true">›</span>
+              </button>
+            ) : null}
+          </header>
+
+          {faceMatchedAlbums.length ? (
+            <div className="people-timeline__album-grid">
+              {faceMatchedAlbums.map(({ person, preview, photoCount }, index) => (
+                <button
+                  key={person.id}
+                  type="button"
+                  className="people-timeline__album-tile"
+                  data-tint={index % 3}
+                  aria-label={`Open ${person.name}'s scrapbook, ${photoCount} matched ${photoCount === 1 ? 'photo' : 'photos'}`}
+                  onClick={() => openPersonAlbum(person.id)}
+                >
+                  <span className="people-timeline__album-tile-image">
+                    <TimelinePhotoImage
+                      source={preview.source}
+                      alt=""
+                      width={preview.displayWidth}
+                      height={preview.displayHeight}
+                    />
+                  </span>
+                  <span className="people-timeline__album-tile-copy">
+                    <strong>{person.name}</strong>
+                    <small>{photoCount} matched {photoCount === 1 ? 'photo' : 'photos'}</small>
+                  </span>
+                  <span className="people-timeline__album-tile-doodle" aria-hidden="true">
+                    {index % 3 === 0 ? '✦' : index % 3 === 1 ? '⌁' : '♡'}
+                  </span>
+                </button>
+              ))}
+            </div>
+          ) : (
+            <button
+              type="button"
+              className="people-timeline__albums-empty"
+              onClick={setupPeople.length ? () => choosePerson(REVIEW_PERSON_ID) : openAddPerson}
+            >
+              <span aria-hidden="true">✦</span>
+              <span>
+                <strong>Your first scrapbook starts here</strong>
+                <small>{setupPeople.length
+                  ? 'Matched family photos will collect here.'
+                  : 'Add a person to begin matching photos.'}</small>
+              </span>
+              <span aria-hidden="true">›</span>
+            </button>
+          )}
+        </section>
+      ) : null}
 
       {importingPhotos && photoImportProgress ? (
         <div
@@ -1418,33 +1548,78 @@ export function PeopleTimeline({
           <p>Opening your people timeline…</p>
         </div>
       ) : displayedPhoto ? (
-        <div className="people-timeline__viewer">
-          <Link
-            ref={photoLinkRef}
-            className="people-timeline__photo-link"
-            data-face-review={displayedReviewFace ? 'true' : 'false'}
-            to={photoDestination(displayedPhoto)}
-            state={photoRouteState(displayedPhoto, selectedPersonId)}
-            aria-label={`Open ${displayedPhoto.caption}, shared by ${displayedPhoto.contributorName}`}
-          >
-            <TimelinePhotoImage
-              key={displayedPhoto.key}
-              source={displayedPhoto.source}
-              alt={displayedPhoto.caption}
-            />
-            {displayedReviewFace ? (
-              <span
-                className="people-timeline__face-focus"
-                aria-hidden="true"
-                style={{
-                  left: `${displayedReviewFace.box[0] * 100}%`,
-                  top: `${displayedReviewFace.box[1] * 100}%`,
-                  width: `${displayedReviewFace.box[2] * 100}%`,
-                  height: `${displayedReviewFace.box[3] * 100}%`,
-                }}
+        <div
+          className="people-timeline__viewer"
+          data-layout={isNamedPersonAlbum ? 'scrapbook' : isFaceReview ? 'review' : 'album'}
+        >
+          {isFaceReview ? (
+            <Link
+              ref={photoLinkRef}
+              className="people-timeline__photo-link"
+              data-face-review={displayedReviewFace ? 'true' : 'false'}
+              to={photoDestination(displayedPhoto)}
+              state={photoRouteState(displayedPhoto, selectedPersonId)}
+              aria-label={`Open ${displayedPhoto.caption}, shared by ${displayedPhoto.contributorName}`}
+            >
+              <TimelinePhotoImage
+                key={displayedPhoto.key}
+                source={displayedPhoto.scanSource}
+                alt={displayedPhoto.caption}
+                width={displayedPhoto.displayWidth}
+                height={displayedPhoto.displayHeight}
               />
-            ) : null}
-          </Link>
+              {displayedReviewFace ? (
+                <span
+                  className="people-timeline__face-focus"
+                  aria-hidden="true"
+                  style={{
+                    left: `${displayedReviewFace.box[0] * 100}%`,
+                    top: `${displayedReviewFace.box[1] * 100}%`,
+                    width: `${displayedReviewFace.box[2] * 100}%`,
+                    height: `${displayedReviewFace.box[3] * 100}%`,
+                  }}
+                />
+              ) : null}
+            </Link>
+          ) : isNamedPersonAlbum ? (
+            <figure
+              ref={photoFigureRef}
+              className="people-timeline__scrapbook-photo"
+              tabIndex={-1}
+              aria-label={`${displayedPhoto.caption}, shared by ${displayedPhoto.contributorName}`}
+            >
+              <span className="people-timeline__scrapbook-tape" aria-hidden="true" />
+              <span className="people-timeline__scrapbook-doodle" aria-hidden="true">♡</span>
+              <span className="people-timeline__scrapbook-image">
+                <TimelinePhotoImage
+                  key={displayedPhoto.key}
+                  source={displayedPhoto.scanSource}
+                  alt={displayedPhoto.caption}
+                  width={displayedPhoto.displayWidth}
+                  height={displayedPhoto.displayHeight}
+                />
+              </span>
+              <figcaption>
+                <strong>{displayedPhoto.caption}</strong>
+                <span>{formatTimelinePhotoDate(displayedPhoto, timelineState.dateOverrides[displayedPhoto.key])}</span>
+              </figcaption>
+            </figure>
+          ) : (
+            <figure
+              ref={photoFigureRef}
+              className="people-timeline__album-photo"
+              tabIndex={-1}
+              aria-label={`${displayedPhoto.caption}, shared by ${displayedPhoto.contributorName}`}
+            >
+              <TimelinePhotoImage
+                key={displayedPhoto.key}
+                source={displayedPhoto.scanSource}
+                alt={displayedPhoto.caption}
+                width={displayedPhoto.displayWidth}
+                height={displayedPhoto.displayHeight}
+              />
+            </figure>
+          )}
 
           {displayedReviewMatch && displayedReviewPerson ? (
             <section className="people-timeline__face-review" aria-live="polite">

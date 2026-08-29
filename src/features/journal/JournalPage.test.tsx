@@ -1,7 +1,7 @@
 import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import type { ComponentProps } from 'react'
-import { MemoryRouter } from 'react-router-dom'
+import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { FamilyCapsule } from '../capsules/types'
 import type { JournalPhoto } from './journalPhotoTypes'
@@ -16,7 +16,17 @@ const sectionMocks = vi.hoisted(() => ({
 vi.mock('./people', () => ({
   PeopleTimeline: (props: unknown) => {
     sectionMocks.people(props)
-    return <section data-testid="people-section">People timeline</section>
+    const callbacks = props as { onClosePersonAlbum?: () => void }
+    return (
+      <section data-testid="people-section">
+        People timeline
+        {callbacks.onClosePersonAlbum ? (
+          <button type="button" onClick={callbacks.onClosePersonAlbum}>
+            Close scrapbook
+          </button>
+        ) : null}
+      </section>
+    )
   },
 }))
 
@@ -98,8 +108,9 @@ describe('JournalPage', () => {
   it('shows the reference three-section Journal with Photos selected by default', () => {
     const { container } = renderJournal()
 
-    expect(screen.getByRole('heading', { name: 'Photo Journal' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'Journal' })).toBeInTheDocument()
     expect(screen.getByText('Our family')).toBeInTheDocument()
+    expect(screen.getByText('Your private place to remember.')).toBeInTheDocument()
 
     const tablist = screen.getByRole('tablist', { name: 'Journal sections' })
     expect(tablist).toBeInTheDocument()
@@ -130,7 +141,7 @@ describe('JournalPage', () => {
       'aria-selected',
       'true',
     )
-    expect(screen.getByRole('heading', { name: 'Family Plans' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'Journal' })).toBeInTheDocument()
 
     await user.click(screen.getByRole('tab', { name: 'Flights' }))
 
@@ -266,5 +277,32 @@ describe('JournalPage', () => {
       initialPersonId: 'maya',
       focusMemoryId: 'capsule-opened-opened-photo',
     }))
+  })
+
+  it('opens a recognized person as a dedicated scrapbook page', async () => {
+    const user = userEvent.setup()
+    render(
+      <MemoryRouter initialEntries={['/journal/person/maya']}>
+        <Routes>
+          <Route
+            path="/journal/person/:personId"
+            element={<JournalPage now={testNow} capsuleCacheNamespace="family:ahmed" />}
+          />
+          <Route path="/journal" element={<p>Journal home</p>} />
+        </Routes>
+      </MemoryRouter>,
+    )
+
+    expect(screen.queryByRole('heading', { name: 'Journal' })).not.toBeInTheDocument()
+    expect(screen.getByTestId('people-section')).toBeInTheDocument()
+    expect(sectionMocks.people).toHaveBeenLastCalledWith(expect.objectContaining({
+      initialPersonId: 'maya',
+      personAlbumOpen: true,
+      onOpenPersonAlbum: expect.any(Function),
+      onClosePersonAlbum: expect.any(Function),
+    }))
+
+    await user.click(screen.getByRole('button', { name: 'Close scrapbook' }))
+    expect(screen.getByText('Journal home')).toBeInTheDocument()
   })
 })

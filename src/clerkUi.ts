@@ -1,12 +1,12 @@
 export const clerkAppearance = {
   variables: {
-    colorPrimary: '#e6b476',
-    colorBackground: '#0a0a0a',
-    colorInputBackground: '#080808',
-    colorInputText: '#f5f5f7',
-    colorText: '#f5f5f7',
-    colorTextSecondary: 'rgba(235, 235, 245, 0.58)',
-    borderRadius: '1rem',
+    colorPrimary: '#e3a638',
+    colorBackground: '#fbf2d9',
+    colorInputBackground: '#fffaf0',
+    colorInputText: '#173b63',
+    colorText: '#173b63',
+    colorTextSecondary: '#66778a',
+    borderRadius: '0.65rem',
     fontFamily:
       '-apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text", sans-serif',
   },
@@ -17,8 +17,8 @@ export const clerkAppearance = {
   elements: {
     modalBackdrop: {
       alignItems: 'center',
-      backgroundColor: 'rgba(0, 0, 0, 0.82)',
-      backdropFilter: 'blur(8px)',
+      backgroundColor: 'rgba(23, 59, 99, 0.68)',
+      backdropFilter: 'blur(7px)',
       boxSizing: 'border-box',
       justifyContent: 'center',
       minHeight: '100dvh',
@@ -36,10 +36,11 @@ export const clerkAppearance = {
       maxHeight: 'inherit',
       overflowY: 'auto',
       overscrollBehavior: 'contain',
-      boxShadow: '0 1.4rem 4rem rgba(0, 0, 0, 0.7)',
+      boxShadow:
+        '0.38rem 0.44rem 0 #efb944, 0 1.4rem 4rem rgba(23, 59, 99, 0.32)',
     },
     card: {
-      border: '1px solid rgba(230, 180, 118, 0.24)',
+      border: '2px solid #173b63',
       boxShadow: 'none',
       padding: '1.75rem 1.5rem',
     },
@@ -47,17 +48,24 @@ export const clerkAppearance = {
       gap: 0,
     },
     headerTitle: {
-      fontSize: '1.45rem',
-      lineHeight: 1.2,
+      color: '#173b63',
+      fontFamily: 'ui-serif, "Iowan Old Style", Baskerville, Georgia, serif',
+      fontSize: '1.75rem',
+      fontWeight: 650,
+      letterSpacing: '-0.035em',
+      lineHeight: 1.08,
     },
     main: {
       gap: '1.25rem',
     },
     socialButtonsBlockButton: {
-      borderColor: 'rgba(230, 180, 118, 0.28)',
+      border: '2px solid rgba(23, 59, 99, 0.66)',
+      borderRadius: '0.55rem',
+      boxShadow: '0.16rem 0.18rem 0 rgba(120, 184, 208, 0.52)',
     },
     formFieldInput: {
-      borderColor: 'rgba(255, 255, 255, 0.16)',
+      borderColor: 'rgba(23, 59, 99, 0.32)',
+      borderRadius: '0.5rem',
     },
     phoneInputBox: {
       minWidth: 0,
@@ -67,8 +75,10 @@ export const clerkAppearance = {
       minWidth: 0,
     },
     formButtonPrimary: {
-      color: '#181009',
-      boxShadow: 'none',
+      border: '2px solid #173b63',
+      borderRadius: '0.58rem 0.76rem 0.6rem 0.7rem',
+      color: '#173b63',
+      boxShadow: '0.2rem 0.22rem 0 #173b63',
       fontWeight: 700,
     },
     footerAction: {

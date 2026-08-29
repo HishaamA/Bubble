@@ -1,4 +1,5 @@
 import { Capacitor, registerPlugin } from '@capacitor/core'
+import type { PluginListenerHandle } from '@capacitor/core'
 import type { PanoramaScene } from '../../../viewer'
 
 type NativeCardboardPanoramaPlugin = {
@@ -9,20 +10,25 @@ type NativeCardboardPanoramaPlugin = {
     initialYaw: number
     initialPitch: number
   }) => Promise<{ launched?: boolean }>
+  addListener: (
+    eventName: 'closed',
+    listener: () => void,
+  ) => Promise<PluginListenerHandle>
 }
 
 const CardboardPanorama = registerPlugin<NativeCardboardPanoramaPlugin>(
   'CardboardPanorama',
 )
 
-// The Android plugin independently enforces the base64-encoded equivalent.
+// Each native plugin independently enforces the base64-encoded equivalent.
 // Refusing earlier avoids materializing an oversized second copy in WebView.
 export const MAX_NATIVE_CARDBOARD_IMAGE_BYTES = 36 * 1024 * 1024
 
 export function nativeCardboardPanoramaAvailable(): boolean {
+  const platform = Capacitor.getPlatform()
   return (
     Capacitor.isNativePlatform() &&
-    Capacitor.getPlatform() === 'android' &&
+    (platform === 'android' || platform === 'ios') &&
     Capacitor.isPluginAvailable('CardboardPanorama')
   )
 }
@@ -30,9 +36,11 @@ export function nativeCardboardPanoramaAvailable(): boolean {
 export async function presentNativeCardboardPanorama(options: {
   scene: PanoramaScene
   sourceBlob?: Blob | null
+  onClosed?: () => void
 }): Promise<boolean> {
   if (!nativeCardboardPanoramaAvailable()) return false
 
+  let closeListener: PluginListenerHandle | undefined
   try {
     const panoramaBlob =
       options.sourceBlob ?? (await fetchPanoramaBlob(options.scene.panorama))
@@ -44,6 +52,14 @@ export async function presentNativeCardboardPanorama(options: {
     }
 
     const dataBase64 = await blobToBase64(panoramaBlob)
+    if (Capacitor.getPlatform() === 'ios' && options.onClosed) {
+      closeListener = await CardboardPanorama.addListener('closed', () => {
+        void closeListener?.remove()
+        closeListener = undefined
+        options.onClosed?.()
+      })
+    }
+
     const result = await CardboardPanorama.open({
       dataBase64,
       mimeType: panoramaBlob.type || 'image/jpeg',
@@ -51,8 +67,11 @@ export async function presentNativeCardboardPanorama(options: {
       initialYaw: options.scene.yaw ?? 0,
       initialPitch: options.scene.pitch ?? 0,
     })
-    return result.launched === true
+    const launched = result.launched === true
+    if (!launched) await closeListener?.remove()
+    return launched
   } catch {
+    await closeListener?.remove()
     // The shared WebGL Cardboard viewer remains the no-data-loss fallback.
     return false
   }

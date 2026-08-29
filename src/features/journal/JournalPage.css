@@ -1,6 +1,17 @@
 .journal-page {
-  --journal-accent: #e6bd82;
-  --journal-line: rgba(255, 244, 230, 0.12);
+  --journal-paper: #fff0d1;
+  --journal-paper-deep: #efd8ae;
+  --journal-plum: #230a1c;
+  --journal-plum-soft: #371026;
+  --journal-paper-ink: #351129;
+  --journal-ink: #fff1d7;
+  --journal-muted: rgba(255, 238, 218, 0.67);
+  --journal-accent: #f3ba43;
+  --journal-coral: #ed725e;
+  --journal-blue: #d995af;
+  --journal-green: #a4b477;
+  --journal-lilac: #b995ba;
+  --journal-line: rgba(255, 231, 206, 0.25);
   --journal-gutter-left: var(--app-page-gutter-left, 1rem);
   --journal-gutter-right: var(--app-page-gutter-right, 1rem);
   position: relative;
@@ -14,8 +25,12 @@
     var(--journal-gutter-left);
   overflow-x: hidden;
   overflow-y: auto;
-  color: rgba(255, 255, 255, 0.96);
-  background: #050504;
+  color: var(--journal-ink);
+  background:
+    radial-gradient(circle at 70% 7%, rgba(169, 83, 122, 0.23), transparent 25rem),
+    radial-gradient(circle at 7% 48%, rgba(113, 39, 79, 0.25), transparent 20rem),
+    repeating-linear-gradient(101deg, rgba(255, 238, 211, 0.012) 0 1px, transparent 1px 5px),
+    var(--journal-plum);
   scrollbar-width: none;
 }
 
@@ -36,18 +51,24 @@
     0
     var(--journal-gutter-left);
   background:
-    radial-gradient(circle at 74% 0%, rgba(230, 189, 130, 0.035), transparent 42%),
-    #050504;
-  box-shadow: 0 1px rgba(230, 189, 130, 0.32);
+    radial-gradient(circle at 74% 10%, rgba(194, 91, 126, 0.13), transparent 12rem),
+    rgba(35, 10, 28, 0.96);
+  box-shadow: 0 1px rgba(255, 237, 213, 0.3);
+  backdrop-filter: blur(20px);
 }
 
 .journal-page__header {
+  position: relative;
+  display: flex;
   min-height: var(--app-header-min-height);
   padding:
     0
     calc(var(--app-header-gutter-right, 1.5rem) - var(--journal-gutter-right))
-    1.3rem
+    1.15rem
     calc(var(--app-header-gutter-left, 1.5rem) - var(--journal-gutter-left));
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 0.75rem;
 }
 
 .journal-page__header h1,
@@ -56,15 +77,17 @@
 }
 
 .journal-page__header h1 {
-  font-size: var(--app-page-title-size);
-  font-weight: var(--app-page-title-weight);
-  letter-spacing: var(--app-page-title-tracking);
-  line-height: var(--app-page-title-leading);
+  color: var(--journal-ink);
+  font-family: var(--font-accent);
+  font-size: clamp(3rem, 14vw, 4rem);
+  font-weight: 500;
+  letter-spacing: -0.055em;
+  line-height: 0.9;
 }
 
 .journal-page__header .journal-page__eyebrow {
   margin-bottom: 0.4rem;
-  color: var(--app-eyebrow-color);
+  color: var(--journal-ink);
   font-size: var(--app-eyebrow-size);
   font-weight: var(--app-eyebrow-weight);
   letter-spacing: var(--app-eyebrow-tracking);
@@ -72,17 +95,49 @@
   text-transform: uppercase;
 }
 
+.journal-page__subtitle {
+  color: var(--journal-muted) !important;
+  font-size: 0.78rem !important;
+}
+
+.journal-page__doodles {
+  width: clamp(5.8rem, 28vw, 7.6rem);
+  height: auto;
+  margin-bottom: -0.15rem;
+  flex: 0 0 auto;
+  overflow: visible;
+  fill: none;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 2.1;
+}
+
+.journal-page__doodle-cloud {
+  color: var(--journal-blue);
+  stroke: currentColor;
+}
+
+.journal-page__doodle-sun {
+  color: var(--journal-accent);
+  stroke: currentColor;
+}
+
+.journal-page__doodle-leaf {
+  color: var(--journal-green);
+  stroke: currentColor;
+}
+
 .journal-page__tabs {
   position: relative;
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   align-items: end;
-  gap: 0.2rem;
+  gap: 0.35rem;
   margin-right: calc(0px - var(--journal-gutter-right));
   margin-left: calc(0px - var(--journal-gutter-left));
   padding: 0.24rem var(--journal-gutter-right) 0 var(--journal-gutter-left);
   border-top: 0;
-  background: #050504;
+  background: transparent;
 }
 
 .journal-page__tabs::after {
@@ -91,30 +146,30 @@
   bottom: 0;
   left: 0;
   height: 1px;
-  background: rgba(230, 189, 130, 0.36);
+  background: rgba(255, 237, 213, 0.48);
   content: '';
 }
 
 .journal-page__tabs button {
-  --journal-tab-rest: #5a402f;
-  --journal-tab-active: #9a704b;
+  --journal-tab-rest: #fff0d1;
+  --journal-tab-active: #fff4dd;
   position: relative;
   z-index: 1;
   min-width: 0;
-  min-height: 2.7rem;
-  padding: 0.48rem 0.35rem;
-  border: 1px solid rgba(230, 189, 130, 0.24);
+  min-height: 3rem;
+  padding: 0.62rem 0.35rem 0.54rem;
+  border: 1px solid rgba(255, 239, 217, 0.24);
   border-bottom: 0;
-  border-radius: 0.58rem 0.58rem 0 0;
-  color: rgba(255, 248, 241, 0.72);
+  border-radius: 0.85rem 0.85rem 0 0;
+  color: var(--journal-paper-ink);
   background-color: var(--journal-tab-rest);
   box-shadow:
-    inset 0 1px rgba(255, 235, 204, 0.1),
-    0 -0.22rem 0.75rem rgba(0, 0, 0, 0.16);
+    inset 0 1px rgba(255, 255, 255, 0.4),
+    0 -0.28rem 0.9rem rgba(10, 0, 7, 0.2);
   font: inherit;
   font-size: 0.62rem;
-  font-weight: 560;
-  letter-spacing: 0.015em;
+  font-weight: 680;
+  letter-spacing: 0.045em;
   line-height: 1.2;
   text-transform: uppercase;
   cursor: pointer;
@@ -127,22 +182,22 @@
 }
 
 .journal-page__tabs button:nth-child(2) {
-  --journal-tab-rest: #493327;
-  --journal-tab-active: #845e42;
+  --journal-tab-rest: #d68fa4;
+  --journal-tab-active: #e39bad;
 }
 
 .journal-page__tabs button:nth-child(3) {
-  --journal-tab-rest: #37271f;
-  --journal-tab-active: #6f4f39;
+  --journal-tab-rest: #a6b47b;
+  --journal-tab-active: #b3c187;
 }
 
 .journal-page__tabs button[aria-selected='true'] {
-  color: rgba(255, 250, 243, 0.97);
-  border-color: rgba(230, 189, 130, 0.72);
+  color: var(--journal-paper-ink);
+  border-color: rgba(255, 239, 217, 0.62);
   background-color: var(--journal-tab-active);
   box-shadow:
-    inset 0 1px rgba(255, 235, 204, 0.22),
-    0 -0.28rem 0.9rem rgba(0, 0, 0, 0.22);
+    inset 0 1px rgba(255, 255, 255, 0.55),
+    0 -0.3rem 1rem rgba(10, 0, 7, 0.25);
   transform: translateY(-0.1rem);
 }
 
@@ -151,13 +206,1588 @@
 }
 
 .journal-page__tabs button:focus-visible {
-  outline: 2px solid rgba(255, 224, 188, 0.9);
+  outline: 2px solid var(--journal-ink);
   outline-offset: 0.12rem;
 }
 
 .journal-page__panel {
   min-width: 0;
   padding-top: 1.3rem;
+}
+
+.journal-page--person-scrapbook {
+  padding-top: 0;
+}
+
+.journal-page--person-scrapbook .journal-page__panel {
+  padding-top: 0;
+}
+
+/* Warm paper Journal skin. The feature components retain all of their data
+   and interaction logic; these rules only give them one playful visual voice. */
+.journal-page .people-timeline {
+  --people-accent: var(--journal-coral);
+  --people-panel: rgba(255, 252, 238, 0.72);
+  --people-line: var(--journal-line);
+  --people-muted: var(--journal-muted);
+  color: var(--journal-ink);
+}
+
+.journal-page :is(
+  .people-timeline__header h2,
+  .people-timeline__setup-copy h3,
+  .people-timeline__faces-to-name h3,
+  .people-timeline__empty-title,
+  .journal-events__heading h2,
+  .journal-events .ks-section__heading h3,
+  .flight-tracker__header h2,
+  .flight-empty h3
+) {
+  color: var(--journal-ink);
+  font-family: var(--font-accent);
+  font-weight: 560;
+  letter-spacing: -0.025em;
+}
+
+.journal-page :is(
+  .people-timeline__setup-copy > p,
+  .people-timeline__setup-person small,
+  .people-timeline__faces-to-name header p,
+  .people-timeline__timeline-meta span,
+  .people-timeline__privacy p,
+  .people-timeline__privacy span,
+  .people-timeline__empty p,
+  .journal-events__upcoming-heading p,
+  .flight-tracker__header p,
+  .flight-empty p
+) {
+  color: var(--journal-muted);
+}
+
+.journal-page .people-timeline__setup {
+  border-bottom-style: dashed;
+}
+
+.journal-page .people-timeline__setup-circle {
+  border-width: 2px;
+  border-color: var(--journal-coral);
+  color: var(--journal-ink);
+  background: rgba(255, 251, 237, 0.7);
+  box-shadow: 0.18rem 0.22rem 0 rgba(23, 59, 99, 0.08);
+}
+
+.journal-page .people-timeline__setup-person:nth-child(3n + 2) .people-timeline__setup-circle {
+  border-color: var(--journal-lilac);
+}
+
+.journal-page .people-timeline__setup-person:nth-child(3n) .people-timeline__setup-circle {
+  border-color: var(--journal-green);
+}
+
+.journal-page .people-timeline__initials {
+  color: var(--journal-ink);
+  background: rgba(234, 170, 49, 0.18);
+}
+
+.journal-page .people-timeline__setup-person strong {
+  color: var(--journal-ink);
+}
+
+.journal-page .people-timeline__chips {
+  border-color: rgba(23, 59, 99, 0.28);
+}
+
+.journal-page .people-timeline__chip {
+  border-color: rgba(23, 59, 99, 0.2);
+  color: var(--journal-muted);
+}
+
+.journal-page .people-timeline__chip[aria-pressed='true'] {
+  border-bottom-color: var(--journal-accent);
+  color: var(--journal-ink);
+  background: linear-gradient(180deg, transparent 55%, rgba(234, 170, 49, 0.22));
+}
+
+.journal-page .people-timeline__upload-button,
+.journal-page .people-timeline__chips .people-timeline__upload-button {
+  border: 1.5px solid rgba(23, 59, 99, 0.48);
+  border-radius: 0.55rem;
+  color: #fff8e8;
+  background: var(--journal-coral);
+  box-shadow: 0.18rem 0.2rem 0 rgba(23, 59, 99, 0.14);
+}
+
+.journal-page :is(
+  .people-timeline__inline-form,
+  .people-timeline__date-editor,
+  .people-timeline__manage-panel,
+  .people-timeline__face-review,
+  .people-timeline__clear-confirm
+) {
+  border-color: rgba(23, 59, 99, 0.22);
+  border-radius: 0.55rem;
+  background: rgba(255, 251, 237, 0.82);
+  box-shadow: 0.25rem 0.3rem 0 rgba(23, 59, 99, 0.06);
+}
+
+.journal-page :is(
+  .people-timeline__inline-form input,
+  .people-timeline__date-editor input,
+  .people-timeline__reference-form input
+) {
+  border-color: rgba(23, 59, 99, 0.25);
+  color: var(--journal-ink);
+  background: rgba(255, 255, 255, 0.56);
+}
+
+.journal-page .people-timeline__form-actions button:first-child,
+.journal-page .people-timeline__date-kind button[aria-pressed='true'],
+.journal-page .people-timeline__face-review-actions button:first-child {
+  color: var(--journal-ink);
+  background: var(--journal-accent);
+}
+
+.journal-page .people-timeline__face-candidates > button > span {
+  border-color: var(--journal-coral);
+  background: var(--journal-paper-deep);
+}
+
+.journal-page .people-timeline__face-review strong,
+.journal-page .people-timeline__timeline-meta time,
+.journal-page .people-timeline__tag-toggle,
+.journal-page .people-timeline__tag-panel label {
+  color: var(--journal-ink);
+}
+
+.journal-page .people-timeline__album-photo {
+  border: 2px solid var(--journal-green);
+  border-radius: 0.65rem;
+  background: #fffaf0;
+  box-shadow: 0.32rem 0.38rem 0 rgba(23, 59, 99, 0.1);
+}
+
+.journal-page .people-timeline__scrapbook-photo {
+  border-color: rgba(23, 59, 99, 0.3);
+  color: var(--journal-ink);
+  background:
+    repeating-linear-gradient(0deg, rgba(23, 59, 99, 0.025) 0 1px, transparent 1px 5px),
+    #f3e1b8;
+  box-shadow: 0.4rem 0.45rem 0 rgba(161, 137, 190, 0.28);
+}
+
+.journal-page .people-timeline__scrapbook-image {
+  border-color: rgba(23, 59, 99, 0.2);
+  background: #fffaf0;
+}
+
+.journal-page .people-timeline__scrapbook-tape {
+  background: rgba(231, 111, 85, 0.62);
+}
+
+.journal-page .people-timeline__scrapbook-doodle,
+.journal-page .people-timeline__scrapbook-photo figcaption span {
+  color: var(--journal-coral);
+}
+
+.journal-page .people-timeline__photo-unavailable {
+  color: var(--journal-muted);
+  background: var(--journal-paper-deep);
+}
+
+.journal-page .people-timeline__scrubber input::-webkit-slider-runnable-track,
+.journal-page .people-timeline__scrubber input::-moz-range-track {
+  background: rgba(23, 59, 99, 0.22);
+}
+
+.journal-page .people-timeline__scrubber input::-webkit-slider-thumb,
+.journal-page .people-timeline__scrubber input::-moz-range-thumb {
+  border-color: var(--journal-paper);
+  background: var(--journal-accent);
+}
+
+.journal-page .people-timeline__privacy {
+  border-top-style: dashed;
+}
+
+.journal-page .people-timeline__privacy > svg {
+  stroke: var(--journal-green);
+}
+
+.journal-page .people-timeline__import-progress {
+  border-color: rgba(23, 59, 99, 0.25);
+  color: var(--journal-ink);
+  background: var(--journal-paper);
+  box-shadow: 0.35rem 0.4rem 0 rgba(23, 59, 99, 0.12);
+}
+
+/* Plans keep their notebook interaction, now on warm ruled paper. */
+.journal-page .journal-events {
+  --plan-gold: var(--journal-accent);
+  --plan-gold-bright: #f3bc54;
+  --plan-paper: #fff9e8;
+  --plan-paper-line: rgba(54, 102, 138, 0.12);
+  color: var(--journal-ink);
+}
+
+.journal-page .journal-events__heading p,
+.journal-page .journal-events .event-plan-card .event-plan-card__when,
+.journal-page .journal-events .event-plan-card .event-plan-card__location {
+  color: #a75a45;
+}
+
+.journal-page .journal-events .event-plan-card {
+  border-color: rgba(23, 59, 99, 0.24);
+  color: var(--journal-ink);
+  background:
+    repeating-linear-gradient(to bottom, transparent 0, transparent 1.86rem, var(--plan-paper-line) 1.9rem, var(--plan-paper-line) 1.94rem),
+    var(--plan-paper);
+  box-shadow: 0.34rem 0.38rem 0 rgba(23, 59, 99, 0.09);
+}
+
+.journal-page .journal-events .event-plan-card h4,
+.journal-page .event-plan-card__checklist label,
+.journal-page .event-plan-card__task-composer input {
+  color: var(--journal-ink);
+}
+
+.journal-page .event-plan-card__sketch {
+  color: var(--journal-coral);
+  background: rgba(234, 170, 49, 0.12);
+}
+
+.journal-page .event-plan-card__attendees > span {
+  border-color: var(--plan-paper);
+  color: var(--journal-ink);
+  background: var(--journal-blue);
+}
+
+.journal-page :is(.event-plan-card__complete, .event-plan-card__add-task, .events-header-action--footer) {
+  border-radius: 0.5rem;
+  color: var(--journal-ink);
+  background: transparent;
+  box-shadow: none;
+}
+
+.journal-page .event-plan-card__add-task {
+  border-color: var(--journal-coral);
+  color: #fff9ea;
+  background: var(--journal-coral);
+}
+
+.journal-page .journal-events__week-days button {
+  color: var(--journal-ink);
+}
+
+.journal-page .journal-events__week-days button[aria-pressed='true'] > strong {
+  color: var(--journal-ink);
+  background: var(--journal-accent);
+}
+
+.journal-page .journal-events__week-navigation,
+.journal-page .journal-events__upcoming-heading {
+  border-color: rgba(23, 59, 99, 0.2);
+}
+
+/* Flight cards stay boarding passes, with ink and paper instead of black boxes. */
+.journal-page .flight-tracker {
+  --flight-ink: var(--journal-ink);
+  --flight-muted: #66778a;
+  --flight-faint: rgba(23, 59, 99, 0.42);
+  --flight-line: rgba(23, 59, 99, 0.18);
+  --flight-accent: #cc8642;
+  --flight-ticket: #fff9e8;
+  color: var(--journal-ink);
+}
+
+.journal-page .flight-doodle-header {
+  color: rgba(87, 150, 183, 0.62);
+}
+
+.journal-page .flight-doodle-header__plane {
+  stroke: rgba(205, 111, 81, 0.82);
+}
+
+.journal-page .flight-tracker__collection-header p {
+  color: var(--journal-muted);
+}
+
+.journal-page .flight-tracker__collection-header h3 {
+  color: var(--journal-ink);
+  font-family: var(--font-accent);
+  font-weight: 560;
+}
+
+.journal-page .flight-tracker__collection-header button {
+  border-color: rgba(23, 59, 99, 0.38);
+  border-radius: 0.52rem 0.68rem 0.48rem 0.64rem;
+  color: var(--journal-ink);
+  background: var(--journal-blue);
+  box-shadow: 0.16rem 0.18rem 0 rgba(23, 59, 99, 0.12);
+}
+
+.journal-page .flight-tracker__add,
+.journal-page .flight-empty button {
+  border-color: rgba(23, 59, 99, 0.35);
+  border-radius: 0.55rem;
+  color: var(--journal-ink);
+  background: var(--journal-blue);
+  box-shadow: 0.18rem 0.2rem 0 rgba(23, 59, 99, 0.12);
+}
+
+.journal-page :is(.flight-empty, .flight-card, .flight-detail__panel, .flight-choice__list > button) {
+  border-color: rgba(23, 59, 99, 0.25);
+  color: var(--journal-ink);
+  background: var(--flight-ticket);
+  box-shadow: 0.32rem 0.38rem 0 rgba(23, 59, 99, 0.09);
+}
+
+.journal-page :is(
+  .flight-card__traveler,
+  .flight-card__number,
+  .flight-card__status,
+  .flight-card__route strong,
+  .flight-card__compact-route strong,
+  .flight-card__times strong,
+  .flight-card__compact-date strong,
+  .flight-detail__route strong,
+  .flight-detail__times dd,
+  .flight-detail__header h2,
+  .flight-choice__header h3,
+  .flight-choice__route strong
+) {
+  color: var(--journal-ink);
+}
+
+.journal-page :is(
+  .flight-card__route div span,
+  .flight-card__compact-route small,
+  .flight-card__times span,
+  .flight-card__times small,
+  .flight-card__compact-date small,
+  .flight-card__compact-meta,
+  .flight-detail__header p,
+  .flight-detail__times dt,
+  .flight-detail__times small,
+  .flight-choice__header p,
+  .flight-choice__list > button small
+) {
+  color: var(--journal-muted);
+}
+
+.journal-page .flight-card__open,
+.journal-page .flight-card__compact-open,
+.journal-page .flight-card__expand,
+.journal-page .flight-card__icon-action {
+  color: var(--journal-ink);
+}
+
+.journal-page .flight-card__expand {
+  border-color: rgba(23, 59, 99, 0.34);
+  border-radius: 0.48rem 0.62rem 0.44rem 0.58rem;
+  background: var(--journal-accent);
+  box-shadow: 0.1rem 0.13rem 0 rgba(23, 59, 99, 0.15);
+}
+
+.journal-page .flight-card__expand::before,
+.journal-page .flight-card__expand::after {
+  border-color: rgba(23, 59, 99, 0.18);
+}
+
+.journal-page .flight-card__details {
+  border-top: 1px dashed rgba(23, 59, 99, 0.24);
+  color: var(--journal-ink);
+  background:
+    repeating-linear-gradient(
+      to bottom,
+      rgba(23, 59, 99, 0.055) 0,
+      rgba(23, 59, 99, 0.055) 1px,
+      transparent 1px,
+      transparent 1.55rem
+    ),
+    #eef0d9;
+}
+
+.journal-page .flight-card__details :is(
+  .flight-detail__quality,
+  .flight-detail__times dt,
+  .flight-detail__times span,
+  .flight-detail__times small,
+  .flight-detail__updated,
+  .flight-map figcaption
+) {
+  color: var(--journal-muted);
+}
+
+.journal-page .flight-card__details .flight-detail__times dd,
+.journal-page .flight-map__codes {
+  color: var(--journal-ink);
+}
+
+.journal-page .flight-card__details .flight-detail__actions button {
+  border: 1px solid rgba(23, 59, 99, 0.28);
+  border-radius: 0.52rem 0.7rem 0.48rem 0.64rem;
+  color: var(--journal-ink);
+  background: var(--journal-blue);
+}
+
+.journal-page .flight-card__route-line .flight-plane-icon,
+.journal-page .flight-detail__route-line .flight-plane-icon,
+.journal-page .flight-card__compact-line .flight-plane-icon {
+  background: var(--flight-ticket);
+}
+
+.journal-page .flight-map {
+  border-color: rgba(23, 59, 99, 0.2);
+  background: #e5efe0;
+}
+
+.journal-page .flight-detail {
+  background: rgba(23, 59, 99, 0.22);
+}
+
+.journal-page :is(.flight-field input, .event-sheet .ks-field input, .event-plan-card__task-composer input) {
+  border-color: rgba(23, 59, 99, 0.25);
+  color: var(--journal-ink);
+  background: rgba(255, 255, 255, 0.7);
+}
+
+@media (max-width: 24rem) {
+  .journal-page__header {
+    align-items: flex-start;
+  }
+
+  .journal-page__doodles {
+    width: 5.2rem;
+    margin-top: 0.55rem;
+  }
+}
+
+/* --------------------------------------------------------------------------
+   Reference composition: the Journal is a plum cloth-covered notebook. These
+   rules intentionally live at the end of the file so the feature components
+   keep their behaviour while matching the supplied mobile layouts.
+   ----------------------------------------------------------------------- */
+
+.journal-page {
+  --journal-paper: #fff0d4;
+  --journal-paper-deep: #efd5aa;
+  --journal-plum: #2a0a20;
+  --journal-plum-soft: #42102f;
+  --journal-paper-ink: #351027;
+  --journal-ink: #fff2d8;
+  --journal-muted: rgba(255, 240, 219, 0.72);
+  --journal-accent: #f4b93f;
+  --journal-coral: #ed6f5a;
+  --journal-blue: #d28da8;
+  --journal-green: #a2b575;
+  background:
+    radial-gradient(ellipse at 82% -4%, rgba(151, 61, 103, 0.32), transparent 34rem),
+    radial-gradient(ellipse at -12% 44%, rgba(118, 35, 79, 0.3), transparent 26rem),
+    repeating-linear-gradient(103deg, rgba(255, 244, 226, 0.012) 0 1px, transparent 1px 4px),
+    repeating-linear-gradient(9deg, rgba(0, 0, 0, 0.014) 0 1px, transparent 1px 5px),
+    var(--journal-plum);
+}
+
+.journal-page__chrome {
+  background:
+    radial-gradient(ellipse at 82% -8%, rgba(151, 61, 103, 0.25), transparent 25rem),
+    repeating-linear-gradient(103deg, rgba(255, 244, 226, 0.012) 0 1px, transparent 1px 4px),
+    rgba(42, 10, 32, 0.97);
+  box-shadow: 0 1px rgba(255, 241, 215, 0.58);
+}
+
+.journal-page__header {
+  min-height: clamp(9.35rem, 25vh, 11.5rem);
+  padding-right: 0.15rem;
+  padding-bottom: 1.45rem;
+  padding-left: 0.2rem;
+  align-items: end;
+}
+
+.journal-page__header h1 {
+  font-size: clamp(3.7rem, 16.8vw, 5.15rem);
+  font-weight: 500;
+  line-height: 0.86;
+}
+
+.journal-page__header .journal-page__eyebrow {
+  margin-bottom: 0.62rem;
+  font-size: clamp(0.7rem, 3.1vw, 0.86rem);
+}
+
+.journal-page__subtitle {
+  margin-top: 0.58rem !important;
+  font-size: clamp(0.78rem, 3.35vw, 0.98rem) !important;
+  line-height: 1.2 !important;
+}
+
+.journal-page__doodles {
+  width: clamp(6.7rem, 31vw, 8.6rem);
+  margin-right: -0.15rem;
+  margin-bottom: -0.15rem;
+}
+
+.journal-page__tabs {
+  gap: 0.42rem;
+  padding: 0.3rem 0.9rem 0;
+}
+
+.journal-page__tabs button {
+  min-height: 4.15rem;
+  padding: 0.8rem 0.26rem 0.66rem;
+  border: 1.5px solid rgba(255, 239, 216, 0.47);
+  border-bottom: 0;
+  border-radius: 1rem 1rem 0 0;
+  opacity: 0.95;
+  background-image:
+    radial-gradient(circle at 22% 26%, rgba(255, 255, 255, 0.13) 0 0.8px, transparent 1px),
+    repeating-linear-gradient(112deg, rgba(53, 16, 39, 0.02) 0 1px, transparent 1px 5px);
+  background-size: 11px 13px, auto;
+  box-shadow:
+    inset 0 1px rgba(255, 255, 255, 0.48),
+    0 -0.3rem 1rem rgba(5, 0, 4, 0.25);
+  font-size: clamp(0.62rem, 2.8vw, 0.75rem);
+  letter-spacing: 0.015em;
+}
+
+.journal-page__tabs button:first-child {
+  --journal-tab-rest: #f7e8cc;
+  --journal-tab-active: #fff2da;
+}
+
+.journal-page__tabs button:nth-child(2) {
+  --journal-tab-rest: #d98fa2;
+  --journal-tab-active: #ea806c;
+}
+
+.journal-page__tabs button:nth-child(3) {
+  --journal-tab-rest: #98aa70;
+  --journal-tab-active: #a8b97d;
+}
+
+.journal-page__tabs button[aria-selected='true']::after {
+  right: 29%;
+  bottom: -0.16rem;
+  left: 29%;
+  height: 0.28rem;
+  border-radius: 54% 40% 51% 38%;
+  background: var(--journal-coral);
+  transform: rotate(-5deg);
+}
+
+.journal-page__panel {
+  padding-top: 1.65rem;
+}
+
+/* Photo Journal --------------------------------------------------------- */
+
+.journal-page .people-timeline {
+  gap: 1.2rem;
+}
+
+.journal-page .people-timeline__header {
+  gap: 0.26rem;
+}
+
+.journal-page .people-timeline__header h2 {
+  color: var(--journal-ink);
+  font-family: var(--font-ui, system-ui, sans-serif);
+  font-size: clamp(1.7rem, 7vw, 2.08rem);
+  font-weight: 720;
+  line-height: 1;
+}
+
+.journal-page .people-timeline__header::after {
+  color: var(--journal-muted);
+  font-size: clamp(0.7rem, 3.15vw, 0.84rem);
+}
+
+.journal-page .people-timeline__setup {
+  position: relative;
+  padding: 0 0 0.42rem;
+  gap: 0;
+  border: 0;
+}
+
+.journal-page .people-timeline__setup-slots {
+  padding-top: 0.25rem;
+  padding-bottom: 0.55rem;
+  gap: clamp(0.7rem, 3vw, 1rem);
+}
+
+.journal-page .people-timeline__setup-person {
+  width: 4.8rem;
+  min-width: 4.8rem;
+  flex-basis: 4.8rem;
+  gap: 0.45rem;
+}
+
+.journal-page .people-timeline__setup-circle {
+  width: 4.35rem;
+  border-width: 2px;
+  background: rgba(37, 7, 27, 0.82);
+  box-shadow:
+    0 0 0 1px rgba(255, 242, 217, 0.18),
+    0 0.42rem 1.1rem rgba(7, 0, 5, 0.28);
+}
+
+.journal-page .people-timeline__setup-person--placeholder .people-timeline__setup-circle {
+  border-width: 1.5px;
+  border-style: dashed;
+  opacity: 0.48;
+}
+
+.journal-page .people-timeline__setup-person--add .people-timeline__setup-circle {
+  opacity: 1;
+  border-color: #e59ab1;
+  color: #e59ab1;
+}
+
+.journal-page .people-timeline__setup-person strong {
+  font-size: 0.73rem;
+  font-weight: 500;
+}
+
+/* Keep the established setup copy available to assistive technology without
+   letting an onboarding block take over the album screen. */
+.journal-page .people-timeline__setup-copy {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.journal-page .people-timeline__chips {
+  display: flex;
+  width: 100%;
+  margin: -0.2rem 0 0;
+  padding: 0;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0;
+  overflow: visible;
+  border: 0;
+}
+
+.journal-page .people-timeline__chip {
+  min-width: 5.2rem;
+  min-height: 2.65rem;
+  padding: 0.5rem 0.7rem;
+  border: 1.5px solid rgba(255, 240, 216, 0.82);
+  border-right: 0;
+  border-radius: 0.72rem 0 0 0.72rem;
+  color: rgba(255, 240, 219, 0.82);
+  background: rgba(43, 8, 31, 0.42);
+  font-size: 0.72rem;
+  font-weight: 620;
+}
+
+.journal-page .people-timeline__chip:nth-child(2) {
+  border-right: 1.5px solid rgba(255, 240, 216, 0.82);
+  border-radius: 0 0.72rem 0.72rem 0;
+}
+
+.journal-page .people-timeline__chip[aria-pressed='true'] {
+  border-color: var(--journal-paper);
+  color: var(--journal-paper-ink);
+  background:
+    repeating-linear-gradient(104deg, rgba(75, 24, 49, 0.025) 0 1px, transparent 1px 5px),
+    var(--journal-paper);
+  box-shadow: 0.12rem 0.15rem 0 rgba(7, 0, 5, 0.2);
+}
+
+.journal-page .people-timeline__upload-button,
+.journal-page .people-timeline__chips .people-timeline__upload-button {
+  min-width: 7.2rem;
+  min-height: 2.65rem;
+  margin-left: auto;
+  padding: 0.5rem 0.78rem;
+  justify-content: center;
+  border: 1.5px solid rgba(255, 234, 210, 0.42);
+  border-radius: 0.68rem 0.86rem 0.62rem 0.78rem;
+  color: #fff4dd;
+  background:
+    repeating-linear-gradient(108deg, rgba(255, 255, 255, 0.035) 0 1px, transparent 1px 5px),
+    var(--journal-coral);
+  box-shadow: 0.16rem 0.2rem 0 rgba(7, 0, 5, 0.28);
+}
+
+.journal-page .people-timeline__review-chip,
+.journal-page .people-timeline__manage-button {
+  margin-top: 0.45rem;
+}
+
+.journal-page .people-timeline__albums {
+  display: grid;
+  padding: 1.2rem 0 1.35rem;
+  gap: 0.92rem;
+  border-top: 1.5px solid rgba(163, 182, 119, 0.72);
+  border-bottom: 1px solid rgba(255, 239, 216, 0.28);
+}
+
+.journal-page .people-timeline__albums-header {
+  display: flex;
+  min-width: 0;
+  align-items: end;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.journal-page .people-timeline__albums-header h3,
+.journal-page .people-timeline__albums-header p {
+  margin: 0;
+}
+
+.journal-page .people-timeline__albums-header h3 {
+  color: var(--journal-ink);
+  font-family: var(--font-accent, Georgia, serif);
+  font-size: clamp(1.65rem, 7.2vw, 2.2rem);
+  font-weight: 560;
+  letter-spacing: -0.04em;
+  line-height: 0.98;
+}
+
+.journal-page .people-timeline__albums-header p {
+  display: flex;
+  margin-top: 0.34rem;
+  align-items: center;
+  gap: 0.35rem;
+  color: var(--journal-muted);
+  font-size: 0.7rem;
+}
+
+.journal-page .people-timeline__albums-header p > span {
+  color: var(--journal-green);
+}
+
+.journal-page .people-timeline__albums-header > button {
+  min-height: 2.4rem;
+  padding: 0.3rem 0;
+  border: 0;
+  color: var(--journal-ink);
+  background: transparent;
+  font: 0.75rem/1 var(--font-ui, system-ui, sans-serif);
+}
+
+.journal-page .people-timeline__album-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.8rem;
+}
+
+.journal-page .people-timeline__album-tile {
+  position: relative;
+  display: grid;
+  min-width: 0;
+  padding: 0;
+  overflow: hidden;
+  gap: 0;
+  border: 1.5px solid rgba(255, 240, 216, 0.7);
+  border-radius: 0.72rem 0.88rem 0.68rem 0.8rem;
+  color: var(--journal-paper-ink);
+  background: #c8b0d3;
+  box-shadow: 0.16rem 0.2rem 0 rgba(6, 0, 4, 0.24);
+  text-align: left;
+}
+
+.journal-page .people-timeline__album-tile[data-tint='1'] {
+  background: #a8bd8a;
+}
+
+.journal-page .people-timeline__album-tile[data-tint='2'] {
+  background: #efac94;
+}
+
+.journal-page .people-timeline__album-tile-image {
+  display: block;
+  aspect-ratio: 1.32;
+  overflow: hidden;
+  border-bottom: 1px solid rgba(53, 16, 39, 0.24);
+  background: var(--journal-plum-soft);
+}
+
+.journal-page .people-timeline__album-tile-image .people-timeline__photo-image {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.journal-page .people-timeline__album-tile-copy {
+  display: grid;
+  min-width: 0;
+  padding: 0.58rem 0.65rem 0.64rem;
+  gap: 0.12rem;
+}
+
+.journal-page .people-timeline__album-tile-copy strong,
+.journal-page .people-timeline__album-tile-copy small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.journal-page .people-timeline__album-tile-copy strong {
+  font-family: var(--font-accent, Georgia, serif);
+  font-size: 1rem;
+  font-weight: 620;
+}
+
+.journal-page .people-timeline__album-tile-copy small {
+  font-size: 0.66rem;
+}
+
+.journal-page .people-timeline__album-tile-doodle {
+  position: absolute;
+  right: 0.54rem;
+  bottom: 0.48rem;
+  color: rgba(255, 246, 224, 0.85);
+  font-family: var(--font-accent, Georgia, serif);
+  font-size: 1.1rem;
+  transform: rotate(8deg);
+}
+
+.journal-page .people-timeline__albums-empty {
+  display: grid;
+  width: 100%;
+  min-height: 4.5rem;
+  padding: 0.65rem 0.75rem;
+  grid-template-columns: 2rem minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 0.68rem;
+  border: 1.5px dashed rgba(244, 185, 63, 0.74);
+  border-radius: 0.68rem 0.9rem 0.62rem 0.82rem;
+  color: var(--journal-ink);
+  background: rgba(75, 18, 53, 0.5);
+  text-align: left;
+}
+
+.journal-page .people-timeline__albums-empty > span:first-child {
+  color: var(--journal-accent);
+  font-size: 1.45rem;
+  text-align: center;
+}
+
+.journal-page .people-timeline__albums-empty > span:nth-child(2) {
+  display: grid;
+  min-width: 0;
+  gap: 0.12rem;
+}
+
+.journal-page .people-timeline__albums-empty strong,
+.journal-page .people-timeline__albums-empty small {
+  display: block;
+}
+
+.journal-page .people-timeline__albums-empty strong {
+  font-family: var(--font-accent, Georgia, serif);
+  font-size: 0.9rem;
+}
+
+.journal-page .people-timeline__albums-empty small {
+  color: var(--journal-muted);
+  font-size: 0.65rem;
+}
+
+.journal-page .people-timeline__viewer[data-layout='album']::before {
+  margin: 0.1rem 0 -0.05rem;
+  color: var(--journal-ink);
+  content: 'Family timeline';
+  font-family: var(--font-accent, Georgia, serif);
+  font-size: 1.55rem;
+}
+
+.journal-page .people-timeline__album-photo {
+  border: 2px solid var(--journal-paper);
+  border-radius: 0.9rem 1.1rem 0.84rem 1rem;
+  box-shadow:
+    0.18rem 0.22rem 0 #d890a8,
+    0 1rem 2.4rem rgba(5, 0, 4, 0.3);
+}
+
+/* Family plans --------------------------------------------------------- */
+
+.journal-page .journal-events {
+  gap: 1rem;
+}
+
+.journal-page .journal-events__week {
+  margin: -0.2rem 0 0.3rem;
+  padding: 0.35rem 0.05rem 0.95rem;
+  gap: 0.48rem;
+  border-bottom: 0;
+}
+
+.journal-page .journal-events__week-days {
+  gap: 0.08rem;
+}
+
+.journal-page .journal-events__week-days button {
+  min-height: 4.35rem;
+  padding: 0.15rem 0 0.25rem;
+  align-content: space-between;
+  color: rgba(255, 239, 218, 0.66);
+}
+
+.journal-page .journal-events__week-days button > span {
+  font-size: 0.68rem;
+}
+
+.journal-page .journal-events__week-days button > strong {
+  width: 2.4rem;
+  height: 2.4rem;
+  color: var(--journal-ink);
+  font-size: 1rem;
+  font-weight: 500;
+}
+
+.journal-page .journal-events__week-days button[aria-pressed='true'] > strong {
+  color: #fff0d7;
+  background:
+    repeating-linear-gradient(104deg, rgba(255, 255, 255, 0.05) 0 1px, transparent 1px 5px),
+    linear-gradient(145deg, #f2866d, #d95856);
+  box-shadow:
+    inset 0 1px rgba(255, 241, 215, 0.35),
+    0 0.3rem 0.9rem rgba(8, 0, 6, 0.24);
+}
+
+.journal-page .journal-events__week-navigation {
+  grid-template-columns: 2.7rem minmax(0, 1fr) 2.7rem;
+}
+
+.journal-page .journal-events__week-navigation > p {
+  color: rgba(255, 241, 221, 0.9);
+  font-size: 0.77rem;
+}
+
+.journal-page .journal-events__week-navigation > button {
+  width: 2.7rem;
+  height: 2.7rem;
+  color: var(--journal-ink);
+}
+
+.journal-page .journal-events__week-navigation > button svg {
+  width: 1.05rem;
+  height: 1.05rem;
+  stroke-width: 1.8;
+}
+
+.journal-page .journal-events__upcoming-list {
+  gap: 0.9rem;
+}
+
+.journal-page .journal-events .event-plan-card {
+  grid-template-columns: 4.8rem minmax(0, 1fr);
+  min-height: 20rem;
+  padding: 1.45rem 1rem 1.05rem;
+  gap: 0.45rem 0.82rem;
+  border: 2px solid rgba(91, 31, 60, 0.82);
+  border-radius: 0.55rem 0.8rem 0.5rem 0.72rem;
+  color: var(--journal-paper-ink);
+  background:
+    repeating-linear-gradient(to bottom, transparent 0 2rem, rgba(89, 35, 61, 0.13) 2rem calc(2rem + 1px)),
+    radial-gradient(circle at 88% 8%, rgba(238, 111, 89, 0.09), transparent 26%),
+    repeating-linear-gradient(103deg, rgba(64, 18, 43, 0.014) 0 1px, transparent 1px 5px),
+    var(--journal-paper);
+  box-shadow:
+    0 0 0 0.12rem rgba(255, 241, 215, 0.42),
+    0.28rem 0.35rem 0 rgba(6, 0, 4, 0.25);
+  clip-path: polygon(
+    0 0.35rem, 4% 0.12rem, 9% 0.34rem, 15% 0.1rem, 22% 0.34rem,
+    29% 0.12rem, 37% 0.33rem, 46% 0.1rem, 55% 0.31rem, 64% 0.1rem,
+    73% 0.34rem, 82% 0.12rem, 91% 0.33rem, 100% 0.14rem,
+    100% calc(100% - 0.3rem), 93% calc(100% - 0.1rem),
+    84% calc(100% - 0.32rem), 73% calc(100% - 0.12rem),
+    62% calc(100% - 0.31rem), 50% calc(100% - 0.11rem),
+    38% calc(100% - 0.32rem), 26% calc(100% - 0.1rem),
+    14% calc(100% - 0.3rem), 5% calc(100% - 0.1rem), 0 calc(100% - 0.32rem)
+  );
+}
+
+.journal-page .journal-events .event-plan-card::before {
+  z-index: 3;
+  top: 0.18rem;
+  right: auto;
+  bottom: auto;
+  left: 1.15rem;
+  width: 4.15rem;
+  height: 1.05rem;
+  border: 0;
+  border-right: 1px dashed rgba(255, 244, 222, 0.55);
+  border-left: 1px dashed rgba(255, 244, 222, 0.55);
+  background:
+    radial-gradient(circle, rgba(255, 255, 255, 0.14) 0 1px, transparent 1.2px) 0 0 / 7px 7px,
+    rgba(232, 103, 91, 0.74);
+  box-shadow: 0 0.1rem 0.22rem rgba(57, 17, 39, 0.18);
+  transform: rotate(-8deg);
+}
+
+.journal-page .event-plan-card__artwork {
+  width: 4.6rem;
+  min-height: 5.4rem;
+  padding-top: 0.52rem;
+}
+
+.journal-page .event-plan-card__sketch {
+  width: 4.1rem;
+  height: 4.1rem;
+  color: #eea72c;
+  filter: none;
+}
+
+.journal-page .event-plan-card__content {
+  padding-top: 0.42rem;
+}
+
+.journal-page .event-plan-card__title-row {
+  grid-template-columns: minmax(0, 1fr) 2.9rem;
+  gap: 0.45rem;
+}
+
+.journal-page .journal-events .event-plan-card h4 {
+  padding-top: 0;
+  color: var(--journal-paper-ink);
+  font-family: var(--font-accent, Georgia, serif);
+  font-size: clamp(1.3rem, 6.1vw, 1.65rem);
+  font-weight: 620;
+  line-height: 1.02;
+}
+
+.journal-page .event-plan-card__doodle.event-reminder-button {
+  width: 2.75rem;
+  height: 2.75rem;
+  min-height: 2.75rem;
+  color: #dc6270;
+}
+
+.journal-page .event-plan-card__doodle.event-reminder-button svg {
+  width: 2.55rem;
+  height: 2.55rem;
+}
+
+.journal-page .journal-events .event-plan-card .event-plan-card__when {
+  margin-top: 0.5rem;
+  color: #d65d57;
+  font-family: var(--font-ui, system-ui, sans-serif);
+  font-size: 0.9rem;
+  font-weight: 610;
+}
+
+.journal-page .journal-events .event-plan-card .event-plan-card__location {
+  margin-top: 0.28rem;
+  color: var(--journal-paper-ink);
+  font-size: 0.78rem;
+}
+
+.journal-page .event-plan-card__checklist {
+  margin-top: 0.55rem;
+  padding: 0.58rem 0.1rem 0;
+  border-top: 1px solid rgba(79, 25, 51, 0.15);
+}
+
+.journal-page .event-plan-card__checklist label {
+  min-height: 2.25rem;
+  padding: 0.3rem 0.42rem;
+  grid-template-columns: 1.3rem minmax(0, 1fr);
+  color: rgba(53, 16, 39, 0.82);
+  font-family: var(--font-ui, system-ui, sans-serif);
+  font-size: 0.78rem;
+}
+
+.journal-page .event-plan-card__checkbox {
+  width: 1.25rem;
+  height: 1.25rem;
+  border-width: 1.5px;
+  border-color: var(--journal-paper-ink);
+  background: rgba(255, 255, 255, 0.18);
+}
+
+.journal-page .event-plan-card__actions {
+  margin-top: auto;
+  padding: 0.72rem 0.1rem 0;
+  gap: 0.7rem;
+  border-top: 1px dashed rgba(215, 88, 86, 0.58);
+}
+
+.journal-page :is(.event-plan-card__add-task, .event-plan-card__complete) {
+  min-height: 3rem;
+  padding: 0.48rem 0.55rem;
+  border: 1.5px solid rgba(213, 84, 82, 0.78);
+  border-radius: 1.15rem 1.35rem 1.05rem 1.25rem;
+  color: var(--journal-paper-ink);
+  background: rgba(255, 251, 238, 0.24);
+  font-size: 0.72rem;
+  font-weight: 620;
+}
+
+.journal-page .events-header-action--footer {
+  min-height: 3.05rem;
+  margin-top: 0.2rem;
+  padding: 0.58rem 1.15rem;
+  border: 1.5px solid rgba(255, 239, 216, 0.42);
+  border-radius: 1rem 1.2rem 0.92rem 1.08rem;
+  color: #fff2dc;
+  background:
+    repeating-linear-gradient(106deg, rgba(255, 255, 255, 0.035) 0 1px, transparent 1px 5px),
+    var(--journal-coral);
+}
+
+/* Flights -------------------------------------------------------------- */
+
+.journal-page .flight-tracker {
+  --flight-ink: var(--journal-paper-ink);
+  --flight-muted: rgba(53, 16, 39, 0.62);
+  --flight-faint: rgba(53, 16, 39, 0.48);
+  --flight-line: rgba(99, 37, 67, 0.26);
+  --flight-accent: #c64f69;
+  --flight-ticket: var(--journal-paper);
+}
+
+.journal-page .flight-doodle-header {
+  height: 4.35rem;
+  margin: -0.35rem 0 0.55rem;
+}
+
+.journal-page .flight-doodle-header__journey {
+  right: 2.3rem;
+  bottom: 0.25rem;
+  width: min(13rem, 55vw);
+  height: 3.8rem;
+}
+
+.journal-page .flight-doodle-header__route,
+.journal-page .flight-doodle-header__route-join,
+.journal-page .flight-doodle-header__plane {
+  stroke: #f4b83d;
+}
+
+.journal-page .flight-tracker__collection-header {
+  margin-bottom: 0.95rem;
+  align-items: center;
+}
+
+.journal-page .flight-tracker__collection-header p {
+  margin-bottom: 0.25rem;
+  color: #eba7bb;
+  font-size: 0.65rem;
+  letter-spacing: 0.13em;
+}
+
+.journal-page .flight-tracker__collection-header h3 {
+  color: var(--journal-ink);
+  font-family: var(--font-accent, Georgia, serif);
+  font-size: clamp(1.55rem, 7vw, 2rem);
+  font-weight: 560;
+  line-height: 1;
+}
+
+.journal-page .flight-tracker__collection-header button {
+  min-height: 2.8rem;
+  padding: 0.52rem 0.82rem;
+  border: 1.5px solid #f2ad3f;
+  border-radius: 1rem 1.2rem 0.92rem 1.08rem;
+  color: #ffd25a;
+  background: rgba(55, 11, 39, 0.5);
+  font-size: 0.72rem;
+}
+
+.journal-page .flight-list {
+  gap: 0.9rem;
+}
+
+.journal-page .flight-card {
+  overflow: hidden;
+  border: 2px solid rgba(83, 27, 55, 0.88);
+  border-radius: 0.72rem;
+  color: var(--journal-paper-ink);
+  background:
+    radial-gradient(circle at 91% 8%, rgba(201, 79, 105, 0.075), transparent 28%),
+    repeating-linear-gradient(102deg, rgba(65, 19, 43, 0.015) 0 1px, transparent 1px 5px),
+    var(--flight-ticket);
+  box-shadow:
+    0 0 0 0.13rem rgba(255, 241, 215, 0.48),
+    0.28rem 0.36rem 0 rgba(7, 0, 5, 0.28);
+  clip-path: polygon(
+    0 0, 100% 0, 100% 46%, 98.2% 48%, 98.2% 52%, 100% 54%,
+    100% 100%, 0 100%, 0 54%, 1.8% 52%, 1.8% 48%, 0 46%
+  );
+}
+
+.journal-page .flight-card::before {
+  inset: 0.3rem;
+  border: 1px solid rgba(91, 31, 60, 0.28);
+  border-radius: 0.45rem;
+}
+
+.journal-page .flight-card--featured {
+  min-height: 22.5rem;
+  padding: 1.25rem 1.15rem 1.05rem;
+}
+
+.journal-page .flight-card__toolbar {
+  top: 0.72rem;
+  right: 0.72rem;
+  gap: 0.05rem;
+}
+
+.journal-page .flight-card__icon-action {
+  width: 2rem;
+  height: 2rem;
+  border-radius: 0.45rem;
+  color: #bd4e67;
+}
+
+.journal-page .flight-card__icon-action svg {
+  width: 1.15rem;
+  height: 1.15rem;
+  stroke-width: 1.65;
+}
+
+.journal-page .flight-card--featured .flight-card__topline {
+  min-height: 2rem;
+  padding-right: 6.35rem;
+}
+
+.journal-page .flight-card__identity {
+  gap: 0.38rem;
+}
+
+.journal-page .flight-card__traveler {
+  color: var(--journal-paper-ink);
+  font-family: var(--font-accent, Georgia, serif);
+  font-size: 0.95rem;
+  font-weight: 620;
+}
+
+.journal-page .flight-card__number {
+  color: #cb5267;
+  font-size: 0.68rem;
+}
+
+.journal-page .flight-card__status {
+  color: #507c47;
+  background: rgba(124, 164, 93, 0.18);
+}
+
+.journal-page .flight-card--featured .flight-card__route {
+  margin-top: 1.55rem;
+  grid-template-columns: minmax(0, 0.78fr) minmax(4.6rem, 1.1fr) minmax(0, 0.78fr);
+  gap: 0.7rem;
+}
+
+.journal-page .flight-card--featured .flight-card__route strong {
+  color: var(--journal-paper-ink);
+  font-family: var(--font-accent, Georgia, serif);
+  font-size: clamp(3.05rem, 14vw, 3.8rem);
+  font-weight: 500;
+  letter-spacing: -0.045em;
+  line-height: 0.82;
+}
+
+.journal-page .flight-card--featured .flight-card__route div span {
+  margin-top: 0.48rem;
+  color: rgba(53, 16, 39, 0.66);
+  font-size: 0.76rem;
+}
+
+.journal-page .flight-route-mark {
+  height: 1.75rem;
+}
+
+.journal-page .flight-route-mark__dots {
+  stroke: rgba(113, 43, 75, 0.78);
+  stroke-dasharray: 4 5;
+  stroke-width: 1.35;
+}
+
+.journal-page .flight-route-mark__mask {
+  fill: var(--journal-paper);
+}
+
+.journal-page .flight-route-mark__plane {
+  fill: #b34663;
+}
+
+.journal-page .flight-card--featured .flight-card__times {
+  margin-top: 1.55rem;
+  padding-top: 0.9rem;
+  border-top: 1.5px dashed rgba(177, 74, 99, 0.72);
+}
+
+.journal-page .flight-card--featured .flight-card__times span:not(.flight-card__duration) {
+  color: #b74b64;
+  font-size: 0.65rem;
+  letter-spacing: 0.1em;
+}
+
+.journal-page .flight-card--featured .flight-card__times strong {
+  color: var(--journal-paper-ink);
+  font-size: 1.72rem;
+}
+
+.journal-page .flight-card--featured .flight-card__times small,
+.journal-page .flight-card__duration {
+  color: rgba(53, 16, 39, 0.62);
+}
+
+.journal-page .flight-card--featured .flight-progress {
+  margin-top: 1.15rem;
+}
+
+.journal-page .flight-card--featured .flight-progress::before {
+  background: rgba(53, 16, 39, 0.18);
+}
+
+.journal-page .flight-card--featured .flight-progress__fill {
+  background: #72974f;
+}
+
+.journal-page .flight-card--featured .flight-progress__plane {
+  color: #668d4a;
+  background: var(--journal-paper);
+}
+
+.journal-page .flight-card__progress-codes {
+  color: rgba(53, 16, 39, 0.7);
+  font-size: 0.65rem;
+}
+
+.journal-page .flight-card__expand {
+  width: 2.65rem;
+  height: 2.65rem;
+  margin-top: 0.85rem;
+  margin-bottom: -0.08rem;
+  border: 1.5px solid rgba(70, 20, 46, 0.82);
+  border-radius: 0.5rem 0.68rem 0.46rem 0.62rem;
+  color: var(--journal-paper-ink);
+  background: #fff3dc;
+  box-shadow: 0.1rem 0.13rem 0 rgba(73, 22, 47, 0.18);
+}
+
+.journal-page .flight-card__expand::before,
+.journal-page .flight-card__expand::after {
+  width: clamp(4.1rem, 25vw, 7.4rem);
+  border-color: rgba(183, 71, 99, 0.65);
+}
+
+.journal-page .flight-card--compact {
+  min-height: 7.35rem;
+}
+
+.journal-page .flight-card--compact .flight-card__compact-open {
+  min-height: 6.25rem;
+  padding: 1.05rem 6.8rem 0.78rem 1rem;
+}
+
+.journal-page .flight-card__compact-route strong {
+  color: var(--journal-paper-ink);
+  font-family: var(--font-accent, Georgia, serif);
+  font-size: 1.35rem;
+}
+
+.journal-page .flight-card__compact-route small,
+.journal-page .flight-card__compact-meta,
+.journal-page .flight-card__compact-date small {
+  color: rgba(53, 16, 39, 0.62);
+}
+
+.journal-page .flight-card__compact-date strong {
+  color: #b54a63;
+}
+
+.journal-page .flight-card__details {
+  color: var(--journal-paper-ink);
+  background:
+    repeating-linear-gradient(to bottom, rgba(89, 34, 61, 0.065) 0 1px, transparent 1px 1.6rem),
+    #f2d9af;
+}
+
+@media (max-width: 24rem) {
+  .journal-page__header {
+    min-height: 8.9rem;
+    padding-bottom: 1.15rem;
+  }
+
+  .journal-page__header h1 {
+    font-size: clamp(3.35rem, 17vw, 4rem);
+  }
+
+  .journal-page__doodles {
+    width: 5.9rem;
+  }
+
+  .journal-page__tabs {
+    padding-inline: 0.78rem;
+  }
+
+  .journal-page__tabs button {
+    min-height: 3.65rem;
+    font-size: 0.6rem;
+  }
+
+  .journal-page .people-timeline__setup-person {
+    width: 4.35rem;
+    min-width: 4.35rem;
+    flex-basis: 4.35rem;
+  }
+
+  .journal-page .people-timeline__setup-circle {
+    width: 3.95rem;
+  }
+
+  .journal-page .people-timeline__chip {
+    min-width: 4.7rem;
+    padding-inline: 0.56rem;
+  }
+
+  .journal-page .people-timeline__upload-button,
+  .journal-page .people-timeline__chips .people-timeline__upload-button {
+    min-width: 6.55rem;
+    margin-left: auto;
+  }
+
+  .journal-page .journal-events .event-plan-card {
+    grid-template-columns: 3.8rem minmax(0, 1fr);
+    min-height: 18.75rem;
+    padding: 1.25rem 0.78rem 0.88rem;
+    gap: 0.34rem 0.62rem;
+  }
+
+  .journal-page .event-plan-card__artwork {
+    width: 3.6rem;
+  }
+
+  .journal-page .event-plan-card__sketch {
+    width: 3.35rem;
+    height: 3.35rem;
+  }
+
+  .journal-page .event-plan-card__title-row {
+    grid-template-columns: minmax(0, 1fr) 2.35rem;
+  }
+
+  .journal-page .event-plan-card__doodle.event-reminder-button,
+  .journal-page .event-plan-card__doodle.event-reminder-button svg {
+    width: 2.25rem;
+    height: 2.25rem;
+    min-height: 2.25rem;
+  }
+
+  .journal-page :is(.event-plan-card__add-task, .event-plan-card__complete) {
+    min-height: 2.65rem;
+    padding-inline: 0.4rem;
+    font-size: 0.64rem;
+  }
+
+  .journal-page .flight-doodle-header__journey {
+    right: 1.8rem;
+  }
+
+  .journal-page .flight-card--featured {
+    min-height: 21.5rem;
+    padding: 1.05rem 0.92rem 0.9rem;
+  }
+
+  .journal-page .flight-card--featured .flight-card__topline {
+    padding-right: 5.95rem;
+  }
+
+  .journal-page .flight-card--featured .flight-card__route {
+    margin-top: 1.32rem;
+    grid-template-columns: minmax(0, 0.78fr) minmax(4.1rem, 1fr) minmax(0, 0.78fr);
+    gap: 0.45rem;
+  }
+
+  .journal-page .flight-card--featured .flight-card__route strong {
+    font-size: clamp(2.65rem, 14.5vw, 3.3rem);
+  }
+
+  .journal-page .flight-card--featured .flight-card__times {
+    margin-top: 1.22rem;
+  }
+}
+
+@media (max-width: 21.5rem) {
+  .journal-page__header {
+    min-height: 8.1rem;
+  }
+
+  .journal-page__header h1 {
+    font-size: 3rem;
+  }
+
+  .journal-page__doodles {
+    width: 4.7rem;
+  }
+
+  .journal-page__tabs {
+    padding-inline: 0.6rem;
+    gap: 0.28rem;
+  }
+
+  .journal-page__tabs button {
+    min-height: 3.35rem;
+    font-size: 0.54rem;
+  }
+
+  .journal-page .people-timeline__chips {
+    gap: 0;
+  }
+
+  .journal-page .people-timeline__chip {
+    min-width: 4.2rem;
+  }
+
+  .journal-page .people-timeline__upload-button,
+  .journal-page .people-timeline__chips .people-timeline__upload-button {
+    min-width: 6.1rem;
+    padding-inline: 0.48rem;
+    font-size: 0.65rem;
+  }
+
+  .journal-page .people-timeline__album-grid {
+    gap: 0.58rem;
+  }
+
+  .journal-page .journal-events__week-days button > strong {
+    width: 2rem;
+    height: 2rem;
+  }
+
+  .journal-page .journal-events .event-plan-card {
+    grid-template-columns: 3.15rem minmax(0, 1fr);
+    padding-inline: 0.66rem;
+  }
+
+  .journal-page .event-plan-card__artwork,
+  .journal-page .event-plan-card__sketch {
+    width: 3rem;
+  }
+
+  .journal-page .event-plan-card__sketch {
+    height: 3rem;
+  }
+
+  .journal-page .journal-events .event-plan-card h4 {
+    font-size: 1.08rem;
+  }
+
+  .journal-page .flight-card--featured .flight-card__route strong {
+    font-size: 2.45rem;
+  }
+
+  .journal-page .flight-card__toolbar {
+    right: 0.5rem;
+  }
+
+  .journal-page .flight-card__icon-action {
+    width: 1.7rem;
+  }
 }
 
 .journal-page__panel > * {
@@ -199,5 +1829,1120 @@
 @media (prefers-reduced-motion: reduce) {
   .journal-page__tabs button {
     transition: none;
+  }
+}
+
+/* Empty dates keep the same generous notebook-page silhouette as a saved
+   plan, so changing days never collapses the composition. */
+.journal-page .journal-events__empty {
+  position: relative;
+  display: grid;
+  min-height: 18.75rem;
+  padding: 2.5rem 1.35rem 1.3rem;
+  grid-template-columns: minmax(4.75rem, 0.42fr) minmax(0, 1fr);
+  place-items: center;
+  align-content: center;
+  gap: 1.1rem;
+  overflow: hidden;
+  border: 2px solid rgba(91, 31, 60, 0.82);
+  border-radius: 0.55rem 0.8rem 0.5rem 0.72rem;
+  color: var(--journal-paper-ink);
+  background:
+    repeating-linear-gradient(to bottom, transparent 0 2rem, rgba(89, 35, 61, 0.13) 2rem calc(2rem + 1px)),
+    radial-gradient(circle at 88% 8%, rgba(238, 111, 89, 0.09), transparent 26%),
+    var(--journal-paper);
+  box-shadow:
+    0 0 0 0.12rem rgba(255, 241, 215, 0.42),
+    0.28rem 0.35rem 0 rgba(6, 0, 4, 0.25);
+  clip-path: polygon(
+    0 0.35rem, 7% 0.12rem, 14% 0.34rem, 23% 0.1rem, 34% 0.33rem,
+    46% 0.1rem, 58% 0.32rem, 71% 0.11rem, 84% 0.33rem, 94% 0.12rem,
+    100% 0.31rem, 100% calc(100% - 0.31rem), 91% calc(100% - 0.11rem),
+    79% calc(100% - 0.32rem), 65% calc(100% - 0.1rem),
+    50% calc(100% - 0.31rem), 35% calc(100% - 0.1rem),
+    21% calc(100% - 0.32rem), 8% calc(100% - 0.11rem), 0 calc(100% - 0.31rem)
+  );
+}
+
+.journal-page .journal-events__empty::before {
+  position: absolute;
+  top: 0.2rem;
+  left: 1.25rem;
+  width: 4.2rem;
+  height: 1.05rem;
+  border-right: 1px dashed rgba(255, 244, 222, 0.55);
+  border-left: 1px dashed rgba(255, 244, 222, 0.55);
+  background:
+    radial-gradient(circle, rgba(255, 255, 255, 0.14) 0 1px, transparent 1.2px) 0 0 / 7px 7px,
+    rgba(232, 103, 91, 0.74);
+  content: '';
+  transform: rotate(-8deg);
+}
+
+.journal-page .journal-events__empty-icon {
+  display: grid;
+  width: 4.75rem;
+  height: 4.75rem;
+  place-items: center;
+  border: 0;
+  border-radius: 0;
+  color: #e6a52d;
+  background: transparent;
+  transform: rotate(-7deg);
+}
+
+.journal-page .journal-events__empty-icon svg {
+  width: 4.2rem;
+  height: 4.2rem;
+  stroke-width: 1.15;
+}
+
+.journal-page .journal-events__empty > div {
+  display: grid;
+  min-width: 0;
+  gap: 0.58rem;
+}
+
+.journal-page .journal-events__empty h3 {
+  margin: 0;
+  color: var(--journal-paper-ink);
+  font-family: var(--font-accent, Georgia, serif);
+  font-size: clamp(1.4rem, 6.2vw, 1.8rem);
+  font-weight: 620;
+  line-height: 1.05;
+}
+
+.journal-page .journal-events__empty p {
+  margin: 0;
+  color: rgba(53, 16, 39, 0.65);
+  font-size: 0.75rem;
+  line-height: 1.48;
+}
+
+.journal-page .journal-events__empty .journal-events__empty-action {
+  display: inline-flex;
+  width: max-content;
+  min-height: 2.75rem;
+  margin-top: 0.28rem;
+  padding: 0.48rem 0.76rem;
+  align-items: center;
+  gap: 0.38rem;
+  border: 1.5px solid rgba(213, 84, 82, 0.78);
+  border-radius: 0.62rem 0.8rem 0.56rem 0.72rem;
+  color: var(--journal-paper-ink);
+  background: rgba(239, 111, 90, 0.12);
+  font: 620 0.7rem/1 var(--font-ui, system-ui, sans-serif);
+}
+
+/* On a phone the empty page reads as one intentional notebook composition.
+   Keeping the doodle above the copy prevents the CTA from being squeezed by
+   the decorative column at the reference's 426px viewport. */
+@media (max-width: 32rem) {
+  .journal-page .journal-events__empty {
+    min-height: 18.75rem;
+    padding: 2.35rem 1.25rem 1.45rem;
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto auto;
+    place-items: center;
+    align-content: center;
+    gap: 0.55rem;
+  }
+
+  .journal-page .journal-events__empty-icon {
+    width: 4rem;
+    height: 4rem;
+  }
+
+  .journal-page .journal-events__empty-icon svg {
+    width: 3.75rem;
+    height: 3.75rem;
+  }
+
+  .journal-page .journal-events__empty > div {
+    width: min(100%, 18rem);
+    justify-items: center;
+    text-align: center;
+  }
+
+  .journal-page .journal-events__empty .journal-events__empty-action {
+    width: min(100%, 13.5rem);
+    justify-content: center;
+    white-space: normal;
+  }
+}
+
+@media (max-width: 23rem) {
+  .journal-page .journal-events__empty {
+    min-height: 17.2rem;
+    padding: 2.2rem 1rem 1.1rem;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 0.42rem;
+  }
+
+  .journal-page .journal-events__empty-icon,
+  .journal-page .journal-events__empty-icon svg {
+    width: 3.55rem;
+    height: 3.55rem;
+  }
+
+  .journal-page .journal-events__empty .journal-events__empty-action {
+    padding-inline: 0.58rem;
+    font-size: 0.64rem;
+  }
+}
+
+/* The flight identity shares the top edge with three compact ticket controls.
+   Reserve only their actual footprint so the trip name and flight number never
+   collapse out of view on iPhone widths. */
+.journal-page .flight-card--featured .flight-card__topline {
+  display: block;
+  width: 100%;
+  min-height: 2.15rem;
+  padding-right: 5.45rem;
+}
+
+.journal-page .flight-card__identity {
+  display: flex;
+  width: 100%;
+  min-width: 0;
+  align-items: center;
+  flex-wrap: nowrap;
+  gap: 0.34rem;
+  overflow: visible;
+}
+
+.journal-page .flight-card__traveler {
+  min-width: 3.6rem;
+  max-width: 6.7rem;
+  flex: 0 1 auto;
+  overflow: hidden;
+  color: var(--journal-paper-ink);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.journal-page .flight-card__number,
+.journal-page .flight-card__status {
+  flex: 0 0 auto;
+}
+
+.journal-page .flight-card__toolbar {
+  min-height: 1.9rem;
+}
+
+.journal-page .flight-card__icon-action {
+  width: 1.72rem;
+  height: 1.72rem;
+}
+
+/* FlightTrackerSection's base skin uses pale text on dark cards. The Journal
+   ticket is cream, so pin the identity colours in this final feature layer. */
+.journal-page[data-section='flights'] .flight-tracker .flight-card .flight-card__traveler {
+  color: #351027 !important;
+}
+
+.journal-page[data-section='flights'] .flight-tracker .flight-card .flight-card__number {
+  color: #c65064 !important;
+}
+
+@media (max-width: 21.5rem) {
+  .journal-page .flight-card--featured .flight-card__topline {
+    padding-right: 4.9rem;
+  }
+
+  .journal-page .flight-card__traveler {
+    min-width: 3rem;
+    max-width: 5.25rem;
+    font-size: 0.82rem;
+  }
+
+  .journal-page .flight-card__number {
+    font-size: 0.6rem;
+  }
+
+  .journal-page .flight-card__status {
+    padding-inline: 0.34rem;
+    font-size: 0.49rem;
+  }
+
+  .journal-page .flight-card__icon-action {
+    width: 1.55rem;
+  }
+}
+
+/* Compact phone polish -------------------------------------------------
+   The illustrated shapes stay playful, while interactive chrome takes up
+   less of a 320–430px viewport. All type continues to come from the app's
+   shared font tokens. */
+.journal-page button {
+  font-family: var(--font-ui);
+}
+
+.journal-page[data-section='flights'] .flight-tracker .flight-card {
+  --flight-ink: #351027;
+  --flight-muted: #654354;
+  --flight-faint: #765266;
+  --flight-line: rgba(74, 25, 51, 0.28);
+}
+
+.journal-page[data-section='flights'] .flight-tracker .flight-card :is(
+  .flight-card__route strong,
+  .flight-card__times strong,
+  .flight-card__compact-route strong,
+  .flight-detail__route strong,
+  .flight-detail__times dd
+) {
+  color: #351027;
+}
+
+.journal-page[data-section='flights'] .flight-tracker .flight-card :is(
+  .flight-card__route div span,
+  .flight-card__times small,
+  .flight-card__duration,
+  .flight-card__progress-codes,
+  .flight-card__compact-route small,
+  .flight-card__compact-date small,
+  .flight-card__compact-meta,
+  .flight-detail__route div span,
+  .flight-detail__times dt,
+  .flight-detail__times span,
+  .flight-detail__times small,
+  .flight-detail__updated
+) {
+  color: #654354;
+}
+
+.journal-page[data-section='flights'] .flight-tracker .flight-card :is(
+  .flight-card__number,
+  .flight-card__compact-number,
+  .flight-card__compact-date strong
+) {
+  color: #a73c58 !important;
+}
+
+.journal-page[data-section='flights'] .flight-tracker .flight-card .flight-card__status {
+  border: 1px solid rgba(55, 94, 45, 0.28);
+  color: #385f31;
+  background: #dbe7bd;
+}
+
+.journal-page[data-section='flights'] .flight-tracker .flight-card .flight-card__status[data-quality='cancelled'] {
+  border-color: rgba(141, 43, 51, 0.25);
+  color: #8d2b33;
+  background: #f4c9bf;
+}
+
+.journal-page[data-section='flights'] .flight-tracker .flight-card .flight-quality {
+  border-color: rgba(61, 44, 54, 0.24);
+  color: #3f2a37;
+  background: rgba(255, 255, 255, 0.42);
+}
+
+.journal-page[data-section='flights'] .flight-tracker .flight-card .flight-card__chevron {
+  color: #5b3549;
+}
+
+.journal-page[data-section='flights'] .flight-tracker .flight-card .flight-card__icon-action {
+  color: #9c3553;
+}
+
+.journal-page[data-section='flights'] .flight-tracker .flight-card .flight-card__icon-action--notify[aria-pressed='true'] {
+  color: #fff7e4;
+  background: #9c3553;
+}
+
+.journal-page[data-section='flights'] .flight-tracker .flight-card .flight-card__icon-action--remove {
+  color: #8d2b33;
+}
+
+.journal-page[data-section='flights'] .flight-tracker .flight-card .flight-detail__delete-confirm p {
+  color: #654354;
+}
+
+.journal-page[data-section='flights'] .flight-tracker .flight-card :is(
+  .flight-detail__quality,
+  .flight-map figcaption
+) {
+  color: #654354;
+}
+
+.journal-page[data-section='flights'] .flight-tracker .flight-card .flight-map__codes {
+  color: #351027;
+}
+
+.journal-page[data-section='flights'] .flight-tracker .flight-card .flight-detail__actions button,
+.journal-page[data-section='flights'] .flight-tracker .flight-card .flight-detail__delete-confirm button {
+  border-color: rgba(78, 27, 52, 0.35);
+  color: #351027;
+  background: rgba(216, 149, 175, 0.32);
+}
+
+.journal-page[data-section='flights'] .flight-tracker .flight-card .flight-detail__delete-confirm {
+  border-color: rgba(141, 43, 51, 0.24);
+  background: rgba(244, 201, 191, 0.42);
+}
+
+@media (max-width: 26.875rem) {
+  .journal-page {
+    overflow-x: clip;
+  }
+
+  .journal-page__panel,
+  .journal-page .people-timeline,
+  .journal-page .journal-events,
+  .journal-page .flight-tracker,
+  .journal-page .flight-list,
+  .journal-page .flight-list > li,
+  .journal-page .flight-card {
+    min-width: 0;
+    max-width: 100%;
+  }
+
+  .journal-page__header {
+    min-height: 8.45rem;
+    padding-bottom: 0.95rem;
+  }
+
+  .journal-page__header h1 {
+    font-size: clamp(3.15rem, 15.5vw, 3.8rem);
+  }
+
+  .journal-page__doodles {
+    width: clamp(5rem, 25vw, 6.4rem);
+  }
+
+  .journal-page__tabs {
+    gap: 0.3rem;
+    padding: 0.2rem 0.72rem 0;
+  }
+
+  .journal-page__tabs button {
+    min-height: 3.25rem;
+    padding: 0.5rem 0.18rem 0.42rem;
+    border-radius: 0.76rem 0.76rem 0 0;
+    font-size: clamp(0.55rem, 2.65vw, 0.68rem);
+  }
+
+  .journal-page__panel {
+    padding-top: 1.2rem;
+  }
+
+  .journal-page .people-timeline {
+    gap: 1rem;
+  }
+
+  .journal-page .people-timeline__setup-person {
+    width: 4.15rem;
+    min-width: 4.15rem;
+    flex-basis: 4.15rem;
+  }
+
+  .journal-page .people-timeline__setup-circle {
+    width: 3.72rem;
+  }
+
+  .journal-page .people-timeline__chip,
+  .journal-page .people-timeline__upload-button,
+  .journal-page .people-timeline__chips .people-timeline__upload-button {
+    min-height: 2.2rem;
+    padding-block: 0.34rem;
+  }
+
+  .journal-page .people-timeline__chip {
+    min-width: 4.35rem;
+    padding-inline: 0.5rem;
+    font-size: 0.66rem;
+  }
+
+  .journal-page .people-timeline__upload-button,
+  .journal-page .people-timeline__chips .people-timeline__upload-button {
+    min-width: 6rem;
+    padding-inline: 0.56rem;
+    font-size: 0.65rem;
+  }
+
+  .journal-page .people-timeline__albums-header > button {
+    min-height: 2rem;
+  }
+
+  .journal-page :is(
+    .people-timeline__chip,
+    .people-timeline__upload-button,
+    .people-timeline__albums-header > button,
+    .event-plan-card__add-task,
+    .event-plan-card__complete,
+    .events-header-action--footer,
+    .journal-events__empty-action,
+    .journal-events__week-navigation > button,
+    .flight-tracker__collection-header button
+  ) {
+    position: relative;
+  }
+
+  /* Preserve a 44px tap target while the visible paper/button shape stays
+     compact. These controls have enough horizontal separation, so the target
+     only grows along the block axis. */
+  .journal-page :is(
+    .people-timeline__chip,
+    .people-timeline__upload-button,
+    .people-timeline__albums-header > button,
+    .event-plan-card__add-task,
+    .event-plan-card__complete,
+    .events-header-action--footer,
+    .journal-events__empty-action,
+    .flight-tracker__collection-header button
+  )::after {
+    position: absolute;
+    top: 50%;
+    right: 0;
+    left: 0;
+    height: 2.75rem;
+    content: '';
+    transform: translateY(-50%);
+  }
+
+  .journal-page .journal-events__week-navigation > button::after {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    width: 2.75rem;
+    height: 2.75rem;
+    content: '';
+    transform: translate(-50%, -50%);
+  }
+
+  .journal-page .people-timeline__albums-empty {
+    min-height: 3.8rem;
+    padding: 0.5rem 0.58rem;
+  }
+
+  .journal-page .journal-events__week {
+    padding-bottom: 0.62rem;
+  }
+
+  .journal-page .journal-events__week-days button {
+    min-height: 3.5rem;
+    padding-bottom: 0.12rem;
+  }
+
+  .journal-page .journal-events__week-days button > strong {
+    width: 2.08rem;
+    height: 2.08rem;
+    font-size: 0.9rem;
+  }
+
+  .journal-page .journal-events__week-navigation {
+    grid-template-columns: 2.2rem minmax(0, 1fr) 2.2rem;
+  }
+
+  .journal-page .journal-events__week-navigation > button {
+    width: 2.2rem;
+    height: 2.2rem;
+  }
+
+  .journal-page :is(.event-plan-card__add-task, .event-plan-card__complete) {
+    min-height: 2.35rem;
+    padding: 0.35rem 0.38rem;
+    border-radius: 0.82rem 1rem 0.76rem 0.92rem;
+    font-size: 0.64rem;
+  }
+
+  .journal-page .event-plan-card__title-row {
+    grid-template-columns: minmax(0, 1fr) 2.75rem;
+  }
+
+  .journal-page .event-plan-card__doodle.event-reminder-button {
+    width: 2.75rem;
+    height: 2.75rem;
+    min-height: 2.75rem;
+  }
+
+  .journal-page .event-plan-card__doodle.event-reminder-button svg {
+    width: 2.1rem;
+    height: 2.1rem;
+  }
+
+  .journal-page .event-plan-card__task-composer input,
+  .journal-page .event-plan-card__task-composer button {
+    min-height: 2.3rem;
+  }
+
+  .journal-page .events-header-action--footer {
+    min-height: 2.4rem;
+    padding: 0.4rem 0.82rem;
+    border-radius: 0.75rem 0.94rem 0.7rem 0.86rem;
+    font-size: 0.68rem;
+  }
+
+  .journal-page .journal-events__empty .journal-events__empty-action {
+    min-height: 2.35rem;
+    padding-block: 0.38rem;
+  }
+
+  .journal-page .flight-doodle-header {
+    height: 3.55rem;
+  }
+
+  .journal-page .flight-tracker__collection-header {
+    gap: 0.55rem;
+  }
+
+  .journal-page .flight-tracker__collection-header button {
+    min-height: 2.3rem;
+    padding: 0.38rem 0.58rem;
+    border-radius: 0.75rem 0.92rem 0.7rem 0.86rem;
+    font-size: 0.65rem;
+  }
+
+  .journal-page .flight-card--featured {
+    min-height: 20rem;
+    padding: 0.95rem 0.82rem 0.78rem;
+  }
+
+  .journal-page .flight-card--featured .flight-card__topline {
+    min-height: 1.8rem;
+    padding-right: 8.4rem;
+  }
+
+  .journal-page .flight-card__toolbar {
+    top: 0.35rem;
+    right: 0.35rem;
+    min-height: 2.75rem;
+    gap: 0;
+  }
+
+  .journal-page .flight-card__icon-action {
+    width: 2.75rem;
+    height: 2.75rem;
+  }
+
+  .journal-page .flight-card__icon-action svg {
+    width: 0.98rem;
+    height: 0.98rem;
+  }
+
+  .journal-page .flight-card__traveler {
+    min-width: 2.9rem;
+    max-width: 5.3rem;
+    font-size: 0.82rem;
+  }
+
+  .journal-page .flight-card__number {
+    font-size: 0.59rem;
+  }
+
+  .journal-page .flight-card__status {
+    min-height: 1.25rem;
+    padding: 0.18rem 0.34rem;
+    font-size: 0.51rem;
+  }
+
+  .journal-page .flight-card--featured .flight-card__route {
+    margin-top: 1.12rem;
+    grid-template-columns: minmax(0, 0.82fr) minmax(3.35rem, 0.96fr) minmax(0, 0.82fr);
+    gap: 0.34rem;
+  }
+
+  .journal-page .flight-card--featured .flight-card__route strong {
+    font-size: clamp(2.4rem, 13.2vw, 3.25rem);
+  }
+
+  .journal-page .flight-card--featured .flight-card__times {
+    margin-top: 1rem;
+    padding-top: 0.72rem;
+    gap: 0.5rem;
+  }
+
+  .journal-page .flight-card--featured .flight-card__times strong {
+    font-size: 1.5rem;
+  }
+
+  .journal-page .flight-card--featured .flight-progress {
+    margin-top: 0.8rem;
+  }
+
+  .journal-page .flight-card__expand {
+    width: 2.75rem;
+    height: 2.75rem;
+    margin-top: 0.58rem;
+  }
+
+  .journal-page .flight-card--compact {
+    min-height: 7.2rem;
+  }
+
+  .journal-page .flight-card--compact .flight-card__compact-open {
+    min-height: 7.15rem;
+    padding: 3rem 0.78rem 0.68rem;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 0.42rem 0.55rem;
+  }
+
+  .journal-page .flight-card__compact-route {
+    gap: 0.28rem;
+  }
+
+  .journal-page .flight-card__compact-route strong {
+    font-size: 1.18rem;
+  }
+
+  .journal-page .flight-card__compact-date {
+    min-width: 2.85rem;
+  }
+
+  .journal-page .flight-card__details {
+    padding: 0.8rem;
+  }
+
+  .journal-page .flight-card--featured .flight-card__details {
+    max-width: none;
+  }
+
+  .journal-page .flight-card--compact .flight-card__details {
+    max-width: 100%;
+  }
+}
+
+@media (max-width: 22rem) {
+  .journal-page__tabs {
+    gap: 0.22rem;
+    padding-inline: 0.58rem;
+  }
+
+  .journal-page__tabs button {
+    min-height: 3.02rem;
+    font-size: 0.54rem;
+  }
+
+  .journal-page .people-timeline__chip {
+    min-width: 4rem;
+    padding-inline: 0.38rem;
+  }
+
+  .journal-page .people-timeline__upload-button,
+  .journal-page .people-timeline__chips .people-timeline__upload-button {
+    min-width: 5.55rem;
+    padding-inline: 0.42rem;
+    font-size: 0.61rem;
+  }
+
+  .journal-page .event-plan-card__actions {
+    gap: 0.38rem;
+  }
+
+  .journal-page :is(.event-plan-card__add-task, .event-plan-card__complete) {
+    padding-inline: 0.28rem;
+    font-size: 0.6rem;
+  }
+
+  .journal-page .flight-card--featured {
+    padding-inline: 0.72rem;
+  }
+
+  .journal-page .flight-card--featured .flight-card__topline {
+    min-height: 2.75rem;
+    padding-top: 0;
+    padding-right: 8.4rem;
+  }
+
+  .journal-page .flight-card--featured .flight-card__identity {
+    display: grid;
+    min-height: 2.75rem;
+    grid-template-columns: auto auto;
+    align-content: center;
+    justify-content: start;
+    gap: 0.12rem 0.28rem;
+  }
+
+  .journal-page .flight-card--featured .flight-card__status {
+    width: max-content;
+    grid-column: 1 / -1;
+  }
+
+  .journal-page .flight-card__traveler {
+    max-width: 4.4rem;
+    font-size: 0.77rem;
+  }
+
+  .journal-page .flight-card__number {
+    font-size: 0.55rem;
+  }
+
+  .journal-page .flight-card__status {
+    padding-inline: 0.27rem;
+    font-size: 0.48rem;
+  }
+
+  .journal-page .flight-card--featured .flight-card__route strong {
+    font-size: 2.32rem;
+  }
+}
+
+/* Reference-scale correction ------------------------------------------
+   Keep the illustrated surfaces from holding their 426px dimensions on
+   narrower phones. Visible shapes scale with the viewport; tap affordances
+   remain larger where neighbouring controls do not overlap. */
+.journal-page {
+  --font-accent: Baskerville, 'Iowan Old Style', ui-serif, Georgia, serif;
+}
+
+@media (max-width: 26.875rem) {
+  .journal-page .journal-page__header {
+    min-height: clamp(5.45rem, 27vw, 7.15rem);
+    padding-bottom: clamp(0.72rem, 3vw, 0.9rem);
+  }
+
+  .journal-page .journal-page__header h1 {
+    font-size: clamp(2.75rem, 12vw, 3.15rem);
+  }
+
+  .journal-page .journal-page__doodles {
+    width: clamp(4.25rem, 25vw, 6.65rem);
+  }
+
+  .journal-page__tabs {
+    gap: clamp(0.22rem, 1.15vw, 0.32rem);
+    padding-inline: clamp(0.9rem, 4.7vw, 1.25rem);
+  }
+
+  .journal-page__tabs button {
+    min-height: clamp(2.15rem, 10.7vw, 2.82rem);
+    padding: clamp(0.34rem, 1.8vw, 0.48rem) 0.2rem clamp(0.28rem, 1.5vw, 0.4rem);
+    border-radius: clamp(0.62rem, 2vw, 0.78rem) clamp(0.62rem, 2vw, 0.78rem) 0 0;
+    font-size: clamp(0.51rem, 2.35vw, 0.63rem);
+  }
+
+  .journal-page__panel {
+    padding-top: clamp(0.75rem, 3.75vw, 1rem);
+  }
+
+  /* Photo Journal */
+  .journal-page .people-timeline {
+    gap: clamp(0.72rem, 3.3vw, 0.92rem);
+  }
+
+  .journal-page .people-timeline__header h2,
+  .journal-page .people-timeline__albums-header h3 {
+    font-size: clamp(1.25rem, 6.2vw, 1.65rem);
+  }
+
+  .journal-page .people-timeline__setup {
+    padding-bottom: 0.2rem;
+  }
+
+  .journal-page .people-timeline__setup-slots {
+    padding-top: 0.12rem;
+    padding-bottom: 0.28rem;
+  }
+
+  .journal-page .people-timeline__setup-person {
+    width: clamp(3.65rem, 16vw, 4.25rem);
+    min-width: clamp(3.65rem, 16vw, 4.25rem);
+    flex-basis: clamp(3.65rem, 16vw, 4.25rem);
+    gap: 0.28rem;
+  }
+
+  .journal-page .people-timeline__setup-circle {
+    width: clamp(3.25rem, 14.6vw, 3.88rem);
+  }
+
+  .journal-page .people-timeline__setup-person strong {
+    font-size: clamp(0.59rem, 2.55vw, 0.68rem);
+  }
+
+  .journal-page .people-timeline__chip,
+  .journal-page .people-timeline__upload-button,
+  .journal-page .people-timeline__chips .people-timeline__upload-button {
+    min-height: clamp(1.8rem, 8.8vw, 2.35rem);
+    padding-block: 0.28rem;
+  }
+
+  .journal-page .people-timeline__chip {
+    min-width: clamp(4.1rem, 20vw, 5.35rem);
+  }
+
+  .journal-page .people-timeline__upload-button,
+  .journal-page .people-timeline__chips .people-timeline__upload-button {
+    min-width: clamp(5.75rem, 27vw, 7.2rem);
+  }
+
+  .journal-page .people-timeline__albums {
+    padding-block: clamp(0.78rem, 3.8vw, 1rem);
+    gap: 0.68rem;
+  }
+
+  .journal-page .people-timeline__album-tile-image {
+    aspect-ratio: 1.48;
+  }
+
+  .journal-page .people-timeline__album-tile-copy {
+    padding: 0.42rem 0.5rem 0.46rem;
+  }
+
+  .journal-page .people-timeline__albums-empty {
+    min-height: clamp(2.8rem, 12.5vw, 3.35rem);
+    padding: 0.4rem 0.52rem;
+    grid-template-columns: 1.55rem minmax(0, 1fr) auto;
+    gap: 0.48rem;
+  }
+
+  .journal-page .people-timeline__privacy {
+    display: none;
+  }
+
+  /* Family plans */
+  .journal-page .journal-events {
+    gap: clamp(0.62rem, 3vw, 0.85rem);
+  }
+
+  .journal-page .journal-events__week {
+    margin-bottom: 0.05rem;
+    padding: 0.12rem 0.05rem clamp(0.5rem, 2.4vw, 0.65rem);
+    gap: 0.18rem;
+  }
+
+  .journal-page .journal-events__week-days button {
+    min-height: clamp(3rem, 12.5vw, 3.35rem);
+    padding-bottom: 0.08rem;
+  }
+
+  .journal-page .journal-events__week-days button > strong {
+    width: clamp(1.72rem, 8.6vw, 2.3rem);
+    height: clamp(1.72rem, 8.6vw, 2.3rem);
+    font-size: clamp(0.76rem, 3.4vw, 0.9rem);
+  }
+
+  .journal-page .journal-events__week-navigation {
+    grid-template-columns: 2rem minmax(0, 1fr) 2rem;
+  }
+
+  .journal-page .journal-events__week-navigation > button {
+    width: 2rem;
+    height: 2rem;
+  }
+
+  .journal-page .journal-events .event-plan-card,
+  .journal-page .journal-events__empty {
+    min-height: clamp(11.75rem, 58.6vw, 15.65rem);
+  }
+
+  .journal-page .journal-events .event-plan-card {
+    padding: clamp(0.78rem, 3.25vw, 0.95rem) clamp(0.68rem, 3vw, 0.86rem) clamp(0.72rem, 3vw, 0.9rem);
+    grid-template-columns: clamp(2.55rem, 12.8vw, 3.4rem) minmax(0, 1fr);
+    gap: 0.32rem clamp(0.48rem, 2vw, 0.68rem);
+  }
+
+  .journal-page .event-plan-card__artwork {
+    width: clamp(2.45rem, 12vw, 3.2rem);
+    min-height: clamp(3rem, 15vw, 4rem);
+    padding-top: 0.26rem;
+  }
+
+  .journal-page .event-plan-card__sketch {
+    width: clamp(2.4rem, 12vw, 3.2rem);
+    height: clamp(2.4rem, 12vw, 3.2rem);
+  }
+
+  .journal-page .event-plan-card__content {
+    padding-top: 0.2rem;
+  }
+
+  .journal-page .event-plan-card__title-row {
+    grid-template-columns: minmax(0, 1fr) clamp(2rem, 9.4vw, 2.5rem);
+    gap: 0.3rem;
+  }
+
+  .journal-page .event-plan-card__doodle.event-reminder-button {
+    width: clamp(2rem, 9.4vw, 2.5rem);
+    height: clamp(2rem, 9.4vw, 2.5rem);
+    min-height: 0;
+  }
+
+  .journal-page .event-plan-card__doodle.event-reminder-button svg {
+    width: clamp(1.65rem, 8vw, 2.15rem);
+    height: clamp(1.65rem, 8vw, 2.15rem);
+  }
+
+  .journal-page .journal-events .event-plan-card h4 {
+    font-size: clamp(1.05rem, 4.8vw, 1.28rem);
+  }
+
+  .journal-page .journal-events .event-plan-card .event-plan-card__when {
+    margin-top: 0.3rem;
+    font-size: clamp(0.69rem, 3.2vw, 0.82rem);
+  }
+
+  .journal-page .journal-events .event-plan-card .event-plan-card__location {
+    margin-top: 0.16rem;
+    font-size: clamp(0.63rem, 2.75vw, 0.73rem);
+  }
+
+  .journal-page .event-plan-card__checklist {
+    margin-top: 0.34rem;
+    padding-top: 0.32rem;
+  }
+
+  .journal-page .event-plan-card__checklist label {
+    min-height: clamp(2rem, 8.8vw, 2.35rem);
+    padding: 0.14rem 0.24rem;
+    grid-template-columns: 1.1rem minmax(0, 1fr);
+    font-size: clamp(0.64rem, 2.8vw, 0.75rem);
+  }
+
+  .journal-page .event-plan-card__checkbox {
+    width: 1.05rem;
+    height: 1.05rem;
+  }
+
+  .journal-page .event-plan-card__actions {
+    padding-top: clamp(0.38rem, 2vw, 0.52rem);
+    gap: clamp(0.38rem, 1.8vw, 0.55rem);
+  }
+
+  .journal-page :is(.event-plan-card__add-task, .event-plan-card__complete) {
+    min-height: clamp(2.1rem, 9.5vw, 2.55rem);
+    padding: 0.28rem 0.32rem;
+    font-size: clamp(0.58rem, 2.6vw, 0.68rem);
+  }
+
+  .journal-page .journal-events__empty {
+    padding: clamp(1rem, 4.8vw, 1.3rem);
+    gap: 0.35rem;
+  }
+
+  .journal-page .journal-events__empty-icon,
+  .journal-page .journal-events__empty-icon svg {
+    width: clamp(2.65rem, 12vw, 3.2rem);
+    height: clamp(2.65rem, 12vw, 3.2rem);
+  }
+
+  .journal-page .journal-events__empty h3 {
+    font-size: clamp(1.08rem, 5.2vw, 1.4rem);
+  }
+
+  .journal-page .journal-events__empty p {
+    margin-top: 0.35rem;
+    font-size: clamp(0.62rem, 2.7vw, 0.72rem);
+  }
+
+  .journal-page .journal-events__empty .journal-events__empty-action {
+    min-height: clamp(2.1rem, 9vw, 2.4rem);
+    margin-top: 0.12rem;
+    padding: 0.35rem 0.6rem;
+  }
+
+  .journal-page .events-header-action--footer {
+    min-height: clamp(2.1rem, 9vw, 2.4rem);
+    padding: 0.34rem 0.72rem;
+  }
+
+  /* Flights */
+  .journal-page .flight-doodle-header {
+    height: clamp(2.65rem, 10vw, 3.55rem);
+    margin-bottom: clamp(0.25rem, 1.8vw, 0.45rem);
+  }
+
+  .journal-page .flight-tracker__collection-header {
+    margin-bottom: clamp(0.55rem, 2.8vw, 0.75rem);
+    gap: 0.45rem;
+  }
+
+  .journal-page .flight-tracker__collection-header h3 {
+    font-size: clamp(1.35rem, 6.2vw, 1.65rem);
+  }
+
+  .journal-page .flight-tracker__collection-header button {
+    min-height: clamp(2.15rem, 9vw, 2.4rem);
+    padding: 0.32rem 0.56rem;
+    font-size: clamp(0.57rem, 2.55vw, 0.66rem);
+  }
+
+  .journal-page .flight-list {
+    gap: clamp(0.58rem, 2.8vw, 0.78rem);
+  }
+
+  .journal-page .flight-card--featured {
+    min-height: clamp(16.35rem, 81.8vw, 21.8rem);
+    padding: clamp(0.72rem, 3.5vw, 0.95rem) clamp(0.68rem, 3.1vw, 0.84rem) clamp(0.64rem, 3vw, 0.8rem);
+  }
+
+  .journal-page .flight-card--featured .flight-card__topline {
+    min-height: clamp(1.65rem, 7vw, 1.88rem);
+    padding-right: clamp(5.6rem, 28vw, 7.45rem);
+  }
+
+  .journal-page .flight-card__toolbar {
+    top: clamp(0.28rem, 1.4vw, 0.38rem);
+    right: clamp(0.28rem, 1.4vw, 0.38rem);
+    min-height: 0;
+    gap: 0.04rem;
+  }
+
+  .journal-page .flight-card__icon-action {
+    width: clamp(1.75rem, 8vw, 2.15rem);
+    height: clamp(1.75rem, 8vw, 2.15rem);
+  }
+
+  .journal-page .flight-card__icon-action svg {
+    width: clamp(0.82rem, 3.8vw, 1rem);
+    height: clamp(0.82rem, 3.8vw, 1rem);
+  }
+
+  .journal-page .flight-card--featured .flight-card__route {
+    margin-top: clamp(0.72rem, 3.6vw, 0.96rem);
+    grid-template-columns: minmax(0, 0.84fr) minmax(2.9rem, 0.92fr) minmax(0, 0.84fr);
+    gap: clamp(0.18rem, 1.5vw, 0.38rem);
+  }
+
+  .journal-page .flight-card--featured .flight-card__route strong {
+    font-size: clamp(2.25rem, 10.8vw, 2.9rem);
+  }
+
+  .journal-page .flight-card--featured .flight-card__route div span {
+    margin-top: 0.28rem;
+    font-size: clamp(0.62rem, 2.8vw, 0.72rem);
+  }
+
+  .journal-page .flight-route-mark {
+    height: clamp(1.2rem, 5.5vw, 1.46rem);
+  }
+
+  .journal-page .flight-card--featured .flight-card__times {
+    margin-top: clamp(0.68rem, 3.4vw, 0.9rem);
+    padding-top: clamp(0.5rem, 2.4vw, 0.64rem);
+  }
+
+  .journal-page .flight-card--featured .flight-card__times strong {
+    font-size: clamp(1.3rem, 6.5vw, 1.72rem);
+  }
+
+  .journal-page .flight-card--featured .flight-progress {
+    margin-top: clamp(0.55rem, 2.7vw, 0.72rem);
+  }
+
+  .journal-page .flight-card__expand {
+    width: clamp(2rem, 9.9vw, 2.65rem);
+    height: clamp(2rem, 9.9vw, 2.65rem);
+    margin-top: clamp(0.38rem, 2vw, 0.55rem);
+  }
+
+  .journal-page .flight-card--compact {
+    min-height: clamp(5.35rem, 24vw, 6.4rem);
+  }
+
+  .journal-page .flight-card--compact .flight-card__compact-open {
+    min-height: clamp(5.3rem, 23.5vw, 6.3rem);
+    padding: clamp(2.15rem, 9vw, 2.4rem) clamp(0.58rem, 2.8vw, 0.74rem) 0.58rem;
+  }
+
+  .journal-page .flight-card__compact-route strong {
+    font-size: clamp(1rem, 4.8vw, 1.28rem);
+  }
+
+  .journal-page .flight-card__details {
+    width: 100%;
+    max-width: 100%;
+    margin-right: 0;
+    margin-left: 0;
   }
 }

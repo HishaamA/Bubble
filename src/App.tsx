@@ -138,6 +138,10 @@ function App() {
                     <Route path="/" element={<MemoriesRoute />} />
                     <Route path="/journal" element={<JournalMemberRoute />} />
                     <Route
+                      path="/journal/person/:personId"
+                      element={<JournalMemberRoute />}
+                    />
+                    <Route
                       path="/journal/photo/:capsuleId/:photoId"
                       element={<CapsulePhotoMemberRoute />}
                     />

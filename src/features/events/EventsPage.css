@@ -443,13 +443,16 @@
 .journal-events__empty {
   position: relative;
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr);
-  padding: 1.15rem 1rem 1.2rem;
+  min-height: 18rem;
+  grid-template-columns: minmax(0, 1fr);
+  padding: 2rem 1.5rem 1.75rem;
   overflow: hidden;
-  align-items: start;
-  gap: 0.78rem;
+  align-content: center;
+  justify-items: center;
+  gap: 0.7rem;
   border: 1px solid rgba(226, 174, 105, 0.18);
   border-radius: 0.45rem;
+  text-align: center;
   background:
     repeating-linear-gradient(
       to bottom,
@@ -459,6 +462,12 @@
       var(--plan-paper-line) 1.82rem
     ),
     var(--plan-paper);
+}
+
+.journal-events__empty > div {
+  display: grid;
+  width: min(100%, 18rem);
+  justify-items: center;
 }
 
 .journal-events__empty-icon {
@@ -488,28 +497,32 @@
 }
 
 .journal-events__empty h3 {
-  color: rgba(255, 255, 255, 0.88);
-  font-size: 0.84rem;
-  font-weight: 650;
+  color: #351129;
+  font-family: var(--font-accent);
+  font-size: clamp(1.25rem, 6vw, 1.6rem);
+  font-weight: 560;
+  letter-spacing: -0.025em;
+  line-height: 1.08;
 }
 
 .journal-events__empty p {
-  margin-top: 0.28rem;
-  color: rgba(255, 255, 255, 0.44);
-  font-size: 0.64rem;
+  max-width: 15.5rem;
+  margin-top: 0.62rem;
+  color: rgba(57, 25, 48, 0.68);
+  font-size: 0.72rem;
   line-height: 1.5;
 }
 
 .journal-events__empty-action {
-  grid-column: 2;
+  grid-column: auto;
   min-height: 2.75rem;
-  margin-top: 0.05rem;
-  padding: 0.45rem 0.78rem;
-  justify-self: start;
-  border: 1px solid rgba(226, 174, 105, 0.45);
-  border-radius: 999px;
-  color: var(--plan-gold-bright);
-  background: rgba(226, 174, 105, 0.045);
+  margin-top: 0.85rem;
+  padding: 0.5rem 0.95rem;
+  justify-self: center;
+  border: 1px solid rgba(207, 92, 82, 0.7);
+  border-radius: 0.7rem;
+  color: #351129;
+  background: rgba(255, 244, 224, 0.42);
   font: inherit;
   font-size: 0.68rem;
   font-weight: 650;
@@ -1592,4 +1605,174 @@
   .event-sheet {
     scroll-behavior: auto;
   }
+}
+
+/* Add-plan sheet uses the same warm paper as the journal cards. It is portal
+   rendered, so this theme lives here rather than under `.journal-page`. */
+.event-sheet {
+  background: rgba(20, 3, 15, 0.72);
+}
+
+.event-sheet__panel {
+  border: 1.5px solid rgba(255, 239, 216, 0.7);
+  border-radius: 0.72rem 0.96rem 0.68rem 0.88rem;
+  color: #351129;
+  background:
+    repeating-linear-gradient(to bottom, transparent 0 1.8rem, rgba(94, 35, 65, 0.08) 1.8rem calc(1.8rem + 1px)),
+    #fff0d1;
+  box-shadow:
+    0 -1rem 3.5rem rgba(8, 0, 6, 0.5),
+    0.25rem 0.3rem 0 rgba(103, 40, 68, 0.45);
+}
+
+.event-sheet__header h2 {
+  color: #351129;
+  font-family: var(--font-accent, Georgia, serif);
+  font-size: 1.45rem;
+  font-weight: 600;
+}
+
+.event-sheet__close {
+  border: 1px solid rgba(73, 23, 49, 0.3);
+  border-radius: 0.4rem 0.55rem 0.38rem 0.5rem;
+  color: #351129;
+  background: rgba(216, 143, 164, 0.24);
+}
+
+.event-sheet .ks-field > span,
+.event-sheet__tasks legend,
+.event-sheet__task-row > label {
+  color: #351129;
+}
+
+.event-sheet .ks-field input,
+.event-sheet__task-row input {
+  border-color: rgba(73, 23, 49, 0.34);
+  color: #351129;
+  background: rgba(255, 255, 255, 0.38);
+}
+
+.event-sheet .ks-field input::placeholder,
+.event-sheet__task-row input::placeholder {
+  color: rgba(53, 17, 41, 0.45);
+}
+
+.event-sheet__tasks {
+  border-color: rgba(191, 76, 96, 0.35);
+}
+
+.event-sheet__tasks p,
+.event-sheet__hint {
+  color: rgba(53, 17, 41, 0.58);
+}
+
+.event-sheet__tasks-heading > button,
+.event-sheet__task-row button {
+  border: 1px solid rgba(196, 76, 95, 0.5);
+  border-radius: 0.45rem 0.58rem 0.42rem 0.54rem;
+  color: #351129;
+  background: rgba(237, 114, 94, 0.13);
+}
+
+.event-sheet__submit {
+  border-radius: 0.55rem 0.74rem 0.5rem 0.68rem;
+  color: #fff4de;
+  background: #ed725e;
+}
+
+.event-sheet__error {
+  border-color: rgba(178, 58, 72, 0.38);
+  color: #8e2437;
+  background: rgba(217, 76, 83, 0.1);
+}
+
+/* The add-plan editor is rendered in a portal, so it carries Journal's paper
+   palette instead of inheriting the app shell through the DOM. */
+.event-sheet {
+  --plan-paper: #fff6df;
+  --plan-ink: #173b63;
+  --plan-muted: #66778a;
+  color-scheme: light;
+  color: var(--plan-ink);
+  background: rgba(23, 59, 99, 0.3);
+  backdrop-filter: blur(12px) saturate(90%);
+}
+
+.event-sheet__panel {
+  border-color: rgba(23, 59, 99, 0.28);
+  border-radius: 1rem 1.24rem 0.92rem 1.12rem;
+  color: var(--plan-ink);
+  background:
+    repeating-linear-gradient(
+      to bottom,
+      rgba(23, 59, 99, 0.045) 0,
+      rgba(23, 59, 99, 0.045) 1px,
+      transparent 1px,
+      transparent 1.65rem
+    ),
+    var(--plan-paper);
+  box-shadow:
+    0.35rem 0.42rem 0 rgba(23, 59, 99, 0.16),
+    0 1.5rem 4rem rgba(23, 59, 99, 0.24);
+}
+
+.event-sheet__header h2 {
+  color: var(--plan-ink);
+  font-family: var(--font-accent);
+  font-weight: 560;
+}
+
+.event-sheet__close {
+  border: 1px solid rgba(23, 59, 99, 0.3);
+  color: var(--plan-ink);
+  background: #efc36a;
+  box-shadow: 0.12rem 0.15rem 0 rgba(23, 59, 99, 0.14);
+}
+
+.event-sheet__tasks {
+  border-color: rgba(23, 59, 99, 0.22);
+}
+
+.event-sheet__tasks legend,
+.event-sheet__task-row > label {
+  color: var(--plan-ink);
+}
+
+.event-sheet__tasks p,
+.event-sheet__hint {
+  color: var(--plan-muted);
+}
+
+.event-sheet__tasks-heading > button {
+  border-color: rgba(23, 59, 99, 0.3);
+  border-radius: 0.5rem 0.68rem 0.46rem 0.62rem;
+  color: var(--plan-ink);
+  background: rgba(120, 184, 208, 0.3);
+}
+
+.event-sheet__task-row input {
+  border-color: rgba(23, 59, 99, 0.24);
+  border-radius: 0.55rem 0.72rem 0.5rem 0.66rem;
+  color: var(--plan-ink);
+  background: rgba(255, 255, 255, 0.62);
+}
+
+.event-sheet__task-row button {
+  border-color: rgba(23, 59, 99, 0.26);
+  color: var(--plan-ink);
+  background: rgba(230, 111, 85, 0.2);
+}
+
+.event-sheet__submit {
+  border: 1px solid rgba(23, 59, 99, 0.3);
+  border-radius: 0.6rem 0.78rem 0.54rem 0.72rem;
+  color: var(--plan-ink);
+  background: #efc36a;
+  box-shadow: 0.17rem 0.2rem 0 rgba(23, 59, 99, 0.14);
+}
+
+.event-sheet__error {
+  border-color: rgba(178, 65, 49, 0.24);
+  color: #8b3028;
+  background: rgba(230, 111, 85, 0.13);
 }

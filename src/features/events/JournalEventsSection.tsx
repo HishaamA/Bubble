@@ -871,6 +871,14 @@ function JournalEventsSectionForFamily({
                 Choose another date or add a plan for this day to the shared
                 family calendar.
               </p>
+              <button
+                className="journal-events__empty-action"
+                type="button"
+                onClick={openEventSheet}
+              >
+                <span aria-hidden="true">＋</span>
+                Add a plan for this day
+              </button>
             </div>
           </div>
         ) : null}

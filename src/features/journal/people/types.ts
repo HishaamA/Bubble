@@ -79,6 +79,8 @@ export type PeopleTimelinePhoto = {
   kind: 'capsule-photo' | 'journal-photo'
   source: CapsuleImageSource
   scanSource: CapsuleImageSource
+  displayWidth?: number
+  displayHeight?: number
   capturedAt: string
   caption: string
   contributorName: string
@@ -118,4 +120,7 @@ export type PeopleTimelineProps = {
     files: readonly File[],
   ) => Promise<JournalPhotoImportResult>
   photoImportProgress?: JournalPhotoImportProgress
+  personAlbumOpen?: boolean
+  onOpenPersonAlbum?: (personId: string) => void
+  onClosePersonAlbum?: () => void
 }

@@ -1,10 +1,14 @@
 import { describe, expect, it } from 'vitest'
 import {
+  calculateAdaptiveSeamMix,
+  calculateRobustFrameLuma,
   createCameraBasis,
   directionToEquirectangular,
+  resolveExposureScales,
   resolveFrameCalibration,
   resolveFrameCameraBasis,
   resolveFrameOrientation,
+  solveOverlapExposureScales,
 } from './composeGuidedPanorama'
 
 describe('guided panorama geometry', () => {
@@ -122,5 +126,139 @@ describe('guided panorama geometry', () => {
       cx: 269.5,
       cy: 540,
     })
+  })
+})
+
+describe('guided panorama exposure and seams', () => {
+  it('uses an order-independent median exposure reference', () => {
+    const original = [52, 96, 104, 112, 220]
+    const reordered = [220, 104, 52, 112, 96]
+    const originalByLuma = new Map(
+      original.map((luma, index) => [luma, resolveExposureScales(original)[index]]),
+    )
+
+    reordered.forEach((luma, index) => {
+      expect(resolveExposureScales(reordered)[index]).toBeCloseTo(
+        originalByLuma.get(luma) as number,
+      )
+    })
+  })
+
+  it('bounds exposure correction when one frame is an outlier', () => {
+    const scales = resolveExposureScales([8, 96, 100, 104, 245])
+
+    expect(scales[0]).toBe(1.22)
+    expect(scales[2]).toBeCloseTo(1)
+    expect(scales[4]).toBe(0.82)
+  })
+
+  it('prefers overlap-local evidence over different scene brightness', () => {
+    const scales = solveOverlapExposureScales(
+      [45, 120, 230],
+      [
+        {
+          firstFrameIndex: 0,
+          secondFrameIndex: 1,
+          logGainDifference: 0,
+          sampleCount: 400,
+        },
+        {
+          firstFrameIndex: 1,
+          secondFrameIndex: 2,
+          logGainDifference: 0,
+          sampleCount: 400,
+        },
+      ],
+    )
+
+    expect(scales[0]).toBeCloseTo(1)
+    expect(scales[1]).toBeCloseTo(1)
+    expect(scales[2]).toBeCloseTo(1)
+  })
+
+  it('solves and bounds relative gain from shared pixels', () => {
+    const scales = solveOverlapExposureScales(
+      [100, 100],
+      [{
+        firstFrameIndex: 0,
+        secondFrameIndex: 1,
+        logGainDifference: Math.log(2),
+        sampleCount: 600,
+      }],
+    )
+
+    expect(scales[0]).toBeCloseTo(1.22)
+    expect(scales[1]).toBeCloseTo(0.82)
+  })
+
+  it('uses conservative global exposure only for an isolated frame', () => {
+    const scales = solveOverlapExposureScales(
+      [100, 100, 200],
+      [{
+        firstFrameIndex: 0,
+        secondFrameIndex: 1,
+        logGainDifference: 0,
+        sampleCount: 300,
+      }],
+    )
+
+    expect(scales[0]).toBeCloseTo(1)
+    expect(scales[1]).toBeCloseTo(1)
+    expect(scales[2]).toBe(0.82)
+  })
+
+  it('trims isolated black and white pixels from frame brightness', () => {
+    const data = new Uint8ClampedArray(1600 * 4)
+    for (let pixel = 0; pixel < 1600; pixel += 1) {
+      const value = pixel < 128 ? 0 : pixel >= 1472 ? 255 : 120
+      data[pixel * 4] = value
+      data[pixel * 4 + 1] = value
+      data[pixel * 4 + 2] = value
+      data[pixel * 4 + 3] = 255
+    }
+
+    expect(calculateRobustFrameLuma(data)).toBe(120)
+  })
+
+  it('keeps the winning source unchanged away from a seam', () => {
+    expect(calculateAdaptiveSeamMix(
+      255,
+      150,
+      120,
+      100,
+      80,
+      121,
+      101,
+      81,
+    )).toBe(0)
+  })
+
+  it('feathers visually matching sources at a narrow ownership seam', () => {
+    const mix = calculateAdaptiveSeamMix(
+      255,
+      252,
+      120,
+      100,
+      80,
+      124,
+      102,
+      82,
+    )
+
+    expect(mix).toBeGreaterThan(0.4)
+    expect(mix).toBeLessThanOrEqual(0.5)
+  })
+
+  it('does not blend mismatched overlap content into a ghost', () => {
+    expect(calculateAdaptiveSeamMix(
+      255,
+      254,
+      230,
+      210,
+      190,
+      25,
+      45,
+      65,
+    )).toBe(0)
   })
 })

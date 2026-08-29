@@ -1,0 +1,390 @@
+/*
+ * Moments owns an immersive canvas, so its plum scrapbook treatment lives
+ * here instead of leaking into the shared shell. Interaction, depth, drift,
+ * deletion, and routing remain controlled by MemoryConstellation.
+ */
+.app-content > .memories-screen {
+  --moments-plum: #321124;
+  --moments-plum-deep: #210916;
+  --moments-plum-soft: #4a1a36;
+  --moments-cream: #fff0cf;
+  --moments-cream-muted: rgba(255, 240, 207, 0.76);
+  --moments-coral: #ef765e;
+  --moments-sage: #a8b680;
+  --moments-blush: #dfa0b1;
+  --moments-action-size: clamp(2.75rem, 10.5vw, 2.9rem);
+  color: var(--moments-cream);
+  background-color: var(--moments-plum);
+  background-image:
+    radial-gradient(circle at 48% 28%, rgba(104, 42, 77, 0.22), transparent 46%),
+    radial-gradient(circle at 50% 84%, rgba(83, 25, 59, 0.16), transparent 46%),
+    linear-gradient(115deg, #280b1d, var(--moments-plum) 48%, #290b1e);
+}
+
+.app-content > .memories-screen::before {
+  z-index: 0;
+  opacity: 0.16;
+  background-image:
+    repeating-linear-gradient(46deg, rgba(255, 240, 207, 0.06) 0 1px, transparent 1px 5px),
+    repeating-linear-gradient(134deg, rgba(20, 3, 13, 0.16) 0 1px, transparent 1px 6px),
+    radial-gradient(circle, rgba(255, 231, 195, 0.2) 0 0.4px, transparent 0.58px);
+  background-position: 0 0, 0 0, 7px 9px;
+  background-size: auto, auto, 18px 21px;
+  mix-blend-mode: soft-light;
+}
+
+.app-content > .memories-screen::after {
+  position: absolute;
+  z-index: 0;
+  inset: 0;
+  box-shadow:
+    inset 0 2.8rem 5.8rem rgba(17, 2, 11, 0.2),
+    inset 0 -3.8rem 6.8rem rgba(17, 2, 11, 0.24),
+    inset 1.8rem 0 4.8rem rgba(17, 2, 11, 0.13),
+    inset -1.8rem 0 4.8rem rgba(17, 2, 11, 0.13);
+  content: '';
+  pointer-events: none;
+}
+
+.app-content > .memories-screen .top-bar {
+  right: max(1rem, var(--app-header-gutter-right));
+  left: max(1.08rem, var(--app-header-gutter-left));
+  align-items: flex-start;
+}
+
+.app-content > .memories-screen .app-page-header__eyebrow {
+  margin-bottom: 0.24rem;
+  color: var(--moments-cream);
+  font-size: clamp(0.68rem, 2.85vw, 0.79rem);
+  font-weight: 650;
+  letter-spacing: 0.16em;
+}
+
+.app-content > .memories-screen .top-bar h1 {
+  width: max-content;
+  max-width: calc(100vw - 8.6rem);
+  color: var(--moments-cream);
+  font-family: var(--font-accent);
+  font-size: clamp(2.72rem, 13.3vw, 4.15rem);
+  font-weight: 500;
+  letter-spacing: -0.045em;
+  line-height: 0.88;
+  text-shadow: 0 0.12rem 0 rgba(39, 6, 24, 0.5);
+}
+
+.app-content > .memories-screen .moments-title__heart {
+  top: -0.18rem;
+  right: -0.66rem;
+  color: var(--moments-coral);
+  text-shadow: none;
+}
+
+.app-content > .memories-screen .moments-date {
+  margin-top: 0.54rem;
+  color: var(--moments-cream-muted);
+  font-size: clamp(0.8rem, 3.55vw, 0.98rem);
+}
+
+/* The three actions read as a single hand-painted tool row on compact phones. */
+.app-content > .memories-screen .round-control,
+.app-viewport > .moments-shortcuts > .capture-360-shortcut,
+.app-viewport > .moments-shortcuts > .moments-settings-shortcut {
+  width: var(--moments-action-size);
+  height: var(--moments-action-size);
+  min-width: var(--moments-action-size);
+  min-height: var(--moments-action-size);
+  border: 1px solid rgba(255, 239, 206, 0.7);
+  border-radius: 0.62rem 0.78rem 0.58rem 0.72rem;
+  color: #291021;
+  box-shadow:
+    0 0.18rem 0 rgba(26, 5, 17, 0.42),
+    0 0.5rem 1.2rem rgba(20, 3, 13, 0.18),
+    inset 0 0 0 1px rgba(255, 249, 228, 0.26);
+  backdrop-filter: none;
+}
+
+.app-content > .memories-screen .round-control {
+  position: absolute;
+  top: 1.55rem;
+  right: calc((var(--moments-action-size) * 2) + 0.92rem);
+  margin: 0;
+  background: #f2d49c;
+  transform: rotate(-0.8deg);
+}
+
+.app-viewport > .moments-shortcuts {
+  --moments-action-size: clamp(2.75rem, 10.5vw, 2.9rem);
+  --moments-coral: #ef765e;
+  --moments-sage: #a8b680;
+  top: calc(var(--app-page-top) + 1.55rem);
+  right: max(1rem, var(--app-header-gutter-right));
+  display: flex;
+  align-items: center;
+  gap: 0.42rem;
+}
+
+.app-viewport[data-app-shell] > .moments-shortcuts > .capture-360-shortcut {
+  position: relative;
+  top: auto;
+  right: auto;
+  border-color: rgba(255, 229, 204, 0.72);
+  background: var(--moments-coral);
+  transform: rotate(0.7deg);
+}
+
+.app-viewport[data-app-shell] > .moments-shortcuts > .capture-360-shortcut::after {
+  right: 0.28rem;
+  bottom: 0.2rem;
+  color: #291021;
+  font-size: 0.36rem;
+  font-weight: 760;
+}
+
+.app-viewport[data-app-shell] > .moments-shortcuts > .capture-360-shortcut .capture-360-shortcut__icon {
+  border-radius: inherit;
+}
+
+.app-viewport > .moments-shortcuts > .moments-settings-shortcut {
+  border-color: rgba(255, 239, 206, 0.66);
+  background: var(--moments-sage);
+  transform: rotate(1.1deg);
+}
+
+.app-content > .memories-screen .round-control:active,
+.app-viewport > .moments-shortcuts > .capture-360-shortcut:active,
+.app-viewport > .moments-shortcuts > .moments-settings-shortcut:active {
+  opacity: 0.88;
+  box-shadow: 0 0.08rem 0 rgba(26, 5, 17, 0.4);
+  transform: translateY(0.09rem) scale(0.98);
+}
+
+.app-content > .memories-screen .memory-constellation {
+  z-index: 2;
+  inset:
+    calc(var(--app-page-top) + 7.2rem)
+    0
+    max(6.35rem, calc(5.05rem + var(--safe-bottom)));
+}
+
+.app-content > .memories-screen .memory-constellation__glow {
+  width: min(108vw, 31rem);
+  height: min(108vw, 31rem);
+  opacity: 0.58;
+  background: radial-gradient(
+    circle,
+    rgba(247, 190, 104, 0.12) 0%,
+    rgba(208, 118, 102, 0.045) 37%,
+    rgba(91, 30, 66, 0) 73%
+  );
+}
+
+.app-content > .memories-screen .memory-constellation__thumb-glow {
+  background: radial-gradient(
+    circle,
+    rgba(255, 222, 164, 0.12),
+    rgba(220, 145, 164, 0.05) 44%,
+    transparent 72%
+  );
+}
+
+.app-content > .memories-screen .memory-constellation__story-thread {
+  opacity: 0.035;
+}
+
+.app-content > .memories-screen .memory-constellation__story-thread path,
+.app-content > .memories-screen .memory-constellation__story-thread path + path {
+  stroke: var(--moments-cream);
+}
+
+.app-content > .memories-screen .memory-constellation__doodle {
+  opacity: 0.12;
+}
+
+.app-content > .memories-screen .memory-constellation__doodle--sun {
+  color: #f1b94d;
+}
+
+.app-content > .memories-screen .memory-constellation__doodle--leaf {
+  color: var(--moments-sage);
+}
+
+.app-content > .memories-screen .memory-constellation__doodle--spark {
+  color: var(--moments-blush);
+}
+
+.app-content > .memories-screen .memory-bubble {
+  --bubble-ring: var(--moments-cream);
+  --bubble-title-ink: var(--moments-cream);
+  --bubble-wash: rgba(239, 139, 99, 0.19);
+  --bubble-radius: 50%;
+  opacity: 0.74;
+}
+
+.app-content > .memories-screen .memory-bubble[data-bubble-accent='sage'],
+.app-content > .memories-screen .memory-bubble[data-bubble-accent='sky'],
+.app-content > .memories-screen .memory-bubble[data-bubble-accent='sun'],
+.app-content > .memories-screen .memory-bubble[data-bubble-accent='lavender'] {
+  --bubble-ring: var(--moments-cream);
+  --bubble-title-ink: var(--moments-cream);
+  --bubble-wash: rgba(239, 139, 99, 0.19);
+}
+
+.app-content > .memories-screen .memory-bubble[data-depth='near'] {
+  opacity: 1;
+}
+
+.app-content > .memories-screen .memory-bubble[data-depth='middle'] {
+  opacity: 0.89;
+}
+
+.app-content > .memories-screen .memory-bubble[data-depth='far'] {
+  opacity: 0.5;
+}
+
+.app-content > .memories-screen .memory-bubble__motion::before {
+  inset: -43%;
+  background: radial-gradient(
+    circle,
+    rgba(244, 174, 91, 0.2) 0%,
+    rgba(204, 92, 85, 0.09) 40%,
+    transparent 72%
+  );
+}
+
+.app-content > .memories-screen .memory-bubble__image {
+  border: clamp(0.13rem, 0.65vw, 0.2rem) solid var(--moments-cream);
+  border-radius: 50%;
+  background: var(--moments-plum-deep);
+  box-shadow:
+    0 0 0 1px rgba(73, 19, 51, 0.62),
+    0 0.55rem 1.35rem rgba(12, 2, 8, 0.44),
+    0 0 1.1rem rgba(246, 171, 92, 0.08);
+}
+
+.app-content > .memories-screen .memory-bubble[data-depth='far'] .memory-bubble__image {
+  filter: saturate(0.72) brightness(0.66);
+}
+
+.app-content > .memories-screen .memory-bubble[data-depth='middle'] .memory-bubble__image {
+  filter: saturate(0.9) brightness(0.88);
+}
+
+.app-content > .memories-screen .memory-bubble[data-depth='near'] .memory-bubble__image {
+  filter: saturate(1.04) brightness(1.01) contrast(1.02);
+}
+
+.app-content > .memories-screen .memory-bubble__image::after {
+  border-radius: 50%;
+  background:
+    linear-gradient(145deg, rgba(255, 241, 207, 0.08), transparent 38%),
+    radial-gradient(circle at 76% 88%, rgba(43, 8, 28, 0.22), transparent 44%);
+  box-shadow: inset 0 0 0 1px rgba(255, 245, 219, 0.15);
+}
+
+.app-content > .memories-screen .memory-bubble[data-center-focus='true'] .memory-bubble__image,
+.app-content > .memories-screen .memory-bubble[data-picked-up='true'] .memory-bubble__image {
+  border-color: var(--moments-cream);
+  box-shadow:
+    0 0 0 1px rgba(86, 25, 59, 0.72),
+    0 0.85rem 2rem rgba(12, 2, 8, 0.5),
+    0 0 2.6rem rgba(240, 161, 77, 0.18);
+}
+
+.app-content > .memories-screen .memory-bubble__arc-labels {
+  inset: -19%;
+  color: var(--moments-cream);
+  filter: drop-shadow(0 1px 1px rgba(25, 4, 16, 0.76));
+}
+
+.app-content > .memories-screen .memory-bubble__arc-text {
+  paint-order: stroke fill;
+  stroke: rgba(42, 9, 28, 0.74);
+  stroke-width: 0.34px;
+}
+
+.app-content > .memories-screen .memory-bubble__arc-title {
+  fill: var(--moments-cream);
+  font-size: 6.2px;
+  font-weight: 500;
+}
+
+.app-content > .memories-screen .memory-bubble__arc-sender {
+  fill: var(--moments-cream-muted);
+  font-size: 4.75px;
+  font-style: normal;
+  font-weight: 500;
+}
+
+.app-content > .memories-screen .memory-bubble__point-count {
+  border-color: rgba(255, 240, 207, 0.8);
+  color: var(--moments-cream);
+  background: rgba(49, 15, 35, 0.9);
+  box-shadow: 0 0.3rem 0.8rem rgba(15, 2, 10, 0.45);
+}
+
+.app-content > .memories-screen .memory-bubble__point-count > span {
+  color: #f1bb70;
+}
+
+.app-content > .memories-screen .memory-bubble__remove > span {
+  border-color: var(--moments-cream);
+  color: #2c0d22;
+  background: var(--moments-coral);
+  box-shadow: 0 0.26rem 0.8rem rgba(13, 2, 9, 0.48);
+}
+
+.app-content > .memories-screen .memory-delete-status {
+  border: 1px solid rgba(255, 240, 207, 0.62);
+  color: var(--moments-cream);
+  background: rgba(43, 10, 30, 0.94);
+  box-shadow: 0 0.7rem 1.7rem rgba(14, 2, 9, 0.45);
+}
+
+@media (hover: none) and (pointer: coarse) {
+  .app-content > .memories-screen .memory-bubble__image,
+  .app-content > .memories-screen .memory-bubble[data-depth='far'] .memory-bubble__image,
+  .app-content > .memories-screen .memory-bubble[data-depth='middle'] .memory-bubble__image,
+  .app-content > .memories-screen .memory-bubble[data-depth='near'] .memory-bubble__image,
+  .app-content > .memories-screen .memory-bubble[data-center-focus='true'] .memory-bubble__image,
+  .app-content > .memories-screen .memory-bubble[data-picked-up='true'] .memory-bubble__image {
+    box-shadow:
+      0 0 0 1px rgba(74, 19, 51, 0.72),
+      inset 0 0 0 1px rgba(255, 245, 219, 0.13);
+    filter: none;
+  }
+}
+
+@media (max-width: 22.5rem) {
+  .app-content > .memories-screen,
+  .app-viewport > .moments-shortcuts {
+    --moments-action-size: 2.75rem;
+  }
+
+  .app-content > .memories-screen .top-bar h1 {
+    max-width: calc(100vw - 8.7rem);
+    font-size: 2.42rem;
+  }
+
+  .app-content > .memories-screen .round-control {
+    right: calc((var(--moments-action-size) * 2) + 0.78rem);
+  }
+
+  .app-viewport > .moments-shortcuts {
+    gap: 0.34rem;
+  }
+}
+
+@media (max-height: 44rem) {
+  .app-content > .memories-screen .round-control,
+  .app-viewport > .moments-shortcuts {
+    top: calc(var(--app-page-top) + 1.2rem);
+  }
+
+  .app-content > .memories-screen .round-control {
+    top: 1.2rem;
+  }
+
+  .app-content > .memories-screen .memory-constellation {
+    top: calc(var(--app-page-top) + 6.35rem);
+  }
+}

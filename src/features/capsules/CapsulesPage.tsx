@@ -454,31 +454,81 @@ function CapsuleLockIcon() {
   )
 }
 
+function CapsuleLockedCover({ opensAt }: { opensAt: string }) {
+  return (
+    <div
+      className="capsule-locked-cover"
+      role="img"
+      aria-label={`Locked until ${formatExactOpenDate(opensAt)}`}
+    >
+      <span className="capsule-locked-cover__icon"><CapsuleLockIcon /></span>
+      <span className="capsule-locked-cover__message" aria-hidden="true">Still gathering…</span>
+      <span className="capsule-visually-hidden">This Capsule unlocks</span>
+      <time className="capsule-visually-hidden" dateTime={opensAt}>{formatExactOpenDate(opensAt)}</time>
+    </div>
+  )
+}
+
+const LOCKED_CAPSULE_TEASER_SRC = '/assets/capsules/demo-locked-capsule-photos.png'
+
+function LockedCapsuleTeasers() {
+  return (
+    <ul className="capsule-empty-polaroids capsule-empty-polaroids--teasers" aria-hidden="true">
+      {Array.from({ length: 4 }, (_, index) => (
+        <li key={index}>
+          <span className="capsule-empty-polaroids__image">
+            <img
+              src={LOCKED_CAPSULE_TEASER_SRC}
+              alt=""
+              draggable="false"
+            />
+          </span>
+        </li>
+      ))}
+    </ul>
+  )
+}
+
 function PhotoStrip({
   photos,
   totalPhotoCount,
   locked,
   opensAt,
+  showLockedTeasers,
 }: {
   photos: CapsulePhoto[]
   totalPhotoCount: number
   locked: boolean
   opensAt: string
+  showLockedTeasers: boolean
 }) {
   const representedPhotoCount = Math.max(photos.length, totalPhotoCount)
   if (representedPhotoCount === 0) {
     return (
-      <div className="capsule-photo-strip capsule-photo-strip--empty">
-        <span aria-hidden="true">＋</span>
-        <p>The first little moment can be yours.</p>
+      <div className="capsule-collection__photos" data-empty="true" data-locked={locked ? 'true' : 'false'}>
+        {locked && showLockedTeasers ? (
+          <LockedCapsuleTeasers />
+        ) : (
+          <ul className="capsule-empty-polaroids" aria-hidden="true">
+            {Array.from({ length: 4 }, (_, index) => (
+              <li key={index}><span>{index % 2 === 0 ? '✦' : '♡'}</span></li>
+            ))}
+          </ul>
+        )}
+        <div className="capsule-photo-strip capsule-photo-strip--empty">
+          <p>The first little moment can be yours.</p>
+        </div>
+        {locked ? <CapsuleLockedCover opensAt={opensAt} /> : null}
       </div>
     )
   }
 
-  const visiblePhotos = photos.slice(0, 6)
+  const hasMorePhotos = representedPhotoCount > 4
+  const mediaSlotCount = hasMorePhotos ? 3 : 4
+  const visiblePhotos = photos.slice(0, mediaSlotCount)
   const concealedSlotCount = Math.max(
     0,
-    Math.min(6, representedPhotoCount) - visiblePhotos.length,
+    Math.min(mediaSlotCount, representedPhotoCount) - visiblePhotos.length,
   )
 
   return (
@@ -503,21 +553,11 @@ function PhotoStrip({
             aria-hidden="true"
           />
         ))}
-        {representedPhotoCount > 6 ? (
-          <li className="capsule-photo-strip__more">+{representedPhotoCount - 6}</li>
+        {hasMorePhotos ? (
+          <li className="capsule-photo-strip__more">+{representedPhotoCount - mediaSlotCount}</li>
         ) : null}
       </ul>
-      {locked ? (
-        <div
-          className="capsule-locked-cover"
-          role="img"
-          aria-label={`Locked until ${formatExactOpenDate(opensAt)}`}
-        >
-          <span className="capsule-locked-cover__icon"><CapsuleLockIcon /></span>
-          <span>This Capsule unlocks</span>
-          <time dateTime={opensAt}>{formatExactOpenDate(opensAt)}</time>
-        </div>
-      ) : null}
+      {locked ? <CapsuleLockedCover opensAt={opensAt} /> : null}
     </div>
   )
 }
@@ -527,6 +567,7 @@ function CapsuleCard({
   now,
   uploading,
   demoUnlocked,
+  hideHeader = false,
   onChoosePhoto,
   onOpenRecap,
   onDemoUnlock,
@@ -535,6 +576,7 @@ function CapsuleCard({
   now: Date
   uploading: boolean
   demoUnlocked: boolean
+  hideHeader?: boolean
   onChoosePhoto: (event: ChangeEvent<HTMLInputElement>, capsule: FamilyCapsule) => void
   onOpenRecap: (capsule: FamilyCapsule) => void
   onDemoUnlock: (capsule: FamilyCapsule) => void
@@ -552,7 +594,7 @@ function CapsuleCard({
       data-kind={capsule.kind}
       data-demo-unlocked={demoUnlocked ? 'true' : 'false'}
     >
-      <header className="capsule-collection__header">
+      <header className="capsule-collection__header" aria-hidden={hideHeader ? 'true' : undefined}>
         <div>
           {capsule.kind === 'special' ? <p>Special Capsule</p> : null}
           <h2>{displayTitle}</h2>
@@ -567,6 +609,7 @@ function CapsuleCard({
         totalPhotoCount={totalPhotoCount}
         locked={!unlocked && !demoUnlocked}
         opensAt={capsule.opensAt}
+        showLockedTeasers={hideHeader && capsule.kind === 'weekly'}
       />
 
       <div className="capsule-collection__details">
@@ -1070,16 +1113,23 @@ export function CapsulesPage({
         <section className="capsule-page__section" aria-labelledby="weekly-capsule-title">
           <div className="capsule-section-heading">
             <div>
-              <p>Weekly Capsule</p>
-              <h2 id="weekly-capsule-title">Right now</h2>
+              <p>This week</p>
+              <h2 id="weekly-capsule-title">{formatWeekRange(currentWeekly)}</h2>
             </div>
-            <span>Photos only · not 360°</span>
+            <span className="capsule-weekly-unlock">
+              <CapsuleLockIcon />
+              {isCapsuleUnlocked(currentWeekly.opensAt, clock)
+                ? 'Open now'
+                : `Unlocks ${new Intl.DateTimeFormat('en', { weekday: 'long' }).format(new Date(currentWeekly.opensAt))}`}
+            </span>
+            <span className="capsule-visually-hidden">Photos only · not 360°</span>
           </div>
           <CapsuleCard
             capsule={currentWeekly}
             now={clock}
             uploading={uploadingCapsuleId === currentWeekly.id}
             demoUnlocked={demoRecapId === currentWeekly.id}
+            hideHeader
             onChoosePhoto={addPhoto}
             onOpenRecap={openRecap}
             onDemoUnlock={openDemoRecap}
@@ -1092,9 +1142,13 @@ export function CapsulesPage({
           <div className="capsule-section-heading">
             <div>
               <p>Opened together</p>
-              <h2 id="past-weekly-capsules-title">Past weeks</h2>
+              <h2 id="past-weekly-capsules-title">
+                <span aria-hidden="true">Past Capsules</span>
+                <span className="capsule-visually-hidden">Past weeks</span>
+              </h2>
             </div>
-            <span>Swipe · play · download</span>
+            <span className="capsule-section-heading__view-all" aria-hidden="true">View all ›</span>
+            <span className="capsule-visually-hidden">Swipe · play · download</span>
           </div>
           <ul
             className="capsule-weekly-carousel"
@@ -1120,14 +1174,14 @@ export function CapsulesPage({
       ) : null}
 
       <section className="capsule-page__section" aria-labelledby="special-capsules-title">
-        <div className="capsule-section-heading">
+        <div className="capsule-section-heading capsule-section-heading--special">
           <div>
             <p>Birthdays, weddings, reunions</p>
             <h2 id="special-capsules-title">Special Capsules</h2>
           </div>
           <button type="button" onClick={() => setCreating(true)}>New</button>
         </div>
-        {specialCapsules.length > 0 ? specialCapsules.map((capsule) => (
+        {specialCapsules.map((capsule) => (
           <CapsuleCard
             key={capsule.id}
             capsule={capsule}
@@ -1138,13 +1192,20 @@ export function CapsulesPage({
             onOpenRecap={openRecap}
             onDemoUnlock={openDemoRecap}
           />
-        )) : (
-          <button className="capsule-special-empty" type="button" onClick={() => setCreating(true)}>
-            <span aria-hidden="true">＋</span>
-            <strong>Make a Capsule for the next big day</strong>
-            <small>Grandpa’s 60th, Lea’s wedding, or anything your family calls special.</small>
-          </button>
-        )}
+        ))}
+        <button
+          className="capsule-special-empty"
+          type="button"
+          aria-label="Make a Capsule for the next big day"
+          onClick={() => setCreating(true)}
+        >
+          <span className="capsule-special-empty__plus" aria-hidden="true">＋</span>
+          <span className="capsule-special-empty__copy">
+            <strong>Create a special Capsule</strong>
+            <small>For birthdays, weddings, and reunions</small>
+          </span>
+          <span className="capsule-special-empty__arrow" aria-hidden="true">›</span>
+        </button>
       </section>
 
       {activeRecap ? (

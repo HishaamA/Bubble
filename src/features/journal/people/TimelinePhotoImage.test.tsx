@@ -25,5 +25,18 @@ describe('TimelinePhotoImage', () => {
       })
     }
   })
-})
 
+  it('preserves stored landscape dimensions in the rendered image', () => {
+    const markup = renderToString(
+      <TimelinePhotoImage
+        source="/family-landscape.jpg"
+        alt="Family dinner"
+        width={560}
+        height={420}
+      />,
+    )
+
+    expect(markup).toContain('width="560"')
+    expect(markup).toContain('height="420"')
+  })
+})

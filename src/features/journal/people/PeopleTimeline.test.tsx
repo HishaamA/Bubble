@@ -268,18 +268,22 @@ describe('PeopleTimeline', () => {
       name: 'Timeline position for All photos',
     })
     expect(slider).toHaveAttribute('aria-valuetext', '1 of 2, June 1, 2012')
-    expect(screen.getByRole('img', { name: 'First school day' })).toHaveAttribute(
+    const landscapePhoto = screen.getByRole('img', { name: 'First school day' })
+    expect(landscapePhoto).toHaveAttribute(
       'src',
-      '/photos/old-thumb.jpg',
+      '/photos/old.jpg',
     )
+    expect(landscapePhoto).toHaveAttribute('width', '1200')
+    expect(landscapePhoto).toHaveAttribute('height', '900')
+    expect(screen.getByRole('figure', {
+      name: 'First school day, shared by Maya',
+    })).toHaveClass('people-timeline__album-photo')
 
     fireEvent.change(slider, { target: { value: '1' } })
-    await user.click(screen.getByRole('link', {
+    expect(await screen.findByRole('img', { name: 'Graduation day' })).toBeInTheDocument()
+    expect(screen.queryByRole('link', {
       name: 'Open Graduation day, shared by Maya',
-    }))
-    expect(screen.getByRole('status', { name: 'Route state' })).toHaveTextContent(
-      '/journal/photo/family-week/new|/journal|people|review-uploads|capsule-family-week-new',
-    )
+    })).not.toBeInTheDocument()
   })
 
   it('requires a clear portrait when adding a person and never adds it to uploads', async () => {
@@ -652,11 +656,116 @@ describe('PeopleTimeline', () => {
     expect(await screen.findByRole('slider', {
       name: 'Timeline position for Maya',
     })).toHaveAttribute('aria-valuetext', '1 of 2, January 1, 2020')
+    expect(screen.getByRole('figure', {
+      name: 'Maya portrait, shared by Maya',
+    })).toHaveClass('people-timeline__scrapbook-photo')
 
     await user.click(screen.getByRole('button', { name: 'Leena' }))
     expect(await screen.findByRole('img', { name: 'Everyone together' })).toBeInTheDocument()
     expect(screen.getByText('1 of 1')).toBeInTheDocument()
     expect(scanTimelineFaces).not.toHaveBeenCalled()
+  })
+
+  it('opens a recognized person in the dedicated scrapbook route when provided', async () => {
+    const namespace = 'people-open-scrapbook'
+    storedStates.set(namespace, stateWith({
+      people: [{ id: 'maya', name: 'Maya', createdAt: '2026-01-01' }],
+      faceProfiles: { maya: faceProfile(mayaEmbedding) },
+      faceScans: {
+        'photo:maya': faceScan(detectedFace('face-1', mayaEmbedding)),
+      },
+    }))
+    const onOpenPersonAlbum = vi.fn()
+    const user = userEvent.setup()
+
+    render(
+      <MemoryRouter>
+        <PeopleTimeline
+          photos={[capsulePhoto(
+            'maya',
+            '2020-01-01T12:00:00.000Z',
+            'Maya portrait',
+          )]}
+          cacheNamespace={namespace}
+          onOpenPersonAlbum={onOpenPersonAlbum}
+        />
+      </MemoryRouter>,
+    )
+
+    await user.click(await screen.findByRole('button', { name: 'Maya' }))
+    expect(onOpenPersonAlbum).toHaveBeenCalledWith('maya')
+  })
+
+  it('opens a manually tagged person scrapbook without requiring a face profile', async () => {
+    const namespace = 'people-open-manual-scrapbook'
+    storedStates.set(namespace, stateWith({
+      people: [{ id: 'maya', name: 'Maya', createdAt: '2026-01-01' }],
+      assignments: [{
+        photoKey: 'photo:maya',
+        personId: 'maya',
+        source: 'manual',
+        confirmedAt: '2026-01-01T00:00:00.000Z',
+      }],
+    }))
+    const onOpenPersonAlbum = vi.fn()
+    const user = userEvent.setup()
+
+    render(
+      <MemoryRouter>
+        <PeopleTimeline
+          photos={[capsulePhoto(
+            'maya',
+            '2020-01-01T12:00:00.000Z',
+            'Maya portrait',
+          )]}
+          cacheNamespace={namespace}
+          onOpenPersonAlbum={onOpenPersonAlbum}
+        />
+      </MemoryRouter>,
+    )
+
+    await user.click(await screen.findByRole('button', { name: 'Maya' }))
+    expect(onOpenPersonAlbum).toHaveBeenCalledWith('maya')
+  })
+
+  it('fills the dedicated scrapbook with every photo matched to that person', async () => {
+    const namespace = 'people-scrapbook-photos'
+    storedStates.set(namespace, stateWith({
+      people: [
+        { id: 'maya', name: 'Maya', createdAt: '2026-01-01' },
+        { id: 'leena', name: 'Leena', createdAt: '2026-01-01' },
+      ],
+      faceProfiles: {
+        maya: faceProfile(mayaEmbedding),
+        leena: faceProfile(leenaEmbedding),
+      },
+      faceScans: {
+        'photo:portrait': faceScan(detectedFace('face-1', mayaEmbedding)),
+        'photo:family': faceScan(
+          detectedFace('face-1', mayaEmbedding),
+          detectedFace('face-2', leenaEmbedding),
+        ),
+      },
+    }))
+
+    render(
+      <MemoryRouter>
+        <PeopleTimeline
+          photos={[
+            capsulePhoto('portrait', '2020-01-01T12:00:00.000Z', 'Maya portrait'),
+            capsulePhoto('family', '2024-01-01T12:00:00.000Z', 'Everyone together'),
+          ]}
+          cacheNamespace={namespace}
+          initialPersonId="maya"
+          personAlbumOpen
+        />
+      </MemoryRouter>,
+    )
+
+    expect(await screen.findByRole('heading', { name: 'Maya' })).toBeInTheDocument()
+    expect(screen.getByText('2 little moments, gathered together.')).toBeInTheDocument()
+    expect(screen.getByRole('img', { name: 'Maya portrait' })).toBeInTheDocument()
+    expect(screen.getByRole('img', { name: 'Everyone together' })).toBeInTheDocument()
   })
 
   it('does not treat duplicate detections of one person as a Family photo', async () => {

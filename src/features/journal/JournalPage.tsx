@@ -4,7 +4,7 @@ import {
   useState,
   type KeyboardEvent,
 } from 'react'
-import { useLocation } from 'react-router-dom'
+import { useLocation, useNavigate, useParams } from 'react-router-dom'
 import type { FamilyCapsule } from '../capsules/types'
 import { JournalEventsSection } from '../events'
 import { FlightTrackerSection } from '../flights'
@@ -18,9 +18,21 @@ import { PeopleTimeline } from './people'
 import './JournalPage.css'
 
 const journalSections = [
-  { id: 'people', label: 'Photos', title: 'Photo Journal' },
-  { id: 'plans', label: 'Plans', title: 'Family Plans' },
-  { id: 'flights', label: 'Flights', title: 'Flights' },
+  {
+    id: 'people',
+    label: 'Photos',
+    subtitle: 'Your private place to remember.',
+  },
+  {
+    id: 'plans',
+    label: 'Plans',
+    subtitle: 'Plans made together.',
+  },
+  {
+    id: 'flights',
+    label: 'Flights',
+    subtitle: 'Journeys worth remembering.',
+  },
 ] as const
 
 type JournalSection = (typeof journalSections)[number]['id']
@@ -62,6 +74,9 @@ export function JournalPage({
   journalPhotoImportProgress,
 }: JournalPageProps = {}) {
   const location = useLocation()
+  const navigate = useNavigate()
+  const { personId: routePersonId } = useParams<{ personId?: string }>()
+  const personScrapbookOpen = Boolean(routePersonId)
   const [openedAt] = useState(() => new Date())
   const effectiveNow = now ?? openedAt
   const effectiveCapsuleNow = capsuleNow ?? effectiveNow
@@ -79,9 +94,6 @@ export function JournalPage({
   const [activeSection, setActiveSection] = useState<JournalSection>(
     () => returnedSection ?? 'people',
   )
-  const activeSectionDetails = journalSections.find(
-    ({ id }) => id === activeSection,
-  ) ?? journalSections[0]
   const tabRefs = useRef<Array<HTMLButtonElement | null>>([])
   const photos = useMemo(
     () => unlockedCapsulePhotos(capsules, effectiveCapsuleNow),
@@ -117,11 +129,36 @@ export function JournalPage({
   }
 
   return (
-    <section className="journal-page" aria-labelledby="journal-title">
-      <div className="journal-page__chrome">
+    <section
+      className={`journal-page${personScrapbookOpen ? ' journal-page--person-scrapbook' : ''}`}
+      data-section={personScrapbookOpen ? 'people' : activeSection}
+      aria-labelledby={personScrapbookOpen ? undefined : 'journal-title'}
+    >
+      {!personScrapbookOpen ? <div className="journal-page__chrome">
         <header className="journal-page__header app-page-header">
-          <p className="journal-page__eyebrow app-page-header__eyebrow">Our family</p>
-          <h1 id="journal-title">{activeSectionDetails.title}</h1>
+          <div>
+            <p className="journal-page__eyebrow app-page-header__eyebrow">Our family</p>
+            <h1 id="journal-title">Journal</h1>
+            <p className="journal-page__subtitle app-page-header__subtitle">
+              {journalSections.find(({ id }) => id === activeSection)?.subtitle}
+            </p>
+          </div>
+          <svg
+            className="journal-page__doodles"
+            viewBox="0 0 132 74"
+            aria-hidden="true"
+          >
+            <g className="journal-page__doodle-cloud">
+              <path d="M8 33c1-7 7-11 14-10 3-8 15-10 21-3 8-3 16 3 16 11 5 0 8 3 9 7H8c-4-1-4-5 0-5Z" />
+            </g>
+            <g className="journal-page__doodle-sun">
+              <circle cx="96" cy="24" r="10" />
+              <path d="M96 5v6m0 26v6M77 24h7m25 0h7M82 10l5 5m18 18 5 5m0-28-5 5M87 33l-5 5" />
+            </g>
+            <g className="journal-page__doodle-leaf">
+              <path d="M91 69c9-12 17-18 28-23M102 57c-4-8 0-12 8-12 0 7-2 11-8 12Zm8-6c2-8 7-10 13-6-3 7-7 9-13 6Zm-15 13c-5-6-3-11 4-13 2 6 1 10-4 13Z" />
+            </g>
+          </svg>
         </header>
 
         <div
@@ -151,27 +188,35 @@ export function JournalPage({
             )
           })}
         </div>
-      </div>
+      </div> : null}
 
       <div
         className="journal-page__panel"
-        id={`journal-panel-${activeSection}`}
-        role="tabpanel"
-        aria-labelledby={`journal-tab-${activeSection}`}
+        id={`journal-panel-${personScrapbookOpen ? 'people' : activeSection}`}
+        role={personScrapbookOpen ? undefined : 'tabpanel'}
+        aria-labelledby={personScrapbookOpen ? undefined : `journal-tab-${activeSection}`}
       >
-        {activeSection === 'people' ? (
+        {personScrapbookOpen || activeSection === 'people' ? (
           <PeopleTimeline
             photos={photos}
             journalPhotos={journalPhotos}
             cacheNamespace={capsuleCacheNamespace}
-            initialPersonId={returnedPersonId}
+            initialPersonId={routePersonId ?? returnedPersonId}
             focusMemoryId={returnedMemoryId}
             onUploadPhotos={onUploadJournalPhotos}
             photoImportProgress={journalPhotoImportProgress}
+            personAlbumOpen={personScrapbookOpen}
+            onOpenPersonAlbum={(personId) => navigate(
+              `/journal/person/${encodeURIComponent(personId)}`,
+            )}
+            onClosePersonAlbum={() => navigate('/journal', {
+              replace: true,
+              state: { journalContext: { section: 'people' } },
+            })}
           />
         ) : null}
-        {activeSection === 'plans' ? <JournalEventsSection /> : null}
-        {activeSection === 'flights' ? (
+        {!personScrapbookOpen && activeSection === 'plans' ? <JournalEventsSection /> : null}
+        {!personScrapbookOpen && activeSection === 'flights' ? (
           <FlightTrackerSection now={now} />
         ) : null}
       </div>

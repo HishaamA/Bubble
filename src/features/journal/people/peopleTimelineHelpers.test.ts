@@ -140,6 +140,8 @@ describe('people timeline helpers', () => {
       key: 'photo:portrait',
       source: thumbnail,
       scanSource: fullImage,
+      displayWidth: 1920,
+      displayHeight: 1080,
       legacyKeys: ['capsule:capsule-a:portrait'],
     })
   })
@@ -169,6 +171,8 @@ describe('people timeline helpers', () => {
       kind: 'journal-photo',
       source: thumbnail,
       scanSource: image,
+      displayWidth: 1200,
+      displayHeight: 900,
       capsuleId: 'family-photo-library',
       memoryId: 'journal-photo-direct-portrait',
     })

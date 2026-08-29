@@ -34,6 +34,7 @@ import {
   getSharedMomentPositions,
   getSharedMomentWorldHeightPercent,
 } from './sharedMomentLayout'
+import './MomentsPlumTheme.css'
 
 type MemoryConstellationProps = {
   sharedMoments?: PanoramaMoment[]
@@ -785,7 +786,10 @@ export function MemoryConstellation({
       <header className="top-bar app-page-header">
         <div>
           <p className="eyebrow app-page-header__eyebrow">Our family</p>
-          <h1 id="moments-title">Moments</h1>
+          <h1 id="moments-title" className="moments-title">
+            Moments
+            <span className="moments-title__heart" aria-hidden="true">♥</span>
+          </h1>
           <time className="moments-date app-page-header__subtitle" dateTime={toLocalIsoDate(now)}>
             {formatLocalDay(now)}
           </time>
@@ -836,6 +840,41 @@ export function MemoryConstellation({
           data-testid="memory-constellation-space"
           style={constellationSpaceStyle}
         >
+          <svg
+            className="memory-constellation__story-thread"
+            viewBox="0 0 100 100"
+            preserveAspectRatio="none"
+            focusable="false"
+            aria-hidden="true"
+          >
+            <path d="M 7 8 C 22 4, 22 24, 39 19 S 64 8, 73 24 S 95 34, 84 47 S 52 50, 61 66 S 88 76, 73 89 S 38 82, 27 96" />
+            <path d="M 2 63 C 14 53, 26 57, 31 71" />
+          </svg>
+          <svg
+            className="memory-constellation__doodle memory-constellation__doodle--sun"
+            viewBox="0 0 48 48"
+            focusable="false"
+            aria-hidden="true"
+          >
+            <circle cx="24" cy="24" r="7" />
+            <path d="M24 4v7M24 37v7M4 24h7M37 24h7M9.8 9.8l5 5M33.2 33.2l5 5M38.2 9.8l-5 5M14.8 33.2l-5 5" />
+          </svg>
+          <svg
+            className="memory-constellation__doodle memory-constellation__doodle--leaf"
+            viewBox="0 0 48 48"
+            focusable="false"
+            aria-hidden="true"
+          >
+            <path d="M10 42c8-14 17-24 29-33M17 33c-6 0-9-3-10-8 6-1 10 1 12 5M25 25c-1-7 2-11 8-13 2 6 0 11-5 15M32 17c5-1 9 1 11 5-4 4-9 4-13 1" />
+          </svg>
+          <svg
+            className="memory-constellation__doodle memory-constellation__doodle--spark"
+            viewBox="0 0 40 40"
+            focusable="false"
+            aria-hidden="true"
+          >
+            <path d="M20 4c1 9 5 14 13 16-8 2-12 7-13 16-1-9-5-14-13-16 8-2 12-7 13-16Z" />
+          </svg>
           {constellationMemories.map((memory, order) => (
             <MemoryBubble
               key={memory.id}

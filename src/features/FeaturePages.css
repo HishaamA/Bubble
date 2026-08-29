@@ -1,6 +1,6 @@
 .ks-feature {
-  --feature-accent: #f5f5f7;
-  --feature-accent-rgb: 245, 245, 247;
+  --feature-accent: var(--cream, #fff1d2);
+  --feature-accent-rgb: 255, 241, 210;
   position: relative;
   height: 100%;
   overflow-x: hidden;
@@ -11,8 +11,12 @@
     var(--app-page-gutter-right, 1rem)
     calc(7rem + env(safe-area-inset-bottom))
     var(--app-page-gutter-left, 1rem);
-  color: var(--text-primary);
-  background: #000;
+  color: var(--cream, #fff1d2);
+  background:
+    radial-gradient(circle at 13% 7%, rgba(125, 49, 89, 0.28), transparent 26%),
+    radial-gradient(circle at 87% 43%, rgba(98, 32, 66, 0.2), transparent 31%),
+    repeating-linear-gradient(98deg, rgba(255, 241, 210, 0.012) 0 1px, transparent 1px 5px),
+    var(--plum-900, #240918);
   scrollbar-width: none;
 }
 
@@ -48,9 +52,10 @@
 
 .ks-feature__header h1 {
   margin: 0;
-  color: #fff;
+  color: var(--cream, #fff1d2);
+  font-family: var(--font-accent);
   font-size: var(--app-page-title-size);
-  font-weight: var(--app-page-title-weight);
+  font-weight: 520;
   letter-spacing: var(--app-page-title-tracking);
   line-height: var(--app-page-title-leading);
 }
@@ -63,10 +68,11 @@
   height: var(--app-header-action-size);
   padding: 0;
   place-items: center;
-  border: 1px solid rgba(255, 255, 255, 0.14);
-  border-radius: 50%;
-  color: #fff;
-  background: #111;
+  border: 1.5px solid rgba(255, 241, 210, 0.62);
+  border-radius: 30% 24% 32% 22%;
+  color: var(--plum-900, #240918);
+  background: var(--coral, #ed735d);
+  box-shadow: 0.18rem 0.2rem 0 rgba(15, 2, 10, 0.3);
   cursor: pointer;
 }
 
@@ -87,7 +93,7 @@
   gap: 0.36rem;
   border: 0;
   border-radius: 999px;
-  color: rgba(255, 255, 255, 0.52);
+  color: #66778a;
   background: transparent;
   font-size: 0.62rem;
   font-weight: 620;
@@ -99,7 +105,7 @@
   width: 0.34rem;
   height: 0.34rem;
   border-radius: 50%;
-  background: rgba(255, 255, 255, 0.58);
+  background: #89aa7f;
   content: '';
 }
 
@@ -124,7 +130,8 @@
 
 .ks-section__heading h2 {
   margin: 0;
-  color: rgba(255, 255, 255, 0.92);
+  color: var(--cream, #fff1d2);
+  font-family: var(--font-accent);
   font-size: 0.92rem;
   font-weight: var(--weight-semibold);
   letter-spacing: var(--tracking-heading);
@@ -132,7 +139,7 @@
 
 .ks-section__heading span,
 .ks-section__heading button {
-  color: rgba(255, 255, 255, 0.45);
+  color: #66778a;
   font-size: 0.7rem;
 }
 
@@ -148,48 +155,51 @@
 
 .ks-card {
   overflow: hidden;
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  border-radius: 1rem;
-  background: #0b0b0c;
+  border: 1px solid rgba(255, 241, 210, 0.6);
+  border-radius: 0.65rem;
+  color: var(--ink, #301027);
+  background: rgba(255, 241, 210, 0.96);
+  box-shadow: 0.25rem 0.3rem 0 rgba(18, 2, 12, 0.26);
 }
 
 .ks-card--accent {
-  border-color: rgba(255, 255, 255, 0.16);
-  background: #0b0b0c;
+  border-color: rgba(255, 241, 210, 0.72);
+  background: var(--paper-deep, #f2dcb6);
 }
 
 .ks-primary-button,
 .ks-secondary-button {
   display: inline-flex;
-  min-height: 2.9rem;
-  padding: 0.65rem 1rem;
+  min-height: 2.75rem;
+  padding: 0.52rem 0.85rem;
   align-items: center;
   justify-content: center;
   gap: 0.5rem;
-  border-radius: 999px;
+  border-radius: 0.65rem;
   font: inherit;
-  font-size: 0.82rem;
+  font-size: 0.78rem;
   font-weight: 690;
   cursor: pointer;
 }
 
 .ks-primary-button {
-  border: 0;
-  color: #000;
-  background: #f5f5f7;
+  border: 1.5px solid rgba(23, 59, 99, 0.44);
+  color: #173b63;
+  background: #efb944;
+  box-shadow: 0.2rem 0.22rem 0 rgba(23, 59, 99, 0.12);
 }
 
 .ks-primary-button:disabled {
-  color: rgba(255, 255, 255, 0.44);
-  background: rgba(255, 255, 255, 0.09);
+  color: rgba(23, 59, 99, 0.44);
+  background: rgba(23, 59, 99, 0.08);
   box-shadow: none;
   cursor: default;
 }
 
 .ks-secondary-button {
-  border: 1px solid rgba(255, 255, 255, 0.11);
-  color: rgba(255, 255, 255, 0.82);
-  background: #111;
+  border: 1px solid rgba(23, 59, 99, 0.28);
+  color: #173b63;
+  background: rgba(255, 250, 235, 0.72);
 }
 
 .ks-field {
@@ -199,7 +209,7 @@
 }
 
 .ks-field > span {
-  color: rgba(255, 255, 255, 0.53);
+  color: #66778a;
   font-size: 0.68rem;
   font-weight: 600;
 }
@@ -212,11 +222,11 @@
   max-width: 100%;
   min-height: 2.85rem;
   padding: 0.72rem 0.82rem;
-  border: 1px solid rgba(255, 255, 255, 0.11);
-  border-radius: 0.72rem;
+  border: 1px solid rgba(23, 59, 99, 0.24);
+  border-radius: 0.55rem;
   outline: none;
-  color: #fff;
-  background: #050505;
+  color: #173b63;
+  background: rgba(255, 255, 255, 0.62);
   font: inherit;
   font-size: 0.82rem;
 }
@@ -230,13 +240,13 @@
 .ks-field input:focus,
 .ks-field textarea:focus,
 .ks-field select:focus {
-  border-color: rgba(255, 255, 255, 0.48);
-  box-shadow: 0 0 0 0.2rem rgba(255, 255, 255, 0.08);
+  border-color: rgba(23, 59, 99, 0.58);
+  box-shadow: 0 0 0 0.18rem rgba(120, 184, 208, 0.22);
 }
 
 .ks-field input::placeholder,
 .ks-field textarea::placeholder {
-  color: rgba(255, 255, 255, 0.3);
+  color: rgba(23, 59, 99, 0.38);
 }
 
 .ks-filter-row {
@@ -255,9 +265,9 @@
   flex: 0 0 auto;
   min-height: 2.75rem;
   padding: 0.4rem 0.8rem;
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  border-radius: 999px;
-  color: rgba(255, 255, 255, 0.56);
+  border: 1px solid rgba(23, 59, 99, 0.22);
+  border-radius: 0.48rem;
+  color: #66778a;
   background: transparent;
   font: inherit;
   font-size: 0.7rem;
@@ -266,9 +276,9 @@
 }
 
 .ks-filter[aria-pressed='true'] {
-  border-color: #f5f5f7;
-  color: #000;
-  background: #f5f5f7;
+  border-color: #173b63;
+  color: #173b63;
+  background: #9ccadd;
 }
 
 .ks-toggle {
@@ -287,7 +297,7 @@
   position: absolute;
   inset: 0.51rem 0.125rem;
   border-radius: 999px;
-  background: rgba(255, 255, 255, 0.15);
+  background: rgba(23, 59, 99, 0.16);
   content: '';
   transition: background 180ms ease;
 }
@@ -299,7 +309,7 @@
   width: 1.36rem;
   height: 1.36rem;
   border-radius: 50%;
-  background: #f5f5f4;
+  background: #fff9e9;
   box-shadow: 0 0.18rem 0.5rem rgba(0, 0, 0, 0.36);
   content: '';
   transition: transform 180ms cubic-bezier(0.2, 0.8, 0.2, 1);
@@ -310,7 +320,7 @@
 }
 
 .ks-toggle[aria-checked='true']::before {
-  background: #f5f5f7;
+  background: #8fae84;
 }
 
 .ks-toggle[aria-checked='true']::after {
@@ -333,10 +343,10 @@
   height: 2.05rem;
   margin-left: -0.42rem;
   place-items: center;
-  border: 2px solid #0b0b0c;
+  border: 2px solid #fbf2d9;
   border-radius: 50%;
-  color: #050505;
-  background: #d8d8dc;
+  color: #173b63;
+  background: #9ccadd;
   font-size: 0.61rem;
   font-weight: 760;
 }
@@ -346,11 +356,11 @@
 }
 
 .ks-avatar:nth-child(2n) {
-  background: #a8a8ad;
+  background: #efb944;
 }
 
 .ks-avatar:nth-child(3n) {
-  background: #ededf0;
+  background: #a994c2;
 }
 
 .ks-progress {
@@ -1445,4 +1455,597 @@
   .ks-progress > span {
     transition: none;
   }
+}
+
+/* Whimsical Settings skin. Kept deliberately scoped so camera and viewer surfaces
+   retain their purpose-built dark treatments. */
+.profile-page {
+  --profile-ink: #173b63;
+  --profile-muted: #65768a;
+  --profile-paper: #fff7df;
+  --profile-paper-deep: #f6e8c3;
+  --profile-sun: #efb944;
+  --profile-coral: #e97958;
+  --profile-sky: #9ccadd;
+  --profile-sage: #97b58d;
+  --profile-lilac: #b8a6cf;
+  --feature-accent: var(--profile-ink);
+  --feature-accent-rgb: 23, 59, 99;
+  isolation: isolate;
+  color: var(--profile-ink);
+  background:
+    radial-gradient(circle at 91% 8%, rgba(239, 185, 68, 0.18) 0 1.7rem, transparent 1.78rem),
+    radial-gradient(circle at 12% 35%, rgba(156, 202, 221, 0.13) 0 2.25rem, transparent 2.35rem),
+    repeating-linear-gradient(
+      0deg,
+      transparent 0 2.95rem,
+      rgba(23, 59, 99, 0.045) 2.95rem 3rem
+    ),
+    linear-gradient(105deg, rgba(255, 255, 255, 0.42), transparent 32%),
+    var(--profile-paper);
+}
+
+.profile-page::before,
+.profile-page::after {
+  position: absolute;
+  z-index: -1;
+  color: var(--profile-coral);
+  font-family: var(--font-accent);
+  pointer-events: none;
+}
+
+.profile-page::before {
+  top: max(8.2rem, calc(env(safe-area-inset-top) + 7rem));
+  right: 1.15rem;
+  font-size: 1.55rem;
+  line-height: 1;
+  content: '\2661';
+  transform: rotate(12deg);
+}
+
+.profile-page::after {
+  top: 23rem;
+  left: 0.55rem;
+  color: var(--profile-sky);
+  font-size: 1.25rem;
+  content: '\2726';
+  transform: rotate(-10deg);
+}
+
+.profile-page > .app-page-header {
+  position: relative;
+  margin-bottom: 2.15rem;
+  padding-bottom: 1.05rem;
+  border-bottom: 2px dashed rgba(184, 166, 207, 0.72);
+}
+
+.profile-page > .app-page-header::after {
+  position: absolute;
+  right: 4.25rem;
+  bottom: -0.68rem;
+  width: 1.8rem;
+  height: 0.68rem;
+  border-top: 3px solid var(--profile-sun);
+  border-radius: 50%;
+  content: '';
+  transform: rotate(-8deg);
+}
+
+.profile-page > .app-page-header .eyebrow {
+  color: #a56a2e;
+}
+
+.profile-page > .app-page-header h1 {
+  color: var(--profile-ink);
+  font-family: var(--font-accent);
+  font-weight: 520;
+}
+
+.profile-page > .app-page-header .profile-card__avatar {
+  border: 2px solid var(--profile-ink);
+  color: var(--profile-ink);
+  background: var(--profile-sun);
+  box-shadow: 0.22rem 0.25rem 0 rgba(23, 59, 99, 0.13);
+  transform: rotate(2deg);
+}
+
+.profile-page__identity {
+  color: var(--profile-muted);
+}
+
+.profile-page .ks-section {
+  position: relative;
+  gap: 0.72rem;
+  margin-top: 1.5rem;
+}
+
+.profile-page .ks-section__heading {
+  padding-inline: 0.16rem;
+}
+
+.profile-page .ks-section__heading h2 {
+  color: var(--profile-ink);
+  font-family: var(--font-accent);
+  font-size: 1.08rem;
+  font-weight: 560;
+}
+
+.profile-page .profile-action-row {
+  min-height: 4.35rem;
+  padding: 0.72rem 0.82rem;
+  border: 1.5px solid rgba(23, 59, 99, 0.48);
+  border-radius: 0.85rem 0.7rem 0.92rem 0.68rem;
+  color: var(--profile-ink);
+  background: rgba(239, 185, 68, 0.35);
+  box-shadow: 0.22rem 0.28rem 0 rgba(23, 59, 99, 0.09);
+  transition:
+    transform 150ms ease,
+    box-shadow 150ms ease;
+}
+
+.profile-page > .ks-section:nth-of-type(2) .profile-action-row {
+  background: rgba(151, 181, 141, 0.42);
+  transform: rotate(-0.35deg);
+}
+
+.profile-page .profile-action-row:active {
+  box-shadow: 0.1rem 0.12rem 0 rgba(23, 59, 99, 0.1);
+  transform: translateY(0.1rem) rotate(0deg);
+}
+
+.profile-page .profile-action-row > span:last-child {
+  color: var(--profile-ink);
+  font-family: var(--font-accent);
+  font-size: 1.15rem;
+}
+
+.profile-page .profile-action-row:focus-visible {
+  outline: 3px solid rgba(23, 59, 99, 0.28);
+  outline-offset: 3px;
+}
+
+.profile-page .profile-account-mark {
+  border: 2px solid var(--profile-ink);
+  color: var(--profile-ink);
+  background: var(--profile-paper-deep);
+  box-shadow: 0.12rem 0.15rem 0 rgba(23, 59, 99, 0.12);
+}
+
+.profile-page .profile-family-mark {
+  border: 1.5px dashed var(--profile-ink);
+  border-radius: 0.75rem 0.55rem 0.82rem 0.62rem;
+  color: var(--profile-ink);
+  background: rgba(255, 247, 223, 0.72);
+  font-family: var(--font-accent);
+  font-size: 1rem;
+  transform: rotate(-3deg);
+}
+
+.profile-page .profile-family-copy strong {
+  color: var(--profile-ink);
+  font-size: 0.79rem;
+}
+
+.profile-page .profile-family-copy small {
+  color: var(--profile-muted);
+}
+
+.profile-page .profile-account-details {
+  margin: 0.1rem 0.45rem 0;
+  padding: 0.7rem 0.85rem 0.85rem;
+  border: 1px solid rgba(23, 59, 99, 0.24);
+  border-top: 0;
+  border-radius: 0 0 0.78rem 0.65rem;
+  background: rgba(255, 251, 238, 0.82);
+}
+
+.profile-page .profile-account-details dl > div {
+  border-bottom: 1px dashed rgba(23, 59, 99, 0.16);
+}
+
+.profile-page .profile-account-details dt,
+.profile-page .profile-account-details p {
+  color: var(--profile-muted);
+}
+
+.profile-page .profile-account-details dd {
+  color: var(--profile-ink);
+}
+
+.profile-page .settings-card {
+  overflow: visible;
+  padding: 0.15rem 0.8rem;
+  border: 1.5px solid rgba(23, 59, 99, 0.45);
+  border-radius: 0.72rem 0.92rem 0.68rem 0.86rem;
+  color: var(--profile-ink);
+  background:
+    repeating-linear-gradient(
+      0deg,
+      transparent 0 2.55rem,
+      rgba(23, 59, 99, 0.08) 2.55rem 2.6rem
+    ),
+    rgba(156, 202, 221, 0.34);
+  box-shadow: 0.22rem 0.28rem 0 rgba(23, 59, 99, 0.08);
+  transform: rotate(0.2deg);
+}
+
+.profile-page .settings-row {
+  min-height: 4.25rem;
+  padding: 0.75rem 0.1rem;
+  border-bottom: 1px dashed rgba(23, 59, 99, 0.2);
+}
+
+.profile-page .settings-row__copy strong {
+  color: var(--profile-ink);
+  font-size: 0.78rem;
+}
+
+.profile-page .settings-row__copy span {
+  color: var(--profile-muted);
+}
+
+.profile-page .ks-toggle::before {
+  border: 1px solid rgba(23, 59, 99, 0.23);
+  background: rgba(23, 59, 99, 0.16);
+}
+
+.profile-page .ks-toggle::after {
+  background: var(--profile-paper);
+  box-shadow: 0 0.12rem 0.35rem rgba(23, 59, 99, 0.24);
+}
+
+.profile-page .ks-toggle[aria-checked='true']::before {
+  background: var(--profile-sage);
+}
+
+.profile-page__preference-error {
+  color: #a34b36;
+}
+
+.profile-page__sign-out {
+  width: fit-content;
+  min-height: 2.85rem;
+  margin: 1.65rem auto 0;
+  padding: 0.45rem 1.2rem;
+  border: 1.5px solid rgba(23, 59, 99, 0.48);
+  border-radius: 0.62rem 0.78rem 0.58rem 0.74rem;
+  color: var(--profile-ink);
+  background: rgba(233, 121, 88, 0.3);
+  box-shadow: 0.18rem 0.22rem 0 rgba(23, 59, 99, 0.1);
+}
+
+.profile-page__sign-out:focus-visible {
+  outline: 3px solid rgba(233, 121, 88, 0.34);
+  outline-offset: 3px;
+}
+
+.profile-page .profile-toast {
+  border: 2px solid var(--profile-ink);
+  border-radius: 0.7rem;
+  color: var(--profile-paper);
+  background: var(--profile-ink);
+  box-shadow: 0.25rem 0.3rem 0 rgba(239, 185, 68, 0.35);
+  backdrop-filter: none;
+}
+
+/* The family panel owns a separate stylesheet, so the stronger Settings scope
+   intentionally translates it from black glass to the same notebook paper. */
+.profile-page .family-sync {
+  --family-sync-accent: var(--profile-ink);
+  gap: 0.8rem;
+  margin: 0.1rem 0.45rem 0;
+  width: calc(100% - 0.9rem);
+  padding: 0.85rem;
+  border: 1px solid rgba(23, 59, 99, 0.3);
+  border-top: 0;
+  border-radius: 0 0 0.82rem 0.66rem;
+  color: var(--profile-ink);
+  background:
+    repeating-linear-gradient(
+      0deg,
+      transparent 0 2.55rem,
+      rgba(23, 59, 99, 0.055) 2.55rem 2.6rem
+    ),
+    rgba(255, 251, 238, 0.92);
+  color-scheme: light;
+}
+
+.profile-page .family-sync__header h2,
+.profile-page .family-sync h3,
+.profile-page .family-sync__state h3,
+.profile-page .family-sync__intro h3,
+.profile-page .family-sync__option h3,
+.profile-page .family-sync__pending-card h3,
+.profile-page .family-sync__subheading h3,
+.profile-page .family-sync__circle-copy h3,
+.profile-page .family-sync__identity strong,
+.profile-page .family-sync__account-row strong,
+.profile-page .family-sync__requests li strong {
+  color: var(--profile-ink);
+}
+
+.profile-page .family-sync__state p:last-child,
+.profile-page .family-sync__intro p,
+.profile-page .family-sync__option p,
+.profile-page .family-sync__pending-card p,
+.profile-page .family-sync__subheading p,
+.profile-page .family-sync__member-note,
+.profile-page .family-sync__privacy-note,
+.profile-page .family-sync__identity small,
+.profile-page .family-sync__account-row span,
+.profile-page .family-sync__circle-copy > span,
+.profile-page .family-sync__circle-copy p,
+.profile-page .family-sync__invite small,
+.profile-page .family-sync__requests li span,
+.profile-page .family-sync__empty-requests,
+.profile-page .family-sync label > span,
+.profile-page .family-sync__invite > span {
+  color: var(--profile-muted);
+}
+
+.profile-page .family-sync__notice {
+  padding: 0.72rem 0.8rem;
+  border: 1px dashed rgba(23, 59, 99, 0.34);
+  border-radius: 0.55rem;
+  color: var(--profile-ink);
+  background: rgba(239, 185, 68, 0.24);
+}
+
+.profile-page .family-sync__notice--error {
+  border-color: rgba(163, 75, 54, 0.55);
+  color: #8c3c2d;
+  background: rgba(233, 121, 88, 0.2);
+}
+
+.profile-page .family-sync__loading {
+  color: var(--profile-muted);
+}
+
+.profile-page .family-sync__loading > span {
+  border-color: rgba(23, 59, 99, 0.2);
+  border-top-color: var(--profile-ink);
+}
+
+.profile-page .family-sync__state,
+.profile-page .family-sync__pending-card,
+.profile-page .family-sync__owner-tools,
+.profile-page .family-sync__requests,
+.profile-page .family-sync__member-note,
+.profile-page .family-sync__invite,
+.profile-page .family-sync__rotation-confirmation,
+.profile-page .family-sync__requests li,
+.profile-page .family-sync__empty-requests {
+  border-color: rgba(23, 59, 99, 0.18);
+}
+
+.profile-page .family-sync__state-icon,
+.profile-page .family-sync__circle-mark {
+  border: 1.5px dashed var(--profile-ink);
+  border-radius: 0.68rem 0.52rem 0.75rem 0.56rem;
+  color: var(--profile-ink);
+  background: rgba(184, 166, 207, 0.32);
+  transform: rotate(-2deg);
+}
+
+.profile-page .family-sync__choice-grid {
+  gap: 0.8rem;
+}
+
+.profile-page .family-sync__option {
+  padding: 0.9rem;
+  border: 1px solid rgba(23, 59, 99, 0.28);
+  border-radius: 0.68rem 0.84rem 0.64rem 0.78rem;
+  background: rgba(156, 202, 221, 0.24);
+}
+
+.profile-page .family-sync__option:nth-child(2) {
+  background: rgba(151, 181, 141, 0.28);
+  transform: rotate(-0.25deg);
+}
+
+.profile-page .family-sync input {
+  border: 1.5px solid rgba(23, 59, 99, 0.34);
+  border-radius: 0.58rem;
+  color: var(--profile-ink);
+  background: rgba(255, 247, 223, 0.86);
+  caret-color: var(--profile-ink);
+}
+
+.profile-page .family-sync input::placeholder {
+  color: rgba(101, 118, 138, 0.68);
+}
+
+.profile-page .family-sync input:focus {
+  border-color: var(--profile-ink);
+  outline-color: rgba(156, 202, 221, 0.7);
+}
+
+.profile-page .family-sync__primary,
+.profile-page .family-sync__secondary,
+.profile-page .family-sync__approve,
+.profile-page .family-sync__reject,
+.profile-page .family-sync__share,
+.profile-page .family-sync__auth-link {
+  border-radius: 0.58rem 0.7rem 0.54rem 0.66rem;
+  box-shadow: 0.15rem 0.18rem 0 rgba(23, 59, 99, 0.09);
+}
+
+.profile-page .family-sync__primary,
+.profile-page .family-sync__approve,
+.profile-page .family-sync__share,
+.profile-page .family-sync__auth-link {
+  border: 1.5px solid var(--profile-ink);
+  color: var(--profile-ink);
+  background: var(--profile-sun);
+}
+
+.profile-page .family-sync__secondary,
+.profile-page .family-sync__reject {
+  border: 1.5px solid rgba(23, 59, 99, 0.44);
+  color: var(--profile-ink);
+  background: rgba(156, 202, 221, 0.28);
+}
+
+.profile-page .family-sync__text-button,
+.profile-page .family-sync__rotate-code {
+  color: var(--profile-ink);
+  border-color: rgba(23, 59, 99, 0.42);
+}
+
+.profile-page .family-sync__circle-card {
+  padding: 0.8rem;
+  border: 1px solid rgba(23, 59, 99, 0.3);
+  border-radius: 0.74rem 0.62rem 0.86rem 0.68rem;
+  background: rgba(151, 181, 141, 0.28);
+}
+
+.profile-page .family-sync__identity > span,
+.profile-page .family-sync__mini-avatar {
+  border: 1.5px solid var(--profile-ink);
+  color: var(--profile-ink);
+  background: var(--profile-paper-deep);
+}
+
+.profile-page .family-sync__invite output {
+  border: 1.5px dashed var(--profile-ink);
+  border-radius: 0.55rem;
+  color: var(--profile-ink);
+  background: rgba(255, 247, 223, 0.88);
+}
+
+.profile-page .family-sync__connected-badge,
+.profile-page .family-sync__count {
+  border-color: rgba(23, 59, 99, 0.28);
+  color: var(--profile-ink);
+  background: rgba(151, 181, 141, 0.32);
+}
+
+.profile-page .family-sync__connected-badge > span,
+.profile-page .family-sync__pending-pulse {
+  background: var(--profile-sage);
+}
+
+.profile-page .family-sync button:focus-visible,
+.profile-page .family-sync__auth-link:focus-visible {
+  outline-color: var(--profile-ink);
+}
+
+@media (min-width: 36rem) {
+  .profile-page .family-sync__choice-grid {
+    align-items: stretch;
+  }
+}
+
+@media (max-width: 24rem) {
+  .profile-page .profile-action-row {
+    padding-inline: 0.68rem;
+  }
+
+  .profile-page .family-sync {
+    margin-inline: 0.25rem;
+    width: calc(100% - 0.5rem);
+    padding: 0.68rem;
+  }
+
+  .profile-page .family-sync__code-actions,
+  .profile-page .family-sync__rotation-confirmation > div {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* Plum scrapbook shell --------------------------------------------------
+   Settings is reached from Moments, so it carries the same dark album cover
+   and keeps cream paper for the parts a person can actually edit. */
+.profile-page {
+  --profile-ink: var(--ink, #301027);
+  --profile-muted: #866f78;
+  --profile-paper: var(--cream, #fff1d2);
+  --profile-paper-deep: var(--cream-soft, #f2dfbd);
+  --profile-sun: var(--sun, #efb43d);
+  --profile-coral: var(--coral, #ed735d);
+  --profile-sky: var(--rose, #d895aa);
+  --profile-sage: var(--sage, #a5b37a);
+  --profile-lilac: var(--lilac, #b39ac8);
+  color: var(--cream, #fff1d2);
+  background:
+    radial-gradient(circle at 88% 10%, rgba(216, 149, 170, 0.2), transparent 25%),
+    radial-gradient(circle at 9% 43%, rgba(237, 115, 93, 0.11), transparent 24%),
+    repeating-linear-gradient(96deg, rgba(255, 241, 210, 0.012) 0 1px, transparent 1px 5px),
+    var(--plum-900, #240918);
+}
+
+.profile-page::before {
+  color: var(--profile-coral);
+}
+
+.profile-page::after {
+  color: var(--profile-sky);
+}
+
+.profile-page > .app-page-header {
+  border-bottom-color: rgba(255, 241, 210, 0.48);
+}
+
+.profile-page > .app-page-header .eyebrow {
+  color: #f0c58a;
+}
+
+.profile-page > .app-page-header h1,
+.profile-page .ks-section__heading h2 {
+  color: var(--cream, #fff1d2);
+}
+
+.profile-page__identity {
+  color: rgba(255, 241, 210, 0.68);
+}
+
+.profile-page > .app-page-header .profile-card__avatar {
+  border-color: var(--cream, #fff1d2);
+  color: var(--profile-ink);
+  background: var(--profile-coral);
+  box-shadow: 0.2rem 0.24rem 0 rgba(12, 1, 8, 0.34);
+}
+
+.profile-page .profile-action-row,
+.profile-page > .ks-section:nth-of-type(2) .profile-action-row {
+  border-color: rgba(255, 241, 210, 0.78);
+  color: var(--profile-ink);
+  background: var(--profile-paper);
+  box-shadow: 0.2rem 0.25rem 0 rgba(12, 1, 8, 0.36);
+}
+
+.profile-page > .ks-section:nth-of-type(2) .profile-action-row {
+  background: var(--profile-sage);
+}
+
+.profile-page .profile-account-details,
+.profile-page .settings-card,
+.profile-page .family-sync {
+  color: var(--profile-ink);
+  background:
+    repeating-linear-gradient(
+      0deg,
+      transparent 0 2.55rem,
+      rgba(48, 16, 39, 0.075) 2.55rem 2.6rem
+    ),
+    var(--profile-paper);
+  border-color: rgba(255, 241, 210, 0.7);
+  box-shadow: 0.2rem 0.25rem 0 rgba(12, 1, 8, 0.26);
+}
+
+.profile-page .settings-card {
+  background:
+    repeating-linear-gradient(
+      0deg,
+      transparent 0 2.55rem,
+      rgba(48, 16, 39, 0.075) 2.55rem 2.6rem
+    ),
+    #e2b1be;
+}
+
+.profile-page__sign-out {
+  border-color: rgba(255, 241, 210, 0.74);
+  color: var(--cream, #fff1d2);
+  background: rgba(237, 115, 93, 0.28);
+  box-shadow: 0.18rem 0.22rem 0 rgba(12, 1, 8, 0.28);
 }

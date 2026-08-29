@@ -154,6 +154,47 @@ describe('CapsulesPage', () => {
     expect(screen.queryByText(/panorama/i)).not.toBeInTheDocument()
   })
 
+  it('previews an empty locked week without counting decorative teaser images as photos', async () => {
+    const store = createMemoryCapsuleStore()
+    render(<CapsulesPage now={testNow} store={store} />)
+
+    const weeklySection = (await screen.findByRole('heading', {
+      name: currentWeekRange,
+    })).closest('section')!
+    const card = weeklySection.querySelector('article')!
+    const teaserList = card.querySelector('.capsule-empty-polaroids')!
+    const teaserImages = teaserList.querySelectorAll('img')
+    const weeklyCapsule = (await store.list()).find(({ kind }) => kind === 'weekly')!
+    const exactOpenDate = new Intl.DateTimeFormat('en', {
+      weekday: 'long',
+      month: 'long',
+      day: 'numeric',
+      year: 'numeric',
+      hour: 'numeric',
+      minute: '2-digit',
+    }).format(new Date(weeklyCapsule.opensAt))
+
+    expect(teaserList).toHaveAttribute('aria-hidden', 'true')
+    expect(teaserImages).toHaveLength(4)
+    teaserImages.forEach((image) => {
+      expect(image).toHaveAttribute(
+        'src',
+        '/assets/capsules/demo-locked-capsule-photos.png',
+      )
+      expect(image).toHaveAttribute('alt', '')
+    })
+    expect(within(card).getByText('0 photos')).toBeInTheDocument()
+    expect(within(card).queryByText('4 photos')).not.toBeInTheDocument()
+    expect(within(card).getByRole('img', {
+      name: `Locked until ${exactOpenDate}`,
+    })).toBeInTheDocument()
+    expect(within(card).getByText('This Capsule unlocks')).toBeInTheDocument()
+    expect(within(card).getByText(exactOpenDate)).toHaveAttribute(
+      'datetime',
+      weeklyCapsule.opensAt,
+    )
+  })
+
   it('adds and persists an uploaded regular photo without a 2:1 check', async () => {
     const user = userEvent.setup()
     const store = createMemoryCapsuleStore()

@@ -3,9 +3,9 @@
    * Bubble uses three type families, each with one clear job. Keeping the
    * stacks here prevents feature CSS from inventing a new visual voice.
    */
-  --font-ui: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Helvetica Neue',
-    system-ui, sans-serif;
-  --font-accent: ui-serif, 'Iowan Old Style', Baskerville, Georgia, serif;
+  --font-ui: ui-rounded, 'Avenir Next', Avenir, -apple-system,
+    BlinkMacSystemFont, 'Helvetica Neue', system-ui, sans-serif;
+  --font-accent: Palatino, 'Palatino Linotype', 'Book Antiqua', Georgia, serif;
   --font-mono: ui-monospace, 'SF Mono', SFMono-Regular, Menlo, monospace;
   --weight-regular: 400;
   --weight-medium: 500;
@@ -16,8 +16,31 @@
   --tracking-eyebrow: 0.1em;
 
   font-family: var(--font-ui);
-  color: #f5f5f7;
-  background: #000;
+  /* Bubble's shared scrapbook palette. Cream is reserved for paper and type;
+     the app canvas stays plum so every feature feels part of one book. */
+  --plum-950: #180611;
+  --plum-900: #240918;
+  --plum-850: #2d0c22;
+  --plum-800: #3a102b;
+  --plum-700: #541a3b;
+  --paper: #fff1d2;
+  --paper-deep: #f2dcb6;
+  --ink: #301027;
+  --ink-muted: #856f79;
+  --sun: #efb43d;
+  --coral: #ed735d;
+  --sky: #d895aa;
+  --sage: #a5b37a;
+  --lilac: #b39ac8;
+  --cream: #fff1d2;
+  --cream-soft: #f2dfbd;
+  --rose: #d895aa;
+  --focus-ring: #f2b84a;
+  --radius-action: 0.62rem;
+  --radius-card: 0.9rem;
+
+  color: var(--cream);
+  background: var(--plum-950);
   font-synthesis: none;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
@@ -32,7 +55,7 @@
 h1,
 h2,
 h3 {
-  font-family: var(--font-ui);
+  font-family: var(--font-accent);
 }
 
 html,
@@ -46,7 +69,7 @@ body,
 body {
   min-height: 100svh;
   overflow: hidden;
-  background: #000;
+  background: var(--plum-950);
 }
 
 button,
@@ -69,8 +92,11 @@ button {
 }
 
 button:focus-visible,
-a:focus-visible {
-  outline: 2px solid #fff;
+a:focus-visible,
+input:focus-visible,
+textarea:focus-visible,
+select:focus-visible {
+  outline: 2px solid var(--focus-ring);
   outline-offset: 3px;
 }
 

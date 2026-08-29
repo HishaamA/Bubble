@@ -529,10 +529,11 @@ export function PanoramaMemoryScreen({
     try {
       const nativeScene = cardboardScenes[0]
       const nativeOpened = nativeScene
-        ? await presentNativeCardboardPanorama({
-            scene: nativeScene,
-            sourceBlob: selectedVrSharedMoment?.blob,
-          })
+          ? await presentNativeCardboardPanorama({
+              scene: nativeScene,
+              sourceBlob: selectedVrSharedMoment?.blob,
+              onClosed: returnFromVrToOrigin,
+            })
         : false
 
       if (!nativeOpened) {
@@ -555,6 +556,7 @@ export function PanoramaMemoryScreen({
     cardboardActive,
     cardboardScenes,
     requestedOpenVr,
+    returnFromVrToOrigin,
     selectedVrSharedMoment,
     vrEntering,
   ])

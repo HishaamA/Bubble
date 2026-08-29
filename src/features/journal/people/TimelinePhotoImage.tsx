@@ -4,6 +4,9 @@ import type { CapsuleImageSource } from '../../capsules/types'
 type TimelinePhotoImageProps = {
   source: CapsuleImageSource
   alt: string
+  width?: number
+  height?: number
+  lazy?: boolean
 }
 
 function UnavailablePhoto({ alt }: { alt: string }) {
@@ -17,7 +20,19 @@ function UnavailablePhoto({ alt }: { alt: string }) {
   )
 }
 
-function StringPhoto({ source, alt }: { source: string; alt: string }) {
+function StringPhoto({
+  source,
+  alt,
+  width,
+  height,
+  lazy,
+}: {
+  source: string
+  alt: string
+  width?: number
+  height?: number
+  lazy?: boolean
+}) {
   const [failedSource, setFailedSource] = useState<string | null>(null)
   if (!source || failedSource === source) return <UnavailablePhoto alt={alt} />
   return (
@@ -25,13 +40,29 @@ function StringPhoto({ source, alt }: { source: string; alt: string }) {
       className="people-timeline__photo-image"
       src={source}
       alt={alt}
+      width={width}
+      height={height}
+      loading={lazy ? 'lazy' : undefined}
+      decoding={lazy ? 'async' : undefined}
       draggable="false"
       onError={() => setFailedSource(source)}
     />
   )
 }
 
-function BlobPhoto({ source, alt }: { source: Blob; alt: string }) {
+function BlobPhoto({
+  source,
+  alt,
+  width,
+  height,
+  lazy,
+}: {
+  source: Blob
+  alt: string
+  width?: number
+  height?: number
+  lazy?: boolean
+}) {
   const imageRef = useRef<HTMLImageElement>(null)
   const [failedSource, setFailedSource] = useState<Blob | null>(null)
 
@@ -47,14 +78,24 @@ function BlobPhoto({ source, alt }: { source: Blob; alt: string }) {
       ref={imageRef}
       className="people-timeline__photo-image"
       alt={alt}
+      width={width}
+      height={height}
+      loading={lazy ? 'lazy' : undefined}
+      decoding={lazy ? 'async' : undefined}
       draggable="false"
       onError={() => setFailedSource(source)}
     />
   )
 }
 
-export function TimelinePhotoImage({ source, alt }: TimelinePhotoImageProps) {
+export function TimelinePhotoImage({
+  source,
+  alt,
+  width,
+  height,
+  lazy = false,
+}: TimelinePhotoImageProps) {
   return typeof source === 'string'
-    ? <StringPhoto source={source} alt={alt} />
-    : <BlobPhoto source={source} alt={alt} />
+    ? <StringPhoto source={source} alt={alt} width={width} height={height} lazy={lazy} />
+    : <BlobPhoto source={source} alt={alt} width={width} height={height} lazy={lazy} />
 }

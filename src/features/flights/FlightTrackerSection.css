@@ -1984,3 +1984,272 @@
     transition: none;
   }
 }
+
+/* Whimsical paper treatment for the portal-mounted flight forms. These sit
+   outside Journal's DOM tree, so they carry the shared palette themselves. */
+.flight-sheet,
+.flight-detail {
+  --flight-ink: #173b63;
+  --flight-muted: #66778a;
+  --flight-faint: rgba(23, 59, 99, 0.42);
+  --flight-line: rgba(23, 59, 99, 0.18);
+  --flight-accent: #efb944;
+  --flight-ticket: #fff9e8;
+  color-scheme: light;
+  color: var(--flight-ink);
+  background: rgba(23, 59, 99, 0.3);
+  backdrop-filter: blur(12px) saturate(90%);
+}
+
+.flight-sheet__panel,
+.flight-detail__panel {
+  border-color: rgba(23, 59, 99, 0.3);
+  border-radius: 1rem 1.24rem 0.92rem 1.12rem;
+  color: var(--flight-ink);
+  background:
+    repeating-linear-gradient(
+      to bottom,
+      rgba(23, 59, 99, 0.045) 0,
+      rgba(23, 59, 99, 0.045) 1px,
+      transparent 1px,
+      transparent 1.65rem
+    ),
+    #fff6df;
+  box-shadow:
+    0.35rem 0.42rem 0 rgba(23, 59, 99, 0.16),
+    0 1.5rem 4rem rgba(23, 59, 99, 0.24);
+}
+
+.flight-sheet__header p,
+.flight-detail__header p {
+  color: #b26424;
+}
+
+.flight-sheet__header h2,
+.flight-detail__header h2 {
+  color: var(--flight-ink);
+  font-family: var(--font-accent);
+  font-weight: 560;
+}
+
+.flight-sheet__header button,
+.flight-detail__header button {
+  border-color: rgba(23, 59, 99, 0.3);
+  color: var(--flight-ink);
+  background: #efc36a;
+  box-shadow: 0.12rem 0.15rem 0 rgba(23, 59, 99, 0.14);
+}
+
+.flight-sheet__intro,
+.flight-field small,
+.flight-choice__list > button > span:not(.flight-choice__route),
+.flight-choice__list > button small,
+.flight-detail__quality,
+.flight-detail__times dt,
+.flight-detail__times span,
+.flight-detail__times small,
+.flight-detail__updated,
+.flight-map figcaption,
+.flight-map--cancelled span {
+  color: var(--flight-muted);
+}
+
+.flight-field > span,
+.flight-choice__header h3,
+.flight-choice__route strong,
+.flight-detail__times dd,
+.flight-map__codes {
+  color: var(--flight-ink);
+}
+
+.flight-field input,
+.flight-choice__list > button {
+  border-color: rgba(23, 59, 99, 0.25);
+  border-radius: 0.58rem 0.76rem 0.52rem 0.7rem;
+  color: var(--flight-ink);
+  background: rgba(255, 255, 255, 0.56);
+}
+
+.flight-field input::placeholder {
+  color: rgba(23, 59, 99, 0.36);
+}
+
+.flight-sheet__submit,
+.flight-detail__actions button {
+  border: 1px solid rgba(23, 59, 99, 0.3);
+  border-radius: 0.6rem 0.78rem 0.54rem 0.72rem;
+  color: var(--flight-ink);
+  background: #efc36a;
+  box-shadow: 0.17rem 0.2rem 0 rgba(23, 59, 99, 0.14);
+}
+
+.flight-choice,
+.flight-detail__times {
+  border-color: var(--flight-line);
+}
+
+.flight-choice__header p {
+  color: #b26424;
+}
+
+.flight-choice__header button,
+.flight-detail__delete-confirm button {
+  border-color: rgba(23, 59, 99, 0.25);
+  border-radius: 0.5rem 0.68rem 0.46rem 0.62rem;
+  color: var(--flight-ink);
+  background: rgba(111, 168, 199, 0.24);
+}
+
+.flight-map {
+  border-color: rgba(23, 59, 99, 0.2);
+  background: #e8efdc;
+}
+
+.flight-map__land {
+  fill: rgba(126, 161, 115, 0.17);
+  stroke: rgba(23, 59, 99, 0.13);
+}
+
+.flight-map__route {
+  stroke: #b26424;
+}
+
+.flight-map__airport {
+  fill: #fff6df;
+  stroke: #173b63;
+}
+
+.flight-map__plane {
+  fill: #e66f55;
+}
+
+.flight-detail__actions .flight-detail__notify,
+.flight-detail__actions .flight-detail__notify[aria-pressed='true'] {
+  color: var(--flight-ink);
+  background: #9ec0d1;
+  box-shadow: 0.17rem 0.2rem 0 rgba(23, 59, 99, 0.14);
+}
+
+.flight-detail__delete-confirm {
+  border-color: rgba(178, 65, 49, 0.24);
+  background: rgba(230, 111, 85, 0.13);
+}
+
+.flight-detail__delete-confirm p {
+  color: var(--flight-ink);
+}
+
+@media (min-width: 38rem) {
+  .flight-detail {
+    background: rgba(23, 59, 99, 0.3);
+  }
+
+  .flight-detail__panel {
+    border-color: rgba(23, 59, 99, 0.3);
+  }
+}
+
+/* Portal-mounted add-flight and detail sheets share Journal's plum-and-paper
+   palette while keeping every lookup, choice and notification interaction. */
+.flight-sheet,
+.flight-detail {
+  --flight-ink: #351129;
+  --flight-muted: rgba(53, 17, 41, 0.62);
+  --flight-faint: rgba(53, 17, 41, 0.42);
+  --flight-line: rgba(92, 34, 63, 0.22);
+  --flight-accent: #ed725e;
+  --flight-ticket: #fff0d1;
+  background: rgba(24, 4, 17, 0.76);
+}
+
+.flight-sheet__panel,
+.flight-detail__panel {
+  border-color: rgba(255, 239, 216, 0.7);
+  color: var(--flight-ink);
+  background:
+    repeating-linear-gradient(to bottom, transparent 0 1.65rem, rgba(95, 36, 64, 0.075) 1.65rem calc(1.65rem + 1px)),
+    #fff0d1;
+  box-shadow:
+    0.3rem 0.38rem 0 rgba(65, 18, 44, 0.42),
+    0 1.5rem 4rem rgba(8, 0, 6, 0.4);
+}
+
+.flight-sheet__header p,
+.flight-detail__header p,
+.flight-choice__header p {
+  color: #bc4d67;
+}
+
+.flight-sheet__header button,
+.flight-detail__header button {
+  border-color: rgba(75, 24, 50, 0.36);
+  border-radius: 0.42rem 0.58rem 0.38rem 0.54rem;
+  color: var(--flight-ink);
+  background: rgba(216, 143, 164, 0.3);
+  box-shadow: 0.12rem 0.15rem 0 rgba(72, 20, 47, 0.15);
+}
+
+.flight-field input,
+.flight-choice__list > button {
+  border-color: rgba(75, 24, 50, 0.32);
+  color: var(--flight-ink);
+  background: rgba(255, 255, 255, 0.42);
+}
+
+.flight-field input::placeholder {
+  color: rgba(53, 17, 41, 0.42);
+}
+
+.flight-sheet__submit,
+.flight-detail__actions button {
+  border-color: rgba(78, 25, 51, 0.38);
+  color: #fff4de;
+  background: #ed725e;
+  box-shadow: 0.17rem 0.2rem 0 rgba(72, 20, 47, 0.18);
+}
+
+.flight-choice__header button,
+.flight-detail__delete-confirm button {
+  border-color: rgba(75, 24, 50, 0.28);
+  color: var(--flight-ink);
+  background: rgba(216, 143, 164, 0.22);
+}
+
+.flight-map {
+  border-color: rgba(75, 24, 50, 0.22);
+  background: #dfe8d2;
+}
+
+.flight-map__land {
+  fill: rgba(118, 153, 92, 0.18);
+  stroke: rgba(53, 17, 41, 0.14);
+}
+
+.flight-map__route {
+  stroke: #b94966;
+}
+
+.flight-map__airport {
+  fill: #fff0d1;
+  stroke: #351129;
+}
+
+.flight-map__plane {
+  fill: #ed725e;
+}
+
+.flight-detail__actions .flight-detail__notify,
+.flight-detail__actions .flight-detail__notify[aria-pressed='true'] {
+  color: #351129;
+  background: #d695aa;
+}
+
+@media (min-width: 38rem) {
+  .flight-detail {
+    background: rgba(24, 4, 17, 0.76);
+  }
+
+  .flight-detail__panel {
+    border-color: rgba(255, 239, 216, 0.7);
+  }
+}

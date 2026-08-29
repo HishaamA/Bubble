@@ -21,6 +21,8 @@ type SharedMomentBubbleProps = {
   onOpen: (moment: PanoramaMoment, event: MouseEvent<HTMLButtonElement>) => void
 }
 
+const BUBBLE_ACCENTS = ['coral', 'sage', 'sky', 'sun', 'lavender'] as const
+
 export function SharedMomentBubble({
   moment,
   order,
@@ -74,6 +76,7 @@ export function SharedMomentBubble({
     <div
       data-memory-id={`shared-${moment.id}`}
       data-memory-label={moment.label}
+      data-bubble-accent={BUBBLE_ACCENTS[order % BUBBLE_ACCENTS.length]}
       data-shared-moment-id={moment.id}
       data-picked-up={pickedUp ? 'true' : 'false'}
       data-owned-by-current-user={
