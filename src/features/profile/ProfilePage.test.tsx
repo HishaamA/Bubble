@@ -2,6 +2,10 @@ import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter, Navigate, Route, Routes } from 'react-router-dom'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import {
+  APP_THEME_STORAGE_KEY,
+  setAppTheme,
+} from '../../theme/AppTheme'
 
 const persistence = vi.hoisted(() => ({
   readProfilePreferences: vi.fn(),
@@ -45,6 +49,7 @@ import { SettingsPage } from './ProfilePage'
 
 beforeEach(() => {
   vi.clearAllMocks()
+  setAppTheme('plum')
   persistence.readProfilePreferences.mockResolvedValue({
     notificationsEnabled: true,
     quietHoursEnabled: true,
@@ -84,6 +89,24 @@ describe('SettingsPage', () => {
       'src',
       'https://images.example/alice.jpg',
     )
+
+    const appearance = screen.getByRole('radiogroup', {
+      name: 'Appearance',
+    })
+    const plumTheme = within(appearance).getByRole('radio', {
+      name: 'Plum: Warm and familiar',
+    })
+    const forestTheme = within(appearance).getByRole('radio', {
+      name: 'Forest: Calm and grounded',
+    })
+    expect(plumTheme).toHaveAttribute('aria-checked', 'true')
+    await user.click(forestTheme)
+    expect(forestTheme).toHaveAttribute('aria-checked', 'true')
+    expect(document.documentElement).toHaveAttribute(
+      'data-bubble-theme',
+      'forest',
+    )
+    expect(window.localStorage.getItem(APP_THEME_STORAGE_KEY)).toBe('forest')
 
     const profileSettings = screen.getByRole('button', {
       name: 'Manage profile settings',

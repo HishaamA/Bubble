@@ -119,6 +119,14 @@ describe('JournalPage', () => {
       'aria-selected',
       'true',
     )
+    expect(screen.getByRole('tab', { name: 'Plans' })).toHaveAttribute(
+      'aria-selected',
+      'false',
+    )
+    expect(screen.getByRole('tab', { name: 'Flights' })).toHaveAttribute(
+      'aria-selected',
+      'false',
+    )
     expect(screen.getByTestId('people-section')).toBeInTheDocument()
     expect(screen.queryByTestId('plans-section')).not.toBeInTheDocument()
     expect(screen.queryByTestId('flights-section')).not.toBeInTheDocument()
@@ -141,6 +149,10 @@ describe('JournalPage', () => {
       'aria-selected',
       'true',
     )
+    expect(screen.getByRole('tab', { name: 'Photos' })).toHaveAttribute(
+      'aria-selected',
+      'false',
+    )
     expect(screen.getByRole('heading', { name: 'Journal' })).toBeInTheDocument()
 
     await user.click(screen.getByRole('tab', { name: 'Flights' }))
@@ -148,6 +160,14 @@ describe('JournalPage', () => {
     expect(screen.queryByTestId('people-section')).not.toBeInTheDocument()
     expect(screen.queryByTestId('plans-section')).not.toBeInTheDocument()
     expect(screen.getByTestId('flights-section')).toBeInTheDocument()
+    expect(screen.getByRole('tab', { name: 'Flights' })).toHaveAttribute(
+      'aria-selected',
+      'true',
+    )
+    expect(screen.getByRole('tab', { name: 'Plans' })).toHaveAttribute(
+      'aria-selected',
+      'false',
+    )
     expect(sectionMocks.people).toHaveBeenCalledTimes(1)
     expect(sectionMocks.plans).toHaveBeenCalledTimes(1)
     expect(sectionMocks.flights).toHaveBeenCalledTimes(1)

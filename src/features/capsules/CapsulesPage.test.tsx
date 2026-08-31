@@ -324,6 +324,43 @@ describe('CapsulesPage', () => {
     await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
   })
 
+  it('renders a one-photo Past Capsule as one accessible recap card', async () => {
+    const store = createMemoryCapsuleStore([unlockedCapsule()])
+    render(<CapsulesPage now={testNow} store={store} />)
+
+    const slider = await screen.findByRole('list', { name: 'Past weekly recaps' })
+    expect(slider).toHaveAttribute('data-single', 'true')
+    expect(slider.children).toHaveLength(1)
+
+    const card = within(slider).getByRole('heading', {
+      name: previousWeekRange,
+    }).closest('article')!
+    const photoStrip = within(card).getByRole('list', {
+      name: '1 photo in this Capsule',
+    })
+    expect(within(photoStrip).getAllByRole('listitem')).toHaveLength(1)
+    expect(photoStrip).not.toContainElement(
+      photoStrip.querySelector('.capsule-photo-strip__more'),
+    )
+    expect(photoStrip).not.toContainElement(
+      photoStrip.querySelector('.capsule-photo-strip__concealed'),
+    )
+    expect(within(card).getByText('1 photo')).toBeInTheDocument()
+    expect(within(card).getByRole('button', { name: 'Play recap' })).toBeEnabled()
+
+    const image = photoStrip.querySelector('img')!
+    expect(image).toHaveAttribute('alt', 'Friday flowers from Simreen')
+    expect(within(photoStrip).getByRole('img', {
+      name: 'Friday flowers from Simreen. Loading preview.',
+    })).toBeInTheDocument()
+
+    fireEvent.load(image)
+
+    expect(within(photoStrip).getByRole('img', {
+      name: 'Friday flowers from Simreen',
+    })).toBe(image)
+  })
+
   it('does not show Past weeks before the family has an uploaded weekly photo', async () => {
     const emptyPastWeek: FamilyCapsule = {
       ...unlockedCapsule(),

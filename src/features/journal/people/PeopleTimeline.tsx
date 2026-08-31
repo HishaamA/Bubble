@@ -1345,14 +1345,14 @@ export function PeopleTimeline({
               className="people-timeline__albums-empty"
               onClick={setupPeople.length ? () => choosePerson(REVIEW_PERSON_ID) : openAddPerson}
             >
-              <span aria-hidden="true">✦</span>
-              <span>
+              <span className="people-timeline__albums-empty-icon" aria-hidden="true">✦</span>
+              <span className="people-timeline__albums-empty-copy">
                 <strong>Your first scrapbook starts here</strong>
                 <small>{setupPeople.length
                   ? 'Matched family photos will collect here.'
                   : 'Add a person to begin matching photos.'}</small>
               </span>
-              <span aria-hidden="true">›</span>
+              <span className="people-timeline__albums-empty-arrow" aria-hidden="true">›</span>
             </button>
           )}
         </section>

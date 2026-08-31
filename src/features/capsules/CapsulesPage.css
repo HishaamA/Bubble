@@ -1349,6 +1349,14 @@
     radial-gradient(circle at 42% 78%, rgba(110, 39, 80, 0.32), transparent 34%),
     repeating-linear-gradient(96deg, rgba(255, 241, 212, 0.014) 0 1px, transparent 1px 5px),
     linear-gradient(148deg, #1b0717 0%, #310a25 46%, #24071c 100%);
+  /*
+   * The earlier light composition gives its four layers explicit tile sizes.
+   * This storybook composition has five full-page layers, so leaving that
+   * list in the cascade made the final canvas gradient repeat in columns.
+   */
+  background-size: auto;
+  background-repeat: no-repeat;
+  background-position: center top;
   background-attachment: local;
 }
 
@@ -2750,5 +2758,336 @@
   .capsule-special-empty {
     padding-inline: 0.6rem;
     gap: 0.45rem;
+  }
+}
+
+/* Compact locked-weekly composition ------------------------------------
+ * Keep the weekly Capsule feeling like an envelope without letting its
+ * concealed preview or seal dominate a phone screen. The lock remains a
+ * single accessible image in the markup; these rules only simplify its
+ * visual treatment.
+ */
+
+.capsule-page__section[aria-labelledby='weekly-capsule-title'] .capsule-collection__photos[data-locked='true'] {
+  min-height: clamp(9.5rem, 39vw, 11rem);
+}
+
+.capsule-page__section[aria-labelledby='weekly-capsule-title'] .capsule-collection__photos[data-locked='true']::before {
+  height: 36%;
+}
+
+.capsule-page__section[aria-labelledby='weekly-capsule-title'] .capsule-collection__photos[data-locked='true']::after {
+  height: 42%;
+  clip-path: polygon(0 14%, 50% 0, 100% 14%, 100% 100%, 0 100%);
+}
+
+.capsule-page__section[aria-labelledby='weekly-capsule-title'] .capsule-collection__photos[data-locked='true'] .capsule-photo-strip:not(.capsule-photo-strip--empty),
+.capsule-page__section[aria-labelledby='weekly-capsule-title'] .capsule-collection__photos[data-locked='true'] .capsule-empty-polaroids {
+  min-height: clamp(7.7rem, 31.5vw, 8.85rem);
+  padding: 0.72rem 0.55rem 2.3rem;
+}
+
+.capsule-page__section[aria-labelledby='weekly-capsule-title'] .capsule-collection__photos[data-locked='true'] .capsule-photo-strip:not(.capsule-photo-strip--empty) li,
+.capsule-page__section[aria-labelledby='weekly-capsule-title'] .capsule-collection__photos[data-locked='true'] .capsule-empty-polaroids li {
+  width: 23%;
+  margin-left: -3.2%;
+  flex-basis: 23%;
+}
+
+.capsule-page__section[aria-labelledby='weekly-capsule-title'] .capsule-collection__photos[data-locked='true'] .capsule-photo-strip:not(.capsule-photo-strip--empty) li:first-child,
+.capsule-page__section[aria-labelledby='weekly-capsule-title'] .capsule-collection__photos[data-locked='true'] .capsule-empty-polaroids li:first-child {
+  margin-left: 0;
+}
+
+.capsule-page__section[aria-labelledby='weekly-capsule-title'] .capsule-collection__photos[data-locked='true'] .capsule-locked-cover {
+  inset: 59% auto auto 50%;
+  display: inline-flex;
+  width: auto;
+  min-width: 8.35rem;
+  height: 2.9rem;
+  min-height: 2.9rem;
+  padding: 0.48rem 0.78rem;
+  align-items: center;
+  justify-content: center;
+  border-color: color-mix(in srgb, var(--capsule-coral) 58%, var(--capsule-paper));
+  border-radius: 999px;
+  gap: 0.48rem;
+  color: var(--capsule-ink);
+  background:
+    repeating-linear-gradient(5deg, color-mix(in srgb, var(--capsule-ink) 2%, transparent) 0 1px, transparent 1px 5px),
+    var(--capsule-paper-light);
+  box-shadow: 0 0.34rem 0.85rem color-mix(in srgb, var(--capsule-shadow) 70%, transparent);
+  transform: translate(-50%, -50%);
+}
+
+.capsule-page__section[aria-labelledby='weekly-capsule-title'] .capsule-collection__photos[data-locked='true'] .capsule-locked-cover__icon {
+  width: 1.45rem;
+  height: 1.45rem;
+  flex: 0 0 1.45rem;
+  color: var(--capsule-ink);
+}
+
+.capsule-page__section[aria-labelledby='weekly-capsule-title'] .capsule-collection__photos[data-locked='true'] .capsule-locked-cover__icon svg {
+  width: 0.92rem;
+  height: 0.92rem;
+}
+
+.capsule-page__section[aria-labelledby='weekly-capsule-title'] .capsule-collection__photos[data-locked='true'] .capsule-locked-cover__message {
+  color: var(--capsule-ink);
+  font-family: var(--font-ui);
+  font-size: 0.68rem;
+  font-weight: 720;
+  letter-spacing: 0.01em;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+@media (max-width: 22rem) {
+  .capsule-page__section[aria-labelledby='weekly-capsule-title'] .capsule-collection__photos[data-locked='true'] {
+    min-height: 9.2rem;
+  }
+
+  .capsule-page__section[aria-labelledby='weekly-capsule-title'] .capsule-collection__photos[data-locked='true'] .capsule-photo-strip:not(.capsule-photo-strip--empty),
+  .capsule-page__section[aria-labelledby='weekly-capsule-title'] .capsule-collection__photos[data-locked='true'] .capsule-empty-polaroids {
+    min-height: 7.4rem;
+  }
+
+  .capsule-page__section[aria-labelledby='weekly-capsule-title'] .capsule-collection__photos[data-locked='true'] .capsule-locked-cover {
+    min-width: 7.8rem;
+    height: 2.75rem;
+    min-height: 2.75rem;
+    padding-inline: 0.66rem;
+  }
+}
+
+/* Past Capsule cards ----------------------------------------------------
+ * Past weeks are quiet, compact keepsakes rather than another scrapbook
+ * page. A small, count-aware mosaic gives every saved photo useful space
+ * (especially a single photo) while the recap information stays easy to
+ * scan on narrow phones.
+ */
+
+.capsule-page__section[aria-labelledby='past-weekly-capsules-title'] .capsule-collection {
+  min-height: 7.25rem;
+  grid-template-columns: minmax(7rem, 42%) minmax(0, 58%);
+  grid-template-rows: auto minmax(0, 1fr);
+  border: 1px solid color-mix(in srgb, var(--capsule-lilac) 72%, var(--capsule-paper));
+  border-radius: 0.95rem;
+  color: var(--capsule-paper);
+  background:
+    linear-gradient(
+      145deg,
+      color-mix(in srgb, var(--theme-canvas-soft, #3b102d) 86%, var(--theme-canvas-deep, #1b0717)),
+      color-mix(in srgb, var(--theme-canvas, #240918) 82%, var(--theme-canvas-deep, #1b0717))
+    );
+  box-shadow: 0 0.42rem 1rem color-mix(in srgb, var(--capsule-shadow) 58%, transparent);
+}
+
+.capsule-page__section[aria-labelledby='past-weekly-capsules-title'] .capsule-collection::before {
+  display: none;
+}
+
+.capsule-page__section[aria-labelledby='past-weekly-capsules-title'] .capsule-collection__photos {
+  min-height: 7.25rem;
+  border: 0;
+  border-right: 1px solid color-mix(in srgb, var(--capsule-paper) 18%, transparent);
+  background: var(--theme-canvas-deep, #1b0717);
+}
+
+.capsule-page__section[aria-labelledby='past-weekly-capsules-title'] .capsule-photo-strip:not(.capsule-photo-strip--empty) {
+  display: grid;
+  height: 100%;
+  min-height: 7.25rem;
+  padding: 0;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-rows: repeat(2, minmax(0, 1fr));
+  gap: 1px;
+  background: color-mix(in srgb, var(--capsule-paper) 16%, var(--theme-canvas-deep, #1b0717));
+}
+
+.capsule-page__section[aria-labelledby='past-weekly-capsules-title'] .capsule-photo-strip:not(.capsule-photo-strip--empty) li {
+  width: auto;
+  height: auto;
+  min-height: 0;
+  align-self: stretch;
+  border: 0;
+  border-radius: 0;
+  background: color-mix(in srgb, var(--capsule-paper-deep) 42%, var(--theme-canvas-deep, #1b0717));
+  box-shadow: none;
+  transform: none;
+}
+
+/* One image fills the entire thumbnail instead of leaving two blank cells. */
+.capsule-page__section[aria-labelledby='past-weekly-capsules-title'] .capsule-photo-strip:not(.capsule-photo-strip--empty) li:only-child {
+  grid-column: 1 / -1;
+  grid-row: 1 / -1;
+}
+
+/* Two images share the full height; three become a calm, asymmetric mosaic. */
+.capsule-page__section[aria-labelledby='past-weekly-capsules-title'] .capsule-photo-strip:not(.capsule-photo-strip--empty) li:first-child:nth-last-child(2),
+.capsule-page__section[aria-labelledby='past-weekly-capsules-title'] .capsule-photo-strip:not(.capsule-photo-strip--empty) li:first-child:nth-last-child(2) ~ li {
+  grid-row: 1 / -1;
+}
+
+.capsule-page__section[aria-labelledby='past-weekly-capsules-title'] .capsule-photo-strip:not(.capsule-photo-strip--empty) li:first-child:nth-last-child(3) {
+  grid-row: 1 / -1;
+}
+
+.capsule-page__section[aria-labelledby='past-weekly-capsules-title'] .capsule-photo-media,
+.capsule-page__section[aria-labelledby='past-weekly-capsules-title'] .capsule-photo-media > img {
+  width: 100%;
+  height: 100%;
+}
+
+.capsule-page__section[aria-labelledby='past-weekly-capsules-title'] .capsule-photo-media > img {
+  object-fit: cover;
+}
+
+.capsule-page__section[aria-labelledby='past-weekly-capsules-title'] .capsule-photo-strip__more {
+  color: var(--capsule-ink);
+  background: var(--capsule-paper-deep) !important;
+  font-family: var(--font-ui);
+  font-size: 0.78rem;
+  font-weight: 760;
+}
+
+.capsule-page__section[aria-labelledby='past-weekly-capsules-title'] .capsule-collection__photos[data-empty='true'] .capsule-empty-polaroids {
+  display: none;
+}
+
+.capsule-page__section[aria-labelledby='past-weekly-capsules-title'] .capsule-collection__photos[data-empty='true'] .capsule-photo-strip--empty {
+  height: 100%;
+  min-height: 7.25rem;
+  padding: 0.8rem;
+  color: color-mix(in srgb, var(--capsule-paper) 72%, transparent);
+  background:
+    radial-gradient(circle at 50% 42%, color-mix(in srgb, var(--capsule-lilac) 22%, transparent), transparent 44%),
+    var(--theme-canvas-deep, #1b0717);
+}
+
+.capsule-page__section[aria-labelledby='past-weekly-capsules-title'] .capsule-collection__photos[data-empty='true'] .capsule-photo-strip--empty p {
+  max-width: 7rem;
+  color: inherit;
+  font-family: var(--font-ui);
+  font-size: 0.58rem;
+  line-height: 1.35;
+}
+
+.capsule-page__section[aria-labelledby='past-weekly-capsules-title'] .capsule-collection__header {
+  min-height: 0;
+  padding: 0.78rem 0.78rem 0.12rem;
+  align-items: flex-start;
+  color: var(--capsule-paper);
+  background: transparent;
+}
+
+.capsule-page__section[aria-labelledby='past-weekly-capsules-title'] .capsule-collection__header h2 {
+  color: var(--capsule-paper);
+  font-family: var(--font-accent);
+  font-size: clamp(1rem, 4.8vw, 1.14rem);
+  font-weight: 580;
+  letter-spacing: -0.025em;
+  line-height: 1.05;
+}
+
+.capsule-page__section[aria-labelledby='past-weekly-capsules-title'] .capsule-collection__details {
+  display: grid;
+  min-height: 0;
+  padding: 0.26rem 0.72rem 0.72rem 0.78rem;
+  grid-template-columns: minmax(0, 1fr) 2.55rem;
+  align-items: end;
+  gap: 0.55rem;
+  color: var(--capsule-paper);
+  background: transparent;
+}
+
+.capsule-page__section[aria-labelledby='past-weekly-capsules-title'] .capsule-collection__details p {
+  align-self: start;
+}
+
+.capsule-page__section[aria-labelledby='past-weekly-capsules-title'] .capsule-collection__details strong {
+  color: var(--capsule-paper);
+  font-family: var(--font-ui);
+  font-size: 0.66rem;
+  font-weight: 720;
+}
+
+.capsule-page__section[aria-labelledby='past-weekly-capsules-title'] .capsule-collection__details p > span {
+  display: -webkit-box;
+  margin-top: 0.16rem;
+  overflow: hidden;
+  color: color-mix(in srgb, var(--capsule-paper) 70%, transparent);
+  font-size: 0.55rem;
+  line-height: 1.25;
+  text-overflow: clip;
+  white-space: normal;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.capsule-page__section[aria-labelledby='past-weekly-capsules-title'] .capsule-open-recap {
+  width: 2.55rem;
+  min-width: 2.55rem;
+  min-height: 2.55rem;
+  align-self: end;
+  border: 0;
+  border-radius: 50%;
+  color: transparent;
+  background: var(--capsule-paper);
+  box-shadow: 0 0.18rem 0 color-mix(in srgb, var(--capsule-shadow) 42%, transparent);
+}
+
+.capsule-page__section[aria-labelledby='past-weekly-capsules-title'] .capsule-open-recap::before {
+  color: var(--capsule-ink);
+  font-size: 0.68rem;
+}
+
+.capsule-page__section[aria-labelledby='past-weekly-capsules-title'] .capsule-open-recap:active:not(:disabled) {
+  box-shadow: none;
+  transform: translateY(0.1rem);
+}
+
+.capsule-page__section[aria-labelledby='past-weekly-capsules-title'] .capsule-open-recap:disabled {
+  color: transparent;
+  background: color-mix(in srgb, var(--capsule-paper) 34%, transparent);
+  box-shadow: none;
+  opacity: 0.72;
+}
+
+.capsule-page__section[aria-labelledby='past-weekly-capsules-title'] .capsule-open-recap:disabled::before {
+  color: color-mix(in srgb, var(--capsule-paper) 72%, transparent);
+  content: '\2014';
+}
+
+@media (max-width: 22rem) {
+  .capsule-page__section[aria-labelledby='past-weekly-capsules-title'] .capsule-collection {
+    min-height: 6.9rem;
+    grid-template-columns: minmax(6.25rem, 40%) minmax(0, 60%);
+  }
+
+  .capsule-page__section[aria-labelledby='past-weekly-capsules-title'] .capsule-collection__photos,
+  .capsule-page__section[aria-labelledby='past-weekly-capsules-title'] .capsule-photo-strip:not(.capsule-photo-strip--empty),
+  .capsule-page__section[aria-labelledby='past-weekly-capsules-title'] .capsule-collection__photos[data-empty='true'] .capsule-photo-strip--empty {
+    min-height: 6.9rem;
+  }
+
+  .capsule-page__section[aria-labelledby='past-weekly-capsules-title'] .capsule-collection__header {
+    padding: 0.68rem 0.65rem 0.08rem;
+  }
+
+  .capsule-page__section[aria-labelledby='past-weekly-capsules-title'] .capsule-collection__header h2 {
+    font-size: 0.96rem;
+  }
+
+  .capsule-page__section[aria-labelledby='past-weekly-capsules-title'] .capsule-collection__details {
+    padding: 0.22rem 0.6rem 0.62rem 0.65rem;
+    grid-template-columns: minmax(0, 1fr) 2.3rem;
+    gap: 0.4rem;
+  }
+
+  .capsule-page__section[aria-labelledby='past-weekly-capsules-title'] .capsule-open-recap {
+    width: 2.3rem;
+    min-width: 2.3rem;
+    min-height: 2.3rem;
   }
 }

@@ -4,6 +4,7 @@ import {
   readProfilePreferences,
   updateProfilePreferences,
 } from '../../services/persistence'
+import { useAppTheme } from '../../theme/AppTheme'
 import { useAuth } from '../auth'
 import '../FeaturePages.css'
 import { FamilySyncPanel, type FamilySyncSnapshot } from './family-sync'
@@ -78,6 +79,7 @@ function getFamilySummary(snapshot: FamilySyncSnapshot | null) {
 export function SettingsPage() {
   const navigate = useNavigate()
   const { signOut, user } = useAuth()
+  const { theme: selectedTheme, setTheme, themes } = useAppTheme()
   const [notifications, setNotifications] = useState(true)
   const [quietHours, setQuietHours] = useState(true)
   const [savingPreference, setSavingPreference] = useState<
@@ -259,6 +261,40 @@ export function SettingsPage() {
             <FamilySyncPanel onSnapshotChange={setFamilySnapshot} />
           </div>
         ) : null}
+      </section>
+
+      <section className="ks-section" aria-labelledby="appearance-title">
+        <div className="ks-section__heading">
+          <h2 id="appearance-title">Appearance</h2>
+        </div>
+        <fieldset className="theme-picker">
+          <legend className="theme-picker__legend">Colour scheme</legend>
+          <div
+            className="theme-picker__options"
+            role="radiogroup"
+            aria-labelledby="appearance-title"
+          >
+            {themes.map((theme) => (
+              <button
+                key={theme.id}
+                className="theme-option"
+                type="button"
+                role="radio"
+                aria-checked={selectedTheme === theme.id}
+                aria-label={`${theme.name}: ${theme.description}`}
+                onClick={() => setTheme(theme.id)}
+              >
+                <span className="theme-option__swatches" aria-hidden="true">
+                  {theme.swatches.map((swatch) => (
+                    <span key={swatch} style={{ backgroundColor: swatch }} />
+                  ))}
+                </span>
+                <strong>{theme.name}</strong>
+                <small>{theme.description}</small>
+              </button>
+            ))}
+          </div>
+        </fieldset>
       </section>
 
       <section className="ks-section" aria-labelledby="preferences-title">

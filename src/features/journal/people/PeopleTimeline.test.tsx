@@ -884,6 +884,106 @@ describe('PeopleTimeline', () => {
     })).toHaveAttribute('aria-valuetext', '1 of 2, January 1, 2020')
   })
 
+  it('adds recognized photos from a newly opened Capsule to the matching slider once', async () => {
+    const namespace = 'people-opened-capsule-scan'
+    const oldPortrait = capsulePhoto(
+      'old-portrait',
+      '2020-01-01T12:00:00.000Z',
+      'Maya in 2020',
+    )
+    const openedPortrait = capsulePhoto(
+      'opened-portrait',
+      '2024-01-01T12:00:00.000Z',
+      'Maya from the Capsule',
+    )
+    const openedWithoutFamily = capsulePhoto(
+      'opened-empty-room',
+      '2025-01-01T12:00:00.000Z',
+      'Empty room from the Capsule',
+    )
+    storedStates.set(namespace, stateWith({
+      people: [{ id: 'maya', name: 'Maya', createdAt: '2026-01-01' }],
+      faceProfiles: { maya: faceProfile(mayaEmbedding) },
+      faceScans: {
+        'photo:old-portrait': faceScan(detectedFace('face-1', mayaEmbedding)),
+      },
+    }))
+    vi.mocked(scanTimelineFaces).mockImplementation(async (photos, checkpoint) => {
+      const faceScans: Record<string, StoredPhotoFaceScan> = {}
+      for (let index = 0; index < photos.length; index += 1) {
+        const photo = photos[index]
+        if (!photo) continue
+        const scan = photo.id === openedPortrait.id
+          ? faceScan(detectedFace('face-1', mayaEmbedding))
+          : faceScan()
+        faceScans[photo.key] = scan
+        await checkpoint?.({
+          photoKey: photo.key,
+          faceScan: scan,
+          failed: false,
+          completed: index + 1,
+          total: photos.length,
+        })
+      }
+      return {
+        faceScans,
+        failedPhotoCount: 0,
+        completedPhotoCount: photos.length,
+      }
+    })
+
+    const renderView = (photos: UnlockedCapsulePhoto[]) => (
+      <MemoryRouter>
+        <PeopleTimeline
+          photos={photos}
+          cacheNamespace={namespace}
+          initialPersonId="maya"
+        />
+      </MemoryRouter>
+    )
+    const view = render(renderView([oldPortrait]))
+
+    expect(await screen.findByRole('slider', {
+      name: 'Timeline position for Maya',
+    })).toHaveAttribute('aria-valuetext', '1 of 1, January 1, 2020')
+    expect(scanTimelineFaces).not.toHaveBeenCalled()
+
+    const openedPhotos = [oldPortrait, openedPortrait, openedWithoutFamily]
+    view.rerender(renderView(openedPhotos))
+
+    await waitFor(() => expect(scanTimelineFaces).toHaveBeenCalledTimes(1))
+    expect(vi.mocked(scanTimelineFaces).mock.calls[0]?.[0]).toEqual([
+      expect.objectContaining({ key: 'photo:opened-portrait' }),
+      expect.objectContaining({ key: 'photo:opened-empty-room' }),
+    ])
+    expect(await screen.findByText(
+      'Photos are organized. New uploads will be matched automatically.',
+    )).toBeInTheDocument()
+    const updatedSlider = screen.getByRole('slider', {
+      name: 'Timeline position for Maya',
+    })
+    expect(updatedSlider).toHaveAttribute(
+      'aria-valuetext',
+      '1 of 2, January 1, 2020',
+    )
+    expect(updatedSlider).toHaveAttribute('max', '1')
+
+    fireEvent.change(updatedSlider, { target: { value: '1' } })
+    expect(await screen.findByRole('img', {
+      name: 'Maya from the Capsule',
+    })).toBeInTheDocument()
+    expect(screen.queryByRole('img', {
+      name: 'Empty room from the Capsule',
+    })).not.toBeInTheDocument()
+
+    view.rerender(renderView([...openedPhotos]))
+
+    expect(scanTimelineFaces).toHaveBeenCalledTimes(1)
+    expect(screen.getByRole('slider', {
+      name: 'Timeline position for Maya',
+    })).toHaveAttribute('max', '1')
+  })
+
   it('preserves manual tags while clearing enrolled faces and detections', async () => {
     const namespace = 'people-clear-face-data'
     storedStates.set(namespace, stateWith({

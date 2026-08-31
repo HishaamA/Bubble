@@ -1,0 +1,453 @@
+/*
+ * Bubble's selectable colour stories. Components consume the semantic
+ * --theme-* contract below; legacy aliases keep older surfaces in step while
+ * feature CSS is gradually moved away from palette-specific token names.
+ */
+:root[data-bubble-theme='plum'] {
+  --theme-canvas: #240918;
+  --theme-canvas-deep: #180611;
+  --theme-canvas-soft: #3a102b;
+  --theme-canvas-highlight: #6e2850;
+  --theme-paper: #fff1d2;
+  --theme-paper-deep: #f2dcb6;
+  --theme-ink: #301027;
+  --theme-muted: #856f79;
+  --theme-accent: #efb43d;
+  --theme-coral: #ed735d;
+  --theme-sage: #a5b37a;
+  --theme-rose: #d895aa;
+  --theme-lilac: #b39ac8;
+  --theme-line: rgba(255, 241, 210, 0.48);
+  --theme-shadow: rgba(12, 1, 8, 0.34);
+}
+
+:root[data-bubble-theme='forest'] {
+  --theme-canvas: #08382f;
+  --theme-canvas-deep: #03251f;
+  --theme-canvas-soft: #105044;
+  --theme-canvas-highlight: #236b5b;
+  --theme-paper: #f5eed6;
+  --theme-paper-deep: #dfd2ad;
+  --theme-ink: #123c32;
+  --theme-muted: #657a71;
+  --theme-accent: #d4b65d;
+  --theme-coral: #dc7c5f;
+  --theme-sage: #9cad78;
+  --theme-rose: #c89585;
+  --theme-lilac: #a7a88a;
+  --theme-line: rgba(245, 238, 214, 0.48);
+  --theme-shadow: rgba(0, 20, 16, 0.38);
+}
+
+:root[data-bubble-theme='midnight'] {
+  --theme-canvas: #07163d;
+  --theme-canvas-deep: #020a24;
+  --theme-canvas-soft: #102657;
+  --theme-canvas-highlight: #24437b;
+  --theme-paper: #fff0d3;
+  --theme-paper-deep: #ead6ad;
+  --theme-ink: #14203f;
+  --theme-muted: #73798a;
+  --theme-accent: #f0b94f;
+  --theme-coral: #ef785b;
+  --theme-sage: #8eaa91;
+  --theme-rose: #d38ea5;
+  --theme-lilac: #9897c8;
+  --theme-line: rgba(255, 240, 211, 0.48);
+  --theme-shadow: rgba(0, 3, 20, 0.42);
+}
+
+:root[data-bubble-theme] {
+  /* Text roles are explicit: ink belongs on paper; on-canvas belongs on dark. */
+  --theme-on-canvas: var(--theme-paper);
+  --theme-on-canvas-muted: color-mix(in srgb, var(--theme-paper) 72%, transparent);
+  --theme-surface: var(--theme-canvas-soft);
+  --theme-surface-deep: var(--theme-canvas-deep);
+  /* Compatibility aliases used throughout the existing feature styles. */
+  --plum-950: var(--theme-canvas-deep);
+  --plum-900: var(--theme-canvas);
+  --plum-850: color-mix(in srgb, var(--theme-canvas) 74%, var(--theme-canvas-soft));
+  --plum-800: var(--theme-canvas-soft);
+  --plum-700: var(--theme-canvas-highlight);
+  --paper: var(--theme-paper);
+  --paper-deep: var(--theme-paper-deep);
+  --cream: var(--theme-paper);
+  --cream-soft: var(--theme-paper-deep);
+  --ink: var(--theme-ink);
+  --ink-muted: var(--theme-muted);
+  --sun: var(--theme-accent);
+  --coral: var(--theme-coral);
+  --sage: var(--theme-sage);
+  --sky: var(--theme-rose);
+  --rose: var(--theme-rose);
+  --lilac: var(--theme-lilac);
+  --focus-ring: var(--theme-accent);
+  color: var(--theme-paper);
+  background: var(--theme-canvas-deep);
+}
+
+:root[data-bubble-theme] body {
+  background: var(--theme-canvas-deep);
+}
+
+:root[data-bubble-theme] .app-viewport {
+  color: var(--theme-paper);
+  background:
+    radial-gradient(
+      circle at 18% 9%,
+      color-mix(in srgb, var(--theme-canvas-highlight) 30%, transparent),
+      transparent 29%
+    ),
+    radial-gradient(
+      circle at 86% 58%,
+      color-mix(in srgb, var(--theme-canvas-soft) 28%, transparent),
+      transparent 34%
+    ),
+    var(--theme-canvas);
+}
+
+/* Moments ---------------------------------------------------------------- */
+:root[data-bubble-theme] .app-content > .memories-screen {
+  --moments-plum: var(--theme-canvas);
+  --moments-plum-deep: var(--theme-canvas-deep);
+  --moments-plum-soft: var(--theme-canvas-soft);
+  --moments-cream: var(--theme-paper);
+  --moments-cream-muted: color-mix(in srgb, var(--theme-paper) 76%, transparent);
+  --moments-coral: var(--theme-coral);
+  --moments-sage: var(--theme-sage);
+  --moments-blush: var(--theme-rose);
+  background-color: var(--theme-canvas);
+  background-image:
+    radial-gradient(
+      circle at 48% 28%,
+      color-mix(in srgb, var(--theme-canvas-highlight) 25%, transparent),
+      transparent 46%
+    ),
+    radial-gradient(
+      circle at 50% 84%,
+      color-mix(in srgb, var(--theme-canvas-soft) 22%, transparent),
+      transparent 46%
+    ),
+    linear-gradient(
+      115deg,
+      var(--theme-canvas-deep),
+      var(--theme-canvas) 48%,
+      color-mix(in srgb, var(--theme-canvas) 80%, var(--theme-canvas-deep))
+    );
+}
+
+:root[data-bubble-theme] .app-content > .memories-screen .round-control {
+  color: var(--theme-ink);
+  background: var(--theme-paper-deep);
+}
+
+:root[data-bubble-theme] .app-viewport[data-app-shell]
+  > .moments-shortcuts
+  > .capture-360-shortcut {
+  color: var(--theme-ink);
+  background: var(--theme-coral);
+}
+
+:root[data-bubble-theme] .app-viewport
+  > .moments-shortcuts
+  > .moments-settings-shortcut {
+  color: var(--theme-ink);
+  background: var(--theme-sage);
+}
+
+:root[data-bubble-theme] .app-content > .memories-screen .memory-bubble__point-count,
+:root[data-bubble-theme] .app-content > .memories-screen .memory-delete-status {
+  background: color-mix(in srgb, var(--theme-canvas-soft) 92%, transparent);
+}
+
+/* Capsule ---------------------------------------------------------------- */
+:root[data-bubble-theme] .capsules-page {
+  --capsule-paper: var(--theme-paper);
+  --capsule-paper-light: color-mix(in srgb, var(--theme-paper) 91%, white);
+  --capsule-paper-deep: var(--theme-paper-deep);
+  --capsule-ink: var(--theme-ink);
+  --capsule-ink-soft: var(--theme-muted);
+  --capsule-coral: var(--theme-coral);
+  --capsule-yellow: var(--theme-accent);
+  --capsule-yellow-deep: color-mix(in srgb, var(--theme-accent) 78%, var(--theme-ink));
+  --capsule-sage: var(--theme-sage);
+  --capsule-lilac: var(--theme-rose);
+  --capsule-line: var(--theme-line);
+  --capsule-shadow: var(--theme-shadow);
+  color: var(--theme-paper);
+  background-color: var(--theme-canvas);
+  background-image:
+    radial-gradient(
+      circle at 12% 4%,
+      color-mix(in srgb, var(--theme-coral) 12%, transparent),
+      transparent 26%
+    ),
+    radial-gradient(
+      circle at 88% 31%,
+      color-mix(in srgb, var(--theme-rose) 11%, transparent),
+      transparent 24%
+    ),
+    radial-gradient(
+      circle at 42% 78%,
+      color-mix(in srgb, var(--theme-canvas-highlight) 28%, transparent),
+      transparent 34%
+    ),
+    repeating-linear-gradient(
+      96deg,
+      color-mix(in srgb, var(--theme-paper) 1.4%, transparent) 0 1px,
+      transparent 1px 5px
+    ),
+    linear-gradient(
+      148deg,
+      var(--theme-canvas-deep) 0%,
+      var(--theme-canvas-soft) 46%,
+      color-mix(in srgb, var(--theme-canvas) 74%, var(--theme-canvas-deep)) 100%
+    );
+  /* Keep the themed canvas continuous through the full scroll area. */
+  background-size: auto;
+  background-repeat: no-repeat;
+  background-position: center top;
+  background-attachment: local;
+}
+
+:root[data-bubble-theme] .capsule-page-header__eyebrow,
+:root[data-bubble-theme] .capsule-page-header .capsule-page-header__eyebrow,
+:root[data-bubble-theme] .capsule-page-header .ks-feature__header-copy h1,
+:root[data-bubble-theme] .capsule-section-heading h2,
+:root[data-bubble-theme] .capsule-section-heading > button {
+  color: var(--theme-paper);
+}
+
+:root[data-bubble-theme] .capsule-page-header .ks-feature__header-copy > p:last-child,
+:root[data-bubble-theme] .capsule-page__announcement,
+:root[data-bubble-theme] .capsule-page__loading {
+  color: color-mix(in srgb, var(--theme-paper) 76%, transparent);
+}
+
+/* Journal ---------------------------------------------------------------- */
+:root[data-bubble-theme] .journal-page {
+  --journal-paper: var(--theme-paper);
+  --journal-paper-deep: var(--theme-paper-deep);
+  --journal-plum: var(--theme-canvas);
+  --journal-plum-soft: var(--theme-canvas-soft);
+  --journal-paper-ink: var(--theme-ink);
+  --journal-ink: var(--theme-paper);
+  --journal-muted: color-mix(in srgb, var(--theme-paper) 72%, transparent);
+  --journal-accent: var(--theme-accent);
+  --journal-coral: var(--theme-coral);
+  --journal-blue: var(--theme-rose);
+  --journal-green: var(--theme-sage);
+  background:
+    radial-gradient(
+      ellipse at 82% -4%,
+      color-mix(in srgb, var(--theme-canvas-highlight) 34%, transparent),
+      transparent 34rem
+    ),
+    radial-gradient(
+      ellipse at -12% 44%,
+      color-mix(in srgb, var(--theme-canvas-soft) 30%, transparent),
+      transparent 26rem
+    ),
+    repeating-linear-gradient(
+      103deg,
+      color-mix(in srgb, var(--theme-paper) 1.2%, transparent) 0 1px,
+      transparent 1px 4px
+    ),
+    var(--theme-canvas);
+}
+
+:root[data-bubble-theme] .journal-page__chrome {
+  background:
+    radial-gradient(
+      ellipse at 82% -8%,
+      color-mix(in srgb, var(--theme-canvas-highlight) 25%, transparent),
+      transparent 25rem
+    ),
+    repeating-linear-gradient(
+      103deg,
+      color-mix(in srgb, var(--theme-paper) 1.2%, transparent) 0 1px,
+      transparent 1px 4px
+    ),
+    color-mix(in srgb, var(--theme-canvas) 97%, transparent);
+  box-shadow: 0 1px color-mix(in srgb, var(--theme-paper) 58%, transparent);
+}
+
+/* Settings --------------------------------------------------------------- */
+:root[data-bubble-theme] .profile-page {
+  --profile-ink: var(--theme-ink);
+  --profile-muted: var(--theme-muted);
+  --profile-paper: var(--theme-paper);
+  --profile-paper-deep: var(--theme-paper-deep);
+  --profile-sun: var(--theme-accent);
+  --profile-coral: var(--theme-coral);
+  --profile-sky: var(--theme-rose);
+  --profile-sage: var(--theme-sage);
+  --profile-lilac: var(--theme-lilac);
+  color: var(--theme-paper);
+  background:
+    radial-gradient(
+      circle at 88% 10%,
+      color-mix(in srgb, var(--theme-rose) 20%, transparent),
+      transparent 25%
+    ),
+    radial-gradient(
+      circle at 9% 43%,
+      color-mix(in srgb, var(--theme-coral) 11%, transparent),
+      transparent 24%
+    ),
+    repeating-linear-gradient(
+      96deg,
+      color-mix(in srgb, var(--theme-paper) 1.2%, transparent) 0 1px,
+      transparent 1px 5px
+    ),
+    var(--theme-canvas);
+}
+
+:root[data-bubble-theme] .profile-page > .app-page-header,
+:root[data-bubble-theme] .profile-page .profile-action-row,
+:root[data-bubble-theme] .profile-page .settings-card,
+:root[data-bubble-theme] .profile-page .family-sync {
+  border-color: var(--theme-line);
+}
+
+.theme-picker {
+  display: grid;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  gap: 0.6rem;
+}
+
+.theme-picker__legend {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.theme-picker__options {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: clamp(0.42rem, 2vw, 0.65rem);
+}
+
+.theme-option {
+  position: relative;
+  display: grid;
+  min-width: 0;
+  min-height: 6.15rem;
+  padding: 0.68rem 0.48rem 0.56rem;
+  place-items: start center;
+  align-content: start;
+  gap: 0.32rem;
+  border: 1px solid color-mix(in srgb, var(--theme-paper) 55%, transparent);
+  border-radius: 0.78rem;
+  color: var(--theme-ink);
+  background: var(--theme-paper);
+  box-shadow: 0 0.22rem 0 var(--theme-shadow);
+  cursor: pointer;
+  transition: transform 150ms ease, box-shadow 150ms ease;
+}
+
+.theme-option[aria-checked='true'] {
+  border-color: var(--theme-paper);
+  box-shadow:
+    0 0 0 2px var(--theme-accent),
+    0 0.25rem 0 var(--theme-shadow);
+  transform: translateY(-0.08rem);
+}
+
+.theme-option[aria-checked='true']::after {
+  position: absolute;
+  top: 0.38rem;
+  right: 0.38rem;
+  display: grid;
+  width: 1.05rem;
+  height: 1.05rem;
+  place-items: center;
+  border-radius: 50%;
+  color: var(--theme-ink);
+  background: var(--theme-accent);
+  content: '\2713';
+  font-size: 0.68rem;
+  font-weight: 800;
+}
+
+.theme-option:active {
+  transform: translateY(0.06rem) scale(0.98);
+}
+
+.theme-option__swatches {
+  display: flex;
+  width: 3.35rem;
+  height: 1.75rem;
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--theme-ink) 24%, transparent);
+  border-radius: 0.48rem;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.22);
+}
+
+.theme-option__swatches span {
+  flex: 1;
+}
+
+.theme-option strong {
+  max-width: 100%;
+  overflow: hidden;
+  font-size: clamp(0.68rem, 3vw, 0.78rem);
+  line-height: 1.1;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.theme-option small {
+  color: var(--theme-muted);
+  font-size: clamp(0.53rem, 2.25vw, 0.62rem);
+  line-height: 1.15;
+  text-align: center;
+}
+
+/* Shared bottom navigation follows the selected cover colour. */
+:root[data-bubble-theme] .tab-bar {
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--theme-canvas) 90%, transparent),
+    color-mix(in srgb, var(--theme-canvas-deep) 98%, transparent)
+  );
+  box-shadow: 0 -0.8rem 1.7rem color-mix(in srgb, var(--theme-shadow) 42%, transparent);
+}
+
+:root[data-bubble-theme] .tab-bar::before {
+  background: color-mix(in srgb, var(--theme-paper) 66%, transparent);
+}
+
+:root[data-bubble-theme] .tab-bar__item {
+  color: color-mix(in srgb, var(--theme-rose) 74%, transparent);
+}
+
+:root[data-bubble-theme] .tab-bar__item--active,
+:root[data-bubble-theme] .tab-bar__item--active .tab-bar__icon {
+  color: var(--theme-paper);
+}
+
+:root[data-bubble-theme] .tab-bar__item--active::after {
+  background: var(--theme-paper);
+}
+
+@media (max-width: 22rem) {
+  .theme-picker__options {
+    gap: 0.34rem;
+  }
+
+  .theme-option {
+    min-height: 5.65rem;
+    padding-inline: 0.34rem;
+  }
+
+  .theme-option__swatches {
+    width: 2.85rem;
+  }
+}

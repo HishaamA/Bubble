@@ -8,12 +8,15 @@ import {
 } from '@clerk/react'
 import './index.css'
 import App from './App.tsx'
+import './theme/AppTheme.css'
 import { installNativeViewportGeometrySync } from './app/nativeViewportGeometry'
 import { clerkAppearance, clerkLocalization } from './clerkUi'
 import { clerkConfigured } from './features/auth'
 import { createNativeClerk } from './features/auth/nativeClerk'
 import { nativeOAuthTransport } from './features/auth/nativeOAuthTransport'
+import { initializeAppTheme } from './theme/AppTheme'
 
+initializeAppTheme()
 installNativeViewportGeometrySync()
 
 const clerkPublishableKey = import.meta.env.VITE_CLERK_PUBLISHABLE_KEY?.trim()
