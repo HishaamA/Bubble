@@ -211,6 +211,10 @@ export class StereoWebGlPanoramaRenderer {
     // never force layout from the animation loop once the buffer has dimensions.
     if (this.canvas.width < 2 || this.canvas.height < 1) this.resize()
     const { gl, canvas } = this
+    // Both lenses receive the same rotation matrix and panorama texture in one
+    // animation frame. Only their physical viewport and optical-center signs
+    // differ; rendering two independent viewers would let their clocks and
+    // sensor samples drift and is a common source of Cardboard eye strain.
     const eyes = resolveStereoViewports(
       canvas.width,
       canvas.height,
@@ -322,6 +326,9 @@ export const StereoPanoramaRenderer = forwardRef<
   }, [])
 
   const stopOrientation = useCallback(() => {
+    // startOrientation may still be waiting for its first usable sample. Settle
+    // that promise before removing every listener so an exit/unmount cannot
+    // leave the parent in a permanent "starting" state or leak sensor access.
     pendingOrientationRef.current?.settle(false)
     pendingOrientationRef.current = null
     const listener = orientationListenerRef.current
@@ -344,6 +351,9 @@ export const StereoPanoramaRenderer = forwardRef<
 
   const startOrientation = useCallback(async (_options?: PanoramaOrientationStartOptions) => {
     if (!rendererRef.current || typeof globalThis.DeviceOrientationEvent === 'undefined') return false
+    // CardboardViewer already consumed any iOS permission prompt in the original
+    // Go gesture. This renderer deliberately ignores the permission flag and
+    // owns only listener attachment, first-sample validation and cleanup.
     stopOrientation()
     poseTracker.prepareForTracking()
     return new Promise<boolean>((resolve) => {
@@ -376,6 +386,9 @@ export const StereoPanoramaRenderer = forwardRef<
         settle(true)
       }
       const handleScreenOrientationChange = () => {
+        // DeviceOrientation axes change with the screen. Rebase on the next
+        // sample instead of composing across coordinate systems and producing a
+        // sudden quarter-turn while the native controller settles landscape.
         poseTracker.markScreenOrientationChanged()
       }
       const handleVisibilityChange = () => {
@@ -492,6 +505,9 @@ export const StereoPanoramaRenderer = forwardRef<
       setStatus('fallback')
       return
     }
+    // Image URLs, including blob: URLs created by the journal, are borrowed.
+    // The renderer cancels callbacks by generation but never revokes the URL,
+    // because the flat-image and native-viewer fallbacks may still share it.
     const image = new Image()
     if (needsAnonymousCors(scene.panorama)) image.crossOrigin = 'anonymous'
     image.decoding = 'async'
@@ -524,6 +540,9 @@ export const StereoPanoramaRenderer = forwardRef<
   }, [scene.panorama])
 
   const pointerDown = useCallback((event: ReactPointerEvent<HTMLCanvasElement>) => {
+    // Touch / pointer drag is a synchronized fallback only while sensors are
+    // absent or stale. Active head tracking remains the sole pose owner so a
+    // finger cannot fight the headset and create a different view per frame.
     if (poseTracker.getState() === 'active') return
     pointerRef.current = { id: event.pointerId, x: event.clientX, y: event.clientY }
     event.currentTarget.setPointerCapture?.(event.pointerId)

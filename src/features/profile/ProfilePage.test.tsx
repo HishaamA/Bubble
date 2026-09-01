@@ -34,16 +34,44 @@ vi.mock('../../services/persistence', () => persistence)
 // SettingsPage owns the disclosures and summary; FamilySyncPanel's backend states
 // have their own focused suite. Keep this test deterministic even when a local
 // developer has valid Supabase credentials in .env.local.
-vi.mock('./family-sync', () => ({
-  FamilySyncPanel: () => (
-    <section aria-label="Family Sync">
-      <h2>Family Sync</h2>
-      <h3>Family groups need a connection</h3>
-      <p>Connect Supabase to securely create a group and share invite codes.</p>
-      <a href="/login">Open secure sign-in</a>
-    </section>
-  ),
-}))
+vi.mock('./family-sync', async () => {
+  const { useEffect } = await import('react')
+  return {
+    FamilySyncPanel: ({
+      onSnapshotChange,
+    }: {
+      onSnapshotChange?: (snapshot: unknown) => void
+    }) => {
+      useEffect(() => {
+        onSnapshotChange?.({
+          kind: 'connected',
+          person: {
+            id: 'person-1',
+            displayName: 'Alice Ahmed',
+            email: 'alice@example.test',
+          },
+          circle: {
+            id: 'family-1',
+            name: 'Ahmed family',
+            role: 'owner',
+            memberCount: 4,
+            shareCode: 'BUB-AAAA-BBBB-CCCC-DDDD-EEEE-FFFF',
+          },
+          pendingRequests: [],
+        })
+      }, [onSnapshotChange])
+
+      return (
+        <section aria-label="Family Sync">
+          <h2>Family Sync</h2>
+          <h3>Family groups need a connection</h3>
+          <p>Connect Supabase to securely create a group and share invite codes.</p>
+          <a href="/login">Open secure sign-in</a>
+        </section>
+      )
+    },
+  }
+})
 
 import { SettingsPage } from './ProfilePage'
 
@@ -89,6 +117,11 @@ describe('SettingsPage', () => {
       'src',
       'https://images.example/alice.jpg',
     )
+    expect(await screen.findByText('Ahmed family')).toBeInTheDocument()
+    expect(screen.getByText(/4 people · you created this group/i)).toBeInTheDocument()
+    expect(
+      screen.queryByRole('heading', { name: 'Family Sync' }),
+    ).not.toBeInTheDocument()
 
     const appearance = screen.getByRole('radiogroup', {
       name: 'Appearance',

@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
@@ -121,6 +121,14 @@ function faceScan(...faces: StoredFaceDetection[]): StoredPhotoFaceScan {
   }
 }
 
+function deferred<Value>() {
+  let resolve!: (value: Value | PromiseLike<Value>) => void
+  const promise = new Promise<Value>((complete) => {
+    resolve = complete
+  })
+  return { promise, resolve }
+}
+
 function RouteState() {
   const location = useLocation()
   const state = location.state as {
@@ -221,6 +229,38 @@ describe('PeopleTimeline', () => {
     expect(scanTimelineFaces).not.toHaveBeenCalled()
   })
 
+  it('returns focus to the people-rail Add person control after cancelling', async () => {
+    const user = userEvent.setup()
+    renderTimeline([])
+    await screen.findByRole('heading', { name: 'Create your people' })
+    const opener = screen.getByRole('button', { name: 'Add person' })
+
+    await user.click(opener)
+    const form = screen.getByRole('form', { name: 'Add a person' })
+    await user.click(within(form).getByRole('button', { name: 'Cancel' }))
+
+    expect(screen.queryByRole('form', { name: 'Add a person' }))
+      .not.toBeInTheDocument()
+    await waitFor(() => expect(opener).toHaveFocus())
+  })
+
+  it('returns focus to the empty scrapbook card after cancelling', async () => {
+    const user = userEvent.setup()
+    renderTimeline([])
+    await screen.findByRole('heading', { name: 'Create your people' })
+    const opener = screen.getByRole('button', {
+      name: /Your first scrapbook starts here/i,
+    })
+
+    await user.click(opener)
+    const form = screen.getByRole('form', { name: 'Add a person' })
+    await user.click(within(form).getByRole('button', { name: 'Cancel' }))
+
+    expect(screen.queryByRole('form', { name: 'Add a person' }))
+      .not.toBeInTheDocument()
+    await waitFor(() => expect(opener).toHaveFocus())
+  })
+
   it('keeps every family member in the compact people rail and adds more from its trailing circle', async () => {
     const namespace = 'people-notes-rail'
     storedStates.set(namespace, stateWith({
@@ -316,6 +356,33 @@ describe('PeopleTimeline', () => {
     expect(screen.getByRole('status')).toHaveTextContent(
       'Maya is ready. Add family photos',
     )
+    await waitFor(() => expect(addPersonButton).toHaveFocus())
+  })
+
+  it('starts one enrollment scan when add-person is submitted twice in one turn', async () => {
+    const user = userEvent.setup()
+    const pendingScan = deferred<Awaited<ReturnType<typeof scanReferencePortrait>>>()
+    vi.mocked(scanReferencePortrait).mockReturnValue(pendingScan.promise)
+    renderTimeline([])
+    await screen.findByRole('heading', { name: 'Create your people' })
+
+    await user.click(screen.getByRole('button', { name: 'Add person' }))
+    const form = screen.getByRole('form', { name: 'Add a person' })
+    await user.type(within(form).getByRole('textbox', { name: 'Name' }), 'Maya')
+    await user.upload(
+      within(form).getByLabelText(/^Face photo/),
+      new File(['portrait'], 'maya.jpg', { type: 'image/jpeg' }),
+    )
+
+    fireEvent.submit(form)
+    fireEvent.submit(form)
+
+    expect(scanReferencePortrait).toHaveBeenCalledTimes(1)
+    await act(async () => {
+      pendingScan.resolve({ embedding: mayaEmbedding, quality: 0.9 })
+      await pendingScan.promise
+    })
+    expect(await screen.findByRole('button', { name: 'Maya' })).toBeInTheDocument()
   })
 
   it('enrolls several face views together and keeps every successful reference', async () => {
@@ -358,6 +425,72 @@ describe('PeopleTimeline', () => {
 
     await user.click(screen.getByRole('button', { name: 'Rename or remove Maya' }))
     expect(screen.getByText('2 face views ready')).toBeInTheDocument()
+  })
+
+  it('keeps the person manager compact while clearly reporting chosen face photos', async () => {
+    const namespace = 'people-manage-picker'
+    storedStates.set(namespace, stateWith({
+      people: [{ id: 'maya', name: 'Maya', createdAt: '2026-01-01' }],
+      faceProfiles: { maya: faceProfile(mayaEmbedding) },
+    }))
+    const user = userEvent.setup()
+    renderTimeline([], namespace, { initialPersonId: 'maya' })
+
+    await user.click(await screen.findByRole('button', {
+      name: 'Rename or remove Maya',
+    }))
+    const manager = screen.getByRole('region', { name: 'Manage Maya' })
+    const picker = within(manager).getByLabelText('Face photo for Maya')
+    const addViews = within(manager).getByRole('button', { name: 'Add face views' })
+
+    expect(within(manager).getByText('Person details')).toBeInTheDocument()
+    expect(within(manager).getByText('Up to 5 photos')).toBeInTheDocument()
+    expect(addViews).toBeDisabled()
+
+    await user.upload(
+      picker,
+      new File(['side'], 'maya-side.jpg', { type: 'image/jpeg' }),
+    )
+
+    expect(within(manager).getByText('1 photo selected')).toBeInTheDocument()
+    expect(addViews).toBeEnabled()
+    await user.click(within(manager).getByRole('button', { name: 'Done' }))
+    expect(screen.queryByRole('region', { name: 'Manage Maya' }))
+      .not.toBeInTheDocument()
+  })
+
+  it('starts one reference scan when add-face-views is submitted twice in one turn', async () => {
+    const namespace = 'people-reference-submit-latch'
+    storedStates.set(namespace, stateWith({
+      people: [{ id: 'maya', name: 'Maya', createdAt: '2026-01-01' }],
+      faceProfiles: { maya: faceProfile(mayaEmbedding) },
+    }))
+    const pendingScan = deferred<Awaited<ReturnType<typeof scanReferencePortrait>>>()
+    vi.mocked(scanReferencePortrait).mockReturnValue(pendingScan.promise)
+    const user = userEvent.setup()
+    renderTimeline([], namespace, { initialPersonId: 'maya' })
+
+    await user.click(await screen.findByRole('button', {
+      name: 'Rename or remove Maya',
+    }))
+    const form = screen.getByRole('form', { name: 'Add face photos for Maya' })
+    await user.upload(
+      within(form).getByLabelText('Face photo for Maya'),
+      new File(['side'], 'maya-side.jpg', { type: 'image/jpeg' }),
+    )
+
+    fireEvent.submit(form)
+    fireEvent.submit(form)
+
+    expect(scanReferencePortrait).toHaveBeenCalledTimes(1)
+    await act(async () => {
+      pendingScan.resolve({ embedding: leenaEmbedding, quality: 0.86 })
+      await pendingScan.promise
+    })
+    await waitFor(() => expect(
+      (storedStates.get(namespace) as PeopleTimelineState)
+        .faceProfiles.maya?.references,
+    ).toHaveLength(2))
   })
 
   it('announces when a person still needs a face photo', async () => {
@@ -666,6 +799,49 @@ describe('PeopleTimeline', () => {
     expect(scanTimelineFaces).not.toHaveBeenCalled()
   })
 
+  it('expands See all to reveal every face-matched album without selecting All photos', async () => {
+    const namespace = 'people-see-all-albums'
+    const people = ['maya', 'leena', 'omar'].map((id) => ({
+      id,
+      name: id[0]!.toLocaleUpperCase() + id.slice(1),
+      createdAt: '2026-01-01',
+    }))
+    storedStates.set(namespace, stateWith({
+      people,
+      assignments: people.map(({ id }) => ({
+        photoKey: `photo:${id}`,
+        personId: id,
+        source: 'manual' as const,
+        confirmedAt: '2026-01-02T00:00:00.000Z',
+      })),
+    }))
+    const user = userEvent.setup()
+    renderTimeline(people.map(({ id, name }, index) => capsulePhoto(
+      id,
+      `202${index}-01-01T12:00:00.000Z`,
+      `${name} portrait`,
+    )), namespace)
+
+    await screen.findByRole('button', {
+      name: "Open Maya's scrapbook, 1 matched photo",
+    })
+    expect(screen.getByRole('button', {
+      name: "Open Leena's scrapbook, 1 matched photo",
+    })).toBeInTheDocument()
+    expect(screen.queryByRole('button', {
+      name: "Open Omar's scrapbook, 1 matched photo",
+    })).not.toBeInTheDocument()
+
+    const seeAll = screen.getByRole('button', { name: 'See all' })
+    expect(seeAll).toHaveAttribute('aria-expanded', 'false')
+    await user.click(seeAll)
+
+    expect(screen.getByRole('button', {
+      name: "Open Omar's scrapbook, 1 matched photo",
+    })).toBeInTheDocument()
+    expect(timelineChip('All photos')).toHaveAttribute('aria-pressed', 'false')
+  })
+
   it('opens a recognized person in the dedicated scrapbook route when provided', async () => {
     const namespace = 'people-open-scrapbook'
     storedStates.set(namespace, stateWith({
@@ -766,6 +942,45 @@ describe('PeopleTimeline', () => {
     expect(screen.getByText('2 little moments, gathered together.')).toBeInTheDocument()
     expect(screen.getByRole('img', { name: 'Maya portrait' })).toBeInTheDocument()
     expect(screen.getByRole('img', { name: 'Everyone together' })).toBeInTheDocument()
+  })
+
+  it('opens the existing person manager from a supported scrapbook route', async () => {
+    const namespace = 'people-scrapbook-manage'
+    storedStates.set(namespace, stateWith({
+      people: [{ id: 'maya', name: 'Maya', createdAt: '2026-01-01' }],
+      faceProfiles: { maya: faceProfile(mayaEmbedding) },
+    }))
+    const onClosePersonAlbum = vi.fn()
+    const user = userEvent.setup()
+    const view = render(
+      <MemoryRouter>
+        <PeopleTimeline
+          photos={[]}
+          cacheNamespace={namespace}
+          initialPersonId="maya"
+          personAlbumOpen
+          onClosePersonAlbum={onClosePersonAlbum}
+        />
+      </MemoryRouter>,
+    )
+
+    await user.click(await screen.findByRole('button', { name: 'Manage Maya' }))
+    expect(onClosePersonAlbum).toHaveBeenCalledOnce()
+
+    view.rerender(
+      <MemoryRouter>
+        <PeopleTimeline
+          photos={[]}
+          cacheNamespace={namespace}
+          onClosePersonAlbum={onClosePersonAlbum}
+        />
+      </MemoryRouter>,
+    )
+
+    const renameForm = await screen.findByRole('form', { name: 'Rename Maya' })
+    await waitFor(() => expect(
+      within(renameForm).getByRole('textbox', { name: 'Name' }),
+    ).toHaveFocus())
   })
 
   it('does not treat duplicate detections of one person as a Family photo', async () => {

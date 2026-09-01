@@ -95,10 +95,24 @@ function CardboardSetupContents({
   const landscape = useLandscapeOrientation()
   const closeButtonRef = useRef<HTMLButtonElement>(null)
   const continueButtonRef = useRef<HTMLButtonElement>(null)
+  const previousFocusRef = useRef<HTMLElement | null>(null)
 
   useLayoutEffect(() => {
     if (!open) return
+    // This flow is mounted as a modal over the memory screen. Capture the exact
+    // invoking control before moving focus, then restore it whether dismissal came
+    // from the close button or Escape so keyboard users do not restart the page.
+    previousFocusRef.current =
+      document.activeElement instanceof HTMLElement
+        ? document.activeElement
+        : null
     closeButtonRef.current?.focus({ preventScroll: true })
+
+    return () => {
+      const previous = previousFocusRef.current
+      if (previous?.isConnected) previous.focus({ preventScroll: true })
+      previousFocusRef.current = null
+    }
   }, [open])
 
   useLayoutEffect(() => {
@@ -121,6 +135,9 @@ function CardboardSetupContents({
 
   useEffect(() => {
     if (step !== 'rotate' || !landscape) return
+    // Device rotation is the preferred transition. The explicit override remains
+    // separate state so an undetected orientation can never masquerade as native
+    // ownership when the viewer later decides how to restore the app.
     setForceLandscape(false)
     setStep('cardboard')
   }, [landscape, step])

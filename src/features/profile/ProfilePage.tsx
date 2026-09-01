@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
+import { AppWhimsy } from '../../app/AppWhimsy'
 import {
   readProfilePreferences,
   updateProfilePreferences,
@@ -49,6 +50,13 @@ function ToggleRow({
 }
 
 function getFamilySummary(snapshot: FamilySyncSnapshot | null) {
+  if (!snapshot) {
+    return {
+      title: 'Checking family group',
+      detail: 'Loading your secure family details',
+    }
+  }
+
   if (snapshot?.kind === 'connected') {
     return {
       title: snapshot.circle.name,
@@ -88,6 +96,9 @@ export function SettingsPage() {
   const [preferenceError, setPreferenceError] = useState<string | null>(null)
   const [showProfileSettings, setShowProfileSettings] = useState(false)
   const [showFamilySync, setShowFamilySync] = useState(false)
+  // The compact settings row needs the same authoritative snapshot as the full
+  // panel. Keep one panel mounted (but hidden) so it can resolve that identity once,
+  // then preserve its forms and request state when the disclosure is toggled.
   const [familySnapshot, setFamilySnapshot] =
     useState<FamilySyncSnapshot | null>(null)
   const familySummary = getFamilySummary(familySnapshot)
@@ -161,6 +172,7 @@ export function SettingsPage() {
 
   return (
     <section className="ks-feature profile-page" aria-labelledby="settings-title">
+      <AppWhimsy page="settings" />
       <header className="ks-feature__header app-page-header">
         <div className="ks-feature__header-copy">
           <p className="eyebrow app-page-header__eyebrow">Our family</p>
@@ -256,11 +268,9 @@ export function SettingsPage() {
           </span>
           <span aria-hidden="true">{showFamilySync ? '−' : '›'}</span>
         </button>
-        {showFamilySync ? (
-          <div id="profile-family-group-panel">
-            <FamilySyncPanel onSnapshotChange={setFamilySnapshot} />
-          </div>
-        ) : null}
+        <div id="profile-family-group-panel" hidden={!showFamilySync}>
+          <FamilySyncPanel onSnapshotChange={setFamilySnapshot} />
+        </div>
       </section>
 
       <section className="ks-section" aria-labelledby="appearance-title">

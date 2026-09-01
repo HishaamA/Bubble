@@ -42,7 +42,6 @@ describe('AppTabBar', () => {
   it.each([
     '/memory/summer-evening',
     '/capture?mode=manual',
-    '/relay',
   ])(
     'keeps Moments active at %s',
     (path) => {

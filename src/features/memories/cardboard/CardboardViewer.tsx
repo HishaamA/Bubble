@@ -181,6 +181,9 @@ async function leaveOwnedFullscreen(
   root: HTMLElement | null,
   fullscreenWasRequested: boolean,
 ): Promise<void> {
+  // Fullscreen is shared browser state. Only unwind the exact element this
+  // session successfully promoted, otherwise leaving VR could collapse a
+  // fullscreen surface owned by another feature or a newer Cardboard session.
   if (!fullscreenWasRequested) return
 
   const fullscreenDocument = document as WebkitFullscreenDocument
@@ -220,6 +223,18 @@ function unlockOrientation(): void {
   } catch {
     // Some browsers expose unlock but reject it outside fullscreen.
   }
+}
+
+function focusableDialogControls(root: HTMLElement): HTMLElement[] {
+  return Array.from(
+    root.querySelectorAll<HTMLElement>(
+      'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
+    ),
+  ).filter(
+    (element) =>
+      !element.hasAttribute('hidden') &&
+      element.getAttribute('aria-hidden') !== 'true',
+  )
 }
 
 function makeAppViewportInert(): () => void {
@@ -450,7 +465,9 @@ export const CardboardViewer = forwardRef<
 
     // Leave the synthetic panorama host route immediately. Native orientation
     // restoration can finish a moment later on iPhone and must never keep the
-    // user stranded on the underlying Sunday dinner memory.
+    // user stranded on the underlying Sunday dinner memory. Restoration is
+    // still awaited by the handle so a caller that needs stable portrait
+    // geometry can await exit(), while the visible route is not held hostage.
     callbacksRef.current.onActiveChange?.(false)
     callbacksRef.current.onExit?.()
 
@@ -518,8 +535,11 @@ export const CardboardViewer = forwardRef<
     }
     callbacksRef.current.onActiveChange?.(true)
 
-    // These calls begin inside the originating click. This is important for
-    // fullscreen, native rotation, and iOS' motion permission prompt.
+    // These calls begin inside the originating click because browser fullscreen,
+    // native rotation and iOS motion permission all consume the same transient
+    // user activation. iOS uses the native bridge without DOM fullscreen;
+    // Android asks for both because an installed bridge can exist while its
+    // immersive flags fail, and the web build relies on DOM fullscreen alone.
     const nativeOrientationCapable = nativeCardboardOrientationAvailable()
     const nativeDomFullscreenFallback =
       shouldRequestCardboardDomFullscreenFallback()
@@ -652,9 +672,28 @@ export const CardboardViewer = forwardRef<
 
     const root = rootRef.current
     const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key !== 'Escape') return
-      event.preventDefault()
-      void exit()
+      if (event.key === 'Escape') {
+        event.preventDefault()
+        void exit()
+        return
+      }
+      if (event.key !== 'Tab' || !root) return
+
+      // The viewer is portalled outside the inert app viewport. Explicitly
+      // cycle its controls so a hardware-keyboard user cannot tab into browser
+      // chrome or another portal while the modal headset surface owns input.
+      const controls = focusableDialogControls(root)
+      const first = controls[0]
+      const last = controls.at(-1)
+      if (!first || !last) return
+      const focused = document.activeElement
+      if (event.shiftKey && (focused === first || !root.contains(focused))) {
+        event.preventDefault()
+        last.focus()
+      } else if (!event.shiftKey && (focused === last || !root.contains(focused))) {
+        event.preventDefault()
+        first.focus()
+      }
     }
     const handleFullscreenChange = () => {
       if (

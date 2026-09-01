@@ -147,6 +147,25 @@ describe('PanoramaViewer accessibility controls', () => {
     expect(viewerMocks.panBy).toHaveBeenCalledWith(0, 8)
   })
 
+  it('offers equivalent zoom buttons and focused keyboard shortcuts', async () => {
+    const user = userEvent.setup()
+    const { container } = render(<PanoramaViewer scenes={scenes} />)
+    const zoomIn = await screen.findByRole('button', { name: 'Zoom in' })
+    const zoomOut = screen.getByRole('button', { name: 'Zoom out' })
+    await waitFor(() => expect(zoomIn).toBeEnabled())
+
+    await user.click(zoomIn)
+    await user.click(zoomOut)
+    const canvas = container.querySelector<HTMLDivElement>(
+      '.ks-panorama__canvas',
+    ) as HTMLDivElement
+    fireEvent.keyDown(canvas, { key: '+' })
+    fireEvent.keyDown(canvas, { key: '-' })
+
+    expect(viewerMocks.zoomIn).toHaveBeenCalledTimes(2)
+    expect(viewerMocks.zoomOut).toHaveBeenCalledTimes(2)
+  })
+
   it('exposes an immediate camera snapshot bridge for Cardboard mirroring', async () => {
     const ref = createRef<PanoramaViewerHandle>()
     const view = { pitch: 14, yaw: -32, hfov: 96 }
@@ -230,6 +249,25 @@ describe('PanoramaViewer accessibility controls', () => {
     expect(onPointSelect).toHaveBeenCalledWith({ pitch: -8, yaw: 42 })
   })
 
+  it('cancels keyboard point selection with Escape', async () => {
+    const onPointSelectionCancel = vi.fn()
+    const { container } = render(
+      <PanoramaViewer
+        scenes={scenes}
+        pointSelectionEnabled
+        onPointSelectionCancel={onPointSelectionCancel}
+      />,
+    )
+    await waitFor(() => expect(viewerMocks.mount).toHaveBeenCalled())
+    const canvas = container.querySelector<HTMLDivElement>(
+      '.ks-panorama__canvas',
+    ) as HTMLDivElement
+
+    fireEvent.keyDown(canvas, { key: 'Escape' })
+
+    expect(onPointSelectionCancel).toHaveBeenCalledOnce()
+  })
+
   it('makes the canvas inert in flat mode and does not intercept ArrowDown on its scene select', async () => {
     const user = userEvent.setup()
     const { container } = render(<PanoramaViewer scenes={scenes} />)
@@ -281,6 +319,112 @@ describe('PanoramaViewer accessibility controls', () => {
     expect(
       screen.getByRole('img', { name: 'A sunny family courtyard.' }),
     ).toBeVisible()
+  })
+
+  it('changes scenes in flat mode and returns focus to the interactive canvas', async () => {
+    const user = userEvent.setup()
+    const { container } = render(<PanoramaViewer scenes={scenes} />)
+    const flatViewButton = await screen.findByRole('button', {
+      name: 'View as a flat image',
+    })
+    await waitFor(() => expect(flatViewButton).toBeEnabled())
+    await user.click(flatViewButton)
+
+    await user.selectOptions(
+      screen.getByRole('combobox', { name: 'Memory' }),
+      'courtyard',
+    )
+    expect(viewerMocks.changeScene).toHaveBeenCalledWith('courtyard')
+    expect(
+      screen.getByRole('img', { name: 'A sunny family courtyard.' }),
+    ).toBeVisible()
+
+    viewerMocks.resize.mockClear()
+    await user.click(
+      screen.getByRole('button', { name: 'Return to interactive panorama' }),
+    )
+    const canvas = container.querySelector<HTMLDivElement>(
+      '.ks-panorama__canvas',
+    ) as HTMLDivElement
+    await waitFor(() => expect(canvas).toHaveFocus())
+    expect(viewerMocks.resize).toHaveBeenCalledOnce()
+  })
+
+  it('turns successful motion control back off through the same button', async () => {
+    viewerMocks.isOrientationSupported.mockReturnValue(true)
+    viewerMocks.isOrientationActive.mockReturnValue(true)
+    viewerMocks.startOrientation.mockResolvedValue(true)
+    const user = userEvent.setup()
+    render(<PanoramaViewer scenes={scenes} />)
+
+    const enableMotion = await screen.findByRole('button', {
+      name: 'Turn motion control on',
+    })
+    await waitFor(() => expect(enableMotion).toBeEnabled())
+    await user.click(enableMotion)
+
+    const disableMotion = await screen.findByRole('button', {
+      name: 'Turn motion control off',
+    })
+    expect(disableMotion).toHaveAttribute('aria-pressed', 'true')
+    await user.click(disableMotion)
+
+    expect(viewerMocks.stopOrientation).toHaveBeenCalledOnce()
+    expect(
+      screen.getByRole('button', { name: 'Turn motion control on' }),
+    ).toHaveAttribute('aria-pressed', 'false')
+  })
+
+  it('keeps motion state accurate when Pannellum changes a linked scene', async () => {
+    viewerMocks.isOrientationSupported.mockReturnValue(true)
+    viewerMocks.isOrientationActive.mockReturnValue(true)
+    viewerMocks.startOrientation.mockResolvedValue(true)
+    const user = userEvent.setup()
+    render(<PanoramaViewer scenes={scenes} />)
+    const enableMotion = await screen.findByRole('button', {
+      name: 'Turn motion control on',
+    })
+    await waitFor(() => expect(enableMotion).toBeEnabled())
+    await user.click(enableMotion)
+    await screen.findByRole('button', { name: 'Turn motion control off' })
+
+    const mountOptions = viewerMocks.mount.mock.calls[0][1]
+    mountOptions.onSceneChange?.('courtyard')
+
+    expect(
+      await screen.findByRole('button', { name: 'Turn motion control off' }),
+    ).toHaveAttribute('aria-pressed', 'true')
+  })
+
+  it('lets manual keyboard panning supersede an unresolved motion request', async () => {
+    let resolvePermission: ((active: boolean) => void) | undefined
+    viewerMocks.isOrientationSupported.mockReturnValue(true)
+    viewerMocks.isOrientationActive.mockReturnValue(true)
+    viewerMocks.startOrientation.mockReturnValue(
+      new Promise<boolean>((resolve) => {
+        resolvePermission = resolve
+      }),
+    )
+    const user = userEvent.setup()
+    const { container } = render(<PanoramaViewer scenes={scenes} />)
+    const motionButton = await screen.findByRole('button', {
+      name: 'Turn motion control on',
+    })
+    await waitFor(() => expect(motionButton).toBeEnabled())
+    await user.click(motionButton)
+
+    const canvas = container.querySelector<HTMLDivElement>(
+      '.ks-panorama__canvas',
+    ) as HTMLDivElement
+    fireEvent.keyDown(canvas, { key: 'ArrowLeft' })
+    resolvePermission?.(true)
+
+    await waitFor(() => expect(motionButton).toHaveAttribute('aria-busy', 'false'))
+    expect(viewerMocks.panBy).toHaveBeenCalledWith(0, -8)
+    expect(motionButton).toHaveAttribute('aria-pressed', 'false')
+    expect(
+      screen.queryByText(/motion access was not granted/i),
+    ).not.toBeInTheDocument()
   })
 
   it('keeps motion unpressed until async permission succeeds and announces denial', async () => {

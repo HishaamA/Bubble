@@ -52,6 +52,9 @@ function addKeyboardActivation(element: HTMLElement): void {
   if (element.dataset.keyboardActivation === 'true') return
   element.dataset.keyboardActivation = 'true'
   element.addEventListener('keydown', (event) => {
+    // Pannellum creates hotspots as clickable divs. Mirroring native button
+    // activation here makes its existing click / scene-change path reachable
+    // without inventing a second action path that could diverge from pointer use.
     if (event.key !== 'Enter' && event.key !== ' ') return
     event.preventDefault()
     element.click()
@@ -102,6 +105,9 @@ function mapHotSpot(hotSpot: PanoramaHotSpot): PannellumHotSpotConfig {
 function mapScene(scene: PanoramaScene) {
   return {
     type: 'equirectangular' as const,
+    // The adapter borrows this URL. In particular, it must not revoke blob:
+    // sources during destroy because a flat fallback, Cardboard bridge or a
+    // freshly mounted adapter may still be displaying the same journal asset.
     panorama: scene.panorama,
     title: scene.title,
     preview: scene.preview,
@@ -156,6 +162,9 @@ function buildConfig(options: PanoramaMountOptions): PannellumConfig {
     showZoomCtrl: false,
     showFullscreenCtrl: false,
     orientationOnByDefault: false,
+    // React exposes one scoped keyboard surface with documented shortcuts.
+    // Disable Pannellum's document-level handler to prevent one keystroke from
+    // panning twice or stealing arrows from the accessible flat-mode picker.
     disableKeyboardCtrl: true,
     ignoreGPanoXMP: true,
     escapeHTML: true,
@@ -196,6 +205,9 @@ export function createPannellumAdapter(
   }
 
   const destroy = () => {
+    // Version counters invalidate both kinds of async work: a runtime import
+    // resolving after unmount and an iOS permission promise resolving after
+    // stop / scene replacement. The underlying APIs are not abortable.
     mountVersion += 1
     orientationRequestVersion += 1
     destroyViewer()
@@ -206,6 +218,8 @@ export function createPannellumAdapter(
     container: HTMLElement,
     options: PanoramaMountOptions,
   ): Promise<void> => {
+    // Pannellum owns imperative DOM and global listeners, so remounting must
+    // fully destroy the prior instance before another one touches the container.
     destroy()
     const requestedMount = mountVersion
     const config = buildConfig(options)
@@ -257,6 +271,8 @@ export function createPannellumAdapter(
       viewer !== orientationViewer ||
       requestedOrientation !== orientationRequestVersion
     ) {
+      // Permission may resolve after the component stopped orientation or
+      // mounted a replacement viewer. Never attach sensors to that stale owner.
       return false
     }
 
@@ -267,6 +283,14 @@ export function createPannellumAdapter(
       orientationViewer.startOrientation()
       await Promise.resolve()
     } catch {
+      // A runtime can attach its listener before a platform sensor exception is
+      // thrown. Always ask that same captured instance to unwind, even if a new
+      // viewer has since replaced it.
+      try {
+        orientationViewer.stopOrientation()
+      } catch {
+        // The React wrapper will remain in drag mode; cleanup is best effort.
+      }
       return false
     }
     return (

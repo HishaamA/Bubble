@@ -10,9 +10,9 @@ import {
   type PointerEvent as ReactPointerEvent,
 } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
-import { Icon } from '../../components/Icon'
+import { AppWhimsy } from '../../app/AppWhimsy'
 import { formatLocalDay, toLocalIsoDate } from '../../lib/appDate'
-import { Capture360Shortcut } from '../capture'
+import { Capture360Shortcut } from '../capture/Capture360Shortcut'
 import { calculateBubbleMotion } from './bubbleMotion'
 import {
   constrainBubblePosition,
@@ -88,6 +88,8 @@ export function MemoryConstellation({
   const fieldRef = useRef<HTMLDivElement>(null)
   const spaceRef = useRef<HTMLDivElement>(null)
   const entryMemoryIdRef = useRef<string | null>(null)
+  // Choose the opening bubble exactly once. Recomputing this after an upload or
+  // deletion would make the whole constellation jump under the user's finger.
   if (entryMemoryIdRef.current === null) {
     const requestedMemoryExists = restoreMemoryId
       ? entryCandidateIds.includes(restoreMemoryId) ||
@@ -136,6 +138,7 @@ export function MemoryConstellation({
   >(null)
   const [deletingMomentId, setDeletingMomentId] = useState<string | null>(null)
   const [deleteError, setDeleteError] = useState('')
+  const deletingMomentIdRef = useRef<string | null>(null)
   const reducedMotionRef = useRef(
     typeof window !== 'undefined' &&
       typeof window.matchMedia === 'function' &&
@@ -206,6 +209,8 @@ export function MemoryConstellation({
   }, [])
 
   function scheduleRender() {
+    // Pointer, resize, and focus events can all fire in one frame. Coalescing
+    // their DOM writes avoids layout thrashing on older phones.
     if (animationFrameRef.current === null) {
       animationFrameRef.current = window.requestAnimationFrame(renderBubbleMotion)
     }
@@ -321,6 +326,8 @@ export function MemoryConstellation({
         ? 'true'
         : 'false'
 
+    // Motion and center-depth are composed here, rather than through React
+    // state, because this path runs for every pointer frame.
     const renderedBubbles: Array<{
       bubble: HTMLElement
       motionElement: HTMLElement
@@ -454,6 +461,8 @@ export function MemoryConstellation({
       top: bubble.offsetTop,
       left: bubble.offsetLeft,
     }
+    // Store positions in world coordinates. The viewport may pan while a
+    // bubble is held, but its saved placement must remain device-independent.
     pickedBubbleRef.current = {
       element: bubble,
       id: memoryId,
@@ -529,6 +538,8 @@ export function MemoryConstellation({
       setDeletionModeMomentId(null)
     }
     clearHoldTimer()
+    // The second press in deletion mode picks up immediately. Otherwise a hold
+    // distinguishes moving a bubble from opening it or panning empty space.
     if (targetBubble && targetMemoryId && !deletingMomentId) {
       if (ownedMomentId && deletionModeMomentId === ownedMomentId) {
         beginBubblePickup(targetBubble, targetMemoryId, ownedMomentId)
@@ -707,6 +718,8 @@ export function MemoryConstellation({
   }
 
   function armPointerClickSuppression() {
+    // Mobile browsers synthesize a click after pointerup. Without this short
+    // guard, dropping a bubble would also navigate into that memory.
     suppressNextPointerClickRef.current = true
     if (suppressResetTimerRef.current !== null) {
       window.clearTimeout(suppressResetTimerRef.current)
@@ -758,7 +771,7 @@ export function MemoryConstellation({
     if (
       moment.ownedByCurrentUser !== true ||
       !onDelete360 ||
-      deletingMomentId
+      deletingMomentIdRef.current
     ) {
       return
     }
@@ -767,6 +780,9 @@ export function MemoryConstellation({
     )
     if (!confirmed) return
 
+    // React cannot disable the remove control until the next render. The ref
+    // closes that gap so a rapid double tap cannot submit two family deletes.
+    deletingMomentIdRef.current = moment.id
     setDeletingMomentId(moment.id)
     setDeleteError('')
     void onDelete360(moment.id)
@@ -778,13 +794,17 @@ export function MemoryConstellation({
             : 'This moment could not be removed. Try again.',
         )
       })
-      .finally(() => setDeletingMomentId(null))
+      .finally(() => {
+        deletingMomentIdRef.current = null
+        setDeletingMomentId(null)
+      })
   }
 
   return (
     <section className="memories-screen" aria-labelledby="moments-title">
-      <header className="top-bar app-page-header">
-        <div>
+      <AppWhimsy page="moments" />
+      <header className="top-bar app-page-header moments-header">
+        <div className="moments-header__copy">
           <p className="eyebrow app-page-header__eyebrow">Our family</p>
           <h1 id="moments-title" className="moments-title">
             Moments
@@ -794,18 +814,6 @@ export function MemoryConstellation({
             {formatLocalDay(now)}
           </time>
         </div>
-        <button
-          className="round-control"
-          type="button"
-          aria-label="Set up Cardboard VR"
-          onClick={() =>
-            navigate('/memory/dinner', {
-              state: { sourceMemoryId: 'dinner', openVr: true },
-            })
-          }
-        >
-          <Icon name="vr" size={24} />
-        </button>
       </header>
 
       <div

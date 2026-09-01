@@ -15,6 +15,9 @@ function currentRuntime(): PannellumRuntime | undefined {
 }
 
 function ensureStylesheet(): void {
+  // The stylesheet belongs to the document, not an individual viewer. Keeping
+  // one marked node avoids duplicate downloads and prevents an unmount from
+  // removing styles while another panorama is still alive.
   const existing = document.querySelector<HTMLLinkElement>(
     `link[${ASSET_MARKER}="style"], link[href="${STYLESHEET_PATH}"]`,
   )
@@ -79,6 +82,9 @@ export const loadPannellum: PannellumRuntimeLoader = () => {
   }
 
   ensureStylesheet()
+  // Concurrent viewer mounts share one import. A failed load clears the cache
+  // so a later route can retry after a transient asset / WebView error, while a
+  // successful runtime remains document-global for the app lifetime.
   runtimePromise ??= loadRuntime().catch((error: unknown) => {
     runtimePromise = undefined
     throw error

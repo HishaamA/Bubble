@@ -50,11 +50,20 @@ function renderShell(
 
 function LocationProbe() {
   const location = useLocation()
+  const state = location.state as {
+    openVr?: boolean
+    sourceMemoryId?: string
+  } | null
   return (
-    <output aria-label="Current route">
-      {location.pathname}
-      {location.search}
-    </output>
+    <>
+      <output aria-label="Current route">
+        {location.pathname}
+        {location.search}
+      </output>
+      <output aria-label="Current route intent">
+        {state?.openVr ? `open-vr:${state.sourceMemoryId ?? ''}` : ''}
+      </output>
+    </>
   )
 }
 
@@ -176,18 +185,38 @@ describe('AppShell', () => {
     )
   })
 
-  it('opens Settings from the shortcut directly below the 360 control', async () => {
+  it('keeps the Moments shortcuts in an accessible vertical action rail', async () => {
     const user = userEvent.setup()
     renderShell('/', <LocationProbe />)
 
-    const shortcutGroup = screen.getByLabelText('Moments shortcuts')
+    const shortcutGroup = screen.getByRole('toolbar', {
+      name: 'Moments shortcuts',
+    })
+    expect(shortcutGroup).toHaveAttribute('aria-orientation', 'vertical')
     const shortcuts = shortcutGroup.querySelectorAll('button')
-    expect(shortcuts).toHaveLength(2)
-    expect(shortcuts[0]).toHaveAccessibleName('Upload a 360 photo now')
-    expect(shortcuts[1]).toHaveAccessibleName('Open settings')
+    expect(shortcuts).toHaveLength(3)
+    expect(shortcuts[0]).toHaveAccessibleName('Set up Cardboard VR')
+    expect(shortcuts[1]).toHaveAccessibleName('Upload a 360 photo now')
+    expect(shortcuts[2]).toHaveAccessibleName('Open settings')
 
     await user.click(screen.getByRole('button', { name: 'Open settings' }))
     expect(screen.getByLabelText('Current route')).toHaveTextContent('/settings')
+  })
+
+  it('opens Cardboard setup from the first Moments shortcut', async () => {
+    const user = userEvent.setup()
+    renderShell('/', <LocationProbe />)
+
+    await user.click(
+      screen.getByRole('button', { name: 'Set up Cardboard VR' }),
+    )
+
+    expect(screen.getByLabelText('Current route')).toHaveTextContent(
+      '/memory/dinner',
+    )
+    expect(screen.getByLabelText('Current route intent')).toHaveTextContent(
+      'open-vr:dinner',
+    )
   })
 
   it('hides the shortcut away from Memories', () => {
@@ -198,6 +227,9 @@ describe('AppShell', () => {
     ).not.toBeInTheDocument()
     expect(
       screen.queryByRole('button', { name: 'Open settings' }),
+    ).not.toBeInTheDocument()
+    expect(
+      screen.queryByRole('button', { name: 'Set up Cardboard VR' }),
     ).not.toBeInTheDocument()
   })
 

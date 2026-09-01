@@ -115,16 +115,64 @@
 .journal-page__doodle-cloud {
   color: var(--journal-blue);
   stroke: currentColor;
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: journal-header-cloud-drift 10.8s ease-in-out -2.3s infinite;
 }
 
 .journal-page__doodle-sun {
   color: var(--journal-accent);
   stroke: currentColor;
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: journal-header-sun-float 14.2s ease-in-out -7.1s infinite;
 }
 
 .journal-page__doodle-leaf {
   color: var(--journal-green);
   stroke: currentColor;
+  transform-box: fill-box;
+  transform-origin: 18% 88%;
+  animation: journal-header-leaf-sway 8.6s ease-in-out -4.1s infinite;
+}
+
+@keyframes journal-header-cloud-drift {
+  0%,
+  100% {
+    opacity: 0.82;
+    transform: translate3d(-1.2px, 0.6px, 0);
+  }
+
+  50% {
+    opacity: 1;
+    transform: translate3d(1.4px, -0.7px, 0);
+  }
+}
+
+@keyframes journal-header-sun-float {
+  0%,
+  100% {
+    opacity: 0.9;
+    transform: translate3d(-0.35px, 0.65px, 0) rotate(-1.2deg);
+  }
+
+  50% {
+    opacity: 1;
+    transform: translate3d(0.45px, -0.65px, 0) rotate(1.2deg);
+  }
+}
+
+@keyframes journal-header-leaf-sway {
+  0%,
+  100% {
+    opacity: 0.86;
+    transform: translate3d(-0.35px, 0.45px, 0) rotate(-1.4deg);
+  }
+
+  50% {
+    opacity: 1;
+    transform: translate3d(0.55px, -0.4px, 0) rotate(1.4deg);
+  }
 }
 
 .journal-page__tabs {
@@ -2019,6 +2067,16 @@
   min-width: 0;
 }
 
+/* The scrapbook deliberately reaches through the Journal page gutters so its
+   cloth background fills the whole phone. This more specific rule protects
+   that full-bleed width from the generic panel-child sizing above. */
+.journal-page--person-scrapbook .journal-page__panel > .person-scrapbook {
+  width: calc(
+    100% + var(--journal-gutter-left) + var(--journal-gutter-right)
+  );
+  max-width: none;
+}
+
 @media (max-width: 22rem) {
   .journal-page {
     --journal-gutter-left: max(
@@ -2053,6 +2111,12 @@
 @media (prefers-reduced-motion: reduce) {
   .journal-page__tabs button {
     transition: none;
+  }
+
+  .journal-page__doodle-cloud,
+  .journal-page__doodle-sun,
+  .journal-page__doodle-leaf {
+    animation: none;
   }
 }
 
@@ -3190,4 +3254,44 @@
     margin-right: 0;
     margin-left: 0;
   }
+}
+
+/* Balance the visible label against an equal empty column on the right. The
+   leading doodle no longer makes Add task/Add plan look off-centre. Keep this
+   final because the Journal has intentionally layered responsive overrides. */
+.journal-page .event-plan-card__actions > :is(
+  .event-plan-card__add-task,
+  .event-plan-card__complete
+),
+.journal-page .events-header-action.events-header-action--footer,
+.journal-page .journal-events__empty .journal-events__empty-action {
+  display: grid;
+  grid-template-columns: 1.2rem minmax(0, auto) 1.2rem;
+  align-items: center;
+  justify-content: center;
+  column-gap: 0.34rem;
+  text-align: center;
+  line-height: 1.15;
+}
+
+.journal-page .event-plan-card__actions > :is(
+  .event-plan-card__add-task,
+  .event-plan-card__complete
+) > :first-child,
+.journal-page .event-plan-card__actions > :is(
+  .event-plan-card__add-task,
+  .event-plan-card__complete
+) > :nth-child(2),
+.journal-page .events-header-action.events-header-action--footer > :first-child,
+.journal-page .events-header-action.events-header-action--footer > :nth-child(2),
+.journal-page .journal-events__empty .journal-events__empty-action > :first-child,
+.journal-page .journal-events__empty .journal-events__empty-action > :nth-child(2) {
+  justify-self: center;
+}
+
+.journal-page .journal-action-spacer {
+  width: 1.2rem;
+  height: 1px;
+  justify-self: center;
+  pointer-events: none;
 }

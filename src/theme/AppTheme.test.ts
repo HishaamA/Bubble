@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
 import { beforeEach, describe, expect, it } from 'vitest'
 import {
   APP_THEME_STORAGE_KEY,
@@ -6,6 +8,11 @@ import {
   readStoredAppTheme,
   setAppTheme,
 } from './AppTheme'
+
+const themeStyles = readFileSync(
+  join(process.cwd(), 'src/theme/AppTheme.css'),
+  'utf8',
+)
 
 describe('AppTheme', () => {
   beforeEach(() => {
@@ -46,5 +53,21 @@ describe('AppTheme', () => {
 
     expect(readStoredAppTheme()).toBe('plum')
     expect(initializeAppTheme()).toBe('plum')
+  })
+
+  it('keeps every primary route on the shared selected-theme canvas', () => {
+    const finalSurfaceContract = themeStyles.slice(
+      themeStyles.indexOf('/* Final page-surface contract'),
+    )
+
+    expect(finalSurfaceContract).toContain('.app-viewport')
+    expect(finalSurfaceContract).toContain('.memories-screen')
+    expect(finalSurfaceContract).toContain('.capsules-page')
+    expect(finalSurfaceContract).toContain('.journal-page')
+    expect(finalSurfaceContract).toContain('.person-scrapbook')
+    expect(finalSurfaceContract).toContain('.profile-page')
+    expect(finalSurfaceContract).toContain('.capture-page')
+    expect(finalSurfaceContract).toContain('background-image: none')
+    expect(finalSurfaceContract).toContain('var(--theme-action) 54%')
   })
 })

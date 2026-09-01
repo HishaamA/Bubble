@@ -3,7 +3,7 @@ import { useEffect, useRef, type PropsWithChildren } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { Icon } from '../components/Icon'
 import { useAuth } from '../features/auth/authContext'
-import { Capture360Shortcut } from '../features/capture'
+import { Capture360Shortcut } from '../features/capture/Capture360Shortcut'
 import {
   blurActiveTextControl,
   installAppViewportGeometrySync,
@@ -28,6 +28,9 @@ export function AppShell({ children }: PropsWithChildren) {
   useEffect(() => {
     const viewport = viewportRef.current
     if (!viewport) return
+    // Capacitor keeps one WebView alive across routes. Mirror the native safe
+    // area and visual viewport onto that persistent shell instead of sizing
+    // every screen independently.
     return installAppViewportGeometrySync(viewport)
   }, [])
 
@@ -35,11 +38,15 @@ export function AppShell({ children }: PropsWithChildren) {
     const viewport = viewportRef.current
     if (!viewport) return
 
+    // iOS can keep the software keyboard attached to an input after a route
+    // change. Blurring first prevents the next page from inheriting its height.
     blurActiveTextControl()
     synchronizeAppViewportGeometry(viewport)
     const frame = window.requestAnimationFrame(() => {
       synchronizeAppViewportGeometry(viewport)
     })
+    // A final pass catches the delayed viewport animation after the keyboard
+    // or native navigation chrome finishes moving.
     const settled = window.setTimeout(() => {
       synchronizeAppViewportGeometry(viewport)
     }, 350)
@@ -58,7 +65,24 @@ export function AppShell({ children }: PropsWithChildren) {
     >
       <main className="app-content">{children}</main>
       {showMomentsShortcuts ? (
-        <div className="moments-shortcuts" aria-label="Moments shortcuts">
+        <div
+          className="moments-shortcuts"
+          role="toolbar"
+          aria-label="Moments shortcuts"
+          aria-orientation="vertical"
+        >
+          <button
+            className="round-control moments-vr-shortcut"
+            type="button"
+            aria-label="Set up Cardboard VR"
+            onClick={() =>
+              navigate('/memory/dinner', {
+                state: { sourceMemoryId: 'dinner', openVr: true },
+              })
+            }
+          >
+            <Icon name="vr" size={24} />
+          </button>
           <Capture360Shortcut
             onClick={() =>
               navigate('/capture?mode=manual', { viewTransition: true })

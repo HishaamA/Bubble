@@ -1,14 +1,23 @@
 .ks-panorama {
-  --ks-glass: rgb(0 0 0 / 72%);
-  --ks-glass-border: rgb(255 255 255 / 16%);
-  --ks-accent: #fff;
+  --ks-glass: color-mix(
+    in srgb,
+    var(--theme-canvas-deep, #180611) 78%,
+    transparent
+  );
+  --ks-glass-border: color-mix(
+    in srgb,
+    var(--theme-paper, #fff1d2) 22%,
+    transparent
+  );
+  --ks-accent: var(--theme-action, var(--theme-rose, #d895aa));
+  --ks-accent-ink: var(--theme-action-ink, var(--theme-ink, #301027));
   position: relative;
   min-block-size: 32rem;
   inline-size: 100%;
   overflow: hidden;
   isolation: isolate;
-  color: #fff;
-  background: #030303;
+  color: var(--theme-paper, #fff1d2);
+  background: var(--theme-canvas-deep, #180611);
   border-radius: inherit;
 }
 
@@ -41,7 +50,7 @@
   z-index: 1;
   display: grid;
   margin: 0;
-  background: #080808;
+  background: var(--theme-canvas-deep, #180611);
 }
 
 .ks-panorama__fallback::after {
@@ -51,7 +60,7 @@
   block-size: 6rem;
   content: '';
   pointer-events: none;
-  background: rgb(0 0 0 / 64%);
+  background: color-mix(in srgb, var(--theme-canvas-deep, #180611) 72%, transparent);
 }
 
 .ks-panorama__fallback img {
@@ -99,7 +108,7 @@
 .ks-panorama__scene-picker select {
   max-inline-size: 13rem;
   padding: 0.55rem 2rem 0.55rem 0.75rem;
-  color: #fff;
+  color: var(--theme-paper, #fff1d2);
   font: inherit;
   letter-spacing: normal;
   text-transform: none;
@@ -146,7 +155,7 @@
   inline-size: 100%;
   min-block-size: 44px;
   padding: 0.52rem 0.65rem;
-  color: #fff;
+  color: var(--theme-paper, #fff1d2);
   font: inherit;
   text-align: start;
   background: rgb(255 255 255 / 8%);
@@ -203,7 +212,7 @@
   min-block-size: 44px;
   padding: 0;
   place-items: center;
-  color: #fff;
+  color: var(--theme-paper, #fff1d2);
   background: transparent;
   border: 0;
   border-radius: 50%;
@@ -217,7 +226,7 @@
 .ks-panorama__controls button:hover:not(:disabled),
 .ks-panorama__controls button:focus-visible,
 .ks-panorama__controls button.is-active {
-  color: #000;
+  color: var(--ks-accent-ink);
   background: var(--ks-accent);
 }
 
@@ -252,15 +261,15 @@
   height: 1.05rem;
   padding: 0 0.22rem;
   place-items: center;
-  color: #17120b;
-  background: #e8c690;
-  border: 1.5px solid #1c1c1e;
+  color: var(--ks-accent-ink);
+  background: var(--ks-accent);
+  border: 1.5px solid var(--theme-canvas-deep, #180611);
   border-radius: 999px;
   font: 700 0.48rem/1 var(--font-ui);
 }
 
 .ks-panorama__comments-button.is-active .ks-panorama__comment-count {
-  border-color: #fff;
+  border-color: var(--theme-paper, #fff1d2);
 }
 
 .ks-panorama__status,
@@ -348,10 +357,10 @@
   inline-size: 3rem;
   block-size: 3rem;
   place-items: center;
-  background: rgb(16 16 16 / 68%);
-  border: 1px solid rgb(255 255 255 / 72%);
+  background: var(--ks-glass);
+  border: 1px solid color-mix(in srgb, var(--ks-accent) 72%, var(--theme-paper, #fff1d2));
   border-radius: 50%;
-  box-shadow: 0 0 0 0.35rem rgb(255 255 255 / 10%);
+  box-shadow: 0 0 0 0.35rem color-mix(in srgb, var(--ks-accent) 12%, transparent);
   transform: translate(-50%, -50%);
   backdrop-filter: blur(14px);
 }
@@ -360,18 +369,18 @@
   inline-size: 0.65rem;
   block-size: 0.65rem;
   content: '';
-  background: #fff;
+  background: var(--ks-accent);
   border-radius: 50%;
 }
 
 .ks-panorama-hotspot--audio::after {
   inline-size: 0.18rem;
   block-size: 0.9rem;
-  background: #fff;
+  background: var(--ks-accent);
   border-radius: 999px;
   box-shadow:
-    -0.36rem 0 0 -0.02rem #fff,
-    0.36rem 0 0 -0.02rem #fff;
+    -0.36rem 0 0 -0.02rem var(--ks-accent),
+    0.36rem 0 0 -0.02rem var(--ks-accent);
 }
 
 .ks-panorama-hotspot__label {
@@ -381,11 +390,11 @@
   inline-size: max-content;
   max-inline-size: 10rem;
   padding: 0.35rem 0.55rem;
-  color: #fff;
+  color: var(--theme-paper, #fff1d2);
   font: 600 0.7rem/1.25 var(--font-ui);
   text-align: center;
-  background: rgb(0 0 0 / 68%);
-  border: 1px solid rgb(255 255 255 / 15%);
+  background: var(--ks-glass);
+  border: 1px solid var(--ks-glass-border);
   border-radius: 999px;
   opacity: 0;
   transform: translateX(-50%) translateY(-0.2rem);

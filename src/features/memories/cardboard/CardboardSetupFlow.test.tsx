@@ -31,9 +31,13 @@ const choices: readonly CardboardMemoryChoice[] = [
 function SetupHarness({
   onGo = vi.fn(),
   allowMemorySelection = true,
+  busy = false,
+  error,
 }: {
   onGo?: (options?: { forceLandscape?: boolean }) => void
   allowMemorySelection?: boolean
+  busy?: boolean
+  error?: string | null
 }) {
   const [selectedMemoryId, setSelectedMemoryId] = useState('dinner')
   return (
@@ -42,10 +46,31 @@ function SetupHarness({
       choices={choices}
       selectedMemoryId={selectedMemoryId}
       allowMemorySelection={allowMemorySelection}
+      busy={busy}
+      error={error}
       onSelectMemory={setSelectedMemoryId}
       onGo={onGo}
       onClose={vi.fn()}
     />
+  )
+}
+
+function ClosableSetupHarness() {
+  const [open, setOpen] = useState(false)
+  return (
+    <>
+      <button type="button" onClick={() => setOpen(true)}>
+        Open VR setup
+      </button>
+      <CardboardSetupFlow
+        open={open}
+        choices={choices}
+        selectedMemoryId="dinner"
+        onSelectMemory={vi.fn()}
+        onGo={vi.fn()}
+        onClose={() => setOpen(false)}
+      />
+    </>
   )
 }
 
@@ -117,6 +142,33 @@ describe('CardboardSetupFlow', () => {
     ).toBeVisible()
   })
 
+  it('contains focus, closes with Escape, and returns focus to its opener', async () => {
+    const user = userEvent.setup()
+    render(<ClosableSetupHarness />)
+    const opener = screen.getByRole('button', { name: 'Open VR setup' })
+
+    await user.click(opener)
+    let close = screen.getByRole('button', { name: 'Close VR setup' })
+    expect(close).toHaveFocus()
+
+    await user.click(close)
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+    expect(opener).toHaveFocus()
+
+    await user.click(opener)
+    close = screen.getByRole('button', { name: 'Close VR setup' })
+    expect(close).toHaveFocus()
+
+    await user.tab({ shift: true })
+    expect(
+      screen.getByRole('button', { name: 'Continue with Sunday dinner' }),
+    ).toHaveFocus()
+
+    await user.keyboard('{Escape}')
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+    expect(opener).toHaveFocus()
+  })
+
   it('advances automatically after the phone reaches landscape', async () => {
     orientationMock.landscape = true
     const user = userEvent.setup()
@@ -167,5 +219,25 @@ describe('CardboardSetupFlow', () => {
     expect(screen.getByText('2 of 2')).toBeVisible()
     await user.click(screen.getByRole('button', { name: 'Go' }))
     expect(onGo).toHaveBeenCalledWith({ forceLandscape: true })
+  })
+
+  it('announces a launch error and disables Go while retrying', async () => {
+    const user = userEvent.setup()
+    render(
+      <SetupHarness
+        allowMemorySelection={false}
+        busy
+        error="The panorama is still preparing."
+      />,
+    )
+
+    await user.click(
+      screen.getByRole('button', { name: 'Use split view anyway' }),
+    )
+
+    expect(screen.getByRole('alert')).toHaveTextContent(
+      'The panorama is still preparing.',
+    )
+    expect(screen.getByRole('button', { name: 'Starting…' })).toBeDisabled()
   })
 })

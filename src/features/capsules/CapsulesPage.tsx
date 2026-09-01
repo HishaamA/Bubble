@@ -9,6 +9,7 @@ import {
   type FormEvent,
 } from 'react'
 import { createPortal } from 'react-dom'
+import { AppWhimsy } from '../../app/AppWhimsy'
 import { useAuth } from '../auth'
 import '../FeaturePages.css'
 import './CapsulesPage.css'
@@ -111,6 +112,18 @@ function mergeCapsules(
   localCapsules: FamilyCapsule[],
   familyCapsules: FamilyCapsule[],
 ) {
+  /*
+   * The server owns shared identity, membership-visible counts, and renewable
+   * signed URLs; IndexedDB owns Blob bytes that must survive a restart and the
+   * queue of photos not uploaded yet. A weekly draft can also acquire a new
+   * server UUID, so weekStart is the reconciliation key until that happens.
+   *
+   * Merging therefore cannot be a simple "remote wins" replacement. Matching
+   * local Blobs replace transient remote URLs for the same photo, and unmatched
+   * pending/local Blob photos stay attached until a later fetch proves the
+   * server has accepted their IDs. This keeps offline work durable without
+   * allowing stale local metadata to override the family's authoritative row.
+   */
   const consumedLocalIds = new Set<string>()
   const mergedFamily = familyCapsules.map((familyCapsule) => {
     const localCapsule = localCapsules.find((candidate) => (
@@ -396,6 +409,10 @@ function CapsulePhotoImage({
   useEffect(() => {
     if (typeof source === 'string' || typeof URL.createObjectURL !== 'function') return
 
+    // This component, and only this component instance, owns the URL created
+    // for an IndexedDB Blob. Object URLs are process-local capabilities, so we
+    // never write them back to the Capsule store and always revoke them when
+    // either the Blob changes or its preview leaves the tree.
     const objectUrl = URL.createObjectURL(source)
     // oxlint-disable-next-line react/set-state-in-effect -- Blob URLs are external browser resources created and released with this effect.
     setBlobPreview({ source, url: objectUrl })
@@ -503,6 +520,19 @@ function PhotoStrip({
   showLockedTeasers: boolean
 }) {
   const representedPhotoCount = Math.max(photos.length, totalPhotoCount)
+
+  // The featured weekly Capsule deliberately uses a synthetic, blurred scene
+  // while it is sealed. Besides making the upcoming reveal feel tangible, it
+  // guarantees that no family photo is mounted in the DOM before unlock day.
+  if (locked && showLockedTeasers) {
+    return (
+      <div className="capsule-collection__photos" data-locked="true">
+        <LockedCapsuleTeasers />
+        <CapsuleLockedCover opensAt={opensAt} />
+      </div>
+    )
+  }
+
   if (representedPhotoCount === 0) {
     return (
       <div className="capsule-collection__photos" data-empty="true" data-locked={locked ? 'true' : 'false'}>
@@ -525,7 +555,11 @@ function PhotoStrip({
 
   const hasMorePhotos = representedPhotoCount > 4
   const mediaSlotCount = hasMorePhotos ? 3 : 4
-  const visiblePhotos = photos.slice(0, mediaSlotCount)
+  // A locked Capsule is a privacy boundary, not a blur treatment. Production
+  // must not instantiate <img> elements or object URLs for its private bytes at
+  // all. Explicit demo preview changes `locked` to false and is the only path
+  // that allows the real media to enter the rendered tree before open time.
+  const visiblePhotos = locked ? [] : photos.slice(0, mediaSlotCount)
   const concealedSlotCount = Math.max(
     0,
     Math.min(mediaSlotCount, representedPhotoCount) - visiblePhotos.length,
@@ -567,6 +601,7 @@ function CapsuleCard({
   now,
   uploading,
   demoUnlocked,
+  allowLockedPreview,
   hideHeader = false,
   onChoosePhoto,
   onOpenRecap,
@@ -576,6 +611,7 @@ function CapsuleCard({
   now: Date
   uploading: boolean
   demoUnlocked: boolean
+  allowLockedPreview: boolean
   hideHeader?: boolean
   onChoosePhoto: (event: ChangeEvent<HTMLInputElement>, capsule: FamilyCapsule) => void
   onOpenRecap: (capsule: FamilyCapsule) => void
@@ -592,6 +628,7 @@ function CapsuleCard({
     <article
       className="capsule-collection"
       data-kind={capsule.kind}
+      data-featured={hideHeader ? 'true' : undefined}
       data-demo-unlocked={demoUnlocked ? 'true' : 'false'}
     >
       <header className="capsule-collection__header" aria-hidden={hideHeader ? 'true' : undefined}>
@@ -647,7 +684,7 @@ function CapsuleCard({
           </button>
         )}
       </div>
-      {!unlocked && capsule.photos.length > 0 ? (
+      {allowLockedPreview && !unlocked && capsule.photos.length > 0 ? (
         <button
           className="capsule-demo-unlock"
           type="button"
@@ -682,6 +719,14 @@ function RecapSheet({
   const [index, setIndex] = useState(0)
   const [saving, setSaving] = useState(false)
   const [status, setStatus] = useState('')
+  const dialogRef = useRef<HTMLDivElement>(null)
+  const closeButtonRef = useRef<HTMLButtonElement>(null)
+  const onCloseRef = useRef(onClose)
+  const saveInFlightRef = useRef(false)
+
+  useEffect(() => {
+    onCloseRef.current = onClose
+  }, [onClose])
 
   useEffect(() => {
     if (orderedPhotos.length < 2) return
@@ -693,19 +738,81 @@ function RecapSheet({
   }, [orderedPhotos.length])
 
   useEffect(() => {
-    function closeOnEscape(event: KeyboardEvent) {
-      if (event.key === 'Escape') onClose()
+    const dialog = dialogRef.current
+    const returnTarget = document.activeElement instanceof HTMLElement
+      ? document.activeElement
+      : null
+    const focusableElements = () => dialog
+      ? Array.from(dialog.querySelectorAll<HTMLElement>([
+          'a[href]',
+          'button:not([disabled])',
+          'input:not([disabled])',
+          'select:not([disabled])',
+          'textarea:not([disabled])',
+          '[tabindex]:not([tabindex="-1"])',
+        ].join(','))).filter((element) => element.getAttribute('aria-hidden') !== 'true')
+      : []
+
+    closeButtonRef.current?.focus({ preventScroll: true })
+
+    function containDialogFocus(event: KeyboardEvent) {
+      if (event.key === 'Escape') {
+        event.preventDefault()
+        event.stopPropagation()
+        onCloseRef.current()
+        return
+      }
+      if (event.key !== 'Tab') return
+
+      const focusable = focusableElements()
+      if (focusable.length === 0) {
+        event.preventDefault()
+        dialog?.focus({ preventScroll: true })
+        return
+      }
+
+      const first = focusable[0]
+      const last = focusable[focusable.length - 1]
+      const active = document.activeElement
+      const focusIsOutside = !active || !dialog?.contains(active)
+      if (event.shiftKey && (active === first || focusIsOutside)) {
+        event.preventDefault()
+        last.focus({ preventScroll: true })
+      } else if (!event.shiftKey && (active === last || focusIsOutside)) {
+        event.preventDefault()
+        first.focus({ preventScroll: true })
+      }
     }
-    window.addEventListener('keydown', closeOnEscape)
-    return () => window.removeEventListener('keydown', closeOnEscape)
-  }, [onClose])
+
+    document.addEventListener('keydown', containDialogFocus, true)
+    return () => {
+      document.removeEventListener('keydown', containDialogFocus, true)
+      if (returnTarget?.isConnected) {
+        returnTarget.focus({ preventScroll: true })
+      }
+    }
+  }, [])
 
   async function saveRecap() {
+    // React state disables the button on the next render, but two synthetic or
+    // assistive-technology activations can arrive in the same JavaScript turn.
+    // The ref is a synchronous mutex so only one native render/download owns
+    // temporary artifacts at a time.
+    if (saveInFlightRef.current) return
+    saveInFlightRef.current = true
     setSaving(true)
     setStatus('Making your video…')
     const nativeArtifacts: string[] = []
     let nativeFailure: unknown
     try {
+      /*
+       * Re-read the snapshot immediately before export so a recap includes
+       * uploads restored from IndexedDB or just acknowledged by family sync.
+       * Native rendering is preferred because it can create and share an MP4
+       * without loading every full-size frame into a WebView canvas. Its staged
+       * images and rendered file are private temporaries and are discarded on
+       * success, failure, and before falling back to the browser renderer.
+       */
       const preparedPhotos = capsuleRecapPhotos(await onPreparePhotos())
         .sort((left, right) => left.capturedAt.localeCompare(right.capturedAt))
       if (preparedPhotos.length === 0) {
@@ -761,20 +868,28 @@ function RecapSheet({
       setStatus(reason instanceof Error ? reason.message : 'The recap could not be saved.')
     } finally {
       await discardNativeCapsuleRecapArtifacts(nativeArtifacts).catch(() => undefined)
+      saveInFlightRef.current = false
       setSaving(false)
     }
   }
 
   const activePhoto = orderedPhotos[index]
   return createPortal(
-    <div className="capsule-recap-sheet" role="dialog" aria-modal="true" aria-labelledby="capsule-recap-title">
+    <div
+      ref={dialogRef}
+      className="capsule-recap-sheet"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="capsule-recap-title"
+      tabIndex={-1}
+    >
       <section className="capsule-recap-sheet__panel">
         <header>
           <div>
             <p>{demoMode ? 'Demo preview' : 'Family recap'}</p>
             <h2 id="capsule-recap-title">{displayTitle}</h2>
           </div>
-          <button type="button" aria-label="Close recap" onClick={onClose}>×</button>
+          <button ref={closeButtonRef} type="button" aria-label="Close recap" onClick={onClose}>×</button>
         </header>
 
         <div className="capsule-recap-player" aria-live="off">
@@ -805,7 +920,7 @@ export function CapsulesPage({
   store: suppliedStore,
   cacheNamespace,
 }: CapsulesPageProps = {}) {
-  const { user } = useAuth()
+  const { isDevelopmentPreview, user } = useAuth()
   const subject = user?.id ?? 'signed-out'
   const storeSubject = cacheNamespace ?? subject
   const displayName = user?.displayName?.trim() || 'You'
@@ -821,6 +936,7 @@ export function CapsulesPage({
   const [capsules, setCapsules] = useState<FamilyCapsule[]>([])
   const [loading, setLoading] = useState(true)
   const [creating, setCreating] = useState(false)
+  const [savingSpecialCapsule, setSavingSpecialCapsule] = useState(false)
   const [uploadingCapsuleId, setUploadingCapsuleId] = useState('')
   const [announcement, setAnnouncement] = useState('')
   const [activeRecapId, setActiveRecapId] = useState('')
@@ -829,6 +945,7 @@ export function CapsulesPage({
   const weekKey = toLocalDateInput(startOfCapsuleWeek(clock))
   const clockRef = useRef(clock)
   const syncPromiseRef = useRef<Promise<CapsuleSyncResult> | null>(null)
+  const createSpecialCapsuleInFlightRef = useRef(false)
   const refreshedUnlocksRef = useRef(new Set<string>())
 
   useEffect(() => {
@@ -1008,6 +1125,13 @@ export function CapsulesPage({
       setAnnouncement('Choose a valid day for this Capsule to open.')
       return
     }
+
+    // A state-only busy flag is too late for two submit events dispatched in
+    // the same turn. Acquire the ref before allocating an ID or mutating the
+    // optimistic list so one user intent can create at most one durable row.
+    if (createSpecialCapsuleInFlightRef.current) return
+    createSpecialCapsuleInFlightRef.current = true
+    setSavingSpecialCapsule(true)
     const localCapsuleId = createId('capsule')
     const special: FamilyCapsule = {
       id: localCapsuleId,
@@ -1036,16 +1160,24 @@ export function CapsulesPage({
     } catch {
       setAnnouncement('This Capsule could not be saved on this device.')
     } finally {
+      createSpecialCapsuleInFlightRef.current = false
+      setSavingSpecialCapsule(false)
       setCreating(false)
     }
   }
 
   function openRecap(capsule: FamilyCapsule) {
+    if (!isCapsuleUnlocked(capsule.opensAt, clockRef.current)) return
     setDemoRecapId('')
     setActiveRecapId(capsule.id)
   }
 
   function openDemoRecap(capsule: FamilyCapsule) {
+    // The preview is a development affordance, never an alternate production
+    // unlock path. Guard both the visible trigger and this imperative boundary
+    // so a stale handler or programmatic call cannot disclose locked media.
+    if (isDevelopmentPreview !== true) return
+    if (isCapsuleUnlocked(capsule.opensAt, clockRef.current)) return
     setDemoRecapId(capsule.id)
     setActiveRecapId(capsule.id)
   }
@@ -1055,7 +1187,11 @@ export function CapsulesPage({
     setDemoRecapId('')
   }
 
-  const activeRecap = capsules.find(({ id }) => id === activeRecapId) ?? null
+  const activeRecapCandidate = capsules.find(({ id }) => id === activeRecapId) ?? null
+  const activeRecap = activeRecapCandidate && (
+    isCapsuleUnlocked(activeRecapCandidate.opensAt, clock) ||
+    (isDevelopmentPreview === true && demoRecapId === activeRecapCandidate.id)
+  ) ? activeRecapCandidate : null
   const currentWeekly = capsules.find(({ id }) => id === authoritativeWeeklyId) ??
     capsules.find((capsule) => capsule.kind === 'weekly' && capsule.weekStart === weekKey)
   const completedWeeklyWithPhotos = capsules.filter((capsule) => (
@@ -1069,6 +1205,7 @@ export function CapsulesPage({
 
   return (
     <section className="ks-feature capsules-page" aria-labelledby="capsules-title">
+      <AppWhimsy page="capsule" />
       <header className="ks-feature__header capsule-page-header app-page-header">
         <div className="ks-feature__header-copy">
           <p className="capsule-page-header__eyebrow app-page-header__eyebrow">Our family</p>
@@ -1080,6 +1217,7 @@ export function CapsulesPage({
           type="button"
           aria-label={creating ? 'Close special Capsule form' : 'Create a special Capsule'}
           aria-expanded={creating}
+          disabled={savingSpecialCapsule}
           onClick={() => setCreating((value) => !value)}
         >
           {creating ? '×' : '+'}
@@ -1103,7 +1241,9 @@ export function CapsulesPage({
             <input name="openDate" type="date" min={toLocalDateInput(addLocalDays(clock, 1))} defaultValue={toLocalDateInput(addLocalDays(clock, 7))} required />
           </label>
           <p>Everyone can add ordinary photos until 8:00 PM on this day.</p>
-          <button className="ks-primary-button" type="submit">Create Capsule</button>
+          <button className="ks-primary-button" type="submit" disabled={savingSpecialCapsule}>
+            {savingSpecialCapsule ? 'Creating Capsule…' : 'Create Capsule'}
+          </button>
         </form>
       ) : null}
 
@@ -1129,6 +1269,7 @@ export function CapsulesPage({
             now={clock}
             uploading={uploadingCapsuleId === currentWeekly.id}
             demoUnlocked={demoRecapId === currentWeekly.id}
+            allowLockedPreview={isDevelopmentPreview === true}
             hideHeader
             onChoosePhoto={addPhoto}
             onOpenRecap={openRecap}
@@ -1163,6 +1304,7 @@ export function CapsulesPage({
                   now={clock}
                   uploading={false}
                   demoUnlocked={demoRecapId === capsule.id}
+                  allowLockedPreview={isDevelopmentPreview === true}
                   onChoosePhoto={addPhoto}
                   onOpenRecap={openRecap}
                   onDemoUnlock={openDemoRecap}
@@ -1179,7 +1321,6 @@ export function CapsulesPage({
             <p>Birthdays, weddings, reunions</p>
             <h2 id="special-capsules-title">Special Capsules</h2>
           </div>
-          <button type="button" onClick={() => setCreating(true)}>New</button>
         </div>
         {specialCapsules.map((capsule) => (
           <CapsuleCard
@@ -1188,6 +1329,7 @@ export function CapsulesPage({
             now={clock}
             uploading={uploadingCapsuleId === capsule.id}
             demoUnlocked={demoRecapId === capsule.id}
+            allowLockedPreview={isDevelopmentPreview === true}
             onChoosePhoto={addPhoto}
             onOpenRecap={openRecap}
             onDemoUnlock={openDemoRecap}

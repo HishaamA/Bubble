@@ -41,7 +41,24 @@ export async function presentNativeCardboardPanorama(options: {
   if (!nativeCardboardPanoramaAvailable()) return false
 
   let closeListener: PluginListenerHandle | undefined
+  let closeNotified = false
+  const removeCloseListener = async () => {
+    const listener = closeListener
+    closeListener = undefined
+    if (!listener) return
+    try {
+      await listener.remove()
+    } catch {
+      // Listener disposal belongs to the best-effort native bridge. A stale
+      // plugin handle must not turn a clean web-viewer fallback into a rejected
+      // launch promise or leave the setup screen permanently busy.
+    }
+  }
+
   try {
+    // sourceBlob is borrowed from the caller. When only a URL is available we
+    // copy its bytes for the native plugin, but never revoke blob: URLs here:
+    // the journal and the WebGL fallback may still share the same object URL.
     const panoramaBlob =
       options.sourceBlob ?? (await fetchPanoramaBlob(options.scene.panorama))
     if (
@@ -53,11 +70,19 @@ export async function presentNativeCardboardPanorama(options: {
 
     const dataBase64 = await blobToBase64(panoramaBlob)
     if (Capacitor.getPlatform() === 'ios' && options.onClosed) {
-      closeListener = await CardboardPanorama.addListener('closed', () => {
-        void closeListener?.remove()
-        closeListener = undefined
+      const listener = await CardboardPanorama.addListener('closed', () => {
+        // Native view controllers can emit more than one lifecycle callback
+        // while dismissing. Treat it as a one-shot transition so the React host
+        // cannot navigate backwards twice.
+        if (closeNotified) return
+        closeNotified = true
+        void removeCloseListener()
         options.onClosed?.()
       })
+      closeListener = listener
+      // Defend against a bridge that synchronously reported closure while the
+      // listener registration promise was still resolving.
+      if (closeNotified) await removeCloseListener()
     }
 
     const result = await CardboardPanorama.open({
@@ -68,10 +93,14 @@ export async function presentNativeCardboardPanorama(options: {
       initialPitch: options.scene.pitch ?? 0,
     })
     const launched = result.launched === true
-    if (!launched) await closeListener?.remove()
+    if (!launched) {
+      closeNotified = true
+      await removeCloseListener()
+    }
     return launched
   } catch {
-    await closeListener?.remove()
+    closeNotified = true
+    await removeCloseListener()
     // The shared WebGL Cardboard viewer remains the no-data-loss fallback.
     return false
   }

@@ -13,10 +13,16 @@
   --theme-ink: #301027;
   --theme-muted: #856f79;
   --theme-accent: #efb43d;
-  --theme-coral: #ed735d;
+  --theme-action: #e6b5c4;
+  --theme-action-soft: #f0d0d9;
+  --theme-action-ink: #301027;
+  --theme-secondary: #a5b37a;
+  --theme-panel: #e2b1be;
+  --theme-tertiary: #c6b2d5;
+  --theme-coral: var(--theme-action);
   --theme-sage: #a5b37a;
-  --theme-rose: #d895aa;
-  --theme-lilac: #b39ac8;
+  --theme-rose: var(--theme-panel);
+  --theme-lilac: var(--theme-tertiary);
   --theme-line: rgba(255, 241, 210, 0.48);
   --theme-shadow: rgba(12, 1, 8, 0.34);
 }
@@ -30,11 +36,17 @@
   --theme-paper-deep: #dfd2ad;
   --theme-ink: #123c32;
   --theme-muted: #657a71;
-  --theme-accent: #d4b65d;
-  --theme-coral: #dc7c5f;
-  --theme-sage: #9cad78;
-  --theme-rose: #c89585;
-  --theme-lilac: #a7a88a;
+  --theme-accent: #a88960;
+  --theme-action: #a8b97d;
+  --theme-action-soft: #cbd6ae;
+  --theme-action-ink: #123c32;
+  --theme-secondary: #93a969;
+  --theme-panel: #bfcca0;
+  --theme-tertiary: #ad8f6e;
+  --theme-coral: var(--theme-action);
+  --theme-sage: var(--theme-secondary);
+  --theme-rose: var(--theme-panel);
+  --theme-lilac: var(--theme-tertiary);
   --theme-line: rgba(245, 238, 214, 0.48);
   --theme-shadow: rgba(0, 20, 16, 0.38);
 }
@@ -49,10 +61,16 @@
   --theme-ink: #14203f;
   --theme-muted: #73798a;
   --theme-accent: #f0b94f;
-  --theme-coral: #ef785b;
-  --theme-sage: #8eaa91;
-  --theme-rose: #d38ea5;
-  --theme-lilac: #9897c8;
+  --theme-action: #f0b94f;
+  --theme-action-soft: #f4d48e;
+  --theme-action-ink: #14203f;
+  --theme-secondary: #7897d0;
+  --theme-panel: #94afe0;
+  --theme-tertiary: #b2c3e4;
+  --theme-coral: var(--theme-action);
+  --theme-sage: var(--theme-secondary);
+  --theme-rose: var(--theme-panel);
+  --theme-lilac: var(--theme-tertiary);
   --theme-line: rgba(255, 240, 211, 0.48);
   --theme-shadow: rgba(0, 3, 20, 0.42);
 }
@@ -63,6 +81,38 @@
   --theme-on-canvas-muted: color-mix(in srgb, var(--theme-paper) 72%, transparent);
   --theme-surface: var(--theme-canvas-soft);
   --theme-surface-deep: var(--theme-canvas-deep);
+  /*
+   * The shell owns the one full-screen backdrop. Feature pages are transparent
+   * over it, which prevents a route from introducing a second gradient or a
+   * differently coloured strip beside narrow content.
+   */
+  --theme-page-background:
+    radial-gradient(
+      circle at 18% 9%,
+      color-mix(in srgb, var(--theme-canvas-highlight) 26%, transparent),
+      transparent 30%
+    ),
+    radial-gradient(
+      circle at 86% 64%,
+      color-mix(in srgb, var(--theme-canvas-soft) 24%, transparent),
+      transparent 36%
+    ),
+    repeating-linear-gradient(
+      98deg,
+      color-mix(in srgb, var(--theme-paper) 1.2%, transparent) 0 1px,
+      transparent 1px 5px
+    ),
+    linear-gradient(
+      148deg,
+      var(--theme-canvas-deep),
+      var(--theme-canvas) 48%,
+      color-mix(in srgb, var(--theme-canvas) 78%, var(--theme-canvas-deep))
+    );
+  --theme-page-chrome: color-mix(
+    in srgb,
+    var(--theme-canvas) 94%,
+    transparent
+  );
   /* Compatibility aliases used throughout the existing feature styles. */
   --plum-950: var(--theme-canvas-deep);
   --plum-900: var(--theme-canvas);
@@ -113,9 +163,9 @@
   --moments-plum-soft: var(--theme-canvas-soft);
   --moments-cream: var(--theme-paper);
   --moments-cream-muted: color-mix(in srgb, var(--theme-paper) 76%, transparent);
-  --moments-coral: var(--theme-coral);
-  --moments-sage: var(--theme-sage);
-  --moments-blush: var(--theme-rose);
+  --moments-coral: var(--theme-action);
+  --moments-sage: var(--theme-secondary);
+  --moments-blush: var(--theme-panel);
   background-color: var(--theme-canvas);
   background-image:
     radial-gradient(
@@ -144,15 +194,15 @@
 :root[data-bubble-theme] .app-viewport[data-app-shell]
   > .moments-shortcuts
   > .capture-360-shortcut {
-  color: var(--theme-ink);
-  background: var(--theme-coral);
+  color: var(--theme-action-ink);
+  background: var(--theme-action);
 }
 
 :root[data-bubble-theme] .app-viewport
   > .moments-shortcuts
   > .moments-settings-shortcut {
-  color: var(--theme-ink);
-  background: var(--theme-sage);
+  color: var(--theme-action-ink);
+  background: var(--theme-secondary);
 }
 
 :root[data-bubble-theme] .app-content > .memories-screen .memory-bubble__point-count,
@@ -167,11 +217,12 @@
   --capsule-paper-deep: var(--theme-paper-deep);
   --capsule-ink: var(--theme-ink);
   --capsule-ink-soft: var(--theme-muted);
-  --capsule-coral: var(--theme-coral);
+  --capsule-coral: var(--theme-action);
   --capsule-yellow: var(--theme-accent);
   --capsule-yellow-deep: color-mix(in srgb, var(--theme-accent) 78%, var(--theme-ink));
-  --capsule-sage: var(--theme-sage);
-  --capsule-lilac: var(--theme-rose);
+  --capsule-sage: var(--theme-secondary);
+  --capsule-sky: var(--theme-panel);
+  --capsule-lilac: var(--theme-tertiary);
   --capsule-line: var(--theme-line);
   --capsule-shadow: var(--theme-shadow);
   color: var(--theme-paper);
@@ -234,9 +285,10 @@
   --journal-ink: var(--theme-paper);
   --journal-muted: color-mix(in srgb, var(--theme-paper) 72%, transparent);
   --journal-accent: var(--theme-accent);
-  --journal-coral: var(--theme-coral);
-  --journal-blue: var(--theme-rose);
-  --journal-green: var(--theme-sage);
+  --journal-coral: var(--theme-action);
+  --journal-blue: var(--theme-panel);
+  --journal-green: var(--theme-secondary);
+  --journal-lilac: var(--theme-tertiary);
   background:
     radial-gradient(
       ellipse at 82% -4%,
@@ -278,11 +330,11 @@
   --profile-muted: var(--theme-muted);
   --profile-paper: var(--theme-paper);
   --profile-paper-deep: var(--theme-paper-deep);
-  --profile-sun: var(--theme-accent);
-  --profile-coral: var(--theme-coral);
-  --profile-sky: var(--theme-rose);
-  --profile-sage: var(--theme-sage);
-  --profile-lilac: var(--theme-lilac);
+  --profile-sun: var(--theme-action);
+  --profile-coral: var(--theme-action);
+  --profile-sky: var(--theme-panel);
+  --profile-sage: var(--theme-secondary);
+  --profile-lilac: var(--theme-tertiary);
   color: var(--theme-paper);
   background:
     radial-gradient(
@@ -437,6 +489,1340 @@
   background: var(--theme-paper);
 }
 
+/* Shared controls -------------------------------------------------------
+ * Action colours are semantic so a component never has to guess which
+ * named swatch belongs to the selected story. Keep the camera-specific
+ * controls in their feature stylesheet, where their contrast needs differ.
+ */
+:root[data-bubble-theme] .ks-feature:not(.capture-page) .ks-primary-button {
+  border-color: color-mix(in srgb, var(--theme-action-ink) 56%, transparent);
+  color: var(--theme-action-ink);
+  background: var(--theme-action);
+  box-shadow: 0.2rem 0.22rem 0 var(--theme-shadow);
+}
+
+:root[data-bubble-theme] .ks-feature:not(.capture-page) .ks-secondary-button {
+  border-color: color-mix(in srgb, var(--theme-ink) 28%, transparent);
+  color: var(--theme-ink);
+  background: color-mix(in srgb, var(--theme-paper) 78%, var(--theme-panel));
+}
+
+:root[data-bubble-theme] .ks-feature:not(.capture-page) .ks-primary-button:disabled,
+:root[data-bubble-theme] .ks-feature:not(.capture-page) .ks-secondary-button:disabled {
+  color: color-mix(in srgb, var(--theme-ink) 48%, transparent);
+  background: color-mix(in srgb, var(--theme-paper) 52%, transparent);
+  box-shadow: none;
+}
+
+/* Settings -------------------------------------------------------------- */
+:root[data-bubble-theme] .profile-page .settings-card {
+  background:
+    repeating-linear-gradient(
+      0deg,
+      transparent 0 2.55rem,
+      color-mix(in srgb, var(--theme-ink) 7.5%, transparent) 2.55rem 2.6rem
+    ),
+    color-mix(in srgb, var(--theme-panel) 78%, var(--theme-paper));
+}
+
+:root[data-bubble-theme] .profile-page__sign-out {
+  border-color: color-mix(in srgb, var(--theme-paper) 74%, transparent);
+  color: var(--theme-paper);
+  background: color-mix(in srgb, var(--theme-action) 32%, transparent);
+  box-shadow: 0.18rem 0.22rem 0 var(--theme-shadow);
+}
+
+:root[data-bubble-theme] .profile-page .family-sync__option {
+  background: color-mix(in srgb, var(--theme-panel) 28%, var(--theme-paper));
+}
+
+:root[data-bubble-theme] .profile-page .family-sync__option:nth-child(2),
+:root[data-bubble-theme] .profile-page .family-sync__circle-card,
+:root[data-bubble-theme] .profile-page .family-sync__connected-badge,
+:root[data-bubble-theme] .profile-page .family-sync__count {
+  background: color-mix(in srgb, var(--theme-secondary) 28%, var(--theme-paper));
+}
+
+:root[data-bubble-theme] .profile-page .family-sync__secondary,
+:root[data-bubble-theme] .profile-page .family-sync__reject {
+  border-color: color-mix(in srgb, var(--theme-ink) 44%, transparent);
+  color: var(--theme-ink);
+  background: color-mix(in srgb, var(--theme-panel) 36%, var(--theme-paper));
+}
+
+/* Capsule controls and decorative control cues ------------------------- */
+:root[data-bubble-theme] .capsule-page-header {
+  border-bottom-color: color-mix(in srgb, var(--theme-action) 68%, transparent);
+}
+
+:root[data-bubble-theme] .capsule-page__section::before {
+  border-color: color-mix(in srgb, var(--theme-action) 58%, transparent);
+}
+
+:root[data-bubble-theme] .capsule-section-heading p,
+:root[data-bubble-theme] .capsule-page__section[aria-labelledby='weekly-capsule-title']
+  .capsule-section-heading p {
+  color: var(--theme-panel);
+}
+
+:root[data-bubble-theme] .capsule-page-header .ks-feature__header-action,
+:root[data-bubble-theme] .capsule-add-photo,
+:root[data-bubble-theme] .capsule-special-empty > .capsule-special-empty__plus,
+:root[data-bubble-theme] .capsule-special-form .ks-primary-button,
+:root[data-bubble-theme] .capsule-recap-save,
+:root[data-bubble-theme] .capsule-recap-sheet .capsule-recap-save {
+  border-color: color-mix(in srgb, var(--theme-action-ink) 58%, transparent);
+  color: var(--theme-action-ink);
+  background: var(--theme-action);
+}
+
+:root[data-bubble-theme] .capsule-open-recap {
+  border-color: color-mix(in srgb, var(--theme-ink) 52%, transparent);
+  color: var(--theme-ink);
+  background: var(--theme-secondary);
+}
+
+:root[data-bubble-theme] .capsule-page__section[aria-labelledby='weekly-capsule-title']
+  .capsule-collection {
+  --capsule-card-accent: var(--theme-action);
+}
+
+:root[data-bubble-theme] .capsule-page__section[aria-labelledby='special-capsules-title']
+  .capsule-collection {
+  --capsule-card-accent: var(--theme-secondary);
+}
+
+:root[data-bubble-theme] .capsule-page__section[aria-labelledby='special-capsules-title']
+  .capsule-collection:nth-of-type(even) {
+  --capsule-card-accent: var(--theme-tertiary);
+}
+
+:root[data-bubble-theme] .capsule-weekly-unlock,
+:root[data-bubble-theme] .capsule-section-heading > .capsule-weekly-unlock,
+:root[data-bubble-theme] .capsule-special-empty {
+  border-color: var(--theme-tertiary);
+}
+
+:root[data-bubble-theme] .capsule-page__section[aria-labelledby='weekly-capsule-title']
+  .capsule-collection__photos,
+:root[data-bubble-theme] .capsule-page__section[aria-labelledby='weekly-capsule-title']
+  .capsule-collection__photos::before,
+:root[data-bubble-theme] .capsule-page__section[aria-labelledby='weekly-capsule-title']
+  .capsule-collection__photos::after {
+  border-color: color-mix(in srgb, var(--theme-action) 68%, var(--theme-ink));
+}
+
+:root[data-bubble-theme] :is(.capsule-photo-strip li, .capsule-empty-polaroids li)::before {
+  background: color-mix(in srgb, var(--theme-panel) 82%, transparent);
+}
+
+:root[data-bubble-theme] :is(.capsule-photo-strip li, .capsule-empty-polaroids li):nth-child(2)::before {
+  background: color-mix(in srgb, var(--theme-accent) 86%, transparent);
+}
+
+:root[data-bubble-theme] :is(.capsule-photo-strip li, .capsule-empty-polaroids li):nth-child(3)::before {
+  background: color-mix(in srgb, var(--theme-secondary) 86%, transparent);
+}
+
+:root[data-bubble-theme] :is(.capsule-photo-strip li, .capsule-empty-polaroids li):nth-child(4)::before {
+  background: color-mix(in srgb, var(--theme-action) 80%, transparent);
+}
+
+:root[data-bubble-theme] .capsule-photo-strip__more {
+  background: var(--theme-panel) !important;
+}
+
+:root[data-bubble-theme] .capsule-locked-cover__icon {
+  border-color: color-mix(in srgb, var(--theme-ink) 40%, transparent);
+  color: var(--theme-ink);
+  background: var(--theme-action-soft);
+}
+
+:root[data-bubble-theme] .capsule-demo-unlock > span {
+  border-color: color-mix(in srgb, var(--theme-ink) 36%, transparent);
+  color: var(--theme-ink);
+  background: color-mix(in srgb, var(--theme-action) 22%, transparent);
+}
+
+:root[data-bubble-theme] .capsule-special-form {
+  border-color: var(--theme-panel);
+}
+
+:root[data-bubble-theme] .capsule-special-form .ks-field input:focus {
+  border-color: var(--theme-panel);
+  box-shadow: 0 0 0 0.2rem color-mix(in srgb, var(--theme-panel) 28%, transparent);
+}
+
+:root[data-bubble-theme] .capsule-page__section[aria-labelledby='weekly-capsule-title']
+  .capsule-collection__details,
+:root[data-bubble-theme] .capsule-page__section[aria-labelledby='weekly-capsule-title']
+  .capsule-collection__details strong {
+  color: var(--theme-paper);
+}
+
+:root[data-bubble-theme] .capsule-page__section[aria-labelledby='weekly-capsule-title']
+  .capsule-collection__details p > span {
+  color: var(--theme-on-canvas-muted);
+}
+
+:root[data-bubble-theme] .capsule-recap-sheet {
+  --capsule-paper: var(--theme-paper);
+  --capsule-paper-light: color-mix(in srgb, var(--theme-paper) 91%, white);
+  --capsule-ink: var(--theme-ink);
+  --capsule-ink-soft: var(--theme-muted);
+  --capsule-coral: var(--theme-action);
+  --capsule-yellow: var(--theme-action-soft);
+  background: color-mix(in srgb, var(--theme-canvas-deep) 84%, transparent);
+}
+
+:root[data-bubble-theme] .capsule-recap-sheet__panel header button {
+  border-color: color-mix(in srgb, var(--theme-ink) 52%, transparent);
+  color: var(--theme-action-ink);
+  background: var(--theme-action-soft);
+}
+
+:root[data-bubble-theme] .capsule-recap-sheet__panel header p {
+  color: color-mix(in srgb, var(--theme-action) 68%, var(--theme-ink));
+}
+
+/* Journal --------------------------------------------------------------- */
+:root[data-bubble-theme] .journal-page__tabs button:first-child {
+  --journal-tab-rest: var(--theme-paper-deep);
+  --journal-tab-active: var(--theme-paper);
+}
+
+:root[data-bubble-theme] .journal-page__tabs button:nth-child(2) {
+  --journal-tab-rest: color-mix(in srgb, var(--theme-panel) 82%, var(--theme-paper));
+  --journal-tab-active: var(--theme-panel);
+}
+
+:root[data-bubble-theme] .journal-page__tabs button:nth-child(3) {
+  --journal-tab-rest: color-mix(in srgb, var(--theme-secondary) 78%, var(--theme-paper));
+  --journal-tab-active: var(--theme-secondary);
+}
+
+:root[data-bubble-theme] .journal-page .people-timeline__upload-button,
+:root[data-bubble-theme] .journal-page .people-timeline__chips .people-timeline__upload-button,
+:root[data-bubble-theme] .journal-page .event-plan-card__add-task,
+:root[data-bubble-theme] .journal-page .events-header-action--footer {
+  border-color: color-mix(in srgb, var(--theme-action-ink) 54%, transparent);
+  color: var(--theme-action-ink);
+  background: var(--theme-action);
+}
+
+:root[data-bubble-theme] .journal-page .people-timeline__setup-circle {
+  border-color: var(--theme-panel);
+  color: var(--theme-paper);
+  background: color-mix(in srgb, var(--theme-canvas-deep) 82%, transparent);
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, var(--theme-paper) 18%, transparent),
+    0 0.42rem 1.1rem var(--theme-shadow);
+}
+
+:root[data-bubble-theme] .journal-page
+  .people-timeline__setup-person--add
+  .people-timeline__setup-circle {
+  border-color: var(--theme-action);
+  color: var(--theme-action);
+}
+
+:root[data-bubble-theme] .journal-page .people-timeline__album-tile {
+  border-color: color-mix(in srgb, var(--theme-paper) 72%, transparent);
+  color: var(--theme-ink);
+  background: var(--theme-tertiary);
+  box-shadow: 0.16rem 0.2rem 0 var(--theme-shadow);
+}
+
+:root[data-bubble-theme] .journal-page .people-timeline__album-tile[data-tint='1'] {
+  background: var(--theme-secondary);
+}
+
+:root[data-bubble-theme] .journal-page .people-timeline__album-tile[data-tint='2'] {
+  background: var(--theme-panel);
+}
+
+:root[data-bubble-theme] .journal-page
+  .journal-events__week-days
+  button[aria-pressed='true']
+  > strong {
+  color: var(--theme-action-ink);
+  background:
+    repeating-linear-gradient(
+      104deg,
+      color-mix(in srgb, var(--theme-paper) 9%, transparent) 0 1px,
+      transparent 1px 5px
+    ),
+    var(--theme-action);
+  box-shadow:
+    inset 0 1px color-mix(in srgb, var(--theme-paper) 36%, transparent),
+    0 0.3rem 0.9rem var(--theme-shadow);
+}
+
+:root[data-bubble-theme] .journal-page .flight-tracker {
+  --flight-accent: var(--theme-action);
+}
+
+:root[data-bubble-theme] .journal-page .flight-tracker__add,
+:root[data-bubble-theme] .journal-page .flight-empty button {
+  border-color: color-mix(in srgb, var(--theme-ink) 40%, transparent);
+  color: var(--theme-action-ink);
+  background: var(--theme-panel);
+}
+
+:root[data-bubble-theme] .journal-page .flight-tracker__collection-header button {
+  border-color: var(--theme-accent);
+  color: var(--theme-accent);
+  background: color-mix(in srgb, var(--theme-canvas-soft) 82%, transparent);
+}
+
+:root[data-bubble-theme] .journal-page .flight-tracker__collection-header p {
+  color: var(--theme-panel);
+}
+
+:root[data-bubble-theme] .journal-page :is(.event-plan-card__add-task, .event-plan-card__complete) {
+  border-color: color-mix(in srgb, var(--theme-action) 68%, var(--theme-ink));
+}
+
+:root[data-bubble-theme] .journal-page .event-plan-card__complete {
+  color: var(--theme-ink);
+  background: color-mix(in srgb, var(--theme-secondary) 30%, var(--theme-paper));
+}
+
+:root[data-bubble-theme] .journal-page .event-plan-card__doodle.event-reminder-button,
+:root[data-bubble-theme] .journal-page .journal-events .event-plan-card .event-plan-card__when,
+:root[data-bubble-theme] .journal-page .flight-card__icon-action,
+:root[data-bubble-theme] .journal-page .flight-card__number {
+  color: color-mix(in srgb, var(--theme-action) 68%, var(--theme-ink));
+}
+
+:root[data-bubble-theme] .journal-page .flight-route-mark__plane {
+  fill: color-mix(in srgb, var(--theme-action) 68%, var(--theme-ink));
+}
+
+:root[data-bubble-theme] .journal-page .journal-events__empty .journal-events__empty-action,
+:root[data-bubble-theme] .journal-page[data-section='flights'] .flight-tracker .flight-card
+  .flight-detail__actions button,
+:root[data-bubble-theme] .journal-page[data-section='flights'] .flight-tracker .flight-card
+  .flight-detail__delete-confirm button {
+  border-color: color-mix(in srgb, var(--theme-action) 64%, var(--theme-ink));
+  color: var(--theme-ink);
+  background: color-mix(in srgb, var(--theme-action-soft) 54%, var(--theme-paper));
+}
+
+:root[data-bubble-theme] .journal-page[data-section='flights'] .flight-tracker .flight-card
+  .flight-card__icon-action--notify[aria-pressed='true'] {
+  color: var(--theme-action-ink);
+  background: var(--theme-action);
+}
+
+:root[data-bubble-theme] .journal-page[data-section='flights'] .flight-tracker .flight-card
+  :is(.flight-card__traveler, .flight-card__route strong, .flight-card__times strong,
+  .flight-card__compact-route strong, .flight-detail__route strong, .flight-detail__times dd) {
+  color: var(--theme-ink) !important;
+}
+
+:root[data-bubble-theme] .journal-page[data-section='flights'] .flight-tracker .flight-card
+  :is(.flight-card__number, .flight-card__compact-number, .flight-card__compact-date strong) {
+  color: color-mix(in srgb, var(--theme-action) 68%, var(--theme-ink)) !important;
+}
+
+:root[data-bubble-theme] .journal-page[data-section='flights']
+  .flight-tracker
+  .flight-card {
+  --flight-ink: var(--theme-ink);
+  --flight-muted: color-mix(in srgb, var(--theme-ink) 72%, transparent);
+  --flight-faint: color-mix(in srgb, var(--theme-ink) 58%, transparent);
+  --flight-line: color-mix(in srgb, var(--theme-ink) 22%, transparent);
+  border-color: color-mix(in srgb, var(--theme-ink) 72%, transparent);
+}
+
+:root[data-bubble-theme] .journal-page[data-section='flights']
+  .flight-tracker
+  .flight-card
+  .flight-card__icon-action,
+:root[data-bubble-theme] .journal-page[data-section='flights']
+  .flight-tracker
+  .flight-card
+  .flight-card__icon-action--remove {
+  border-color: color-mix(in srgb, var(--theme-action) 68%, var(--theme-ink));
+  color: color-mix(in srgb, var(--theme-action) 68%, var(--theme-ink));
+}
+
+:root[data-bubble-theme] .journal-page[data-section='flights']
+  .flight-tracker
+  .flight-card
+  .flight-card__icon-action--notify[aria-pressed='true'] {
+  color: var(--theme-action-ink);
+  background: var(--theme-action);
+}
+
+:root[data-bubble-theme] .journal-page[data-section='flights']
+  .flight-tracker
+  .flight-card--featured
+  .flight-card__times {
+  border-top-color: color-mix(in srgb, var(--theme-action) 68%, var(--theme-ink));
+}
+
+:root[data-bubble-theme] .journal-page[data-section='flights']
+  .flight-tracker
+  .flight-card--featured
+  .flight-card__times
+  span:not(.flight-card__duration) {
+  color: color-mix(in srgb, var(--theme-action) 68%, var(--theme-ink));
+}
+
+:root[data-bubble-theme] .journal-page[data-section='flights']
+  .flight-tracker
+  .flight-card
+  .flight-route-mark__dots {
+  stroke: color-mix(in srgb, var(--theme-action) 62%, var(--theme-ink));
+}
+
+:root[data-bubble-theme] .journal-page[data-section='flights']
+  .flight-tracker
+  .flight-card
+  .flight-card__expand {
+  border-color: color-mix(in srgb, var(--theme-ink) 68%, transparent);
+  box-shadow: 0.1rem 0.13rem 0 color-mix(in srgb, var(--theme-ink) 16%, transparent);
+}
+
+:root[data-bubble-theme] .journal-page[data-section='flights']
+  .flight-tracker
+  .flight-card
+  :is(.flight-detail__actions button, .flight-detail__delete-confirm button) {
+  border-color: color-mix(in srgb, var(--theme-action) 58%, var(--theme-ink));
+  color: var(--theme-ink);
+  background: color-mix(in srgb, var(--theme-action-soft) 54%, var(--theme-paper));
+}
+
+/* Photo routes sit outside Journal's page wrapper, so give their full-screen
+ * canvases the selected colour story directly. The image itself still uses a
+ * deep neutralised theme surface so letterboxing does not distract from it.
+ */
+:root[data-bubble-theme] .journal-photo-viewer {
+  color: var(--theme-paper);
+  background:
+    radial-gradient(
+      circle at 82% 8%,
+      color-mix(in srgb, var(--theme-panel) 18%, transparent),
+      transparent 28%
+    ),
+    var(--theme-canvas-deep);
+}
+
+:root[data-bubble-theme] .journal-photo-viewer__bar p,
+:root[data-bubble-theme] .journal-photo-viewer__eyebrow {
+  color: var(--theme-action-soft);
+}
+
+:root[data-bubble-theme] .journal-photo-viewer__bar h1,
+:root[data-bubble-theme] .journal-photo-post__caption p strong {
+  color: var(--theme-paper);
+}
+
+:root[data-bubble-theme] :is(
+  .journal-photo-viewer__back,
+  .journal-photo-viewer__close,
+  .journal-photo-viewer__pager button
+) {
+  border-color: var(--theme-line);
+  color: var(--theme-paper);
+  background: var(--theme-canvas-soft);
+}
+
+:root[data-bubble-theme] .journal-photo-post {
+  border-color: var(--theme-line);
+  background: color-mix(in srgb, var(--theme-canvas-soft) 86%, var(--theme-canvas-deep));
+}
+
+:root[data-bubble-theme] .journal-photo-post__person > span {
+  border-color: color-mix(in srgb, var(--theme-action) 46%, transparent);
+  color: var(--theme-paper);
+  background: color-mix(in srgb, var(--theme-action) 20%, var(--theme-canvas-deep));
+}
+
+:root[data-bubble-theme] .journal-photo-post__person small,
+:root[data-bubble-theme] .journal-photo-post__caption p,
+:root[data-bubble-theme] .journal-photo-viewer--status > p:not(.journal-photo-viewer__eyebrow),
+:root[data-bubble-theme] .journal-photo-viewer__pager > span {
+  color: var(--theme-on-canvas-muted);
+}
+
+:root[data-bubble-theme] .journal-photo-post__figure,
+:root[data-bubble-theme] .journal-photo-placeholder.journal-photo-post__image {
+  background: color-mix(in srgb, var(--theme-canvas-deep) 92%, var(--theme-ink));
+}
+
+:root[data-bubble-theme] .journal-photo-viewer--status button {
+  color: var(--theme-action-ink);
+  background: var(--theme-action);
+}
+
+:root[data-bubble-theme] .person-scrapbook {
+  background:
+    radial-gradient(
+      ellipse at 84% -5%,
+      color-mix(in srgb, var(--theme-panel) 28%, transparent),
+      transparent 32rem
+    ),
+    radial-gradient(
+      ellipse at -10% 47%,
+      color-mix(in srgb, var(--theme-canvas-highlight) 30%, transparent),
+      transparent 24rem
+    ),
+    repeating-linear-gradient(
+      103deg,
+      color-mix(in srgb, var(--theme-paper) 1.2%, transparent) 0 1px,
+      transparent 1px 4px
+    ),
+    var(--theme-canvas);
+}
+
+:root[data-bubble-theme] .person-scrapbook__actions .person-scrapbook__manage {
+  border-color: color-mix(in srgb, var(--theme-action-ink) 52%, transparent);
+  color: var(--theme-action-ink);
+  background: var(--theme-action);
+}
+
+:root[data-bubble-theme] .person-scrapbook__details-grid label:first-child {
+  background: color-mix(in srgb, var(--theme-action) 22%, var(--theme-paper));
+}
+
+:root[data-bubble-theme] .person-scrapbook__details-grid label:nth-child(2) {
+  background: color-mix(in srgb, var(--theme-secondary) 26%, var(--theme-paper));
+}
+
+:root[data-bubble-theme] .person-scrapbook__details-grid label:nth-child(3) {
+  background: color-mix(in srgb, var(--theme-panel) 24%, var(--theme-paper));
+}
+
+:root[data-bubble-theme] .person-scrapbook__details-grid label:nth-child(4) {
+  background: color-mix(in srgb, var(--theme-tertiary) 23%, var(--theme-paper));
+}
+
+:root[data-bubble-theme] .panorama-screen {
+  background: var(--theme-canvas-deep);
+}
+
+/* Portal-mounted plan and flight editors need their own inherited palette. */
+:root[data-bubble-theme] :is(.event-sheet, .flight-sheet, .flight-detail) {
+  --plan-paper: var(--theme-paper);
+  --plan-ink: var(--theme-ink);
+  --plan-muted: var(--theme-muted);
+  --flight-ink: var(--theme-ink);
+  --flight-muted: var(--theme-muted);
+  --flight-faint: color-mix(in srgb, var(--theme-ink) 46%, transparent);
+  --flight-line: color-mix(in srgb, var(--theme-ink) 20%, transparent);
+  --flight-accent: var(--theme-action);
+  --flight-ticket: var(--theme-paper);
+  background: color-mix(in srgb, var(--theme-canvas-deep) 82%, transparent);
+}
+
+:root[data-bubble-theme] :is(.event-sheet__panel, .flight-sheet__panel, .flight-detail__panel) {
+  border-color: color-mix(in srgb, var(--theme-paper) 70%, transparent);
+  color: var(--theme-ink);
+  background:
+    repeating-linear-gradient(
+      to bottom,
+      transparent 0 1.65rem,
+      color-mix(in srgb, var(--theme-ink) 7.5%, transparent) 1.65rem calc(1.65rem + 1px)
+    ),
+    var(--theme-paper);
+  box-shadow:
+    0.3rem 0.38rem 0 var(--theme-shadow),
+    0 1.5rem 4rem color-mix(in srgb, var(--theme-canvas-deep) 48%, transparent);
+}
+
+:root[data-bubble-theme] :is(
+  .event-sheet__submit,
+  .flight-sheet__submit,
+  .flight-detail__actions button
+) {
+  border-color: color-mix(in srgb, var(--theme-action-ink) 44%, transparent);
+  color: var(--theme-action-ink);
+  background: var(--theme-action);
+}
+
+:root[data-bubble-theme] :is(
+  .event-sheet__close,
+  .event-sheet__tasks-heading > button,
+  .event-sheet__task-row button,
+  .flight-sheet__header button,
+  .flight-detail__header button,
+  .flight-choice__header button,
+  .flight-detail__delete-confirm button
+) {
+  border-color: color-mix(in srgb, var(--theme-ink) 30%, transparent);
+  color: var(--theme-ink);
+  background: color-mix(in srgb, var(--theme-panel) 42%, var(--theme-paper));
+}
+
+:root[data-bubble-theme] .flight-detail__actions .flight-detail__notify,
+:root[data-bubble-theme] .flight-detail__actions .flight-detail__notify[aria-pressed='true'] {
+  color: var(--theme-action-ink);
+  background: var(--theme-secondary);
+}
+
+:root[data-bubble-theme] :is(
+  .flight-sheet__intro,
+  .flight-field small,
+  .flight-choice__list > button > span:not(.flight-choice__route),
+  .flight-choice__list > button small,
+  .flight-detail__quality,
+  .flight-detail__times dt,
+  .flight-detail__times span,
+  .flight-detail__times small,
+  .flight-detail__updated
+) {
+  color: var(--theme-muted);
+}
+
+:root[data-bubble-theme] :is(
+  .flight-field > span,
+  .flight-choice__header h3,
+  .flight-choice__route strong,
+  .flight-detail__times dd
+) {
+  color: var(--theme-ink);
+}
+
+:root[data-bubble-theme] :is(.flight-field input, .flight-choice__list > button) {
+  border-color: color-mix(in srgb, var(--theme-ink) 28%, transparent);
+  color: var(--theme-ink);
+  background: color-mix(in srgb, white 42%, var(--theme-paper));
+}
+
+:root[data-bubble-theme] .flight-field input::placeholder {
+  color: color-mix(in srgb, var(--theme-muted) 70%, transparent);
+}
+
+:root[data-bubble-theme] .flight-field input:focus {
+  border-color: var(--theme-action);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--theme-action) 18%, transparent);
+}
+
+:root[data-bubble-theme] .flight-choice__header p {
+  color: color-mix(in srgb, var(--theme-action) 68%, var(--theme-ink));
+}
+
+:root[data-bubble-theme] .flight-detail__route-line .flight-plane-icon {
+  background: var(--theme-paper);
+}
+
+/* Authentication -------------------------------------------------------
+ * Auth renders outside the app shell, so it needs the selected palette on
+ * both its full-screen states and the portal-mounted email sheet.
+ */
+:root[data-bubble-theme] :is(.auth-page, .email-auth, .auth-loading, .auth-bootstrap-failed) {
+  --auth-paper: var(--theme-paper);
+  --auth-paper-deep: var(--theme-paper-deep);
+  --auth-ink: var(--theme-ink);
+  --auth-muted: var(--theme-muted);
+  --auth-sun: var(--theme-action);
+  --auth-coral: var(--theme-action);
+  --auth-sky: var(--theme-panel);
+  --auth-sage: var(--theme-secondary);
+  --auth-lilac: var(--theme-tertiary);
+}
+
+:root[data-bubble-theme] .auth-page {
+  color: var(--theme-paper);
+  background:
+    radial-gradient(
+      circle at 16% 18%,
+      color-mix(in srgb, var(--theme-action) 15%, transparent) 0 0.12rem,
+      transparent 0.14rem
+    ),
+    radial-gradient(
+      circle at 84% 38%,
+      color-mix(in srgb, var(--theme-panel) 14%, transparent) 0 0.1rem,
+      transparent 0.12rem
+    ),
+    repeating-linear-gradient(
+      96deg,
+      color-mix(in srgb, var(--theme-paper) 1.4%, transparent) 0 1px,
+      transparent 1px 5px
+    ),
+    var(--theme-canvas);
+}
+
+:root[data-bubble-theme] .auth-page::before {
+  background: radial-gradient(
+    circle,
+    color-mix(in srgb, var(--theme-action) 31%, transparent) 0,
+    color-mix(in srgb, var(--theme-action) 12%, transparent) 38%,
+    transparent 69%
+  );
+}
+
+:root[data-bubble-theme] :is(.auth-page__brand p, .auth-card__intro h1) {
+  color: var(--theme-paper);
+}
+
+:root[data-bubble-theme] .auth-card__intro > p,
+:root[data-bubble-theme] :is(.auth-demo-action > small, .auth-card__preview small) {
+  color: var(--theme-on-canvas-muted);
+}
+
+:root[data-bubble-theme] .auth-illustration::before {
+  border-color: var(--theme-line);
+}
+
+:root[data-bubble-theme] .auth-illustration::after {
+  color: var(--theme-panel);
+  text-shadow: -8.5rem 7.2rem 0 var(--theme-action);
+}
+
+:root[data-bubble-theme] .auth-illustration__halo {
+  background: radial-gradient(
+    ellipse,
+    color-mix(in srgb, var(--theme-action) 43%, transparent) 0,
+    color-mix(in srgb, var(--theme-action) 20%, transparent) 31%,
+    color-mix(in srgb, var(--theme-panel) 8%, transparent) 54%,
+    transparent 74%
+  );
+  box-shadow: 0 0 4.8rem color-mix(in srgb, var(--theme-action) 18%, transparent);
+}
+
+:root[data-bubble-theme] .auth-family-bubble {
+  border-color: var(--theme-action);
+  background: var(--theme-paper-deep);
+  box-shadow:
+    0 0 0 2px color-mix(in srgb, var(--theme-paper) 90%, transparent) inset,
+    0.3rem 0.45rem 0 var(--theme-shadow),
+    0 0 2.6rem color-mix(in srgb, var(--theme-action) 26%, transparent);
+}
+
+:root[data-bubble-theme] :is(.auth-actions button, .auth-card__preview button) {
+  border-color: color-mix(in srgb, var(--theme-action-ink) 62%, transparent);
+  color: var(--theme-action-ink);
+  background: var(--theme-action);
+  box-shadow: 0.25rem 0.3rem 0 var(--theme-shadow);
+}
+
+:root[data-bubble-theme] :is(
+  .auth-actions button:hover,
+  .auth-actions button:focus-visible,
+  .auth-card__preview button:hover,
+  .auth-card__preview button:focus-visible,
+  .auth-bootstrap-failed button:hover,
+  .auth-bootstrap-failed button:focus-visible
+) {
+  background: var(--theme-action-soft);
+}
+
+:root[data-bubble-theme] :is(
+  .auth-actions button:active,
+  .auth-card__preview button:active,
+  .auth-bootstrap-failed button:active
+) {
+  background: color-mix(in srgb, var(--theme-action) 84%, var(--theme-action-ink));
+}
+
+:root[data-bubble-theme] .auth-demo-action > button {
+  color: var(--theme-action-soft);
+  text-decoration-color: color-mix(in srgb, var(--theme-action) 58%, transparent);
+}
+
+:root[data-bubble-theme] .auth-card__loading {
+  color: var(--theme-on-canvas-muted);
+}
+
+:root[data-bubble-theme] :is(.auth-card__loading span, .auth-loading span) {
+  border-color: color-mix(in srgb, var(--theme-paper) 22%, transparent);
+  border-top-color: var(--theme-action);
+}
+
+:root[data-bubble-theme] .auth-card__setup {
+  border-color: color-mix(in srgb, var(--theme-ink) 34%, transparent);
+  color: var(--theme-ink);
+  background: color-mix(in srgb, var(--theme-panel) 22%, var(--theme-paper));
+  box-shadow: 0.22rem 0.24rem 0 color-mix(in srgb, var(--theme-secondary) 28%, transparent);
+}
+
+:root[data-bubble-theme] .auth-card__setup strong {
+  color: color-mix(in srgb, var(--theme-action) 64%, var(--theme-ink));
+}
+
+:root[data-bubble-theme] .email-auth__backdrop {
+  background: color-mix(in srgb, var(--theme-canvas-deep) 84%, transparent);
+}
+
+:root[data-bubble-theme] .email-auth__sheet {
+  border-color: color-mix(in srgb, var(--theme-ink) 58%, transparent);
+  color: var(--theme-ink);
+  background:
+    radial-gradient(
+      circle at 92% 7%,
+      color-mix(in srgb, var(--theme-panel) 22%, transparent) 0 0.23rem,
+      transparent 0.26rem
+    ),
+    repeating-linear-gradient(
+      0deg,
+      color-mix(in srgb, var(--theme-ink) 2%, transparent) 0 1px,
+      transparent 1px 5px
+    ),
+    var(--theme-paper);
+  box-shadow:
+    0.42rem 0.52rem 0 var(--theme-action),
+    0 1.4rem 4rem color-mix(in srgb, var(--theme-canvas-deep) 44%, transparent);
+}
+
+:root[data-bubble-theme] .email-auth__close:hover,
+:root[data-bubble-theme] .email-auth__close:focus-visible {
+  background: color-mix(in srgb, var(--theme-panel) 28%, transparent);
+}
+
+:root[data-bubble-theme] .email-auth__heading p,
+:root[data-bubble-theme] .email-auth__secondary-actions button {
+  color: color-mix(in srgb, var(--theme-action) 66%, var(--theme-ink));
+  text-decoration-color: color-mix(in srgb, var(--theme-action) 52%, transparent);
+}
+
+:root[data-bubble-theme] .email-auth__google {
+  border-color: color-mix(in srgb, var(--theme-ink) 58%, transparent);
+  color: var(--theme-ink);
+  background: color-mix(in srgb, var(--theme-panel) 26%, var(--theme-paper));
+  box-shadow: 0.18rem 0.2rem 0 color-mix(in srgb, var(--theme-panel) 44%, transparent);
+}
+
+:root[data-bubble-theme] .email-auth__google:hover,
+:root[data-bubble-theme] .email-auth__google:focus-visible {
+  border-color: var(--theme-ink);
+  background: color-mix(in srgb, var(--theme-panel) 42%, var(--theme-paper));
+}
+
+:root[data-bubble-theme] .email-auth__field input {
+  border-color: color-mix(in srgb, var(--theme-ink) 32%, transparent);
+  color: var(--theme-ink);
+  background: color-mix(in srgb, var(--theme-paper) 90%, white);
+  caret-color: var(--theme-action);
+}
+
+:root[data-bubble-theme] .email-auth__field input:focus {
+  border-color: var(--theme-ink);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--theme-panel) 28%, transparent);
+}
+
+:root[data-bubble-theme] .email-auth__primary,
+:root[data-bubble-theme] .auth-bootstrap-failed button {
+  border-color: color-mix(in srgb, var(--theme-action-ink) 62%, transparent);
+  color: var(--theme-action-ink);
+  background: var(--theme-action);
+  box-shadow: 0.22rem 0.25rem 0 var(--theme-shadow);
+}
+
+:root[data-bubble-theme] :is(.auth-loading, .auth-bootstrap-failed) {
+  color: var(--theme-paper);
+  background:
+    repeating-linear-gradient(
+      96deg,
+      color-mix(in srgb, var(--theme-paper) 1.4%, transparent) 0 1px,
+      transparent 1px 5px
+    ),
+    var(--theme-canvas-deep);
+}
+
+:root[data-bubble-theme] .auth-bootstrap-failed::before {
+  background: radial-gradient(
+    ellipse,
+    color-mix(in srgb, var(--theme-action) 30%, transparent) 0,
+    color-mix(in srgb, var(--theme-action) 9%, transparent) 45%,
+    transparent 72%
+  );
+}
+
+:root[data-bubble-theme] :is(
+  .auth-bootstrap-failed h1,
+  .auth-bootstrap-failed__eyebrow
+) {
+  color: var(--theme-paper);
+}
+
+:root[data-bubble-theme] .auth-bootstrap-failed > p:not(.auth-bootstrap-failed__eyebrow) {
+  color: var(--theme-on-canvas-muted);
+}
+
+/* Onboarding -----------------------------------------------------------
+ * Keep the loader's fixed, centred geometry in OnboardingPage.css; only its
+ * colour story is overridden here.
+ */
+:root[data-bubble-theme] :is(.onboarding-page, .onboarding-loading) {
+  --onboarding-paper: var(--theme-paper);
+  --onboarding-paper-deep: var(--theme-paper-deep);
+  --onboarding-ink: var(--theme-ink);
+  --onboarding-muted: var(--theme-muted);
+  --onboarding-sun: var(--theme-action);
+  --onboarding-coral: var(--theme-action);
+  --onboarding-sky: var(--theme-panel);
+  --onboarding-sage: var(--theme-secondary);
+  --onboarding-lilac: var(--theme-tertiary);
+}
+
+:root[data-bubble-theme] .onboarding-page {
+  color: var(--theme-paper);
+  background:
+    radial-gradient(
+      circle at 17% 24%,
+      color-mix(in srgb, var(--theme-action) 13%, transparent) 0 0.12rem,
+      transparent 0.14rem
+    ),
+    radial-gradient(
+      circle at 82% 18%,
+      color-mix(in srgb, var(--theme-panel) 13%, transparent) 0 0.1rem,
+      transparent 0.12rem
+    ),
+    repeating-linear-gradient(
+      96deg,
+      color-mix(in srgb, var(--theme-paper) 1.4%, transparent) 0 1px,
+      transparent 1px 5px
+    ),
+    var(--theme-canvas);
+}
+
+:root[data-bubble-theme] .onboarding-page__aura {
+  background: radial-gradient(
+    circle,
+    color-mix(in srgb, var(--theme-action) 28%, transparent) 0%,
+    color-mix(in srgb, var(--theme-action) 9%, transparent) 46%,
+    transparent 73%
+  );
+}
+
+:root[data-bubble-theme] .onboarding-page::before {
+  color: var(--theme-action);
+}
+
+:root[data-bubble-theme] .onboarding-page::after {
+  color: var(--theme-panel);
+}
+
+:root[data-bubble-theme] :is(
+  .onboarding-brand,
+  .onboarding-family h1,
+  .onboarding-ready h1
+) {
+  color: var(--theme-paper);
+}
+
+:root[data-bubble-theme] :is(.onboarding-header > button, .onboarding-eyebrow) {
+  color: var(--theme-action-soft);
+  text-decoration-color: color-mix(in srgb, var(--theme-action) 52%, transparent);
+}
+
+:root[data-bubble-theme] :is(.onboarding-family__intro > span, .onboarding-copy) {
+  color: var(--theme-on-canvas-muted);
+}
+
+:root[data-bubble-theme] :is(.onboarding-family, .onboarding-ready)::before {
+  border-color: var(--theme-line);
+  background: color-mix(in srgb, var(--theme-canvas-soft) 76%, transparent);
+  box-shadow: 0.35rem 0.42rem 0 var(--theme-shadow);
+}
+
+:root[data-bubble-theme] .onboarding-family__choices button {
+  border-color: color-mix(in srgb, var(--theme-action-ink) 52%, transparent);
+  color: var(--theme-action-ink);
+  background: var(--theme-action);
+  box-shadow: 0.22rem 0.25rem 0 var(--theme-shadow);
+}
+
+:root[data-bubble-theme] .onboarding-family__choices button:nth-child(2) {
+  background: var(--theme-secondary);
+}
+
+:root[data-bubble-theme] .onboarding-family__choices button[aria-pressed='true'] {
+  border-color: var(--theme-paper);
+  background: var(--theme-action-soft);
+  box-shadow: 0.3rem 0.34rem 0 var(--theme-shadow);
+}
+
+:root[data-bubble-theme] .onboarding-family__choices button:nth-child(2)[aria-pressed='true'] {
+  background: color-mix(in srgb, var(--theme-secondary) 72%, var(--theme-paper));
+}
+
+:root[data-bubble-theme] :is(
+  .onboarding-family__choices button > span,
+  .onboarding-family__choices small
+) {
+  color: var(--theme-action-ink);
+}
+
+:root[data-bubble-theme] .onboarding-family__form label > span,
+:root[data-bubble-theme] .onboarding-pending strong {
+  color: var(--theme-paper);
+}
+
+:root[data-bubble-theme] .onboarding-family__form input {
+  border-color: color-mix(in srgb, var(--theme-ink) 36%, transparent);
+  color: var(--theme-ink);
+  background: color-mix(in srgb, var(--theme-paper) 90%, white);
+}
+
+:root[data-bubble-theme] .onboarding-family__form input:focus {
+  border-color: var(--theme-action);
+  box-shadow: 0 0 0 0.2rem color-mix(in srgb, var(--theme-action) 28%, transparent);
+}
+
+:root[data-bubble-theme] :is(.onboarding-family__submit, .onboarding-action--primary) {
+  border-color: color-mix(in srgb, var(--theme-action-ink) 62%, transparent);
+  color: var(--theme-action-ink);
+  background: var(--theme-action);
+  box-shadow: 0.22rem 0.25rem 0 var(--theme-shadow);
+}
+
+:root[data-bubble-theme] .onboarding-pending {
+  border-color: var(--theme-line);
+}
+
+:root[data-bubble-theme] :is(
+  .onboarding-pending p,
+  .onboarding-family__notice,
+  .onboarding-ready__status
+) {
+  color: var(--theme-on-canvas-muted);
+}
+
+:root[data-bubble-theme] .onboarding-pending button {
+  border-color: color-mix(in srgb, var(--theme-action-ink) 48%, transparent);
+  color: var(--theme-action-ink);
+  background: var(--theme-secondary);
+}
+
+:root[data-bubble-theme] .onboarding-ready__mark {
+  border-color: color-mix(in srgb, var(--theme-action-ink) 58%, transparent);
+  color: var(--theme-action-ink);
+  background: var(--theme-action);
+  box-shadow: 0.18rem 0.2rem 0 var(--theme-shadow);
+}
+
+:root[data-bubble-theme] .onboarding-ready__code {
+  border-color: color-mix(in srgb, var(--theme-ink) 31%, transparent);
+  color: var(--theme-ink);
+  background: color-mix(in srgb, var(--theme-paper) 92%, transparent);
+}
+
+:root[data-bubble-theme] .onboarding-action--secondary {
+  border-color: color-mix(in srgb, var(--theme-action-ink) 52%, transparent);
+  color: var(--theme-action-ink);
+  background: var(--theme-panel);
+  box-shadow: 0.2rem 0.22rem 0 var(--theme-shadow);
+}
+
+:root[data-bubble-theme] .onboarding-loading {
+  color: var(--theme-on-canvas-muted);
+  background:
+    repeating-linear-gradient(
+      96deg,
+      color-mix(in srgb, var(--theme-paper) 1.4%, transparent) 0 1px,
+      transparent 1px 5px
+    ),
+    var(--theme-canvas-deep);
+}
+
+:root[data-bubble-theme] .onboarding-loading > span {
+  border-color: color-mix(in srgb, var(--theme-paper) 22%, transparent);
+  border-top-color: var(--theme-action);
+}
+
+/* Family sync ----------------------------------------------------------
+ * This panel began as a black utility surface. The stronger theme scope
+ * makes it notebook paper and routes every action through semantic colours.
+ */
+:root[data-bubble-theme] .family-sync {
+  --family-sync-accent: var(--theme-action);
+  border-color: color-mix(in srgb, var(--theme-ink) 24%, transparent);
+  color: var(--theme-ink);
+  background:
+    repeating-linear-gradient(
+      0deg,
+      transparent 0 2.55rem,
+      color-mix(in srgb, var(--theme-ink) 7.5%, transparent) 2.55rem 2.6rem
+    ),
+    var(--theme-paper);
+  color-scheme: light;
+}
+
+:root[data-bubble-theme] .family-sync :is(
+  .family-sync__header h2,
+  h3,
+  .family-sync__identity strong,
+  .family-sync__account-row strong,
+  .family-sync__requests li strong
+) {
+  color: var(--theme-ink);
+}
+
+:root[data-bubble-theme] .family-sync :is(
+  .family-sync__state p:last-child,
+  .family-sync__intro p,
+  .family-sync__option p,
+  .family-sync__pending-card p,
+  .family-sync__subheading p,
+  .family-sync__member-note,
+  .family-sync__privacy-note,
+  .family-sync__identity small,
+  .family-sync__account-row span,
+  .family-sync__circle-copy > span,
+  .family-sync__circle-copy p,
+  .family-sync__invite small,
+  .family-sync__requests li span,
+  .family-sync__empty-requests,
+  label > span,
+  .family-sync__invite > span
+) {
+  color: var(--theme-muted);
+}
+
+:root[data-bubble-theme] .family-sync :is(
+  .family-sync__state,
+  .family-sync__pending-card,
+  .family-sync__owner-tools,
+  .family-sync__requests,
+  .family-sync__member-note,
+  .family-sync__invite,
+  .family-sync__rotation-confirmation,
+  .family-sync__requests li,
+  .family-sync__empty-requests
+) {
+  border-color: color-mix(in srgb, var(--theme-ink) 18%, transparent);
+}
+
+:root[data-bubble-theme] .family-sync__segmented {
+  border-color: color-mix(in srgb, var(--theme-ink) 18%, transparent);
+  background: color-mix(in srgb, var(--theme-panel) 24%, var(--theme-paper));
+}
+
+:root[data-bubble-theme] .family-sync__segmented button {
+  color: var(--theme-muted);
+}
+
+:root[data-bubble-theme] .family-sync__segmented button[aria-pressed='true'] {
+  color: var(--theme-action-ink);
+  background: var(--theme-action);
+}
+
+:root[data-bubble-theme] .family-sync :is(
+  .family-sync__connected-badge,
+  .family-sync__state-icon,
+  .family-sync__circle-mark,
+  .family-sync__count
+) {
+  border-color: color-mix(in srgb, var(--theme-ink) 28%, transparent);
+  color: var(--theme-ink);
+  background: color-mix(in srgb, var(--theme-secondary) 28%, var(--theme-paper));
+}
+
+:root[data-bubble-theme] .family-sync :is(input, .family-sync__invite output) {
+  border-color: color-mix(in srgb, var(--theme-ink) 34%, transparent);
+  color: var(--theme-ink);
+  background: color-mix(in srgb, var(--theme-paper) 90%, white);
+  caret-color: var(--theme-action);
+}
+
+:root[data-bubble-theme] .family-sync input::placeholder {
+  color: color-mix(in srgb, var(--theme-muted) 70%, transparent);
+}
+
+:root[data-bubble-theme] .family-sync input:focus {
+  border-color: var(--theme-action);
+  outline-color: color-mix(in srgb, var(--theme-action) 42%, transparent);
+}
+
+:root[data-bubble-theme] .family-sync :is(
+  .family-sync__primary,
+  .family-sync__approve,
+  .family-sync__share,
+  .family-sync__auth-link
+) {
+  border-color: color-mix(in srgb, var(--theme-action-ink) 58%, transparent);
+  color: var(--theme-action-ink);
+  background: var(--theme-action);
+}
+
+:root[data-bubble-theme] .family-sync :is(.family-sync__secondary, .family-sync__reject) {
+  border-color: color-mix(in srgb, var(--theme-ink) 38%, transparent);
+  color: var(--theme-ink);
+  background: color-mix(in srgb, var(--theme-panel) 36%, var(--theme-paper));
+}
+
+:root[data-bubble-theme] .family-sync :is(
+  .family-sync__text-button,
+  .family-sync__rotate-code
+) {
+  border-color: color-mix(in srgb, var(--theme-ink) 38%, transparent);
+  color: var(--theme-ink);
+}
+
+:root[data-bubble-theme] .family-sync :is(
+  .family-sync__identity > span,
+  .family-sync__mini-avatar
+) {
+  border-color: color-mix(in srgb, var(--theme-ink) 48%, transparent);
+  color: var(--theme-ink);
+  background: color-mix(in srgb, var(--theme-secondary) 22%, var(--theme-paper-deep));
+}
+
+:root[data-bubble-theme] .family-sync :is(
+  .family-sync__connected-badge > span,
+  .family-sync__pending-pulse
+) {
+  background: var(--theme-secondary);
+}
+
+:root[data-bubble-theme] .family-sync__loading {
+  color: var(--theme-muted);
+}
+
+:root[data-bubble-theme] .family-sync__loading > span {
+  border-color: color-mix(in srgb, var(--theme-ink) 20%, transparent);
+  border-top-color: var(--theme-action);
+}
+
+:root[data-bubble-theme] .family-sync button:focus-visible,
+:root[data-bubble-theme] .family-sync__auth-link:focus-visible {
+  outline-color: var(--theme-action);
+}
+
+/* Comments and photo processing ------------------------------------------ */
+:root[data-bubble-theme] .family-comments-panel {
+  color: var(--theme-on-canvas);
+  background: color-mix(in srgb, var(--theme-canvas-soft) 94%, transparent);
+  border-color: color-mix(in srgb, var(--theme-paper) 18%, transparent);
+  box-shadow: 0 1.4rem 4rem var(--theme-shadow);
+}
+
+:root[data-bubble-theme] .family-comments-panel__icon {
+  color: var(--theme-action);
+  background: color-mix(in srgb, var(--theme-action) 12%, transparent);
+  border-color: color-mix(in srgb, var(--theme-action) 30%, transparent);
+}
+
+:root[data-bubble-theme] .family-comments-panel :is(
+  .family-comments-panel__header p,
+  .family-comments-panel__empty,
+  .family-comment time,
+  .family-comment small,
+  .family-comments-panel__composer > label
+) {
+  color: var(--theme-on-canvas-muted);
+}
+
+:root[data-bubble-theme] .family-comments-panel :is(
+  .family-comment header strong,
+  .family-comment > p,
+  .family-comments-panel__composer > label strong
+) {
+  color: var(--theme-on-canvas);
+}
+
+:root[data-bubble-theme] .family-comments-panel__header > button,
+:root[data-bubble-theme] .family-comments-panel__scopes button,
+:root[data-bubble-theme] .family-comments-panel__composer textarea {
+  color: var(--theme-on-canvas);
+  background: color-mix(in srgb, var(--theme-paper) 8%, transparent);
+  border-color: color-mix(in srgb, var(--theme-paper) 14%, transparent);
+}
+
+:root[data-bubble-theme] .family-comments-panel__scopes button.is-active {
+  color: var(--theme-action);
+  background: color-mix(in srgb, var(--theme-action) 14%, transparent);
+  border-color: color-mix(in srgb, var(--theme-action) 42%, transparent);
+}
+
+:root[data-bubble-theme] .family-comments-panel :is(
+  .family-comments-panel__empty span,
+  .family-comment__context
+) {
+  color: var(--theme-action);
+}
+
+:root[data-bubble-theme] .family-comment__context {
+  background: color-mix(in srgb, var(--theme-action) 10%, transparent);
+}
+
+:root[data-bubble-theme] .family-comments-panel :is(
+  .family-comments-panel__list,
+  .family-comment,
+  .family-comments-panel__composer
+) {
+  border-color: color-mix(in srgb, var(--theme-paper) 11%, transparent);
+}
+
+:root[data-bubble-theme] .family-comments-panel__composer {
+  background: var(--theme-canvas-deep);
+}
+
+:root[data-bubble-theme] .family-comments-panel__composer textarea {
+  caret-color: var(--theme-action);
+}
+
+:root[data-bubble-theme] .family-comments-panel__composer textarea:focus {
+  border-color: color-mix(in srgb, var(--theme-action) 62%, transparent);
+}
+
+:root[data-bubble-theme] .family-comments-panel__composer button {
+  color: var(--theme-action-ink);
+  background: var(--theme-action);
+}
+
+:root[data-bubble-theme] .people-timeline {
+  --people-panel: color-mix(in srgb, var(--theme-paper) 5%, transparent);
+  --people-line: color-mix(in srgb, var(--theme-paper) 18%, transparent);
+  --people-muted: var(--theme-on-canvas-muted);
+}
+
+:root[data-bubble-theme] .people-timeline :is(
+  .people-timeline__setup-circle,
+  .people-timeline__face-candidates > button > span,
+  .people-timeline__photo-link,
+  .people-timeline__album-photo,
+  .people-timeline__scrapbook-image
+) {
+  background: var(--theme-canvas-deep);
+}
+
+:root[data-bubble-theme] .people-timeline__scrapbook-photo {
+  color: var(--theme-on-canvas);
+  background:
+    repeating-linear-gradient(
+      0deg,
+      color-mix(in srgb, var(--theme-paper) 2.2%, transparent) 0,
+      color-mix(in srgb, var(--theme-paper) 2.2%, transparent) 1px,
+      transparent 1px,
+      transparent 5px
+    ),
+    var(--theme-canvas-soft);
+  border-color: color-mix(in srgb, var(--theme-action) 34%, transparent);
+  box-shadow:
+    0 1.3rem 3.3rem var(--theme-shadow),
+    inset 0 0 2.5rem color-mix(in srgb, var(--theme-canvas-deep) 28%, transparent);
+}
+
+:root[data-bubble-theme] .people-timeline__scrapbook-tape {
+  background: color-mix(in srgb, var(--theme-action-soft) 58%, transparent);
+}
+
+:root[data-bubble-theme] .people-timeline__scrapbook-doodle,
+:root[data-bubble-theme] .people-timeline__import-status {
+  color: var(--theme-action);
+}
+
+:root[data-bubble-theme] .people-timeline__scrapbook-photo figcaption {
+  color: var(--theme-on-canvas-muted);
+}
+
+:root[data-bubble-theme] .people-timeline__import-progress {
+  color: var(--theme-on-canvas);
+  background: color-mix(in srgb, var(--theme-canvas-soft) 96%, transparent);
+  border-color: color-mix(in srgb, var(--theme-action) 30%, transparent);
+  box-shadow: 0 1rem 3rem var(--theme-shadow);
+}
+
+:root[data-bubble-theme] .people-timeline__import-progress > i {
+  background: color-mix(in srgb, var(--theme-paper) 14%, transparent);
+}
+
 @media (max-width: 22rem) {
   .theme-picker__options {
     gap: 0.34rem;
@@ -450,4 +1836,36 @@
   .theme-option__swatches {
     width: 2.85rem;
   }
+}
+
+/* Final page-surface contract -------------------------------------------
+ * Keep this last. Feature styles may define local paper, cards, and doodles,
+ * but every primary route sits on the exact same selected-theme canvas.
+ */
+:root[data-bubble-theme] .app-viewport {
+  background: var(--theme-page-background);
+}
+
+:root[data-bubble-theme] .app-content > .memories-screen,
+:root[data-bubble-theme] .app-content > .capsules-page,
+:root[data-bubble-theme] .app-content > .journal-page,
+:root[data-bubble-theme] .app-content > .profile-page,
+:root[data-bubble-theme] .app-content > .capture-page,
+:root[data-bubble-theme] .journal-page .person-scrapbook {
+  background-color: transparent;
+  background-image: none;
+}
+
+/* Journal's sticky heading needs a quiet scrim while content moves beneath
+ * it. It uses the same canvas token instead of inventing another gradient.
+ */
+:root[data-bubble-theme] .journal-page__chrome {
+  background: var(--theme-page-chrome);
+}
+
+/* The family row is an action, not a green status. This resolves to pink in
+ * Plum, sage in Forest, and gold in Midnight through the semantic palette.
+ */
+:root[data-bubble-theme] .profile-page > .ks-section:nth-of-type(2) .profile-action-row {
+  background: color-mix(in srgb, var(--theme-action) 54%, var(--theme-paper));
 }

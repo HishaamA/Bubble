@@ -199,6 +199,15 @@ export function Capture360Page({
   const draftSaveQueueRef = useRef<Promise<void>>(Promise.resolve())
   const draftSaveVersionRef = useRef(0)
   const draftSaveUiRequestRef = useRef(0)
+  const draftSaveInFlightRef = useRef(false)
+  const guidedCaptureInFlightRef = useRef(false)
+  const guidedCaptureRequestRef = useRef(0)
+  const fileSelectionInFlightRef = useRef(false)
+  const fileSelectionRequestRef = useRef(0)
+  const shareInFlightRef = useRef(false)
+  const mountedRef = useRef(true)
+  const restoreGuideFocusRef = useRef(false)
+  const guidedCaptureButtonRef = useRef<HTMLButtonElement>(null)
 
   useEffect(() => {
     if (now) return
@@ -207,8 +216,21 @@ export function Capture360Page({
     return () => window.clearInterval(timer)
   }, [now])
 
-  useEffect(() => () => {
-    if (previewUrlRef.current) URL.revokeObjectURL(previewUrlRef.current)
+  useEffect(() => {
+    mountedRef.current = true
+    return () => {
+      mountedRef.current = false
+      guidedCaptureRequestRef.current += 1
+      fileSelectionRequestRef.current += 1
+      guidedCaptureInFlightRef.current = false
+      fileSelectionInFlightRef.current = false
+      draftSaveInFlightRef.current = false
+      shareInFlightRef.current = false
+      // This component owns the one installed draft URL. Async candidates do
+      // not become owned until their request identity is still current.
+      if (previewUrlRef.current) URL.revokeObjectURL(previewUrlRef.current)
+      previewUrlRef.current = null
+    }
   }, [])
 
   useEffect(() => {
@@ -258,8 +280,23 @@ export function Capture360Page({
   const phaseCopy = getPhaseCopy(phase)
   const canUseDailyWindow = phase === 'open'
   const isSuccess = shared
+  const interactionBusy = checking || guidedCaptureRunning || savingDraft || sharing
 
-  function clearDraft() {
+  function hasBlockingInteraction() {
+    return (
+      guidedCaptureInFlightRef.current ||
+      fileSelectionInFlightRef.current ||
+      draftSaveInFlightRef.current ||
+      shareInFlightRef.current
+    )
+  }
+
+  function clearDraft({ invalidateFileSelection = true } = {}) {
+    if (invalidateFileSelection) {
+      fileSelectionRequestRef.current += 1
+      fileSelectionInFlightRef.current = false
+      setChecking(false)
+    }
     const nativeCaptureResult = draft?.nativeCaptureResult
     if (previewUrlRef.current) {
       URL.revokeObjectURL(previewUrlRef.current)
@@ -281,6 +318,7 @@ export function Capture360Page({
     nextSource: CaptureSource,
     picker: 'camera' | 'library' = 'library',
   ) {
+    if (hasBlockingInteraction()) return
     if (nextSource === 'daily' && !canUseDailyWindow) return
     sourceRef.current = nextSource
     pickerRef.current = picker
@@ -299,6 +337,9 @@ export function Capture360Page({
     warning?: string,
     nativeCaptureResult?: NativePanoramaCaptureResult,
   ) {
+    // The currently installed draft exclusively owns previewUrlRef. Request
+    // identity checks happen before this function so a stale async selection
+    // can never revoke the newer draft's URL.
     if (previewUrlRef.current) URL.revokeObjectURL(previewUrlRef.current)
     const previewUrl = URL.createObjectURL(file)
     previewUrlRef.current = previewUrl
@@ -392,9 +433,10 @@ export function Capture360Page({
   }
 
   async function retryDraftSave() {
-    if (!draft || !onSaveDraft || savingDraft) return
+    if (!draft || !onSaveDraft || draftSaveInFlightRef.current) return
 
     const uiRequest = ++draftSaveUiRequestRef.current
+    draftSaveInFlightRef.current = true
     setSavingDraft(true)
     setError('')
     try {
@@ -405,7 +447,10 @@ export function Capture360Page({
       setError(message)
       setAnnouncement(message)
     } finally {
-      if (uiRequest === draftSaveUiRequestRef.current) setSavingDraft(false)
+      if (uiRequest === draftSaveUiRequestRef.current) {
+        draftSaveInFlightRef.current = false
+        setSavingDraft(false)
+      }
     }
   }
 
@@ -414,6 +459,7 @@ export function Capture360Page({
     if (!draft || !onSaveDraft) return
 
     const uiRequest = ++draftSaveUiRequestRef.current
+    draftSaveInFlightRef.current = true
     setSavingDraft(true)
     setError('')
     void saveDraftLocally(draft, caption.trim(), nextAnnotations)
@@ -429,13 +475,17 @@ export function Capture360Page({
         setAnnouncement(message)
       })
       .finally(() => {
-        if (uiRequest === draftSaveUiRequestRef.current) setSavingDraft(false)
+        if (uiRequest === draftSaveUiRequestRef.current) {
+          draftSaveInFlightRef.current = false
+          setSavingDraft(false)
+        }
       })
   }
 
   async function finishPanoramaReview() {
     if (onSaveDraft) {
       const uiRequest = ++draftSaveUiRequestRef.current
+      draftSaveInFlightRef.current = true
       setSavingDraft(true)
       try {
         await draftSaveQueueRef.current
@@ -443,10 +493,16 @@ export function Capture360Page({
         const message = 'Save the latest memory points before continuing.'
         setError(message)
         setAnnouncement(message)
-        if (uiRequest === draftSaveUiRequestRef.current) setSavingDraft(false)
+        if (uiRequest === draftSaveUiRequestRef.current) {
+          draftSaveInFlightRef.current = false
+          setSavingDraft(false)
+        }
         return
       }
-      if (uiRequest === draftSaveUiRequestRef.current) setSavingDraft(false)
+      if (uiRequest === draftSaveUiRequestRef.current) {
+        draftSaveInFlightRef.current = false
+        setSavingDraft(false)
+      }
     }
 
     setReviewingPanorama(false)
@@ -458,6 +514,9 @@ export function Capture360Page({
   }
 
   async function beginGuidedCapture(nextSource: CaptureSource) {
+    // React state disables the button visually; this ref closes the same-tick
+    // window before a render so the native bridge can only own one session.
+    if (hasBlockingInteraction()) return
     if (nextSource === 'daily' && !canUseDailyWindow) return
     sourceRef.current = nextSource
     setSource(nextSource)
@@ -465,11 +524,17 @@ export function Capture360Page({
     setError('')
 
     if (!guidedCaptureAvailable) {
+      restoreGuideFocusRef.current = false
       setGuidePreview(true)
       setAnnouncement('Opened the guided capture preview.')
       return
     }
 
+    guidedCaptureInFlightRef.current = true
+    const requestId = ++guidedCaptureRequestRef.current
+    const requestIsCurrent = () => (
+      mountedRef.current && guidedCaptureRequestRef.current === requestId
+    )
     setGuidedCaptureRunning(true)
     setGuidedCaptureStatus('Opening the camera guide…')
     let captureResult: NativePanoramaCaptureResult | undefined
@@ -477,6 +542,7 @@ export function Capture360Page({
     try {
       const result = await startGuidedCapture()
       captureResult = result
+      if (!requestIsCurrent()) return
       if (
         result.frames.length < result.targetCount ||
         result.capturedCount < result.targetCount
@@ -486,6 +552,7 @@ export function Capture360Page({
 
       setGuidedCaptureStatus('Building your 360° moment…')
       const processed = await composeGuidedCapture(result, (progress) => {
+        if (!requestIsCurrent()) return
         if (progress.phase === 'reading') {
           setGuidedCaptureStatus(`Reading view ${Math.min(progress.completed + 1, progress.total)} of ${progress.total}…`)
         } else if (progress.phase === 'projecting') {
@@ -494,6 +561,7 @@ export function Capture360Page({
           setGuidedCaptureStatus('Finishing your 360° moment…')
         }
       })
+      if (!requestIsCurrent()) return
       const file = new File(
         [processed.viewer],
         `bubble-${new Date().toISOString().replace(/[:.]/g, '-')}-360.jpg`,
@@ -511,11 +579,15 @@ export function Capture360Page({
         setGuidedCaptureStatus('Saving your assembled sphere…')
         try {
           await saveDraftLocally(assembledDraft)
+          // saveDraftLocally has made the panorama durable and released the
+          // native frame directory, so the bridge result is no longer ours.
+          captureResult = undefined
+          if (!requestIsCurrent()) return
         } catch {
+          if (!requestIsCurrent()) return
           keepNativeCapture = true
           throw new Error('Your sphere was assembled, but it could not be saved yet. The preview and source pictures are still here. Try saving again.')
         }
-        captureResult = undefined
       }
       setAnnouncement(
         onSaveDraft
@@ -523,7 +595,7 @@ export function Capture360Page({
           : 'Your guided 360° moment is ready to review.',
       )
     } catch (captureError) {
-      if (!isNativeCaptureCancellation(captureError)) {
+      if (requestIsCurrent() && !isNativeCaptureCancellation(captureError)) {
         const message = captureError instanceof Error
           ? captureError.message
           : 'The guided capture could not be completed. Your family has not received anything yet.'
@@ -539,34 +611,47 @@ export function Capture360Page({
           // away the finished, already-sanitized panorama.
         }
       }
-      setGuidedCaptureRunning(false)
-      setGuidedCaptureStatus('')
+      if (guidedCaptureRequestRef.current === requestId) {
+        guidedCaptureInFlightRef.current = false
+        if (mountedRef.current) {
+          setGuidedCaptureRunning(false)
+          setGuidedCaptureStatus('')
+        }
+      }
     }
   }
 
   async function selectFile(event: ChangeEvent<HTMLInputElement>) {
-    const file = event.target.files?.[0]
+    const input = event.currentTarget
+    const file = input.files?.[0]
     if (!file) return
 
-    clearDraft()
+    // A newer picker result supersedes earlier async validation/normalization.
+    // Only the current request may install or report a draft.
+    const requestId = ++fileSelectionRequestRef.current
+    const requestIsCurrent = () => (
+      mountedRef.current && fileSelectionRequestRef.current === requestId
+    )
+    fileSelectionInFlightRef.current = true
+    clearDraft({ invalidateFileSelection: false })
     const selectedSource = sourceRef.current
-
-    if (!file.type.startsWith('image/')) {
-      setError('Choose an image file from your camera or photo library.')
-      setAnnouncement('The selected file is not an image.')
-      return
-    }
-
-    if (file.size > 25 * 1024 * 1024) {
-      const message = 'Choose a 360° panorama smaller than 25 MB.'
-      setError(message)
-      setAnnouncement(message)
-      return
-    }
-
     setChecking(true)
     try {
+      if (!file.type.startsWith('image/')) {
+        setError('Choose an image file from your camera or photo library.')
+        setAnnouncement('The selected file is not an image.')
+        return
+      }
+
+      if (file.size > 25 * 1024 * 1024) {
+        const message = 'Choose a 360° panorama smaller than 25 MB.'
+        setError(message)
+        setAnnouncement(message)
+        return
+      }
+
       const dimensions = await readDimensions(file)
+      if (!requestIsCurrent()) return
       const validation = validatePanoramaCaptureDimensions(dimensions)
 
       if (!validation.valid) {
@@ -579,6 +664,7 @@ export function Capture360Page({
       let preparedDimensions = dimensions
       if (validation.needsNormalization) {
         const processed = await processPanorama(file)
+        if (!requestIsCurrent()) return
         const filename = file.name.replace(/\.[^.]+$/, '') || 'family-panorama'
         preparedFile = new File(
           [processed.viewer],
@@ -603,12 +689,15 @@ export function Capture360Page({
       if (onSaveDraft) {
         try {
           await saveDraftLocally(uploadedDraft)
+          if (!requestIsCurrent()) return
           savedOnDevice = true
         } catch {
+          if (!requestIsCurrent()) return
           saveFailureMessage = 'This panorama is ready to review, but it could not be saved yet. Check free space, then try saving again.'
           setError(saveFailureMessage)
         }
       }
+      if (!requestIsCurrent()) return
       setAnnouncement(
         saveFailureMessage || (savedOnDevice
           ? `${file.name} is saved in Memories and ready to review.`
@@ -617,19 +706,29 @@ export function Capture360Page({
             : `${file.name} is ready to preview and share.`),
       )
     } catch {
+      if (!requestIsCurrent()) return
       const message = 'We could not open this image. Try another 360° panorama.'
       setError(message)
       setAnnouncement(message)
     } finally {
-      setChecking(false)
-      event.target.value = ''
+      // Clear this picker even when superseded so choosing the same file later
+      // still dispatches change. The captured File object is already owned by
+      // its request and does not depend on the live input value.
+      input.value = ''
+      if (requestIsCurrent()) {
+        fileSelectionInFlightRef.current = false
+        setChecking(false)
+      }
     }
   }
 
   async function shareCapture(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
-    if (!draft || sharing) return
+    if (!draft || shareInFlightRef.current) return
 
+    // Keep editor state stable for the exact draft captured by this request.
+    // The ref prevents a second form submit before React paints disabled UI.
+    shareInFlightRef.current = true
     captionInputRef.current?.blur()
     setSharing(true)
     setError('')
@@ -676,12 +775,27 @@ export function Capture360Page({
       setError(message)
       setAnnouncement(message)
     } finally {
-      setSharing(false)
+      shareInFlightRef.current = false
+      if (mountedRef.current) setSharing(false)
     }
   }
 
+  function closeGuidePreview() {
+    restoreGuideFocusRef.current = true
+    setGuidePreview(false)
+  }
+
+  useEffect(() => {
+    if (guidePreview || !restoreGuideFocusRef.current) return
+    const frame = window.requestAnimationFrame(() => {
+      guidedCaptureButtonRef.current?.focus()
+      restoreGuideFocusRef.current = false
+    })
+    return () => window.cancelAnimationFrame(frame)
+  }, [guidePreview])
+
   if (guidePreview) {
-    return <GuidedCapturePreview onClose={() => setGuidePreview(false)} />
+    return <GuidedCapturePreview onClose={closeGuidePreview} />
   }
 
   return (
@@ -696,7 +810,15 @@ export function Capture360Page({
           <h1 id="capture-title">360 Moment</h1>
         </div>
         {onClose ? (
-          <button className="ks-feature__header-action" type="button" aria-label="Close 360 capture" onClick={onClose}>
+          <button
+            className="ks-feature__header-action"
+            type="button"
+            aria-label="Close 360 capture"
+            disabled={interactionBusy}
+            onClick={() => {
+              if (!hasBlockingInteraction()) onClose()
+            }}
+          >
             <CaptureIcon name="close" />
           </button>
         ) : null}
@@ -764,6 +886,7 @@ export function Capture360Page({
             onAnnotationsChange={updateAnnotations}
             onContinue={() => void finishPanoramaReview()}
             onRetake={() => {
+              if (hasBlockingInteraction()) return
               const captureSource = draft.source
               const captureOrigin = draft.origin
               const capturePicker = draft.picker ?? 'library'
@@ -775,13 +898,21 @@ export function Capture360Page({
               }
             }}
             retakeLabel={draft.origin === 'upload' ? 'Choose another' : 'Retake'}
+            busy={interactionBusy}
           />
         </>
       ) : draft ? (
         <form className="capture-editor" onSubmit={shareCapture}>
           <div className="capture-preview">
             <img src={draft.previewUrl} alt="Preview of selected 360 panorama" />
-            <button type="button" aria-label="Remove selected panorama" onClick={clearDraft}>
+            <button
+              type="button"
+              aria-label="Remove selected panorama"
+              disabled={sharing}
+              onClick={() => {
+                if (!hasBlockingInteraction()) clearDraft()
+              }}
+            >
               <CaptureIcon name="close" />
             </button>
           </div>
@@ -797,6 +928,7 @@ export function Capture360Page({
           <button
             className="ks-secondary-button capture-editor__review-button"
             type="button"
+            disabled={sharing}
             onClick={() => setReviewingPanorama(true)}
           >
             Edit 360 &amp; points
@@ -813,6 +945,7 @@ export function Capture360Page({
                 enterKeyHint="done"
                 autoCapitalize="sentences"
                 placeholder="Dinner together on the balcony…"
+                disabled={sharing}
                 onChange={(event) => setCaption(event.target.value)}
               />
             </label>
@@ -842,9 +975,10 @@ export function Capture360Page({
                 <li><span>3</span><p><strong>Hold for a moment</strong>Each aligned view captures itself. No shutter tapping.</p></li>
               </ol>
               <button
+                ref={guidedCaptureButtonRef}
                 className="ks-primary-button"
                 type="button"
-                disabled={guidedCaptureRunning}
+                disabled={interactionBusy}
                 onClick={() => void beginGuidedCapture('manual')}
               >
                 <CaptureIcon name="camera" />
@@ -854,11 +988,11 @@ export function Capture360Page({
                     ? 'Start guided 360 capture'
                     : 'Preview guided capture'}
               </button>
-              <button className="capture-library-button" type="button" onClick={() => openPicker('manual', 'library')}>
+              <button className="capture-library-button" type="button" disabled={interactionBusy} onClick={() => openPicker('manual', 'library')}>
                 <CaptureIcon name="image" />
                 Choose finished panorama
               </button>
-              <button className="capture-manual-panel__daily" type="button" onClick={() => openPicker('manual', 'camera')}>
+              <button className="capture-manual-panel__daily" type="button" disabled={interactionBusy} onClick={() => openPicker('manual', 'camera')}>
                 Use the phone camera instead
               </button>
               <p className="capture-camera-note">
@@ -866,7 +1000,8 @@ export function Capture360Page({
                   ? 'Captured frames stay in the app’s temporary storage while your sphere is assembled.'
                   : 'This browser shows the interaction preview. Install the Capacitor app on your phone for live camera and motion capture.'}
               </p>
-              <button className="capture-manual-panel__daily" type="button" onClick={() => {
+              <button className="capture-manual-panel__daily" type="button" disabled={interactionBusy} onClick={() => {
+                if (hasBlockingInteraction()) return
                 sourceRef.current = 'daily'
                 setSource('daily')
                 setError('')
@@ -886,7 +1021,7 @@ export function Capture360Page({
                   <button
                     className="ks-primary-button capture-window__action"
                     type="button"
-                    disabled={guidedCaptureRunning}
+                    disabled={interactionBusy}
                     onClick={() => void beginGuidedCapture('daily')}
                   >
                     <CaptureIcon name="camera" />
@@ -903,6 +1038,7 @@ export function Capture360Page({
                 className="capture-manual-entry"
                 type="button"
                 aria-label="Upload a 360 photo now"
+                disabled={interactionBusy}
                 onClick={() => openPicker('manual', 'library')}
               >
                 <span className="capture-manual-entry__icon"><CaptureIcon name="image" /></span>
@@ -944,6 +1080,8 @@ export function Capture360Page({
         accept="image/*"
         capture="environment"
         aria-label="Take a panorama with camera"
+        tabIndex={-1}
+        disabled={interactionBusy}
         onChange={(event) => void selectFile(event)}
       />
       <input
@@ -952,6 +1090,8 @@ export function Capture360Page({
         type="file"
         accept="image/*"
         aria-label="Choose a 360 photo from camera or library"
+        tabIndex={-1}
+        disabled={interactionBusy}
         onChange={(event) => void selectFile(event)}
       />
     </section>

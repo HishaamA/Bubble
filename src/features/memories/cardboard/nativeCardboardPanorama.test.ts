@@ -99,8 +99,35 @@ describe('native Cardboard panorama bridge', () => {
       expect.any(Function),
     )
     notifyClosed?.()
+    notifyClosed?.()
     expect(onClosed).toHaveBeenCalledOnce()
     expect(remove).toHaveBeenCalledOnce()
+  })
+
+  it('falls back even when a failed iOS launch cannot dispose its listener', async () => {
+    capacitor.getPlatform.mockReturnValue('ios')
+    const remove = vi.fn().mockRejectedValue(new Error('bridge detached'))
+    let notifyClosed: (() => void) | undefined
+    panoramaPlugin.addListener.mockImplementation(
+      (_eventName: string, listener: () => void) => {
+        notifyClosed = listener
+        return Promise.resolve({ remove })
+      },
+    )
+    panoramaPlugin.open.mockResolvedValue({ launched: false })
+    const onClosed = vi.fn()
+
+    await expect(
+      presentNativeCardboardPanorama({
+        scene,
+        sourceBlob: new Blob(['panorama'], { type: 'image/jpeg' }),
+        onClosed,
+      }),
+    ).resolves.toBe(false)
+
+    expect(remove).toHaveBeenCalledOnce()
+    notifyClosed?.()
+    expect(onClosed).not.toHaveBeenCalled()
   })
 
   it('does not allocate or send an oversized image', async () => {

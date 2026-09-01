@@ -1,14 +1,26 @@
 .ks-cardboard {
-  --cardboard-accent: #e4b06f;
-  --cardboard-glass: rgb(0 0 0 / 72%);
-  --cardboard-border: rgb(255 255 255 / 15%);
+  --cardboard-accent: var(--theme-action, var(--theme-rose, #d895aa));
+  --cardboard-accent-ink: var(
+    --theme-action-ink,
+    var(--theme-ink, #301027)
+  );
+  --cardboard-glass: color-mix(
+    in srgb,
+    var(--theme-canvas-deep, #180611) 78%,
+    transparent
+  );
+  --cardboard-border: color-mix(
+    in srgb,
+    var(--theme-paper, #fff1d2) 22%,
+    transparent
+  );
   position: fixed;
   z-index: 1000;
   inset: 0;
   visibility: hidden;
   overflow: hidden;
-  color: #f8f7f3;
-  background: #000;
+  color: var(--theme-paper, #fff1d2);
+  background: var(--theme-canvas-deep, #180611);
   opacity: 0;
   pointer-events: none;
 }
@@ -88,8 +100,8 @@
   background: linear-gradient(
     to bottom,
     transparent,
-    rgb(255 255 255 / 72%) 30%,
-    rgb(255 255 255 / 72%)
+    color-mix(in srgb, var(--theme-paper, #fff1d2) 72%, transparent) 30%,
+    color-mix(in srgb, var(--theme-paper, #fff1d2) 72%, transparent)
   );
   transform: translateX(-0.5px);
   pointer-events: none;
@@ -114,11 +126,11 @@
   inset-inline-start: 50%;
   inline-size: 0.55rem;
   block-size: 0.55rem;
-  border: 1px solid rgb(228 176 111 / 82%);
+  border: 1px solid color-mix(in srgb, var(--cardboard-accent) 82%, transparent);
   border-radius: 50%;
   box-shadow:
-    0 0 0 0.22rem rgb(0 0 0 / 16%),
-    0 0 0.75rem rgb(228 176 111 / 24%);
+    0 0 0 0.22rem color-mix(in srgb, var(--theme-canvas-deep, #180611) 24%, transparent),
+    0 0 0.75rem color-mix(in srgb, var(--cardboard-accent) 28%, transparent);
   transform: translate(-50%, -50%);
   pointer-events: none;
 }
@@ -130,8 +142,14 @@
   display: grid;
   margin: 0;
   place-items: center;
-  color: rgb(255 255 255 / 70%);
-  background: #000;
+  color: color-mix(in srgb, var(--theme-paper, #fff1d2) 72%, transparent);
+  background:
+    radial-gradient(
+      circle at 50% 44%,
+      color-mix(in srgb, var(--theme-canvas-highlight, #6e2850) 34%, transparent),
+      transparent 48%
+    ),
+    var(--theme-canvas-deep, #180611);
 }
 
 .ks-cardboard__exit,
@@ -157,7 +175,7 @@
   overflow: hidden;
   border: 1px solid var(--cardboard-border);
   border-radius: 999px;
-  color: #fff;
+  color: var(--theme-paper, #fff1d2);
   text-align: center;
   background: var(--cardboard-glass);
   backdrop-filter: blur(22px);
@@ -197,7 +215,7 @@
   padding: 0;
   align-items: center;
   justify-content: center;
-  color: #fff;
+  color: var(--theme-paper, #fff1d2);
   border-radius: 50%;
   font: 650 0.72rem/1 var(--font-ui);
   transform: translateX(-50%);
@@ -206,7 +224,7 @@
 
 .ks-cardboard__exit:hover,
 .ks-cardboard__exit:focus-visible {
-  color: #000;
+  color: var(--cardboard-accent-ink);
   background: var(--cardboard-accent);
   border-color: var(--cardboard-accent);
   outline: none;
@@ -264,7 +282,7 @@
 
 .ks-cardboard__status-panel p {
   margin: 0;
-  color: rgb(255 255 255 / 76%);
+  color: color-mix(in srgb, var(--theme-paper, #fff1d2) 78%, transparent);
   font: 540 0.68rem/1.35 var(--font-ui);
 }
 
@@ -272,7 +290,7 @@
   min-block-size: 44px;
   padding: 0.4rem 0.66rem;
   flex: 0 0 auto;
-  color: #120d06;
+  color: var(--cardboard-accent-ink);
   border: 0;
   border-radius: 999px;
   background: var(--cardboard-accent);
@@ -287,8 +305,9 @@
   inline-size: max-content;
   max-inline-size: 18rem;
   padding: 0.35rem 0.55rem;
-  color: rgb(255 255 255 / 68%);
-  background: rgb(0 0 0 / 58%);
+  color: color-mix(in srgb, var(--theme-paper, #fff1d2) 70%, transparent);
+  background: var(--cardboard-glass);
+  border: 1px solid var(--cardboard-border);
   border-radius: 999px;
   font: 520 0.6rem/1.25 var(--font-ui);
 }
@@ -302,9 +321,15 @@
   place-content: center;
   place-items: center;
   gap: 0.55rem;
-  color: #fff;
+  color: var(--theme-paper, #fff1d2);
   text-align: center;
-  background: rgb(0 0 0 / 82%);
+  background:
+    radial-gradient(
+      circle at 50% 45%,
+      color-mix(in srgb, var(--theme-canvas-highlight, #6e2850) 38%, transparent),
+      transparent 54%
+    ),
+    color-mix(in srgb, var(--theme-canvas-deep, #180611) 94%, transparent);
   backdrop-filter: blur(20px);
 }
 
@@ -315,7 +340,7 @@
 }
 
 .ks-cardboard__rotate-hint > span:not(.ks-cardboard__phone) {
-  color: rgb(255 255 255 / 64%);
+  color: color-mix(in srgb, var(--theme-paper, #fff1d2) 66%, transparent);
   font: 520 0.8rem/1.4 var(--font-ui);
 }
 
@@ -323,7 +348,7 @@
   min-block-size: 44px;
   margin-block-start: 0.75rem;
   padding: 0.7rem 1.05rem;
-  color: #120d06;
+  color: var(--cardboard-accent-ink);
   border: 1px solid var(--cardboard-accent);
   border-radius: 999px;
   background: var(--cardboard-accent);
@@ -335,7 +360,7 @@
   block-size: 3.7rem;
   border: 2px solid var(--cardboard-accent);
   border-radius: 0.5rem;
-  box-shadow: 0 0 1.4rem rgb(255 255 255 / 18%);
+  box-shadow: 0 0 1.4rem color-mix(in srgb, var(--cardboard-accent) 30%, transparent);
   animation: ks-cardboard-rotate-phone 1.8s ease-in-out infinite;
 }
 

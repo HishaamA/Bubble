@@ -28,6 +28,11 @@ export function resolveStereoViewports(
   opticalCenterShift: number,
   profile: StereoViewportProfile = 'ios-reference',
 ): readonly [StereoViewport, StereoViewport] {
+  // The quarter-screen centers model the physical lens positions, not two
+  // arbitrary half-width crops. Equal dimensions and mirrored X placement keep
+  // projection math symmetric, while the signed NDC optical offset moves both
+  // views inward without introducing false binocular parallax into a monoscopic
+  // equirectangular source.
   const width = Math.max(2, Math.floor(canvasWidth))
   const height = Math.max(1, Math.floor(canvasHeight))
   const lensWidthFraction =

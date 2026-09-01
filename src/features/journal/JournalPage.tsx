@@ -5,6 +5,7 @@ import {
   type KeyboardEvent,
 } from 'react'
 import { useLocation, useNavigate, useParams } from 'react-router-dom'
+import { AppWhimsy } from '../../app/AppWhimsy'
 import type { FamilyCapsule } from '../capsules/types'
 import { JournalEventsSection } from '../events'
 import { FlightTrackerSection } from '../flights'
@@ -82,6 +83,8 @@ export function JournalPage({
   const effectiveCapsuleNow = capsuleNow ?? effectiveNow
   const returnedContext = (location.state as JournalLocationState | null)
     ?.journalContext
+  // Photo and panorama routes return through navigation state. Read it once as
+  // the initial tab/person context so ordinary tab changes remain user-owned.
   const returnedSection = readJournalSection(
     returnedContext?.section,
   )
@@ -96,6 +99,8 @@ export function JournalPage({
   )
   const tabRefs = useRef<Array<HTMLButtonElement | null>>([])
   const photos = useMemo(
+    // Locked capsule media never reaches PeopleTimeline, its face scanner, or
+    // the DOM. Unlocking is a data boundary, not just a visual overlay.
     () => unlockedCapsulePhotos(capsules, effectiveCapsuleNow),
     [capsules, effectiveCapsuleNow],
   )
@@ -112,6 +117,8 @@ export function JournalPage({
     event: KeyboardEvent<HTMLButtonElement>,
     index: number,
   ) {
+    // This is a manual-activation tablist: arrow keys move and activate in one
+    // step, matching the compact three-tab control on mobile.
     let nextIndex: number | null = null
     if (event.key === 'ArrowRight') {
       nextIndex = (index + 1) % journalSections.length
@@ -134,6 +141,7 @@ export function JournalPage({
       data-section={personScrapbookOpen ? 'people' : activeSection}
       aria-labelledby={personScrapbookOpen ? undefined : 'journal-title'}
     >
+      {!personScrapbookOpen ? <AppWhimsy page="journal" /> : null}
       {!personScrapbookOpen ? <div className="journal-page__chrome">
         <header className="journal-page__header app-page-header">
           <div>

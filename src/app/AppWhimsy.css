@@ -1,0 +1,477 @@
+.app-whimsy {
+  --whimsy-cloud: color-mix(
+    in srgb,
+    var(--theme-panel) 72%,
+    var(--theme-paper)
+  );
+  --whimsy-cloud-fill: color-mix(
+    in srgb,
+    var(--theme-panel) 10%,
+    transparent
+  );
+  --whimsy-bubble: color-mix(
+    in srgb,
+    var(--theme-action-soft) 70%,
+    var(--theme-paper)
+  );
+  --whimsy-bubble-fill: color-mix(
+    in srgb,
+    var(--theme-action) 10%,
+    transparent
+  );
+  --whimsy-trail: color-mix(
+    in srgb,
+    var(--theme-accent) 84%,
+    var(--theme-paper)
+  );
+  --whimsy-spark: color-mix(
+    in srgb,
+    var(--theme-secondary) 78%,
+    var(--theme-paper)
+  );
+  --whimsy-nav-clearance: calc(
+    var(--bottom-chrome-height, 4.75rem) + var(--safe-bottom, 1rem)
+  );
+  position: absolute;
+  z-index: 0;
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
+  contain: layout paint;
+}
+
+.app-whimsy,
+.app-whimsy * {
+  pointer-events: none;
+}
+
+.memories-screen > .app-whimsy,
+.capsules-page > .app-whimsy,
+.journal-page > .app-whimsy,
+.profile-page > .app-whimsy {
+  position: absolute;
+  z-index: 0;
+}
+
+.profile-page > .app-whimsy ~ * {
+  position: relative;
+  z-index: 1;
+}
+
+.app-whimsy__cloud,
+.app-whimsy__trail,
+.app-whimsy__spark,
+.app-whimsy__bubble {
+  --whimsy-opacity-rest: 0.42;
+  --whimsy-opacity-high: 0.56;
+  --whimsy-opacity-low: 0.3;
+  position: absolute;
+  display: none;
+  opacity: var(--whimsy-opacity-rest);
+  transform-origin: center;
+}
+
+.app-whimsy__cloud {
+  height: auto;
+  overflow: visible;
+  fill: var(--whimsy-cloud-fill);
+  stroke: var(--whimsy-cloud);
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 2.15;
+  filter: drop-shadow(
+    0 0.22rem 0.4rem color-mix(in srgb, var(--theme-shadow) 28%, transparent)
+  );
+}
+
+.app-whimsy__cloud-sketch {
+  fill: none;
+  opacity: 0.52;
+  stroke-dasharray: 2 6;
+  stroke-width: 1.2;
+}
+
+.app-whimsy__cloud--large {
+  width: 4.6rem;
+  transform: rotate(-2deg);
+  animation: app-whimsy-cloud-roam 27s cubic-bezier(0.42, 0, 0.28, 1)
+    -9s infinite;
+}
+
+.app-whimsy__cloud--small {
+  width: 3.6rem;
+  transform: rotate(2deg);
+  animation: app-whimsy-cloud-meander 23s cubic-bezier(0.4, 0, 0.24, 1)
+    -5.5s infinite;
+}
+
+.app-whimsy__bubble {
+  border: clamp(1.25px, 0.25vw, 1.8px) solid var(--whimsy-bubble);
+  border-radius: 48% 52% 46% 54% / 53% 45% 55% 47%;
+  background:
+    radial-gradient(
+      circle at 31% 26%,
+      color-mix(in srgb, var(--theme-paper) 48%, transparent) 0 6%,
+      transparent 7% 100%
+    ),
+    radial-gradient(
+      circle at 65% 70%,
+      color-mix(in srgb, var(--theme-secondary) 16%, transparent),
+      transparent 62%
+    ),
+    var(--whimsy-bubble-fill);
+  box-shadow:
+    inset 0.12rem 0.15rem 0.55rem
+      color-mix(in srgb, var(--theme-paper) 12%, transparent),
+    0 0.22rem 0.75rem color-mix(in srgb, var(--theme-shadow) 14%, transparent);
+}
+
+.app-whimsy__bubble::after {
+  position: absolute;
+  top: 18%;
+  left: 19%;
+  width: 27%;
+  height: 13%;
+  border-top: 1px solid color-mix(in srgb, var(--theme-paper) 70%, transparent);
+  border-radius: 50%;
+  content: '';
+  transform: rotate(-25deg);
+}
+
+.app-whimsy__bubble--one {
+  width: 2.25rem;
+  height: 2.25rem;
+  animation: app-whimsy-bubble-rise 19s cubic-bezier(0.37, 0, 0.22, 1)
+    -3.75s infinite;
+}
+
+.app-whimsy__bubble--two {
+  width: 1.25rem;
+  height: 1.25rem;
+  animation: app-whimsy-bubble-orbit 24s cubic-bezier(0.45, 0, 0.2, 1)
+    -13s infinite;
+}
+
+.app-whimsy__bubble--three {
+  width: 0.9rem;
+  height: 0.9rem;
+  animation: app-whimsy-bubble-soft-loop 17s ease-in-out -7s infinite;
+}
+
+.app-whimsy__bubble--four {
+  width: 1.5rem;
+  height: 1.5rem;
+  animation: app-whimsy-bubble-wide-loop 26s cubic-bezier(0.4, 0, 0.3, 1)
+    -17s infinite;
+}
+
+.app-whimsy__trail {
+  width: 4.45rem;
+  height: auto;
+  overflow: visible;
+  fill: none;
+  stroke: var(--whimsy-trail);
+  stroke-dasharray: 3 7;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 2.05;
+  transform: rotate(5deg);
+  animation: app-whimsy-trail-glide 21s cubic-bezier(0.38, 0, 0.22, 1)
+    -11s infinite;
+}
+
+.app-whimsy__trail-tip {
+  stroke-dasharray: none;
+}
+
+.app-whimsy__spark {
+  height: auto;
+  overflow: visible;
+  fill: none;
+  stroke: var(--whimsy-spark);
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 2;
+}
+
+.app-whimsy__spark--one {
+  width: 1.15rem;
+  animation: app-whimsy-spark-roam 16s ease-in-out -2.5s infinite;
+}
+
+.app-whimsy__spark--two {
+  width: 0.95rem;
+  opacity: var(--whimsy-opacity-low);
+  stroke: var(--whimsy-trail);
+  animation: app-whimsy-spark-turn 22s ease-in-out -15s infinite;
+}
+
+/* Moments and Settings already have decorative art that belongs to their
+   content: the constellation and the notebook dividers. A second full-page
+   scatter only competes with those intentional compositions. */
+.app-whimsy--moments > *,
+.app-whimsy--settings > * {
+  display: none;
+}
+
+/* Journal's empty People view leaves a generous pocket above the tab bar.
+   The three pieces form one loose diagonal there instead of clipping the
+   viewport or landing behind the header, filters, and scrapbook CTA. */
+.journal-page[data-section='people']:has(.people-timeline__albums-empty)
+  > .app-whimsy--journal
+  .app-whimsy__cloud--large {
+  --whimsy-opacity-rest: 0.38;
+  --whimsy-opacity-high: 0.5;
+  --whimsy-opacity-low: 0.3;
+  display: block;
+  bottom: calc(var(--whimsy-nav-clearance) + 7.75rem);
+  left: clamp(12rem, 61vw, 16.25rem);
+}
+
+.journal-page[data-section='people']:has(.people-timeline__albums-empty)
+  > .app-whimsy--journal
+  .app-whimsy__bubble--one {
+  --whimsy-opacity-rest: 0.38;
+  --whimsy-opacity-high: 0.5;
+  --whimsy-opacity-low: 0.28;
+  display: block;
+  bottom: calc(var(--whimsy-nav-clearance) + 5rem);
+  left: clamp(8.5rem, 43vw, 11rem);
+}
+
+.journal-page[data-section='people']:has(.people-timeline__albums-empty)
+  > .app-whimsy--journal
+  .app-whimsy__bubble--two {
+  --whimsy-opacity-rest: 0.3;
+  --whimsy-opacity-high: 0.42;
+  --whimsy-opacity-low: 0.22;
+  display: block;
+  bottom: calc(var(--whimsy-nav-clearance) + 2.1rem);
+  left: clamp(5rem, 26vw, 7rem);
+}
+
+/* Plans and Flights consume the same lower area and already retain the
+   intentional header illustration, so their generic layer stays quiet. */
+.journal-page[data-section='plans'] > .app-whimsy--journal > *,
+.journal-page[data-section='flights'] > .app-whimsy--journal > * {
+  display: none;
+}
+
+/* Capsule has one stable lower pause after its final action. Keep this a
+   restrained cloud-and-bubble pairing, fully inside the page at 320-430px. */
+.capsules-page > .app-whimsy--capsule .app-whimsy__cloud--small {
+  --whimsy-opacity-rest: 0.34;
+  --whimsy-opacity-high: 0.45;
+  --whimsy-opacity-low: 0.25;
+  display: block;
+  bottom: calc(var(--whimsy-nav-clearance) + 6.5rem);
+  left: clamp(12.5rem, 61vw, 16rem);
+}
+
+.capsules-page > .app-whimsy--capsule .app-whimsy__bubble--two {
+  --whimsy-opacity-rest: 0.28;
+  --whimsy-opacity-high: 0.4;
+  --whimsy-opacity-low: 0.2;
+  display: block;
+  bottom: calc(var(--whimsy-nav-clearance) + 2.8rem);
+  left: clamp(5.5rem, 33vw, 8.75rem);
+}
+
+@keyframes app-whimsy-cloud-roam {
+  0%,
+  100% {
+    opacity: var(--whimsy-opacity-rest);
+    transform: translate3d(0, 0, 0) rotate(-2deg);
+  }
+
+  31% {
+    opacity: var(--whimsy-opacity-high);
+    transform: translate3d(-0.62rem, -0.22rem, 0) rotate(-0.7deg);
+  }
+
+  67% {
+    opacity: var(--whimsy-opacity-rest);
+    transform: translate3d(0.72rem, 0.28rem, 0) rotate(-2.6deg);
+  }
+
+  84% {
+    opacity: var(--whimsy-opacity-low);
+    transform: translate3d(0.28rem, -0.16rem, 0) rotate(-1.4deg);
+  }
+}
+
+@keyframes app-whimsy-cloud-meander {
+  0%,
+  100% {
+    opacity: var(--whimsy-opacity-rest);
+    transform: translate3d(0, 0, 0) rotate(2deg);
+  }
+
+  38% {
+    opacity: var(--whimsy-opacity-low);
+    transform: translate3d(0.68rem, -0.2rem, 0) rotate(3.2deg);
+  }
+
+  72% {
+    opacity: var(--whimsy-opacity-high);
+    transform: translate3d(-0.52rem, 0.24rem, 0) rotate(1deg);
+  }
+}
+
+@keyframes app-whimsy-bubble-rise {
+  0%,
+  100% {
+    opacity: var(--whimsy-opacity-rest);
+    transform: translate3d(0, 0.18rem, 0) scale(0.98);
+  }
+
+  34% {
+    opacity: var(--whimsy-opacity-high);
+    transform: translate3d(0.76rem, -0.9rem, 0) scale(1.03);
+  }
+
+  69% {
+    opacity: var(--whimsy-opacity-low);
+    transform: translate3d(-0.36rem, -0.42rem, 0) scale(0.96);
+  }
+}
+
+@keyframes app-whimsy-bubble-orbit {
+  0%,
+  100% {
+    opacity: var(--whimsy-opacity-rest);
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+
+  27% {
+    opacity: var(--whimsy-opacity-low);
+    transform: translate3d(-0.62rem, -0.48rem, 0) scale(0.95);
+  }
+
+  58% {
+    opacity: var(--whimsy-opacity-high);
+    transform: translate3d(0.44rem, -0.72rem, 0) scale(1.04);
+  }
+
+  81% {
+    opacity: var(--whimsy-opacity-rest);
+    transform: translate3d(0.58rem, 0.2rem, 0) scale(0.99);
+  }
+}
+
+@keyframes app-whimsy-bubble-soft-loop {
+  0%,
+  100% {
+    opacity: var(--whimsy-opacity-rest);
+    transform: translate3d(0, 0, 0) scale(0.96);
+  }
+
+  50% {
+    opacity: var(--whimsy-opacity-high);
+    transform: translate3d(0.5rem, -0.58rem, 0) scale(1.05);
+  }
+}
+
+@keyframes app-whimsy-bubble-wide-loop {
+  0%,
+  100% {
+    opacity: var(--whimsy-opacity-rest);
+    transform: translate3d(0, 0, 0) scale(0.98);
+  }
+
+  42% {
+    opacity: var(--whimsy-opacity-high);
+    transform: translate3d(-0.82rem, -0.34rem, 0) scale(1.02);
+  }
+
+  76% {
+    opacity: var(--whimsy-opacity-low);
+    transform: translate3d(0.48rem, 0.26rem, 0) scale(0.95);
+  }
+}
+
+@keyframes app-whimsy-trail-glide {
+  0%,
+  100% {
+    opacity: var(--whimsy-opacity-rest);
+    transform: translate3d(0, 0, 0) rotate(5deg);
+  }
+
+  45% {
+    opacity: var(--whimsy-opacity-high);
+    transform: translate3d(0.74rem, -0.42rem, 0) rotate(2deg);
+  }
+
+  78% {
+    opacity: var(--whimsy-opacity-low);
+    transform: translate3d(-0.38rem, 0.28rem, 0) rotate(6deg);
+  }
+}
+
+@keyframes app-whimsy-spark-roam {
+  0%,
+  100% {
+    opacity: var(--whimsy-opacity-low);
+    transform: translate3d(0, 0, 0) rotate(0deg) scale(0.86);
+  }
+
+  46% {
+    opacity: var(--whimsy-opacity-high);
+    transform: translate3d(0.54rem, -0.62rem, 0) rotate(13deg) scale(1.06);
+  }
+
+  72% {
+    opacity: var(--whimsy-opacity-rest);
+    transform: translate3d(-0.34rem, -0.16rem, 0) rotate(-7deg) scale(0.96);
+  }
+}
+
+@keyframes app-whimsy-spark-turn {
+  0%,
+  100% {
+    opacity: var(--whimsy-opacity-low);
+    transform: translate3d(0, 0, 0) rotate(0deg) scale(0.9);
+  }
+
+  52% {
+    opacity: var(--whimsy-opacity-high);
+    transform: translate3d(-0.58rem, -0.5rem, 0) rotate(20deg) scale(1.06);
+  }
+}
+
+@media (max-width: 22rem) {
+  .journal-page[data-section='people']:has(.people-timeline__albums-empty)
+    > .app-whimsy--journal
+    .app-whimsy__cloud--large {
+    width: 4.2rem;
+  }
+
+  .capsules-page > .app-whimsy--capsule .app-whimsy__cloud--small {
+    width: 3.25rem;
+  }
+}
+
+@media (max-height: 42rem), (orientation: landscape) {
+  .journal-page[data-section='people']:has(.people-timeline__albums-empty)
+    > .app-whimsy--journal
+    .app-whimsy__cloud--large,
+  .journal-page[data-section='people']:has(.people-timeline__albums-empty)
+    > .app-whimsy--journal
+    .app-whimsy__bubble--one,
+  .journal-page[data-section='people']:has(.people-timeline__albums-empty)
+    > .app-whimsy--journal
+    .app-whimsy__bubble--two,
+  .capsules-page > .app-whimsy--capsule .app-whimsy__cloud--small,
+  .capsules-page > .app-whimsy--capsule .app-whimsy__bubble--two {
+    display: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .app-whimsy__cloud,
+  .app-whimsy__trail,
+  .app-whimsy__spark,
+  .app-whimsy__bubble {
+    animation: none;
+  }
+}

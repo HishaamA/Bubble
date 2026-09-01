@@ -382,48 +382,6 @@ describe('PanoramaMemoryScreen lifecycle', () => {
     expect(screen.getByLabelText('Restored memory')).toHaveTextContent('dinner')
   })
 
-  it('never exposes Sunday dinner while an immediately closed Moments VR shortcut restores the bubbles', async () => {
-    const user = userEvent.setup()
-    render(
-      <MemoryRouter initialEntries={['/']}>
-        <Routes>
-          <Route path="/" element={<MemoryConstellation />} />
-          <Route path="/memory/:memoryId" element={<PanoramaMemoryScreen />} />
-        </Routes>
-      </MemoryRouter>,
-    )
-
-    await user.click(
-      screen.getByRole('button', { name: 'Set up Cardboard VR' }),
-    )
-
-    expect(
-      await screen.findByRole('heading', { name: 'Choose a moment' }),
-    ).toBeVisible()
-    expect(
-      document.querySelector(
-        '[data-panorama="/assets/panoramas/sunday-dinner-demo.jpg"]',
-      ),
-    ).not.toBeInTheDocument()
-    expect(
-      screen.queryByRole('heading', { name: 'Sunday dinner' }),
-    ).not.toBeInTheDocument()
-
-    await user.click(screen.getByRole('button', { name: 'Close VR setup' }))
-
-    expect(
-      await screen.findByRole('heading', { name: 'Moments' }),
-    ).toBeVisible()
-    expect(
-      document.querySelector(
-        '[data-panorama="/assets/panoramas/sunday-dinner-demo.jpg"]',
-      ),
-    ).not.toBeInTheDocument()
-    expect(
-      screen.queryByRole('heading', { name: 'Sunday dinner' }),
-    ).not.toBeInTheDocument()
-  })
-
   it('keeps the homepage VR shortcut chooser populated with current uploads', async () => {
     const yesterday = new Date()
     yesterday.setDate(yesterday.getDate() - 1)

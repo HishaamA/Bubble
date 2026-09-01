@@ -23,7 +23,6 @@ import {
   SharedMomentsProvider,
 } from './features/memories/shared'
 import { SettingsPage } from './features/profile'
-import { RelayPage } from './features/relay'
 import {
   FamilyOnboardingProvider,
   OnboardingPage,
@@ -33,10 +32,14 @@ import {
 import './App.css'
 
 export function memberCacheNamespace(userId: string, familyId: string) {
+  // Every local cache is namespaced by both account and family. This prevents
+  // a shared phone from showing the previous household's offline memories.
   return `${userId}:${familyId}`
 }
 
 function openPlansFromLegacyEventRoute(state: unknown) {
+  // Old links still land in the right Journal tab without discarding the
+  // caller's focus and scroll restoration state.
   const routeState = state && typeof state === 'object' && !Array.isArray(state)
     ? state as Record<string, unknown>
     : {}
@@ -66,6 +69,8 @@ export function AccountScopedData({ children }: { children: ReactNode }) {
       ? memberCacheNamespace(user.id, familyId)
       : 'signed-out:no-family'
 
+  // Changing the key tears down Blob URLs, subscriptions, and IndexedDB-backed
+  // providers together when the active account or family changes.
   return (
     <SharedMomentsProvider
       key={cacheNamespace}
@@ -123,6 +128,8 @@ function MemberApplication() {
 }
 
 function App() {
+  // Authentication and family membership are separate gates: a valid account
+  // must never bootstrap family-scoped providers before membership is known.
   return (
     <ErrorBoundary>
       <AuthProvider>
@@ -151,7 +158,6 @@ function App() {
                     />
                     <Route path="/memory/:memoryId" element={<PanoramaRoute />} />
                     <Route path="/capture" element={<CaptureRoute />} />
-                    <Route path="/relay" element={<RelayPage />} />
                     <Route path="/capsule/*" element={<CapsuleRoute />} />
                     <Route
                       path="/capsules/*"

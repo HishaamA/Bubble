@@ -7,14 +7,14 @@ export const APP_THEMES = [
     id: 'plum',
     name: 'Plum',
     description: 'Warm and familiar',
-    swatches: ['#240918', '#d895aa', '#fff1d2'],
+    swatches: ['#240918', '#e6b5c4', '#fff1d2'],
     browserChrome: '#180611',
   },
   {
     id: 'forest',
     name: 'Forest',
     description: 'Calm and grounded',
-    swatches: ['#08382f', '#9cad78', '#f5eed6'],
+    swatches: ['#08382f', '#a8b97d', '#f5eed6'],
     browserChrome: '#03251f',
   },
   {

@@ -21,6 +21,10 @@ export function useLandscapeOrientation(): boolean {
 
   useEffect(() => {
     const update = () => setLandscape(isLandscapeOrientation())
+    // Native UIWindowScene rotation, visualViewport settling, CSS media-query
+    // changes and browser resize do not arrive in a guaranteed order. Listen to
+    // every available signal and derive one value instead of letting the setup
+    // flow advance from whichever API happened to fire first.
     const query = typeof window.matchMedia === 'function'
       ? window.matchMedia('(orientation: landscape)')
       : undefined
@@ -30,6 +34,8 @@ export function useLandscapeOrientation(): boolean {
     query?.addEventListener?.('change', update)
     update()
     return () => {
+      // Cardboard setup is repeatedly mounted and dismissed. Symmetric cleanup
+      // avoids old setup instances advancing a future flow after rotation.
       window.removeEventListener('resize', update)
       window.removeEventListener('orientationchange', update)
       window.visualViewport?.removeEventListener('resize', update)

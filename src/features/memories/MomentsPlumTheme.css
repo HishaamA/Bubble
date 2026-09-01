@@ -12,7 +12,7 @@
   --moments-coral: #ef765e;
   --moments-sage: #a8b680;
   --moments-blush: #dfa0b1;
-  --moments-action-size: clamp(2.75rem, 10.5vw, 2.9rem);
+  --moments-action-size: var(--moments-shortcut-size);
   color: var(--moments-cream);
   background-color: var(--moments-plum);
   background-image:
@@ -47,9 +47,13 @@
 }
 
 .app-content > .memories-screen .top-bar {
-  right: max(1rem, var(--app-header-gutter-right));
+  right: calc(
+    max(1rem, var(--app-header-gutter-right)) + var(--moments-action-size) +
+      var(--moments-shortcut-clearance)
+  );
   left: max(1.08rem, var(--app-header-gutter-left));
   align-items: flex-start;
+  justify-content: flex-start;
 }
 
 .app-content > .memories-screen .app-page-header__eyebrow {
@@ -62,7 +66,7 @@
 
 .app-content > .memories-screen .top-bar h1 {
   width: max-content;
-  max-width: calc(100vw - 8.6rem);
+  max-width: 100%;
   color: var(--moments-cream);
   font-family: var(--font-accent);
   font-size: clamp(2.72rem, 13.3vw, 4.15rem);
@@ -85,8 +89,8 @@
   font-size: clamp(0.8rem, 3.55vw, 0.98rem);
 }
 
-/* The three actions read as a single hand-painted tool row on compact phones. */
-.app-content > .memories-screen .round-control,
+/* The three actions read as one hand-painted rail, clear of the title block. */
+.app-viewport > .moments-shortcuts > .moments-vr-shortcut,
 .app-viewport > .moments-shortcuts > .capture-360-shortcut,
 .app-viewport > .moments-shortcuts > .moments-settings-shortcut {
   width: var(--moments-action-size);
@@ -103,24 +107,22 @@
   backdrop-filter: none;
 }
 
-.app-content > .memories-screen .round-control {
-  position: absolute;
-  top: 1.55rem;
-  right: calc((var(--moments-action-size) * 2) + 0.92rem);
-  margin: 0;
-  background: #f2d49c;
+.app-viewport > .moments-shortcuts > .moments-vr-shortcut {
+  color: var(--theme-ink, #291021);
+  background: var(--theme-paper-deep, #f2d49c);
   transform: rotate(-0.8deg);
 }
 
 .app-viewport > .moments-shortcuts {
-  --moments-action-size: clamp(2.75rem, 10.5vw, 2.9rem);
+  --moments-action-size: var(--moments-shortcut-size);
   --moments-coral: #ef765e;
   --moments-sage: #a8b680;
-  top: calc(var(--app-page-top) + 1.55rem);
+  top: var(--app-page-top);
   right: max(1rem, var(--app-header-gutter-right));
   display: flex;
-  align-items: center;
-  gap: 0.42rem;
+  align-items: flex-end;
+  flex-direction: column;
+  gap: clamp(0.42rem, 1.4vh, 0.58rem);
 }
 
 .app-viewport[data-app-shell] > .moments-shortcuts > .capture-360-shortcut {
@@ -150,7 +152,7 @@
   transform: rotate(1.1deg);
 }
 
-.app-content > .memories-screen .round-control:active,
+.app-viewport > .moments-shortcuts > .moments-vr-shortcut:active,
 .app-viewport > .moments-shortcuts > .capture-360-shortcut:active,
 .app-viewport > .moments-shortcuts > .moments-settings-shortcut:active {
   opacity: 0.88;
@@ -355,35 +357,22 @@
 }
 
 @media (max-width: 22.5rem) {
-  .app-content > .memories-screen,
-  .app-viewport > .moments-shortcuts {
-    --moments-action-size: 2.75rem;
+  .app-viewport {
+    --moments-shortcut-size: 2.75rem;
+    --moments-shortcut-clearance: 0.72rem;
   }
 
   .app-content > .memories-screen .top-bar h1 {
-    max-width: calc(100vw - 8.7rem);
+    max-width: 100%;
     font-size: 2.42rem;
   }
 
-  .app-content > .memories-screen .round-control {
-    right: calc((var(--moments-action-size) * 2) + 0.78rem);
-  }
-
   .app-viewport > .moments-shortcuts {
-    gap: 0.34rem;
+    gap: 0.38rem;
   }
 }
 
 @media (max-height: 44rem) {
-  .app-content > .memories-screen .round-control,
-  .app-viewport > .moments-shortcuts {
-    top: calc(var(--app-page-top) + 1.2rem);
-  }
-
-  .app-content > .memories-screen .round-control {
-    top: 1.2rem;
-  }
-
   .app-content > .memories-screen .memory-constellation {
     top: calc(var(--app-page-top) + 6.35rem);
   }

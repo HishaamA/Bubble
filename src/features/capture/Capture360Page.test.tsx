@@ -1,4 +1,4 @@
-import { act, render, screen, waitFor } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import {
@@ -83,8 +83,14 @@ describe('Capture360Page', () => {
     await user.click(screen.getByRole('button', { name: 'Preview guided capture' }))
     expect(screen.getByLabelText('Guided 360 capture preview')).toBeInTheDocument()
     expect(screen.getByText(/drag to preview here/i)).toBeInTheDocument()
-    await user.click(screen.getByRole('button', { name: 'Close guided capture preview' }))
+    await waitFor(() => expect(screen.getByRole('button', {
+      name: 'Close guided capture preview',
+    })).toHaveFocus())
+    await user.keyboard('{Escape}')
     expect(screen.getByRole('heading', { name: 'Capture every direction' })).toBeInTheDocument()
+    await waitFor(() => expect(screen.getByRole('button', {
+      name: 'Preview guided capture',
+    })).toHaveFocus())
   })
 
   it('shows the locked daily use case and an always-available manual entry', () => {
@@ -103,6 +109,8 @@ describe('Capture360Page', () => {
     const libraryInput = screen.getByLabelText('Choose a 360 photo from camera or library')
     expect(cameraInput).toHaveAttribute('accept', 'image/*')
     expect(cameraInput).toHaveAttribute('capture', 'environment')
+    expect(cameraInput).toHaveAttribute('tabindex', '-1')
+    expect(libraryInput).toHaveAttribute('tabindex', '-1')
     expect(libraryInput).not.toHaveAttribute('capture')
     expect(screen.getByText(/including above and below/i)).toBeInTheDocument()
   })
@@ -244,6 +252,110 @@ describe('Capture360Page', () => {
 
     await act(async () => composition.resolve(makeProcessedPanorama()))
     expect(await screen.findByRole('heading', { name: 'Review your 360°' })).toBeInTheDocument()
+  })
+
+  it('starts only one native session for same-tick activation and locks competing actions', async () => {
+    const nativeCapture = makeDeferred<NativePanoramaCaptureResult>()
+    const startGuidedCapture = vi.fn(() => nativeCapture.promise)
+    const onClose = vi.fn()
+
+    render(
+      <Capture360Page
+        initialMode="manual"
+        guidedCaptureAvailable
+        startGuidedCapture={startGuidedCapture}
+        composeGuidedCapture={vi.fn().mockResolvedValue(makeProcessedPanorama())}
+        discardGuidedCapture={vi.fn().mockResolvedValue(undefined)}
+        onClose={onClose}
+      />,
+    )
+
+    const start = screen.getByRole('button', { name: 'Start guided 360 capture' })
+    act(() => {
+      start.click()
+      start.click()
+    })
+
+    expect(startGuidedCapture).toHaveBeenCalledTimes(1)
+    expect(screen.getByRole('button', { name: 'Close 360 capture' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: 'Choose finished panorama' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: 'Use the phone camera instead' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: 'Go to today’s moment' })).toBeDisabled()
+
+    await act(async () => nativeCapture.resolve(makeGuidedCaptureResult()))
+    expect(await screen.findByRole('heading', { name: 'Review your 360°' })).toBeInTheDocument()
+    expect(onClose).not.toHaveBeenCalled()
+  })
+
+  it('lets the newest file selection win without a stale result replacing its object URL', async () => {
+    const firstDimensions = makeDeferred<{ width: number; height: number }>()
+    const secondDimensions = makeDeferred<{ width: number; height: number }>()
+    const first = new File(['first'], 'first-360.jpg', { type: 'image/jpeg' })
+    const second = new File(['second'], 'second-360.jpg', { type: 'image/jpeg' })
+    const readDimensions = vi.fn((file: File) => (
+      file === first ? firstDimensions.promise : secondDimensions.promise
+    ))
+    vi.mocked(URL.createObjectURL).mockImplementation((source) => (
+      `blob:${(source as File).name}`
+    ))
+
+    render(
+      <Capture360Page
+        initialMode="manual"
+        readDimensions={readDimensions}
+      />,
+    )
+
+    const input = screen.getByLabelText('Choose a 360 photo from camera or library')
+    fireEvent.change(input, { target: { files: [first] } })
+    // Programmatic delivery models two native picker callbacks arriving before
+    // the first image decoder finishes. The latest callback owns the draft.
+    fireEvent.change(input, { target: { files: [second] } })
+
+    await act(async () => secondDimensions.resolve({ width: 4000, height: 2000 }))
+    expect(await screen.findByRole('heading', { name: 'Review your 360°' })).toBeInTheDocument()
+    expect(URL.createObjectURL).toHaveBeenCalledTimes(1)
+    expect(URL.createObjectURL).toHaveBeenCalledWith(second)
+
+    await act(async () => firstDimensions.resolve({ width: 4000, height: 2000 }))
+    expect(URL.createObjectURL).toHaveBeenCalledTimes(1)
+    expect(URL.revokeObjectURL).not.toHaveBeenCalledWith('blob:second-360.jpg')
+  })
+
+  it('prevents duplicate sharing and keeps draft mutation locked until sharing settles', async () => {
+    const share = makeDeferred<void>()
+    const onShare = vi.fn(() => share.promise)
+    const onClose = vi.fn()
+    render(
+      <Capture360Page
+        initialMode="manual"
+        onClose={onClose}
+        onShare={onShare}
+        readDimensions={vi.fn().mockResolvedValue({ width: 4000, height: 2000 })}
+      />,
+    )
+    const input = screen.getByLabelText('Choose a 360 photo from camera or library')
+    fireEvent.change(input, {
+      target: { files: [new File(['panorama'], 'share-360.jpg', { type: 'image/jpeg' })] },
+    })
+    await screen.findByRole('heading', { name: 'Review your 360°' })
+    await userEvent.click(screen.getByRole('button', { name: 'Continue' }))
+
+    const submit = await screen.findByRole('button', { name: 'Share with family' })
+    act(() => {
+      submit.click()
+      submit.click()
+    })
+
+    await waitFor(() => expect(onShare).toHaveBeenCalledTimes(1))
+    expect(screen.getByRole('button', { name: 'Close 360 capture' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: 'Remove selected panorama' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: 'Edit 360 & points' })).toBeDisabled()
+    expect(screen.getByRole('textbox', { name: /moment title/i })).toBeDisabled()
+
+    await act(async () => share.resolve(undefined))
+    expect(await screen.findByRole('heading', { name: 'Shared with family' })).toBeInTheDocument()
+    expect(onClose).not.toHaveBeenCalled()
   })
 
   it('rejects a completed counter when fewer frames than targets were returned', async () => {

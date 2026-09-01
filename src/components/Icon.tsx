@@ -1,7 +1,6 @@
 export type IconName =
   | 'memories'
   | 'journal'
-  | 'relay'
   | 'capsules'
   | 'events'
   | 'profile'
@@ -34,17 +33,6 @@ export function Icon({ name, size = 24 }: IconProps) {
         <circle cx="16.5" cy="7" r="2.2" />
         <circle cx="15" cy="15.5" r="4.1" />
         <circle cx="6.5" cy="16.5" r="1.7" />
-      </svg>
-    )
-  }
-
-  if (name === 'relay') {
-    return (
-      <svg {...common}>
-        <path d="M5 7.5a8 8 0 0 1 12.8-1.9" />
-        <path d="m17.4 2.8.5 3.6-3.6.5" />
-        <path d="M19 16.5A8 8 0 0 1 6.2 18.4" />
-        <path d="m6.6 21.2-.5-3.6 3.6-.5" />
       </svg>
     )
   }

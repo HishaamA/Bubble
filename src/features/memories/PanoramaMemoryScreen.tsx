@@ -131,6 +131,7 @@ export function PanoramaMemoryScreen({
   const [pointEditorSaving, setPointEditorSaving] = useState(false)
   const [pointEditorError, setPointEditorError] = useState<string | null>(null)
   const [pointEditorSaved, setPointEditorSaved] = useState(false)
+  const commentsSendingRef = useRef(false)
   const pointSaveQueueRef = useRef<Promise<void>>(Promise.resolve())
   const pointSaveRevisionRef = useRef(0)
   const titleRef = useRef<HTMLHeadingElement>(null)
@@ -195,6 +196,9 @@ export function PanoramaMemoryScreen({
     setPointEditorError(null)
     const revision = pointSaveRevisionRef.current + 1
     pointSaveRevisionRef.current = revision
+    // Annotation edits can arrive faster than the family service. Keep their
+    // original order, while the revision number stops an older completion from
+    // overwriting the status of the newest edit.
     const save = pointSaveQueueRef.current
       .catch(() => undefined)
       .then(() => onUpdateMomentAnnotations(sharedMoment, next))
@@ -282,6 +286,9 @@ export function PanoramaMemoryScreen({
       return () => undefined
     }
 
+    // The initial fetch and Realtime callback share one guarded updater. The
+    // `active` flag is essential because route changes keep the WebView alive
+    // while an in-flight family request finishes.
     const refresh = async (announceLoading = false) => {
       if (announceLoading && active) setCommentsLoading(true)
       try {
@@ -363,7 +370,10 @@ export function PanoramaMemoryScreen({
     body: string,
     annotationId: string | null,
   ) => {
-    if (!sharedMomentId || commentsSending) return
+    // State-based disabling is visible; the ref is the same-tick lock that
+    // prevents two persisted comments from a rapid Enter/click combination.
+    if (!sharedMomentId || commentsSending || commentsSendingRef.current) return
+    commentsSendingRef.current = true
     setCommentsSending(true)
     setCommentsError(null)
     try {
@@ -389,6 +399,7 @@ export function PanoramaMemoryScreen({
       )
       throw reason
     } finally {
+      commentsSendingRef.current = false
       setCommentsSending(false)
     }
   }, [commentsSending, sharedMomentId])
@@ -436,6 +447,8 @@ export function PanoramaMemoryScreen({
   const vrChoices = useMemo<CardboardMemoryChoice[]>(
     () => {
       const today = new Date()
+      // Current uploads come first so the headset chooser reflects this phone;
+      // bundled memories remain a stable fallback for an empty family library.
       return [
         ...sharedMoments
           .filter(
@@ -503,6 +516,8 @@ export function PanoramaMemoryScreen({
       ]
     }
 
+    // Static memories intentionally share the bundled panorama. Uploaded
+    // moments use their own Blob URL and retain their annotation hot spots.
     const selectedMemory = selectedVrStaticMemory ?? memories[0]
     return [
       {
@@ -527,6 +542,8 @@ export function PanoramaMemoryScreen({
     setCommentsOpen(false)
     setVrError(null)
     try {
+      // iOS/Android get the native panorama first. The DOM renderer is a real
+      // fallback for browsers and for devices without the native bridge.
       const nativeScene = cardboardScenes[0]
       const nativeOpened = nativeScene
           ? await presentNativeCardboardPanorama({

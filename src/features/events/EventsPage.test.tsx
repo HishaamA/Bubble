@@ -67,6 +67,14 @@ function formatDayButton(date: Date) {
   return `${weekday}, ${monthDay}`
 }
 
+function demoPlanDates(anchor = new Date()) {
+  const dayInWeek = (anchor.getDay() + 6) % 7
+  return {
+    birthday: dateFromToday(dayInWeek < 6 ? 1 : -1, 16),
+    beach: dateFromToday(dayInWeek < 5 ? 2 : -2, 9),
+  }
+}
+
 function storeCreatedPlans(
   plans: Array<{
     id: string
@@ -137,11 +145,22 @@ describe('JournalEventsSection', () => {
       .filter((button) => button.getAttribute('data-has-plans') === 'true')
     expect(plannedDays).toHaveLength(3)
 
-    await user.click(plannedDays[1])
+    // The demo dates straddle the end of the week. Selecting by the date that
+    // owns each plan keeps this test stable on Friday, Saturday, and Sunday.
+    const demoDates = demoPlanDates()
+    await user.click(
+      screen.getByRole('button', {
+        name: `${formatDayButton(demoDates.birthday)}, has plans`,
+      }),
+    )
     expect(screen.getByRole('heading', { name: 'Maya’s birthday' })).toBeInTheDocument()
     expect(screen.queryByRole('heading', { name: 'Sunday dinner' })).not.toBeInTheDocument()
 
-    await user.click(plannedDays[2])
+    await user.click(
+      screen.getByRole('button', {
+        name: `${formatDayButton(demoDates.beach)}, has plans`,
+      }),
+    )
     expect(screen.getByRole('heading', { name: 'Family beach day' })).toBeInTheDocument()
     expect(screen.queryByRole('heading', { name: 'Maya’s birthday' })).not.toBeInTheDocument()
 
@@ -307,6 +326,67 @@ describe('JournalEventsSection', () => {
     expect(screen.queryByRole('heading', { name: 'Family supper' })).not.toBeInTheDocument()
     expect(eventServiceMocks.deleteFamilyEvent).toHaveBeenCalledWith(eventId)
     expect(await screen.findByRole('status')).toHaveTextContent(/shared calendar/i)
+  })
+
+  it('ignores a rapid second completion while the first request is pending', async () => {
+    const today = dateFromToday(0, 20)
+    const eventId = 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeee3'
+    let finishDelete: (removed: boolean) => void = () => undefined
+    eventServiceMocks.fetchFamilyEvents.mockResolvedValue([{
+      id: eventId,
+      title: 'Family supper',
+      startsAt: today.toISOString(),
+      location: 'Home',
+      details: 'kinsphere-plan-category:v1:other',
+    }])
+    eventServiceMocks.deleteFamilyEvent.mockImplementation(
+      () => new Promise<boolean>((resolve) => {
+        finishDelete = resolve
+      }),
+    )
+    renderJournalEventsSection()
+
+    const complete = await screen.findByRole('button', {
+      name: 'Complete task: Family supper',
+    })
+    await act(async () => {
+      complete.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+      complete.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    })
+    expect(eventServiceMocks.deleteFamilyEvent).toHaveBeenCalledTimes(1)
+
+    await act(async () => finishDelete(true))
+  })
+
+  it('retries a failed shared completion after the calendar remounts', async () => {
+    const user = userEvent.setup()
+    const today = dateFromToday(0, 20)
+    const eventId = 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeee4'
+    eventServiceMocks.fetchFamilyEvents.mockResolvedValue([{
+      id: eventId,
+      title: 'Family picnic',
+      startsAt: today.toISOString(),
+      location: 'Park',
+      details: 'kinsphere-plan-category:v1:other',
+    }])
+    eventServiceMocks.deleteFamilyEvent
+      .mockRejectedValueOnce(new Error('offline'))
+      .mockResolvedValue(true)
+    const view = renderJournalEventsSection()
+
+    await user.click(await screen.findByRole('button', {
+      name: 'Complete task: Family picnic',
+    }))
+    expect(await screen.findByRole('status')).toHaveTextContent(/will retry/i)
+    expect(eventServiceMocks.deleteFamilyEvent).toHaveBeenCalledTimes(1)
+
+    view.unmount()
+    renderJournalEventsSection()
+    await waitFor(() => {
+      expect(eventServiceMocks.deleteFamilyEvent).toHaveBeenCalledTimes(2)
+    })
+    expect(screen.queryByRole('heading', { name: 'Family picnic' }))
+      .not.toBeInTheDocument()
   })
 
   it('changes weeks and filters locally saved plans by the selected date', async () => {

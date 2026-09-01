@@ -67,6 +67,7 @@ const reminderIdsKey = 'kinsphere-event-reminders'
 const checklistProgressKey = 'kinsphere-plan-checklists:v1'
 const taskDefinitionsKey = 'kinsphere-plan-tasks:v1'
 const completedPlanIdsKey = 'kinsphere-completed-plans:v1'
+const pendingPlanDeleteIdsKey = 'kinsphere-pending-plan-deletes:v1'
 const planCategories = [
   { value: 'travel', label: 'Travel' },
   { value: 'graduation', label: 'Graduation' },
@@ -127,6 +128,10 @@ function JournalEventsSectionForFamily({
     completedPlanIdsKey,
     storageSubject,
   )
+  const pendingPlanDeleteIdsStorageKey = eventStorageKey(
+    pendingPlanDeleteIdsKey,
+    storageSubject,
+  )
   const [isUpcomingExpanded, setIsUpcomingExpanded] = useState(false)
   const [showEventSheet, setShowEventSheet] = useState(false)
   const [eventSaving, setEventSaving] = useState(false)
@@ -167,10 +172,25 @@ function JournalEventsSectionForFamily({
   const [completedPlanIds, setCompletedPlanIds] = useState<Set<string>>(
     () => readStringSet(completedPlanIdsStorageKey),
   )
+  const [reminderBusyIds, setReminderBusyIds] = useState<Set<string>>(
+    () => new Set(),
+  )
+  const [completionBusyIds, setCompletionBusyIds] = useState<Set<string>>(
+    () => new Set(),
+  )
   const eventSheetRef = useRef<HTMLFormElement>(null)
   const eventSheetFirstFieldRef = useRef<HTMLInputElement>(null)
   const eventSheetOpenerRef = useRef<HTMLElement | null>(null)
   const taskComposerInputRef = useRef<HTMLInputElement>(null)
+  // Refs close the same-render gap that state alone leaves on rapid taps. The
+  // corresponding state sets exist only to reflect the lock in the UI.
+  const eventSavingRef = useRef(false)
+  const reminderBusyIdsRef = useRef(new Set<string>())
+  const completionBusyIdsRef = useRef(new Set<string>())
+  const pendingDeleteIdsRef = useRef(
+    readStringSet(pendingPlanDeleteIdsStorageKey),
+  )
+  const pendingDeleteRetryRef = useRef<Promise<void> | null>(null)
 
   const allUpcomingEvents = useMemo(() => {
     const eventsById = new Map<string, FamilyEvent>()
@@ -213,6 +233,36 @@ function JournalEventsSectionForFamily({
     setSharedEventsUnavailable(false)
   }, [])
 
+  const retryPendingSharedDeletes = useCallback(() => {
+    // A completed plan disappears locally immediately, but a failed server
+    // delete must remain durable across reloads. Serialize retries so initial
+    // fetch and Realtime reconnects cannot send the same batch twice.
+    if (pendingDeleteRetryRef.current) return pendingDeleteRetryRef.current
+    const retry = (async () => {
+      let changed = false
+      for (const eventId of [...pendingDeleteIdsRef.current]) {
+        try {
+          if (await deleteFamilyEventRecord(eventId)) {
+            pendingDeleteIdsRef.current.delete(eventId)
+            changed = true
+          }
+        } catch {
+          // Keep the id queued for the next mount or successful reconnect.
+        }
+      }
+      if (changed) {
+        writeJson(
+          pendingPlanDeleteIdsStorageKey,
+          [...pendingDeleteIdsRef.current],
+        )
+      }
+    })().finally(() => {
+      pendingDeleteRetryRef.current = null
+    })
+    pendingDeleteRetryRef.current = retry
+    return retry
+  }, [pendingPlanDeleteIdsStorageKey])
+
   useEffect(() => {
     let active = true
     let unsubscribe: () => void = () => undefined
@@ -224,6 +274,7 @@ function JournalEventsSectionForFamily({
           setSharedFamilyEvents(toImportantFamilyEvents(records))
           setSharedEventsUnavailable(false)
         }
+        void retryPendingSharedDeletes()
       } catch {
         if (active) setSharedEventsUnavailable(true)
         // Locally-created plans remain available while offline.
@@ -246,7 +297,7 @@ function JournalEventsSectionForFamily({
       active = false
       unsubscribe()
     }
-  }, [storageSubject])
+  }, [retryPendingSharedDeletes, storageSubject])
 
   useEffect(() => {
     const selectedEvents = allUpcomingEvents.filter((event) =>
@@ -325,6 +376,7 @@ function JournalEventsSectionForFamily({
 
   async function createFamilyEvent(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
+    if (eventSavingRef.current) return
     setEventFormError('')
     const form = new FormData(event.currentTarget)
     const title = String(form.get('title') ?? '').trim()
@@ -341,6 +393,7 @@ function JournalEventsSectionForFamily({
 
     const startsAt = `${date}T${time}:00`
     const doodle = planDoodleForSeed(`${title}-${date}-${time}`)
+    eventSavingRef.current = true
     setEventSaving(true)
     try {
       const saved = await createFamilyEventRecord({
@@ -383,40 +436,49 @@ function JournalEventsSectionForFamily({
         'The plan could not be saved. Check your connection and try again.',
       )
     } finally {
+      eventSavingRef.current = false
       setEventSaving(false)
     }
   }
 
   async function toggleReminder(event: FamilyEvent) {
-    if (reminderIds.has(event.id)) {
-      const nextIds = new Set(reminderIds)
-      nextIds.delete(event.id)
+    if (reminderBusyIdsRef.current.has(event.id)) return
+    reminderBusyIdsRef.current.add(event.id)
+    setReminderBusyIds(new Set(reminderBusyIdsRef.current))
+    try {
+      if (reminderIds.has(event.id)) {
+        const nextIds = new Set(reminderIds)
+        nextIds.delete(event.id)
+        setReminderIds(nextIds)
+        writeJson(reminderIdsStorageKey, [...nextIds])
+        const cancellation = await cancelEventReminder(event.id, storageSubject)
+        try {
+          await syncEventReminder(event.id, false)
+        } catch {
+          // The local reminder state remains authoritative until sync can retry.
+        }
+        setReminderStatus(
+          cancellation.cleared
+            ? `Reminder removed for ${event.title}.`
+            : cancellation.message,
+        )
+        return
+      }
+
+      const result = await enableEventReminder(event, storageSubject)
+      const nextIds = new Set(reminderIds).add(event.id)
       setReminderIds(nextIds)
       writeJson(reminderIdsStorageKey, [...nextIds])
-      const cancellation = await cancelEventReminder(event.id, storageSubject)
       try {
-        await syncEventReminder(event.id, false)
+        await syncEventReminder(event.id, true)
       } catch {
-        // The local reminder state remains authoritative until sync can retry.
+        // Device scheduling still succeeds if the server is temporarily unavailable.
       }
-      setReminderStatus(
-        cancellation.cleared
-          ? `Reminder removed for ${event.title}.`
-          : cancellation.message,
-      )
-      return
+      setReminderStatus(result.message)
+    } finally {
+      reminderBusyIdsRef.current.delete(event.id)
+      setReminderBusyIds(new Set(reminderBusyIdsRef.current))
     }
-
-    const result = await enableEventReminder(event, storageSubject)
-    const nextIds = new Set(reminderIds).add(event.id)
-    setReminderIds(nextIds)
-    writeJson(reminderIdsStorageKey, [...nextIds])
-    try {
-      await syncEventReminder(event.id, true)
-    } catch {
-      // Device scheduling still succeeds if the server is temporarily unavailable.
-    }
-    setReminderStatus(result.message)
   }
 
   function toggleChecklistItem(
@@ -506,13 +568,31 @@ function JournalEventsSectionForFamily({
   }
 
   async function completePlan(event: FamilyEvent) {
-    const nextCompletedPlanIds = new Set(completedPlanIds).add(event.id)
-    setCompletedPlanIds(nextCompletedPlanIds)
-    writeJson(completedPlanIdsStorageKey, [...nextCompletedPlanIds])
+    if (completionBusyIdsRef.current.has(event.id)) return
+    completionBusyIdsRef.current.add(event.id)
+    setCompletionBusyIds(new Set(completionBusyIdsRef.current))
+    const isSharedEvent = sharedFamilyEvents.some(({ id }) => id === event.id)
+    if (isSharedEvent) {
+      pendingDeleteIdsRef.current.add(event.id)
+      writeJson(
+        pendingPlanDeleteIdsStorageKey,
+        [...pendingDeleteIdsRef.current],
+      )
+    }
 
-    const nextCreatedEvents = createdEvents.filter((item) => item.id !== event.id)
-    setCreatedEvents(nextCreatedEvents)
-    writeJson(createdEventsStorageKey, nextCreatedEvents)
+    // Completion is optimistic for a reason: a flaky connection should not
+    // make a checked-off family plan jump back into the day's notebook.
+    setCompletedPlanIds((current) => {
+      const next = new Set(current).add(event.id)
+      writeJson(completedPlanIdsStorageKey, [...next])
+      return next
+    })
+
+    setCreatedEvents((current) => {
+      const next = current.filter((item) => item.id !== event.id)
+      writeJson(createdEventsStorageKey, next)
+      return next
+    })
     setSharedFamilyEvents((current) =>
       current.filter((item) => item.id !== event.id),
     )
@@ -534,14 +614,23 @@ function JournalEventsSectionForFamily({
       setTaskComposerValue('')
     }
 
-    const nextReminderIds = new Set(reminderIds)
-    nextReminderIds.delete(event.id)
-    setReminderIds(nextReminderIds)
-    writeJson(reminderIdsStorageKey, [...nextReminderIds])
+    setReminderIds((current) => {
+      const next = new Set(current)
+      next.delete(event.id)
+      writeJson(reminderIdsStorageKey, [...next])
+      return next
+    })
     await cancelEventReminder(event.id, storageSubject)
 
     try {
       const removedForFamily = await deleteFamilyEventRecord(event.id)
+      if (removedForFamily && isSharedEvent) {
+        pendingDeleteIdsRef.current.delete(event.id)
+        writeJson(
+          pendingPlanDeleteIdsStorageKey,
+          [...pendingDeleteIdsRef.current],
+        )
+      }
       setReminderStatus(
         removedForFamily
           ? `${event.title} was completed and removed from the shared calendar.`
@@ -551,6 +640,9 @@ function JournalEventsSectionForFamily({
       setReminderStatus(
         `${event.title} was removed here. Shared removal will retry when the family calendar reconnects.`,
       )
+    } finally {
+      completionBusyIdsRef.current.delete(event.id)
+      setCompletionBusyIds(new Set(completionBusyIdsRef.current))
     }
   }
 
@@ -712,6 +804,8 @@ function JournalEventsSectionForFamily({
                         hasReminder ? 'Remove reminder for' : 'Remind me about'
                       } ${event.title}`}
                       aria-pressed={hasReminder}
+                      aria-busy={reminderBusyIds.has(event.id)}
+                      disabled={reminderBusyIds.has(event.id)}
                       onClick={() => void toggleReminder(event)}
                     >
                       <ReminderBellDoodle />
@@ -819,17 +913,21 @@ function JournalEventsSectionForFamily({
                   >
                     <span aria-hidden="true">＋</span>
                     <span>{taskComposerPlanId === event.id ? 'Cancel' : 'Add task'}</span>
+                    <span className="journal-action-spacer" aria-hidden="true" />
                   </button>
                   <button
                     className="event-plan-card__complete"
                     type="button"
                     aria-label={`Complete task: ${event.title}`}
+                    aria-busy={completionBusyIds.has(event.id)}
+                    disabled={completionBusyIds.has(event.id)}
                     onClick={() => void completePlan(event)}
                   >
                     <svg aria-hidden="true" viewBox="0 0 20 20">
                       <path d="m4 10 4 4 8-9" />
                     </svg>
                     <span>Complete task</span>
+                    <span className="journal-action-spacer" aria-hidden="true" />
                   </button>
                 </div>
               </article>
@@ -877,7 +975,8 @@ function JournalEventsSectionForFamily({
                 onClick={openEventSheet}
               >
                 <span aria-hidden="true">＋</span>
-                Add a plan for this day
+                <span>Add a plan for this day</span>
+                <span className="journal-action-spacer" aria-hidden="true" />
               </button>
             </div>
           </div>
@@ -913,6 +1012,7 @@ function JournalEventsSectionForFamily({
       >
         <span className="events-header-action__plus" aria-hidden="true">+</span>
         <span>Add plan</span>
+        <span className="journal-action-spacer" aria-hidden="true" />
       </button>
 
       {showEventSheet

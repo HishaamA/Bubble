@@ -1,12 +1,14 @@
 import {
   useCallback,
   useEffect,
+  useId,
   useMemo,
   useRef,
   useState,
   type ChangeEvent,
   type CSSProperties,
   type FormEvent,
+  type MouseEvent,
 } from 'react'
 import { Link } from 'react-router-dom'
 import { TimelinePhotoImage } from './TimelinePhotoImage'
@@ -111,6 +113,13 @@ function automaticScanSignature(
   faceScans: PeopleTimelineState['faceScans'],
   photos: readonly PeopleTimelinePhoto[],
 ) {
+  /*
+   * This is a scheduling fingerprint, not a biometric identifier. It changes
+   * when the model revision, usable reference count, or an unscanned photo's
+   * durable key/source changes. The automatic effect can therefore ignore
+   * render churn without permanently suppressing new uploads or revised face
+   * models. Embedding values deliberately never enter the signature.
+   */
   const profileSignature = Object.entries(faceProfiles)
     .filter(([, profile]) => profile.references.length > 0)
     .map(([personId, profile]) => `${personId}:${profile.references.length}`)
@@ -131,6 +140,12 @@ function faceReviewKey(suggestion: FaceSuggestion) {
 }
 
 async function scanReferencePhotos(files: readonly File[]) {
+  /*
+   * Enrollment Files are intentionally short-lived input capabilities. The
+   * face model consumes them in memory and this helper returns only numeric
+   * descriptors and quality scores; source image bytes are never copied into
+   * People state, IndexedDB, route state, or a remote request.
+   */
   const scans: Awaited<ReturnType<typeof scanReferencePortrait>>[] = []
   let firstError: unknown
   for (const file of files) {
@@ -214,17 +229,33 @@ export function PeopleTimeline({
   const [photoImportMessage, setPhotoImportMessage] = useState('')
   const [photoImportError, setPhotoImportError] = useState(false)
   const [postponedFaceReviews, setPostponedFaceReviews] = useState<string[]>([])
+  const [showAllFaceMatchedAlbums, setShowAllFaceMatchedAlbums] = useState(false)
+  const faceMatchedAlbumsId = useId()
+
+  // React state snapshots can be produced faster than IndexedDB completes.
+  // Chaining writes preserves intent order so an older, slower save cannot
+  // overwrite a newer tag, reference, or scan checkpoint on this device.
   const saveQueue = useRef(Promise.resolve())
   const scanController = useRef<AbortController | null>(null)
   const scanSavedPhotoCount = useRef(0)
   const timelineStateRef = useRef(timelineState)
   const photoLinkRef = useRef<HTMLAnchorElement>(null)
   const photoFigureRef = useRef<HTMLElement>(null)
+
+  // Route restoration is intentionally one-shot. These signatures distinguish
+  // a newly returned memory/person from ordinary rerenders, while the pending
+  // manage ref bridges the scrapbook route closing into its inline editor.
   const restoredPersonSignature = useRef('')
   const restoredFocusSignature = useRef('')
   const restoredLinkFocusSignature = useRef('')
+  const manageAfterRouteClosePersonId = useRef('')
   const lastAutomaticScanSignature = useRef('')
+  const addPersonScanInFlight = useRef(false)
+  const referenceScanInFlight = useRef(false)
   const photoInputRef = useRef<HTMLInputElement>(null)
+  const addPersonFormRef = useRef<HTMLFormElement>(null)
+  const addPersonOpenerRef = useRef<HTMLButtonElement | null>(null)
+  const addPersonFocusFrameRef = useRef<number | null>(null)
   const importingPhotos = photoImportProgress?.importing ?? false
   const photoPickerBusy = importingPhotos ||
     Boolean(scanProgress) ||
@@ -329,6 +360,9 @@ export function PeopleTimeline({
       ? [{ person, preview, photoCount: matchingPhotos.length }]
       : []
   }), [effectivePeopleByPhoto, timelinePhotos, timelineState.people])
+  const displayedFaceMatchedAlbums = showAllFaceMatchedAlbums
+    ? faceMatchedAlbums
+    : faceMatchedAlbums.slice(0, 2)
   const familyPhotoKeys = useMemo(() => new Set(
     timelinePhotos
       .filter((photo) => {
@@ -410,6 +444,9 @@ export function PeopleTimeline({
   }, [replaceTimelineState])
 
   const queueTimelineStateSave = useCallback((state: typeof timelineState) => {
+    // `savePeopleTimelineState` is an account-namespaced local persistence
+    // boundary. Keeping the queue here also makes it harder for a future caller
+    // to accidentally treat private descriptors as family-sync payload data.
     const result = saveQueue.current
       .catch(() => undefined)
       .then(() => savePeopleTimelineState(cacheNamespace, state))
@@ -428,10 +465,15 @@ export function PeopleTimeline({
     setSelectedPersonId(FAMILY_PERSON_ID)
     setActivePhotoKey(null)
     setPostponedFaceReviews([])
+    setShowAllFaceMatchedAlbums(false)
     restoredPersonSignature.current = ''
     restoredFocusSignature.current = ''
     restoredLinkFocusSignature.current = ''
+    manageAfterRouteClosePersonId.current = ''
     lastAutomaticScanSignature.current = ''
+    // Cache reads can finish after the signed-in family namespace changes.
+    // The active flag prevents that stale local snapshot from crossing the
+    // identity boundary and replacing the new family's empty/loading state.
     void loadPeopleTimelineState(cacheNamespace).then((storedState) => {
       if (!active) return
       replaceTimelineState(storedState)
@@ -484,6 +526,32 @@ export function PeopleTimeline({
 
   useEffect(() => {
     if (!cacheReady) return
+
+    /*
+     * Managing from a dedicated scrapbook first has to close the route owned by
+     * JournalPage. Carry the person ID across that prop transition, then mark
+     * the route's default selection as already restored so a later autosave
+     * render does not snap the editor back to Family. The rename input's
+     * existing autofocus provides the final, visible focus handoff.
+     */
+    const pendingManagePersonId = !personAlbumOpen
+      ? manageAfterRouteClosePersonId.current
+      : ''
+    const pendingManagePersonExists = timelineState.people.some(
+      ({ id }) => id === pendingManagePersonId,
+    )
+    if (pendingManagePersonExists && selectedPersonId === pendingManagePersonId) {
+      manageAfterRouteClosePersonId.current = ''
+      restoredPersonSignature.current = `${cacheNamespace}\u0000${initialPersonId ?? FAMILY_PERSON_ID}`
+      return
+    }
+    if (!personAlbumOpen && manageAfterRouteClosePersonId.current) {
+      manageAfterRouteClosePersonId.current = ''
+    }
+
+    // Person and memory IDs arrive from router state after returning from a
+    // photo. Restore each tuple once; otherwise local chip/scrubber choices
+    // would be undone every time a scan checkpoint updates timelineState.
     const requestedPersonId = initialPersonId ?? FAMILY_PERSON_ID
     const personSignature = `${cacheNamespace}\u0000${requestedPersonId}`
     const restoredPersonId = requestedPersonId === FAMILY_PERSON_ID ||
@@ -522,6 +590,7 @@ export function PeopleTimeline({
     familyPhotoKeys,
     focusMemoryId,
     initialPersonId,
+    personAlbumOpen,
     selectedPersonId,
     timelinePhotos,
     timelineState.people,
@@ -536,6 +605,9 @@ export function PeopleTimeline({
       displayedPhoto.memoryId !== focusMemoryId
     ) return
 
+    // Wait until the restored photo surface has replaced the prior route's
+    // subtree. Focusing in the frame avoids losing focus to unmount cleanup and
+    // `preventScroll` preserves the Journal position the user came back to.
     const frame = window.requestAnimationFrame(() => {
       restoredLinkFocusSignature.current = focusSignature
       const photoSurface = photoLinkRef.current ?? photoFigureRef.current
@@ -550,7 +622,15 @@ export function PeopleTimeline({
     setDateError('')
   }, [displayedPhoto?.key])
 
-  useEffect(() => () => scanController.current?.abort(), [])
+  // A face scan owns model work and Blob/image resources outside React. Abort
+  // it on unmount so late checkpoints cannot retain those objects or update a
+  // timeline that is no longer visible.
+  useEffect(() => () => {
+    scanController.current?.abort()
+    if (addPersonFocusFrameRef.current !== null) {
+      window.cancelAnimationFrame(addPersonFocusFrameRef.current)
+    }
+  }, [])
 
   function choosePerson(personId: string) {
     setSelectedPersonId(personId)
@@ -569,8 +649,40 @@ export function PeopleTimeline({
     choosePerson(personId)
   }
 
-  function openAddPerson() {
+  function managePersonFromScrapbook(personId: string) {
+    if (!onClosePersonAlbum) return
+    const person = timelineStateRef.current.people.find(({ id }) => id === personId)
+    if (!person) return
+    manageAfterRouteClosePersonId.current = personId
+    startManagingPerson(person)
+    onClosePersonAlbum()
+  }
+
+  function restoreAddPersonOpenerFocus() {
+    const opener = addPersonOpenerRef.current
+    if (!opener) return
+    if (addPersonFocusFrameRef.current !== null) {
+      window.cancelAnimationFrame(addPersonFocusFrameRef.current)
+    }
+    // The inline form must unmount before its invoking control can receive
+    // focus reliably. Preserve the exact entry point because both the people
+    // rail and empty scrapbook card can launch the same editor.
+    addPersonFocusFrameRef.current = window.requestAnimationFrame(() => {
+      addPersonFocusFrameRef.current = null
+      if (opener.isConnected && !opener.disabled) opener.focus()
+    })
+  }
+
+  function closeAddPerson() {
+    setAddingPerson(false)
+    setNewPersonPortraits([])
+    setAddPersonError('')
+    restoreAddPersonOpenerFocus()
+  }
+
+  function openAddPerson(event: MouseEvent<HTMLButtonElement>) {
     if (photoPickerBusy) return
+    addPersonOpenerRef.current = event.currentTarget
     setAddingPerson(true)
     setAddPersonError('')
     setNewPersonPortraits([])
@@ -645,6 +757,11 @@ export function PeopleTimeline({
       return
     }
 
+    // Disabled state is committed on a later render. A hardware key and click,
+    // or two synthetic submits, can reach this handler in the same turn; take a
+    // synchronous latch before starting an expensive scan or allocating IDs.
+    if (addPersonScanInFlight.current) return
+    addPersonScanInFlight.current = true
     setAddingPersonBusy(true)
     setAddPersonError('')
     try {
@@ -671,6 +788,7 @@ export function PeopleTimeline({
       setAddingPerson(false)
       form.reset()
       choosePerson(person.id)
+      if (form.contains(document.activeElement)) restoreAddPersonOpenerFocus()
       setScanMessage(
         timelinePhotos.length > 0
           ? `${name} is ready with ${scans.length} face ${scans.length === 1 ? 'view' : 'views'}. Organizing matching photos on this device…${failed ? ` ${failed} unclear photo${failed === 1 ? ' was' : 's were'} skipped.` : ''}`
@@ -683,6 +801,7 @@ export function PeopleTimeline({
           : 'That face photo could not be scanned. Try another clear portrait.',
       )
     } finally {
+      addPersonScanInFlight.current = false
       setAddingPersonBusy(false)
     }
   }
@@ -744,6 +863,11 @@ export function PeopleTimeline({
       return
     }
 
+    // The ref closes the same-turn gap before `referenceBusy` disables the
+    // form. Without it, duplicate activation would scan the same private File
+    // twice and append indistinguishable enrollment vectors twice.
+    if (referenceScanInFlight.current) return
+    referenceScanInFlight.current = true
     const personId = selectedPerson.id
     const personLabel = selectedPerson.name
     setReferenceBusy(true)
@@ -782,6 +906,7 @@ export function PeopleTimeline({
           : 'That face photo could not be scanned. Try another clear portrait.',
       )
     } finally {
+      referenceScanInFlight.current = false
       setReferenceBusy(false)
     }
   }
@@ -961,6 +1086,12 @@ export function PeopleTimeline({
       return
     }
 
+    /*
+     * One controller identifies one library pass. Checkpoints are persisted
+     * independently so cancellation keeps completed work, while controller
+     * identity prevents an older pass's finally block from clearing a newer
+     * one. `scanSavedPhotoCount` reports durability, not merely model output.
+     */
     const controller = new AbortController()
     scanController.current = controller
     scanSavedPhotoCount.current = 0
@@ -1040,6 +1171,9 @@ export function PeopleTimeline({
     const savedPhotoCount = scanSavedPhotoCount.current
     scanController.current?.abort()
     scanController.current = null
+    // Fingerprint the remaining work after the last durable checkpoint. This
+    // suppresses an immediate effect-driven restart, but a new upload or face
+    // reference produces a different signature and remains eligible later.
     lastAutomaticScanSignature.current = automaticScanSignature(
       timelineStateRef.current.faceProfiles,
       timelineStateRef.current.faceScans,
@@ -1137,6 +1271,9 @@ export function PeopleTimeline({
         cacheNamespace={cacheNamespace}
         dateOverrides={timelineState.dateOverrides}
         onBack={onClosePersonAlbum}
+        onManage={onClosePersonAlbum
+          ? () => managePersonFromScrapbook(scrapbookPerson.id)
+          : undefined}
       />
     )
   }
@@ -1303,16 +1440,21 @@ export function PeopleTimeline({
                 On-device · private
               </p>
             </div>
-            {faceMatchedAlbums.length > 2 ? (
-              <button type="button" onClick={() => choosePerson(REVIEW_PERSON_ID)}>
+            {faceMatchedAlbums.length > displayedFaceMatchedAlbums.length ? (
+              <button
+                type="button"
+                aria-controls={faceMatchedAlbumsId}
+                aria-expanded={showAllFaceMatchedAlbums}
+                onClick={() => setShowAllFaceMatchedAlbums(true)}
+              >
                 See all <span aria-hidden="true">›</span>
               </button>
             ) : null}
           </header>
 
           {faceMatchedAlbums.length ? (
-            <div className="people-timeline__album-grid">
-              {faceMatchedAlbums.map(({ person, preview, photoCount }, index) => (
+            <div id={faceMatchedAlbumsId} className="people-timeline__album-grid">
+              {displayedFaceMatchedAlbums.map(({ person, preview, photoCount }, index) => (
                 <button
                   key={person.id}
                   type="button"
@@ -1383,7 +1525,7 @@ export function PeopleTimeline({
       ) : null}
 
       {addingPerson ? (
-        <form className="people-timeline__inline-form people-timeline__person-form" aria-label="Add a person" onSubmit={(event) => void addPerson(event)}>
+        <form ref={addPersonFormRef} className="people-timeline__inline-form people-timeline__person-form" aria-label="Add a person" onSubmit={(event) => void addPerson(event)}>
           <label>
             <span>Name</span>
             <input
@@ -1419,11 +1561,7 @@ export function PeopleTimeline({
             <button
               type="button"
               disabled={addingPersonBusy}
-              onClick={() => {
-                setAddingPerson(false)
-                setNewPersonPortraits([])
-                setAddPersonError('')
-              }}
+              onClick={closeAddPerson}
             >
               Cancel
             </button>
@@ -1433,8 +1571,28 @@ export function PeopleTimeline({
       ) : null}
 
       {managingPerson && selectedPerson ? (
-        <div className="people-timeline__manage-panel">
-          <form className="people-timeline__inline-form" aria-label={`Rename ${selectedPerson.name}`} onSubmit={renamePerson}>
+        <section
+          className="people-timeline__manage-panel"
+          aria-label={`Manage ${selectedPerson.name}`}
+        >
+          <header className="people-timeline__manage-header">
+            <div>
+              <span>Person details</span>
+              <h3>Manage {selectedPerson.name}</h3>
+            </div>
+            <button
+              type="button"
+              className="people-timeline__manage-done"
+              onClick={() => setManagingPerson(false)}
+            >
+              Done
+            </button>
+          </header>
+          <form
+            className="people-timeline__inline-form people-timeline__rename-form"
+            aria-label={`Rename ${selectedPerson.name}`}
+            onSubmit={renamePerson}
+          >
             <label>
               <span>Name</span>
               <input
@@ -1450,7 +1608,6 @@ export function PeopleTimeline({
             </label>
             <div className="people-timeline__form-actions">
               <button type="submit" disabled={referenceBusy}>Save name</button>
-              <button type="button" onClick={() => setManagingPerson(false)}>Done</button>
             </div>
           </form>
           <form
@@ -1458,7 +1615,7 @@ export function PeopleTimeline({
             aria-label={`Add face photos for ${selectedPerson.name}`}
             onSubmit={(event) => void saveReferencePortrait(event)}
           >
-            <div>
+            <div className="people-timeline__reference-copy">
               <strong>
                 {timelineState.faceProfiles[selectedPerson.id]?.references.length
                   ? `${timelineState.faceProfiles[selectedPerson.id]?.references.length} face ${timelineState.faceProfiles[selectedPerson.id]?.references.length === 1 ? 'view' : 'views'} ready`
@@ -1470,26 +1627,40 @@ export function PeopleTimeline({
                   : `Add one clear portrait to organize ${selectedPerson.name}’s photos automatically.`}
               </span>
             </div>
-            <label>
-              <span className="people-timeline__sr-only">Face photo for {selectedPerson.name}</span>
-              <input
-                type="file"
-                accept="image/*"
-                multiple
-                disabled={referenceBusy || importingPhotos || Boolean(scanProgress)}
-                onChange={(event) => {
-                  setReferencePortraits(Array.from(event.currentTarget.files ?? []).slice(0, MAX_REFERENCE_PHOTOS_AT_ONCE))
-                  setManageError('')
-                }}
-              />
-            </label>
-            <button type="submit" disabled={referenceBusy || importingPhotos || Boolean(scanProgress) || !referencePortraits.length}>
-              {referenceBusy
-                ? 'Scanning…'
-                : timelineState.faceProfiles[selectedPerson.id]?.references.length
-                  ? 'Add face views'
-                  : 'Add face photo'}
-            </button>
+            <div className="people-timeline__reference-controls">
+              <label
+                className="people-timeline__face-picker"
+                data-disabled={referenceBusy || importingPhotos || Boolean(scanProgress) ? 'true' : 'false'}
+              >
+                <input
+                  className="people-timeline__sr-only"
+                  type="file"
+                  accept="image/*"
+                  multiple
+                  aria-label={`Face photo for ${selectedPerson.name}`}
+                  disabled={referenceBusy || importingPhotos || Boolean(scanProgress)}
+                  onChange={(event) => {
+                    setReferencePortraits(Array.from(event.currentTarget.files ?? []).slice(0, MAX_REFERENCE_PHOTOS_AT_ONCE))
+                    setManageError('')
+                  }}
+                />
+                <span className="people-timeline__face-picker-action" aria-hidden="true">
+                  Choose photos
+                </span>
+                <span className="people-timeline__face-picker-summary" aria-live="polite">
+                  {referencePortraits.length
+                    ? `${referencePortraits.length} ${referencePortraits.length === 1 ? 'photo' : 'photos'} selected`
+                    : 'Up to 5 photos'}
+                </span>
+              </label>
+              <button type="submit" disabled={referenceBusy || importingPhotos || Boolean(scanProgress) || !referencePortraits.length}>
+                {referenceBusy
+                  ? 'Scanning…'
+                  : timelineState.faceProfiles[selectedPerson.id]?.references.length
+                    ? 'Add face views'
+                    : 'Add face photo'}
+              </button>
+            </div>
           </form>
           {manageError ? <p className="people-timeline__manage-error" role="alert">{manageError}</p> : null}
           {confirmingDelete ? (
@@ -1503,7 +1674,7 @@ export function PeopleTimeline({
               Remove person
             </button>
           )}
-        </div>
+        </section>
       ) : null}
 
       {cacheReady && faceReviewPreviews.length ? (

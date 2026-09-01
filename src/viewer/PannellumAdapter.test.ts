@@ -116,6 +116,49 @@ describe('createPannellumAdapter', () => {
     expect(fakeViewer.instance.on).toHaveBeenCalledTimes(3)
   })
 
+  it('maps runtime hotspots to named keyboard-activatable controls', async () => {
+    const onActivate = vi.fn()
+    const scenesWithHotSpot: readonly PanoramaScene[] = [
+      {
+        ...scenes[0],
+        hotSpots: [
+          {
+            id: 'voice-note',
+            kind: 'audio',
+            pitch: 4,
+            yaw: 12,
+            label: 'Play voice note',
+            onActivate,
+          },
+        ],
+      },
+    ]
+    const fakeViewer = createFakeViewer()
+    const { runtime, viewer } = createFakeRuntime(fakeViewer)
+    const adapter = createPannellumAdapter({ loadRuntime: async () => runtime })
+    await adapter.mount(document.createElement('div'), {
+      scenes: scenesWithHotSpot,
+    })
+
+    const hotSpot = viewer.mock.calls[0][1].scenes.dinner.hotSpots?.[0]
+    const element = document.createElement('div')
+    const click = vi.spyOn(element, 'click')
+    hotSpot?.createTooltipFunc?.(element)
+
+    expect(element).toHaveAttribute('role', 'button')
+    expect(element).toHaveAttribute('aria-label', 'Play voice note')
+    element.dispatchEvent(
+      new KeyboardEvent('keydown', {
+        key: 'Enter',
+        bubbles: true,
+        cancelable: true,
+      }),
+    )
+    expect(click).toHaveBeenCalledOnce()
+    hotSpot?.clickHandlerFunc?.(new Event('click'))
+    expect(onActivate).toHaveBeenCalledOnce()
+  })
+
   it('converts a tapped screen point into panorama pitch and yaw', async () => {
     const fakeViewer = createFakeViewer()
     vi.mocked(fakeViewer.instance.mouseEventToCoords).mockReturnValue([18, -64])
@@ -260,6 +303,22 @@ describe('createPannellumAdapter', () => {
     ).toBe(true)
     expect(requestOrientationPermission).not.toHaveBeenCalled()
     expect(fakeViewer.instance.startOrientation).toHaveBeenCalledOnce()
+  })
+
+  it('stops a partially started runtime after a sensor exception', async () => {
+    const fakeViewer = createFakeViewer({ orientationSupported: true })
+    vi.mocked(fakeViewer.instance.startOrientation).mockImplementationOnce(() => {
+      throw new Error('sensor detached')
+    })
+    const runtime = createFakeRuntime(fakeViewer).runtime
+    const adapter = createPannellumAdapter({
+      loadRuntime: async () => runtime,
+      requestOrientationPermission: async () => true,
+    })
+    await adapter.mount(document.createElement('div'), { scenes })
+
+    await expect(adapter.startOrientation()).resolves.toBe(false)
+    expect(fakeViewer.instance.stopOrientation).toHaveBeenCalledOnce()
   })
 
   it('forwards load, scene, and normalized error events once', async () => {

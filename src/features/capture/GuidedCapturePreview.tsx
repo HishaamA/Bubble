@@ -25,6 +25,7 @@ export function GuidedCapturePreview({ onClose }: GuidedCapturePreviewProps) {
     yaw: number
     pitch: number
   } | null>(null)
+  const closeButtonRef = useRef<HTMLButtonElement>(null)
 
   const projected = useMemo(
     () => STANDARD_GUIDE_TARGETS.map((target) => ({
@@ -72,6 +73,20 @@ export function GuidedCapturePreview({ onClose }: GuidedCapturePreviewProps) {
     return () => window.removeEventListener('deviceorientation', updateFromDevice, true)
   }, [updateFromDevice])
 
+  useEffect(() => {
+    const frame = window.requestAnimationFrame(() => closeButtonRef.current?.focus())
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return
+      event.preventDefault()
+      onClose()
+    }
+    document.addEventListener('keydown', closeOnEscape)
+    return () => {
+      window.cancelAnimationFrame(frame)
+      document.removeEventListener('keydown', closeOnEscape)
+    }
+  }, [onClose])
+
   function startDrag(event: ReactPointerEvent<HTMLDivElement>) {
     event.currentTarget.setPointerCapture(event.pointerId)
     dragRef.current = {
@@ -105,9 +120,21 @@ export function GuidedCapturePreview({ onClose }: GuidedCapturePreviewProps) {
       role="dialog"
       aria-modal="true"
       aria-label="Guided 360 capture preview"
+      onKeyDown={(event) => {
+        // The preview has one interactive control. Keeping Tab on that control
+        // prevents keyboard focus from escaping behind the modal surface.
+        if (event.key !== 'Tab') return
+        event.preventDefault()
+        closeButtonRef.current?.focus()
+      }}
     >
       <div className="guided-capture__topbar">
-        <button type="button" onClick={onClose} aria-label="Close guided capture preview">
+        <button
+          ref={closeButtonRef}
+          type="button"
+          onClick={onClose}
+          aria-label="Close guided capture preview"
+        >
           Close
         </button>
         <div>

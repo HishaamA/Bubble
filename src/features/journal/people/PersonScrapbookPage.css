@@ -216,6 +216,7 @@
 
 .person-scrapbook__details-heading > div {
   display: grid;
+  min-width: 0;
   gap: 0.18rem;
 }
 
@@ -307,6 +308,20 @@
   /* iOS zooms the entire WebView when a focused field is smaller than 16px. */
   font-size: 1rem;
   line-height: 1.45;
+}
+
+.person-scrapbook__details-grid input[type='date'] {
+  overflow: hidden;
+  color-scheme: light;
+  appearance: none;
+  -webkit-appearance: none;
+}
+
+.person-scrapbook__details-grid input[type='date']::-webkit-date-and-time-value {
+  width: 100%;
+  min-width: 0;
+  margin: 0;
+  text-align: left;
 }
 
 .person-scrapbook__details-grid textarea {
@@ -1013,15 +1028,27 @@
   }
 
   .person-scrapbook__details-heading {
+    align-items: start;
+    flex-direction: column;
     gap: 0.55rem;
   }
 
+  .person-scrapbook__details-heading p {
+    max-width: none;
+    text-align: left;
+  }
+
   .person-scrapbook__details-grid {
+    grid-template-columns: minmax(0, 1fr);
     gap: 0.5rem;
   }
 
   .person-scrapbook__details-grid label {
     padding: 0.58rem 0.6rem;
+  }
+
+  .person-scrapbook__details-grid label:nth-child(n) {
+    grid-column: auto;
   }
 }
 

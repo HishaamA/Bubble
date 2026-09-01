@@ -454,6 +454,34 @@ describe('MemoryConstellation', () => {
     expect(onDelete360).toHaveBeenCalledWith(ownedSharedMoment.id)
   })
 
+  it('submits only one removal when the remove control is tapped twice rapidly', async () => {
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true)
+    let finishDelete: () => void = () => undefined
+    const onDelete360 = vi.fn(() => new Promise<void>((resolve) => {
+      finishDelete = resolve
+    }))
+    render(
+      <MemoryRouter>
+        <MemoryConstellation
+          sharedMoments={[ownedSharedMoment]}
+          onDelete360={onDelete360}
+        />
+      </MemoryRouter>,
+    )
+    const removeButton = screen.getByRole('button', {
+      name: 'Remove Family balcony from your family',
+    })
+
+    act(() => {
+      removeButton.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+      removeButton.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    })
+
+    expect(confirm).toHaveBeenCalledTimes(1)
+    expect(onDelete360).toHaveBeenCalledTimes(1)
+    await act(async () => finishDelete())
+  })
+
   it('gives every cached shared moment a distinct position and grows the world', () => {
     const sharedMoments = Array.from({ length: 45 }, (_, index) => ({
       ...sharedMoment,

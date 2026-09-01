@@ -329,6 +329,39 @@ describe('CardboardViewer', () => {
     ).toHaveClass('ks-cardboard--forced-landscape')
   })
 
+  it('contains keyboard focus, exits with Escape, and restores the launch control', async () => {
+    setViewport(390, 844)
+    const user = userEvent.setup()
+    const ref = createRef<CardboardViewerHandle>()
+    const onExit = vi.fn()
+    render(
+      <>
+        <button type="button" onClick={() => void ref.current?.enter()}>
+          Open Cardboard
+        </button>
+        <CardboardViewer ref={ref} scenes={scenes} onExit={onExit} />
+      </>,
+    )
+    const opener = screen.getByRole('button', { name: 'Open Cardboard' })
+
+    await user.click(opener)
+    const exitButton = await screen.findByRole('button', {
+      name: 'Exit Cardboard view',
+    })
+    await waitFor(() => expect(exitButton).toHaveFocus())
+
+    await user.tab({ shift: true })
+    expect(
+      screen.getByRole('button', { name: 'Use split view anyway' }),
+    ).toHaveFocus()
+    await user.tab()
+    expect(exitButton).toHaveFocus()
+
+    await user.keyboard('{Escape}')
+    await waitFor(() => expect(onExit).toHaveBeenCalledOnce())
+    await waitFor(() => expect(opener).toHaveFocus())
+  })
+
   it('uses native iOS landscape without requesting browser fullscreen', async () => {
     nativeOrientationMocks.available.mockReturnValue(true)
     nativeOrientationMocks.requestLandscape.mockResolvedValue(true)

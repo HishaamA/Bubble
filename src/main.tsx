@@ -8,6 +8,7 @@ import {
 } from '@clerk/react'
 import './index.css'
 import App from './App.tsx'
+import { AuthBootstrapFailure } from './app/AuthBootstrapFailure'
 import './theme/AppTheme.css'
 import { installNativeViewportGeometrySync } from './app/nativeViewportGeometry'
 import { clerkAppearance, clerkLocalization } from './clerkUi'
@@ -22,6 +23,8 @@ installNativeViewportGeometrySync()
 const clerkPublishableKey = import.meta.env.VITE_CLERK_PUBLISHABLE_KEY?.trim()
 const nativeClerk = createNativeClerk(clerkPublishableKey)
 
+// Native builds use a headless Clerk runtime and the in-app OAuth transport;
+// browsers keep Clerk's standard popup flow. Both mount the same app routes.
 const app = clerkConfigured ? (
   <ClerkProvider
     Clerk={nativeClerk}
@@ -42,17 +45,7 @@ const app = clerkConfigured ? (
       <App />
     </ClerkLoaded>
     <ClerkFailed>
-      <section className="auth-bootstrap-failed" role="alert">
-        <p className="auth-bootstrap-failed__eyebrow">Bubble sign-in</p>
-        <h1>We couldn’t open sign-in.</h1>
-        <p>
-          Sign-in is temporarily unavailable. Try again in a moment. Your
-          family data has not been changed.
-        </p>
-        <button type="button" onClick={() => window.location.reload()}>
-          Try again
-        </button>
-      </section>
+      <AuthBootstrapFailure />
     </ClerkFailed>
   </ClerkProvider>
 ) : (

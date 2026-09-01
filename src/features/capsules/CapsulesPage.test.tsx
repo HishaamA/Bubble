@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { createMemoryCapsuleStore } from './capsuleStore'
@@ -24,6 +24,9 @@ const nativeRecapMocks = vi.hoisted(() => ({
   shareNativeCapsuleRecap: vi.fn(),
   stageNativeCapsuleRecapImage: vi.fn(),
 }))
+const authMocks = vi.hoisted(() => ({
+  isDevelopmentPreview: false,
+}))
 
 vi.mock('./processCapsuleImage', () => capsuleImageMocks)
 vi.mock('./capsulePhotoDate', () => capsulePhotoDateMocks)
@@ -31,6 +34,7 @@ vi.mock('./capsuleService', () => capsuleServiceMocks)
 vi.mock('./recap/nativeCapsuleRecap', () => nativeRecapMocks)
 vi.mock('../auth', () => ({
   useAuth: () => ({
+    isDevelopmentPreview: authMocks.isDevelopmentPreview,
     user: { id: 'user_simreen', displayName: 'Simreen' },
   }),
 }))
@@ -106,6 +110,7 @@ function lockedSpecialCapsule(
 
 beforeEach(() => {
   vi.clearAllMocks()
+  authMocks.isDevelopmentPreview = false
   capsuleServiceMocks.ensureFamilyWeeklyCapsule.mockResolvedValue(null)
   capsuleServiceMocks.fetchFamilyCapsules.mockResolvedValue([])
   capsuleServiceMocks.subscribeToFamilyCapsules.mockResolvedValue(() => undefined)
@@ -146,6 +151,9 @@ describe('CapsulesPage', () => {
 
     expect(await screen.findByRole('heading', { name: currentWeekRange })).toBeInTheDocument()
     expect(screen.getByText('Photos only · not 360°')).toBeInTheDocument()
+    const unlockStatus = screen.getByText('Unlocks Monday')
+    expect(unlockStatus).not.toHaveAttribute('role', 'button')
+    expect(unlockStatus.closest('button')).toBeNull()
 
     const input = container.querySelector<HTMLInputElement>('input[type="file"]')
     expect(input).not.toBeNull()
@@ -193,6 +201,55 @@ describe('CapsulesPage', () => {
       'datetime',
       weeklyCapsule.opensAt,
     )
+    expect(card).toHaveAttribute('data-featured', 'true')
+  })
+
+  it('uses synthetic teasers instead of mounting a locked weekly photo', async () => {
+    const currentWeek: FamilyCapsule = {
+      id: 'weekly-2026-08-24',
+      kind: 'weekly',
+      title: 'This week',
+      weekStart: '2026-08-24',
+      createdAt: '2026-08-24T00:00:00.000Z',
+      closesAt: '2026-08-31T00:00:00.000Z',
+      opensAt: '2026-08-31T00:00:00.000Z',
+      createdByName: 'Simreen',
+      totalPhotoCount: 1,
+      familySynced: false,
+      photos: [{
+        id: 'private-weekly-photo',
+        capsuleId: 'weekly-2026-08-24',
+        image: '/private-weekly-photo.jpg',
+        thumbnail: '/private-weekly-thumb.jpg',
+        width: 1200,
+        height: 900,
+        caption: 'Private Saturday photo',
+        capturedAt: '2026-08-29T09:00:00.000Z',
+        contributorName: 'Simreen',
+        ownedByCurrentUser: true,
+      }],
+    }
+    const store = createMemoryCapsuleStore([currentWeek])
+    render(<CapsulesPage now={testNow} store={store} />)
+
+    const weeklySection = (await screen.findByRole('heading', {
+      name: currentWeekRange,
+    })).closest('section')!
+    const featuredCapsule = weeklySection.querySelector('article')!
+    const teaserImages = featuredCapsule.querySelectorAll<HTMLImageElement>(
+      '.capsule-empty-polaroids--teasers img',
+    )
+
+    expect(featuredCapsule).toHaveAttribute('data-featured', 'true')
+    expect(teaserImages).toHaveLength(4)
+    teaserImages.forEach((image) => {
+      expect(image).toHaveAttribute(
+        'src',
+        '/assets/capsules/demo-locked-capsule-photos.png',
+      )
+    })
+    expect(featuredCapsule.querySelector('img[src="/private-weekly-thumb.jpg"]')).toBeNull()
+    expect(within(featuredCapsule).getByText('1 photo')).toBeInTheDocument()
   })
 
   it('adds and persists an uploaded regular photo without a 2:1 check', async () => {
@@ -300,6 +357,43 @@ describe('CapsulesPage', () => {
     )
   })
 
+  it('admits only one special Capsule when the form submits twice in one turn', async () => {
+    const user = userEvent.setup()
+    const store = createMemoryCapsuleStore()
+    render(<CapsulesPage now={testNow} store={store} />)
+    await screen.findByRole('heading', { name: currentWeekRange })
+
+    await user.click(screen.getByRole('button', { name: 'Create a special Capsule' }))
+    fireEvent.change(screen.getByRole('textbox', { name: 'Name' }), {
+      target: { value: 'One careful save' },
+    })
+    fireEvent.change(screen.getByLabelText('Open after'), {
+      target: { value: '2026-09-20' },
+    })
+    const form = screen.getByRole('button', { name: 'Create Capsule' }).closest('form')!
+
+    fireEvent.submit(form)
+    fireEvent.submit(form)
+
+    await waitFor(async () => {
+      const matching = (await store.list()).filter(
+        ({ title }) => title === 'One careful save',
+      )
+      expect(matching).toHaveLength(1)
+    })
+    expect(screen.getAllByRole('heading', { name: 'One careful save' })).toHaveLength(1)
+  })
+
+  it('does not leave the visually clipped New affordance in the tab order', async () => {
+    render(<CapsulesPage now={testNow} store={createMemoryCapsuleStore()} />)
+    await screen.findByRole('heading', { name: currentWeekRange })
+
+    expect(screen.queryByRole('button', { name: 'New' })).not.toBeInTheDocument()
+    expect(screen.getByRole('button', {
+      name: 'Make a Capsule for the next big day',
+    })).toBeInTheDocument()
+  })
+
   it('keeps a finished week locked to contributions and opens its recap player', async () => {
     const user = userEvent.setup()
     const store = createMemoryCapsuleStore([unlockedCapsule()])
@@ -322,6 +416,38 @@ describe('CapsulesPage', () => {
 
     await user.click(screen.getByRole('button', { name: 'Close recap' }))
     await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+  })
+
+  it('places and contains recap focus, closes on Escape, and restores its trigger', async () => {
+    const user = userEvent.setup()
+    render(
+      <CapsulesPage
+        now={testNow}
+        store={createMemoryCapsuleStore([unlockedCapsule()])}
+      />,
+    )
+
+    const card = (await screen.findByRole('heading', {
+      name: previousWeekRange,
+    })).closest('article')!
+    const trigger = within(card).getByRole('button', { name: 'Play recap' })
+    await user.click(trigger)
+
+    const dialog = screen.getByRole('dialog', { name: previousWeekRange })
+    const close = within(dialog).getByRole('button', { name: 'Close recap' })
+    const save = within(dialog).getByRole('button', { name: 'Save video' })
+    await waitFor(() => expect(close).toHaveFocus())
+
+    await user.tab()
+    expect(save).toHaveFocus()
+    await user.tab()
+    expect(close).toHaveFocus()
+    await user.tab({ shift: true })
+    expect(save).toHaveFocus()
+
+    await user.keyboard('{Escape}')
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+    expect(trigger).toHaveFocus()
   })
 
   it('renders a one-photo Past Capsule as one accessible recap card', async () => {
@@ -470,6 +596,43 @@ describe('CapsulesPage', () => {
     )
   })
 
+  it('starts only one recap export for two save activations in the same turn', async () => {
+    const user = userEvent.setup()
+    const capsule = unlockedCapsule()
+    capsule.photos[0] = {
+      ...capsule.photos[0],
+      image: new Blob(['full local photo'], { type: 'image/jpeg' }),
+      thumbnail: new Blob(['local thumbnail'], { type: 'image/jpeg' }),
+      syncStatus: 'pending',
+    }
+    nativeRecapMocks.isNativeCapsuleRecapAvailable.mockReturnValue(true)
+    render(
+      <CapsulesPage
+        now={testNow}
+        store={createMemoryCapsuleStore([capsule])}
+      />,
+    )
+
+    const card = (await screen.findByRole('heading', {
+      name: previousWeekRange,
+    })).closest('article')!
+    await user.click(within(card).getByRole('button', { name: 'Play recap' }))
+    const save = within(screen.getByRole('dialog', {
+      name: previousWeekRange,
+    })).getByRole('button', { name: 'Save video' })
+
+    act(() => {
+      save.click()
+      save.click()
+    })
+
+    await waitFor(() => {
+      expect(nativeRecapMocks.stageNativeCapsuleRecapImage).toHaveBeenCalledTimes(1)
+      expect(nativeRecapMocks.renderNativeCapsuleRecap).toHaveBeenCalledTimes(1)
+      expect(nativeRecapMocks.shareNativeCapsuleRecap).toHaveBeenCalledTimes(1)
+    })
+  })
+
   it('does not offer a recap for an unrecoverable legacy object URL', async () => {
     const capsule = unlockedCapsule()
     capsule.photos[0] = {
@@ -489,7 +652,7 @@ describe('CapsulesPage', () => {
     })).toBeDisabled()
   })
 
-  it('obscures a locked Capsule, exposes its exact open date, and represents hidden family photos', async () => {
+  it('keeps locked production photos out of the rendered tree and exposes only safe metadata', async () => {
     const capsule = lockedSpecialCapsule('special-one', 'Lea’s wedding', 3)
     const store = createMemoryCapsuleStore([capsule])
     render(<CapsulesPage now={testNow} store={store} />)
@@ -514,17 +677,20 @@ describe('CapsulesPage', () => {
       capsule.opensAt,
     )
     expect(card.querySelector('.capsule-photo-strip')).toHaveAttribute('aria-hidden', 'true')
-    expect(card.querySelectorAll('.capsule-photo-strip__concealed')).toHaveLength(2)
+    expect(card.querySelectorAll('.capsule-photo-strip__concealed')).toHaveLength(3)
+    expect(card.querySelector('img')).toBeNull()
     expect(within(card).queryByRole('img', {
       name: /Lea’s wedding breakfast from Simreen/i,
     })).not.toBeInTheDocument()
-    expect(within(card).getByRole('button', {
+    expect(within(card).queryByRole('button', {
       name: 'Demo only: Preview Lea’s wedding recap',
-    })).toBeInTheDocument()
+    })).not.toBeInTheDocument()
+    expect(screen.queryByRole('dialog', { name: capsule.title })).not.toBeInTheDocument()
   })
 
   it('demo-opens only the selected Capsule and includes its local pending photo', async () => {
     const user = userEvent.setup()
+    authMocks.isDevelopmentPreview = true
     const first = lockedSpecialCapsule('special-one', 'Lea’s wedding')
     const second = lockedSpecialCapsule('special-two', 'Grandpa’s 60th')
     const store = createMemoryCapsuleStore([first, second])

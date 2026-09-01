@@ -67,6 +67,11 @@ function BlobPhoto({
   const [failedSource, setFailedSource] = useState<Blob | null>(null)
 
   useEffect(() => {
+    // This mounted image exclusively owns the process-local URL for its Blob.
+    // Assigning through the ref keeps URL allocation out of render/SSR, and the
+    // cleanup releases the previous Blob when a timeline slide changes as well
+    // as when the image unmounts. Object URLs must never enter persisted People
+    // state because they are invalid after an app restart.
     const objectUrl = URL.createObjectURL(source)
     if (imageRef.current) imageRef.current.src = objectUrl
     return () => URL.revokeObjectURL(objectUrl)

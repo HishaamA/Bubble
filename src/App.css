@@ -45,6 +45,8 @@
 }
 
 .app-viewport {
+  --moments-shortcut-size: clamp(2.75rem, 10.5vw, 2.9rem);
+  --moments-shortcut-clearance: clamp(0.72rem, 3vw, 1rem);
   --app-page-top: max(
     1.75rem,
     calc(env(safe-area-inset-top) + 0.55rem),
@@ -124,16 +126,29 @@
 .moments-shortcuts {
   position: absolute;
   z-index: 24;
-  top: calc(var(--app-page-top) + 4.8rem);
-  right: 1.5rem;
+  top: var(--app-page-top);
+  right: var(--app-header-gutter-right);
   display: grid;
-  gap: 0.55rem;
+  grid-auto-flow: row;
+  justify-items: end;
+  gap: clamp(0.42rem, 1.4vh, 0.58rem);
 }
 
-.app-viewport > .moments-shortcuts > .capture-360-shortcut {
+.app-viewport > .moments-shortcuts > :is(
+    .moments-vr-shortcut,
+    .capture-360-shortcut,
+    .moments-settings-shortcut
+  ) {
   position: relative;
   top: auto;
   right: auto;
+  width: var(--moments-shortcut-size);
+  height: var(--moments-shortcut-size);
+  min-width: var(--moments-shortcut-size);
+  min-height: var(--moments-shortcut-size);
+}
+
+.app-viewport > .moments-shortcuts > .capture-360-shortcut {
   border: 2px solid #17395b;
   border-radius: 0.72rem 0.96rem 0.78rem 0.88rem;
   color: #17395b;
@@ -275,6 +290,21 @@
 
 .round-control:active {
   transform: scale(0.96);
+}
+
+.memories-screen > .moments-header {
+  right: calc(
+    var(--app-header-gutter-right) + var(--moments-shortcut-size) +
+      var(--moments-shortcut-clearance)
+  );
+  align-items: flex-start;
+  justify-content: flex-start;
+}
+
+.moments-header__copy {
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
 }
 
 .memories-screen {

@@ -77,6 +77,7 @@ export function FamilyCommentsPanel({
   const [body, setBody] = useState('')
   const panelRef = useRef<HTMLElement>(null)
   const composerRef = useRef<HTMLTextAreaElement>(null)
+  const submitPendingRef = useRef(false)
 
   const annotationLabels = useMemo(
     () => new Map(
@@ -93,6 +94,8 @@ export function FamilyCommentsPanel({
 
   useEffect(() => {
     if (!open) return
+    // Moving between a whole-moment comment and a point reply deliberately
+    // returns the keyboard to the composer instead of forcing another tap.
     const frame = window.requestAnimationFrame(() => {
       composerRef.current?.focus({ preventScroll: true })
     })
@@ -108,6 +111,8 @@ export function FamilyCommentsPanel({
       return
     }
     if (event.key !== 'Tab') return
+    // The panorama remains mounted behind this sheet, so a manual focus loop
+    // prevents Tab from activating viewer controls through the modal layer.
     const focusable = Array.from(
       panelRef.current?.querySelectorAll<HTMLElement>(
         'button:not(:disabled), textarea:not(:disabled)',
@@ -128,10 +133,16 @@ export function FamilyCommentsPanel({
   const submit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
     const cleanBody = body.trim()
-    if (!cleanBody || sending) return
+    // `sending` arrives from the parent on the next render. The ref also locks
+    // the handler synchronously, which protects against a rapid Enter + tap.
+    if (!cleanBody || sending || submitPendingRef.current) return
+    submitPendingRef.current = true
     void Promise.resolve(onSubmit(cleanBody, targetAnnotationId))
       .then(() => setBody(''))
       .catch(() => undefined)
+      .finally(() => {
+        submitPendingRef.current = false
+      })
   }
 
   return (

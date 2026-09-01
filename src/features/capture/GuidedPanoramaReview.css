@@ -1,4 +1,15 @@
 .guided-panorama-review {
+  --review-text: var(--theme-paper, #fff1d2);
+  --review-muted: color-mix(in srgb, var(--review-text) 68%, transparent);
+  --review-line: color-mix(in srgb, var(--review-text) 20%, transparent);
+  --review-action: var(--theme-action, var(--theme-rose, #d895aa));
+  --review-action-ink: var(--theme-action-ink, var(--theme-ink, #301027));
+  --review-secondary: var(--theme-secondary, var(--theme-sage, #a5b37a));
+  --review-glass: color-mix(
+    in srgb,
+    var(--theme-canvas-deep, #180611) 78%,
+    transparent
+  );
   --review-safe-top: max(
     env(safe-area-inset-top),
     var(--native-safe-area-top, 0px)
@@ -23,8 +34,8 @@
   margin-inline: auto;
   overflow: hidden;
   isolation: isolate;
-  color: #fff;
-  background: #000;
+  color: var(--review-text);
+  background: var(--theme-canvas-deep, #180611);
 }
 
 .guided-panorama-review[tabindex='-1']:focus {
@@ -43,13 +54,19 @@
 .guided-panorama-review::before {
   inset-block-start: 0;
   block-size: calc(8rem + var(--review-safe-top));
-  background: linear-gradient(rgb(0 0 0 / 72%), transparent);
+  background: linear-gradient(
+    color-mix(in srgb, var(--theme-canvas-deep, #180611) 76%, transparent),
+    transparent
+  );
 }
 
 .guided-panorama-review::after {
   inset-block-end: 0;
   block-size: calc(11rem + var(--review-safe-bottom));
-  background: linear-gradient(transparent, rgb(0 0 0 / 82%));
+  background: linear-gradient(
+    transparent,
+    color-mix(in srgb, var(--theme-canvas-deep, #180611) 86%, transparent)
+  );
 }
 
 .guided-panorama-review__viewer.ks-panorama {
@@ -103,10 +120,10 @@
 .guided-panorama-review__topbar > span {
   flex: 0 0 auto;
   padding: 0.42rem 0.65rem;
-  border: 1px solid rgb(255 255 255 / 17%);
+  border: 1px solid var(--review-line);
   border-radius: 999px;
-  color: rgb(255 255 255 / 78%);
-  background: rgb(16 16 17 / 56%);
+  color: var(--review-text);
+  background: var(--review-glass);
   font-size: 0.64rem;
   font-weight: 630;
   backdrop-filter: blur(22px) saturate(140%);
@@ -123,10 +140,10 @@
   );
   margin: 0;
   padding: 0.54rem 0.78rem;
-  border: 1px solid rgb(255 255 255 / 15%);
+  border: 1px solid var(--review-line);
   border-radius: 999px;
-  color: rgb(255 255 255 / 84%);
-  background: rgb(12 12 13 / 68%);
+  color: var(--review-text);
+  background: var(--review-glass);
   font-size: 0.68rem;
   line-height: 1.35;
   text-align: center;
@@ -137,8 +154,8 @@
 
 .guided-panorama-review.is-placing-point__status,
 .guided-panorama-review.is-placing-point .guided-panorama-review__status {
-  color: #111;
-  background: rgb(255 255 255 / 92%);
+  color: var(--review-action-ink);
+  background: color-mix(in srgb, var(--review-action) 92%, transparent);
 }
 
 .guided-panorama-review__dock {
@@ -156,8 +173,8 @@
     calc(var(--review-safe-left) + 1rem);
   align-items: center;
   gap: 0.65rem;
-  background: rgb(8 8 9 / 58%);
-  border-block-start: 1px solid rgb(255 255 255 / 12%);
+  background: var(--review-glass);
+  border-block-start: 1px solid var(--review-line);
   backdrop-filter: blur(28px) saturate(145%);
 }
 
@@ -173,7 +190,7 @@
 .guided-panorama-review__dock button:focus-visible,
 .guided-panorama-review__sheet button:focus-visible,
 .guided-panorama-review__sheet textarea:focus-visible {
-  outline: 2px solid #fff;
+  outline: 2px solid var(--review-action);
   outline-offset: 2px;
 }
 
@@ -189,7 +206,7 @@
   border: 0;
   border-radius: 999px;
   background: transparent;
-  color: rgb(255 255 255 / 74%);
+  color: var(--review-muted);
   font-size: 0.76rem;
   font-weight: 610;
 }
@@ -204,8 +221,8 @@
 
 .guided-panorama-review__side-action.is-primary {
   padding-inline: 1rem;
-  color: #090909;
-  background: #fff;
+  color: var(--review-action-ink);
+  background: var(--review-action);
 }
 
 .guided-panorama-review__add {
@@ -215,13 +232,13 @@
   padding: 0;
   place-items: center;
   justify-self: center;
-  border: 1px solid rgb(255 255 255 / 38%);
+  border: 1px solid color-mix(in srgb, var(--review-action) 72%, var(--review-line));
   border-radius: 50%;
-  color: #090909;
-  background: #fff;
+  color: var(--review-action-ink);
+  background: var(--review-action);
   box-shadow:
-    0 0 0 0.42rem rgb(255 255 255 / 10%),
-    0 0.7rem 2rem rgb(0 0 0 / 42%);
+    0 0 0 0.42rem color-mix(in srgb, var(--review-action) 12%, transparent),
+    0 0.7rem 2rem color-mix(in srgb, var(--theme-shadow, #0c0108) 42%, transparent);
   transition:
     color 180ms ease,
     background-color 180ms ease,
@@ -233,8 +250,8 @@
 }
 
 .guided-panorama-review__add[aria-pressed='true'] {
-  color: #fff;
-  background: #ec5b5b;
+  color: var(--review-action-ink);
+  background: var(--review-secondary);
   transform: rotate(45deg);
 }
 
@@ -249,7 +266,7 @@
     calc(var(--review-safe-bottom) + 0.75rem)
     calc(var(--review-safe-left) + 0.75rem);
   align-items: end;
-  background: rgb(0 0 0 / 38%);
+  background: color-mix(in srgb, var(--theme-canvas-deep, #180611) 48%, transparent);
   backdrop-filter: blur(5px);
 }
 
@@ -261,11 +278,15 @@
   overflow-x: hidden;
   overflow-y: auto;
   gap: 0.9rem;
-  border: 1px solid rgb(255 255 255 / 15%);
+  border: 1px solid var(--review-line);
   border-radius: 1.55rem;
-  color: #fff;
-  background: rgb(25 25 27 / 94%);
-  box-shadow: 0 -1.5rem 5rem rgb(0 0 0 / 54%);
+  color: var(--review-text);
+  background: color-mix(
+    in srgb,
+    var(--theme-canvas-soft, #3a102b) 94%,
+    var(--theme-canvas-deep, #180611)
+  );
+  box-shadow: 0 -1.5rem 5rem color-mix(in srgb, var(--theme-shadow, #0c0108) 54%, transparent);
   backdrop-filter: blur(32px) saturate(155%);
 }
 
@@ -273,7 +294,7 @@
   inline-size: 2.4rem;
   block-size: 0.28rem;
   margin-inline: auto;
-  background: rgb(255 255 255 / 24%);
+  background: color-mix(in srgb, var(--review-text) 26%, transparent);
   border-radius: 999px;
 }
 
@@ -296,7 +317,7 @@
 
 .guided-panorama-review__sheet-header p {
   margin-block-end: 0.16rem;
-  color: rgb(255 255 255 / 46%);
+  color: var(--review-muted);
   font-size: 0.61rem;
   font-weight: 650;
   letter-spacing: 0.08em;
@@ -312,7 +333,7 @@
 .guided-panorama-review__cancel {
   padding-inline: 0.3rem;
   border: 0;
-  color: #78adff !important;
+  color: var(--review-action) !important;
   background: transparent;
   font-size: 0.76rem !important;
   font-weight: 620 !important;
@@ -331,10 +352,10 @@
   padding: 0.85rem;
   justify-items: start;
   gap: 0.2rem;
-  border: 1px solid rgb(255 255 255 / 11%);
+  border: 1px solid var(--review-line);
   border-radius: 1.05rem;
-  color: #fff;
-  background: rgb(255 255 255 / 7%);
+  color: var(--review-text);
+  background: color-mix(in srgb, var(--review-secondary) 10%, transparent);
   text-align: start;
 }
 
@@ -345,8 +366,8 @@
   margin-block-end: 0.32rem;
   place-items: center;
   border-radius: 50%;
-  color: #0c0c0c;
-  background: #fff;
+  color: var(--review-action-ink);
+  background: var(--review-action);
 }
 
 .guided-panorama-review__kind-picker svg {
@@ -358,7 +379,7 @@
 }
 
 .guided-panorama-review__kind-picker small {
-  color: rgb(255 255 255 / 48%);
+  color: var(--review-muted);
   font-size: 0.63rem;
   line-height: 1.35;
 }
@@ -370,7 +391,7 @@
 }
 
 .guided-panorama-review__editor > label {
-  color: rgb(255 255 255 / 62%);
+  color: var(--review-muted);
   font-size: 0.68rem;
   font-weight: 620;
 }
@@ -382,15 +403,15 @@
   min-block-size: 6.4rem;
   padding: 0.82rem;
   resize: vertical;
-  border: 1px solid rgb(255 255 255 / 13%);
+  border: 1px solid var(--review-line);
   border-radius: 0.95rem;
-  color: #fff;
-  background: rgb(0 0 0 / 28%);
+  color: var(--review-text);
+  background: color-mix(in srgb, var(--theme-canvas-deep, #180611) 54%, transparent);
   font: 400 0.9rem/1.45 var(--font-ui);
 }
 
 .guided-panorama-review__editor textarea::placeholder {
-  color: rgb(255 255 255 / 28%);
+  color: color-mix(in srgb, var(--review-text) 34%, transparent);
 }
 
 .guided-panorama-review__editor-meta {
@@ -398,7 +419,7 @@
   min-inline-size: 0;
   justify-content: space-between;
   gap: 0.75rem;
-  color: rgb(255 255 255 / 40%);
+  color: var(--review-muted);
   font-size: 0.61rem;
 }
 
@@ -407,8 +428,8 @@
   padding: 0.72rem 1rem;
   border: 0;
   border-radius: 999px;
-  color: #0a0a0a !important;
-  background: #fff;
+  color: var(--review-action-ink) !important;
+  background: var(--review-action);
   font-size: 0.77rem !important;
   font-weight: 680 !important;
 }

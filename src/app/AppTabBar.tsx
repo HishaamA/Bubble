@@ -16,8 +16,7 @@ const tabs: Tab[] = [
     isActive: (pathname, returnTo) =>
       pathname === '/' ||
       (pathname.startsWith('/memory/') && returnTo !== '/journal') ||
-      pathname.startsWith('/capture') ||
-      pathname.startsWith('/relay'),
+      pathname.startsWith('/capture'),
   },
   {
     label: 'Capsule',

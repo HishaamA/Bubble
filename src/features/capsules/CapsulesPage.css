@@ -2710,6 +2710,35 @@
   min-height: 2.75rem;
 }
 
+/* WKWebView gives native date controls an intrinsic inline size. Keep every
+   field inside the paper card without disabling the native date picker. */
+.capsule-special-form .ks-field,
+.capsule-special-form .ks-field input {
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+  min-inline-size: 0;
+  max-inline-size: 100%;
+}
+
+.capsule-special-form .ks-field input {
+  display: block;
+}
+
+.capsule-special-form .ks-field input[type='date'] {
+  overflow: hidden;
+  color-scheme: light;
+  appearance: none;
+  -webkit-appearance: none;
+}
+
+.capsule-special-form .ks-field input[type='date']::-webkit-date-and-time-value {
+  width: 100%;
+  min-width: 0;
+  margin: 0;
+  text-align: left;
+}
+
 @media (max-width: 22rem) {
   .capsule-page-header {
     padding-right: 1rem;
@@ -3089,5 +3118,241 @@
     width: 2.3rem;
     min-width: 2.3rem;
     min-height: 2.3rem;
+  }
+}
+
+/* The weekly opening date is information, not an action. Present it as a
+   quiet inline status so it cannot be mistaken for another Capsule button. */
+.capsule-weekly-unlock,
+.capsule-section-heading > .capsule-weekly-unlock {
+  width: auto;
+  max-width: none;
+  min-height: 0;
+  padding: 0;
+  gap: 0.32rem;
+  border: 0;
+  border-radius: 0;
+  color: color-mix(in srgb, var(--theme-paper, var(--capsule-paper)) 78%, transparent);
+  background: transparent;
+  box-shadow: none;
+  font-family: var(--font-ui, system-ui, sans-serif);
+  font-size: clamp(0.62rem, 2.75vw, 0.7rem);
+  font-weight: 650;
+  letter-spacing: 0.01em;
+  cursor: default;
+}
+
+.capsule-weekly-unlock svg {
+  width: 0.8rem;
+  height: 0.8rem;
+}
+
+/* This is a real action, so lift it away from the canvas with a paper ticket.
+   The copy uses the same friendly UI face as the bottom navigation. */
+.capsule-special-empty {
+  border-color: color-mix(in srgb, var(--theme-action, var(--capsule-coral)) 72%, var(--theme-ink, var(--capsule-ink)));
+  color: var(--theme-ink, var(--capsule-ink));
+  background:
+    repeating-linear-gradient(
+      0deg,
+      transparent 0 1.65rem,
+      color-mix(in srgb, var(--theme-ink, var(--capsule-ink)) 5%, transparent) 1.65rem calc(1.65rem + 1px)
+    ),
+    color-mix(in srgb, var(--theme-paper, var(--capsule-paper)) 92%, var(--theme-action, var(--capsule-coral)));
+  box-shadow: 0.2rem 0.24rem 0 var(--theme-shadow, var(--capsule-shadow));
+  font-family: var(--font-ui, system-ui, sans-serif);
+}
+
+.capsule-special-empty > .capsule-special-empty__plus {
+  border: 1px solid color-mix(in srgb, var(--theme-action-ink, var(--capsule-ink)) 48%, transparent);
+  color: var(--theme-action-ink, var(--capsule-ink));
+  background: var(--theme-action, var(--capsule-coral));
+  font-family: var(--font-ui, system-ui, sans-serif);
+}
+
+.capsule-special-empty__copy strong,
+.capsule-special-empty__copy small,
+.capsule-special-empty > .capsule-special-empty__arrow {
+  font-family: var(--font-ui, system-ui, sans-serif);
+}
+
+.capsule-special-empty__copy strong {
+  color: var(--theme-ink, var(--capsule-ink));
+  font-weight: 680;
+}
+
+.capsule-special-empty__copy small {
+  color: color-mix(in srgb, var(--theme-ink, var(--capsule-ink)) 68%, transparent);
+}
+
+.capsule-special-empty > .capsule-special-empty__arrow {
+  color: var(--theme-ink, var(--capsule-ink));
+}
+
+/* Featured weekly Capsule ------------------------------------------------
+ * This is a loose scene on the page, not a card. The fanned photos and round
+ * seal sit directly on the selected theme canvas. Special Capsules remain
+ * ticket-like cards because each is a separate, named occasion.
+ */
+.capsule-page__section[aria-labelledby='weekly-capsule-title']
+  > .capsule-collection[data-featured='true']
+  .capsule-collection__photos {
+  min-height: clamp(11.8rem, 52vw, 14rem);
+  overflow: visible;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+/* A quiet stitched arc ties the little photos to their seal. It has no fill,
+   so the weekly Capsule never acquires a panel or envelope silhouette. */
+.capsule-page__section[aria-labelledby='weekly-capsule-title']
+  > .capsule-collection[data-featured='true']
+  .capsule-collection__photos::before {
+  position: absolute;
+  z-index: 1;
+  right: 12%;
+  bottom: 1.6rem;
+  left: 12%;
+  height: 3rem;
+  border: 0;
+  border-bottom: 1.5px dashed color-mix(in srgb, var(--theme-action, var(--capsule-coral)) 72%, transparent);
+  border-radius: 0 0 50% 50%;
+  background: transparent;
+  box-shadow: none;
+  clip-path: none;
+  content: '';
+  pointer-events: none;
+  transform: rotate(-1.5deg);
+}
+
+.capsule-page__section[aria-labelledby='weekly-capsule-title']
+  > .capsule-collection[data-featured='true']
+  .capsule-collection__photos::after {
+  position: absolute;
+  z-index: 1;
+  right: 4%;
+  bottom: 2.05rem;
+  left: auto;
+  width: 1rem;
+  height: 1rem;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+  clip-path: none;
+  color: color-mix(in srgb, var(--theme-secondary, var(--capsule-sage)) 84%, var(--theme-paper, var(--capsule-paper)));
+  content: '\2726';
+  font-family: var(--font-ui, system-ui, sans-serif);
+  font-size: 0.95rem;
+  line-height: 1;
+  pointer-events: none;
+  transform: rotate(8deg);
+}
+
+.capsule-page__section[aria-labelledby='weekly-capsule-title']
+  > .capsule-collection[data-featured='true']
+  :is(.capsule-photo-strip:not(.capsule-photo-strip--empty), .capsule-empty-polaroids) {
+  position: absolute;
+  z-index: 2;
+  inset: 0.35rem 3% auto;
+  min-height: 9.2rem;
+  padding: 0.7rem 0.3rem 0;
+  align-items: flex-start;
+  overflow: visible;
+}
+
+.capsule-page__section[aria-labelledby='weekly-capsule-title']
+  > .capsule-collection[data-featured='true']
+  :is(.capsule-photo-strip:not(.capsule-photo-strip--empty), .capsule-empty-polaroids) li {
+  width: 26%;
+  margin-left: -2.2%;
+  flex-basis: 26%;
+}
+
+.capsule-page__section[aria-labelledby='weekly-capsule-title']
+  > .capsule-collection[data-featured='true']
+  :is(.capsule-photo-strip:not(.capsule-photo-strip--empty), .capsule-empty-polaroids) li:first-child {
+  margin-left: 0;
+}
+
+.capsule-page__section[aria-labelledby='weekly-capsule-title']
+  > .capsule-collection[data-featured='true']
+  .capsule-empty-polaroids--teasers {
+  filter: blur(0.26rem) saturate(0.72) brightness(0.78);
+  opacity: 0.86;
+  transform: none;
+}
+
+/* The seal is intentionally organic and compact: status, not a pill button. */
+.capsule-page__section[aria-labelledby='weekly-capsule-title']
+  > .capsule-collection[data-featured='true']
+  .capsule-locked-cover {
+  inset: auto auto 0.45rem 50%;
+  display: grid;
+  width: 5.7rem;
+  min-width: 0;
+  height: 5.45rem;
+  min-height: 0;
+  padding: 0.62rem;
+  place-items: center;
+  align-content: center;
+  border: 1.5px dashed color-mix(in srgb, var(--theme-action, var(--capsule-coral)) 74%, var(--theme-ink, var(--capsule-ink)));
+  border-radius: 48% 52% 46% 54% / 54% 46% 53% 47%;
+  gap: 0.1rem;
+  color: var(--theme-ink, var(--capsule-ink));
+  background:
+    repeating-linear-gradient(5deg, color-mix(in srgb, var(--theme-ink, var(--capsule-ink)) 2%, transparent) 0 1px, transparent 1px 5px),
+    var(--theme-paper, var(--capsule-paper-light));
+  box-shadow: 0 0.38rem 0.85rem color-mix(in srgb, var(--theme-shadow, var(--capsule-shadow)) 68%, transparent);
+  transform: translateX(-50%) rotate(-2deg);
+}
+
+.capsule-page__section[aria-labelledby='weekly-capsule-title']
+  > .capsule-collection[data-featured='true']
+  .capsule-locked-cover__icon {
+  width: 1.75rem;
+  height: 1.75rem;
+  color: var(--theme-action-ink, var(--capsule-ink));
+  background: var(--theme-action-soft, var(--capsule-yellow));
+}
+
+.capsule-page__section[aria-labelledby='weekly-capsule-title']
+  > .capsule-collection[data-featured='true']
+  .capsule-locked-cover__message {
+  max-width: 4.4rem;
+  color: var(--theme-ink, var(--capsule-ink));
+  font-family: var(--font-ui, system-ui, sans-serif);
+  font-size: 0.61rem;
+  font-weight: 720;
+  line-height: 1.15;
+  text-align: center;
+  white-space: normal;
+}
+
+.capsule-page__section[aria-labelledby='weekly-capsule-title']
+  > .capsule-collection[data-featured='true']
+  .capsule-collection__details {
+  padding-top: 0.35rem;
+}
+
+@media (max-width: 22rem) {
+  .capsule-page__section[aria-labelledby='weekly-capsule-title']
+    > .capsule-collection[data-featured='true']
+    .capsule-collection__photos {
+    min-height: 11rem;
+  }
+
+  .capsule-page__section[aria-labelledby='weekly-capsule-title']
+    > .capsule-collection[data-featured='true']
+    :is(.capsule-photo-strip:not(.capsule-photo-strip--empty), .capsule-empty-polaroids) {
+    min-height: 8.55rem;
+  }
+
+  .capsule-page__section[aria-labelledby='weekly-capsule-title']
+    > .capsule-collection[data-featured='true']
+    .capsule-locked-cover {
+    width: 5.25rem;
+    height: 5rem;
   }
 }

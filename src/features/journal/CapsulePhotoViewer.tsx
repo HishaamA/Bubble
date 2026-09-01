@@ -81,6 +81,8 @@ export function CapsulePhotoViewer({
       : ''
   )
   const unlockedPhotos = useMemo(
+    // Build one feed from opened capsules and direct journal uploads. Sealed
+    // media is excluded before route lookup so a guessed URL cannot reveal it.
     () => [
       ...unlockedCapsulePhotos(capsules, now),
       ...journalPhotos.map(journalPhotoAsUnlocked),
@@ -90,6 +92,8 @@ export function CapsulePhotoViewer({
   const requestedPhoto = unlockedPhotos.find((photo) =>
     photo.capsuleId === requestedCapsuleId && photo.id === photoId,
   )
+  // Paging stays within the captured day that launched the viewer. Returning
+  // therefore restores the same timeline group rather than jumping albums.
   const photos = requestedPhoto
     ? unlockedPhotos.filter((photo) =>
         sameCapturedDay(photo.capturedAt, requestedPhoto.capturedAt),
@@ -121,6 +125,8 @@ export function CapsulePhotoViewer({
     const nextMemoryId = nextPhoto.capsuleId === JOURNAL_LIBRARY_ID
       ? `journal-photo-${nextPhoto.id}`
       : `capsule-${nextPhoto.capsuleId}-${nextPhoto.id}`
+    // Replace rather than push: Previous/Next is one viewer session, so the
+    // device Back gesture should leave the viewer instead of replaying photos.
     const nextState: JournalViewerState = {
       ...(routeState ?? { returnTo: '/journal' }),
       journalContext: {

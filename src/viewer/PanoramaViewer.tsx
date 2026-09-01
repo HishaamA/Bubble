@@ -251,7 +251,10 @@ export const PanoramaViewer = forwardRef<
         },
         onSceneChange: (nextSceneId) => {
           if (!effectActive) return
-          setMotionActive(false)
+          // Pannellum can retain its device-orientation listener while loading a
+          // linked scene. Reflect the adapter's real state instead of making the
+          // button look off while the sensor still owns the camera.
+          setMotionActive(adapter.isOrientationActive())
           setCurrentSceneId(nextSceneId)
           callbacksRef.current.onSceneChange?.(nextSceneId)
         },
@@ -315,6 +318,9 @@ export const PanoramaViewer = forwardRef<
   const handleViewerKeyDown = (
     event: ReactKeyboardEvent<HTMLDivElement>,
   ) => {
+    // Pannellum's global keyboard controller is disabled by the adapter. Keep
+    // shortcuts on the explicitly focused canvas so arrows continue to operate
+    // selects, buttons and the page itself according to native browser rules.
     if (
       flatMode ||
       status !== 'ready' ||
@@ -325,6 +331,17 @@ export const PanoramaViewer = forwardRef<
 
     const adapter = adapterRef.current
     if (!adapter) return
+
+    const panManually = (pitchDelta: number, yawDelta: number) => {
+      // The permission prompt is not abortable. Invalidate its React-side
+      // completion before adapter.panBy stops the runtime listener, otherwise a
+      // late permission result can re-label manual navigation as motion-active.
+      motionRequestVersionRef.current += 1
+      setMotionActive(false)
+      setMotionPending(false)
+      setMotionNotice(null)
+      adapter.panBy(pitchDelta, yawDelta)
+    }
 
     if (pointSelectionEnabled && event.key === 'Escape') {
       event.preventDefault()
@@ -344,20 +361,16 @@ export const PanoramaViewer = forwardRef<
 
     switch (event.key) {
       case 'ArrowUp':
-        adapter.panBy(KEYBOARD_PAN_STEP, 0)
-        setMotionActive(false)
+        panManually(KEYBOARD_PAN_STEP, 0)
         break
       case 'ArrowDown':
-        adapter.panBy(-KEYBOARD_PAN_STEP, 0)
-        setMotionActive(false)
+        panManually(-KEYBOARD_PAN_STEP, 0)
         break
       case 'ArrowLeft':
-        adapter.panBy(0, -KEYBOARD_PAN_STEP)
-        setMotionActive(false)
+        panManually(0, -KEYBOARD_PAN_STEP)
         break
       case 'ArrowRight':
-        adapter.panBy(0, KEYBOARD_PAN_STEP)
-        setMotionActive(false)
+        panManually(0, KEYBOARD_PAN_STEP)
         break
       case '+':
       case '=':
@@ -377,7 +390,9 @@ export const PanoramaViewer = forwardRef<
   const beginPointSelection = (
     event: ReactPointerEvent<HTMLDivElement>,
   ) => {
-    if (motionActive) stopMotion()
+    // Pointer drag is another camera owner. Cancel even a pending motion start
+    // before handing the gesture to Pannellum / point placement.
+    if (motionActive || motionPending) stopMotion()
     if (
       !pointSelectionEnabled ||
       !event.isPrimary ||
@@ -407,6 +422,8 @@ export const PanoramaViewer = forwardRef<
       return
     }
 
+    // A small movement threshold separates an intentional hotspot placement
+    // from Pannellum's own drag gesture; both listen on this same canvas.
     const point = adapterRef.current?.getCoordinatesFromEvent(
       event.nativeEvent as MouseEvent,
     )
@@ -435,6 +452,9 @@ export const PanoramaViewer = forwardRef<
     }
 
     setFlatMode(false)
+    // The interactive canvas was inert while the native select / hotspot list
+    // owned focus. Resize after React exposes it, then return focus so keyboard
+    // panning resumes without an extra tab journey.
     queueMicrotask(() => {
       adapterRef.current?.resize()
       containerRef.current?.focus()
