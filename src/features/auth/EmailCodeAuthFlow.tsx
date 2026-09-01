@@ -4,6 +4,7 @@ import {
   useRef,
   useState,
   type FormEvent,
+  type KeyboardEvent as ReactKeyboardEvent,
 } from 'react'
 import {
   isNativeOAuthPlatform,
@@ -16,6 +17,16 @@ type EmailCodeAuthFlowProps = {
 }
 
 type VerificationMode = 'primary' | 'second-factor'
+type MaintenanceAction = 'close' | 'resend' | 'start-over'
+
+const dialogFocusSelector = [
+  'button:not([disabled])',
+  '[href]',
+  'input:not([disabled])',
+  'select:not([disabled])',
+  'textarea:not([disabled])',
+  '[tabindex]:not([tabindex="-1"])',
+].join(',')
 
 type ClerkErrorLike = {
   errors?: Array<{
@@ -109,13 +120,34 @@ export function EmailCodeAuthFlow({
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
   const [finishing, setFinishing] = useState(false)
   const [googlePending, setGooglePending] = useState(false)
+  const [maintenanceAction, setMaintenanceAction] =
+    useState<MaintenanceAction | null>(null)
+  const [verificationDestination, setVerificationDestination] = useState('')
+  const dialogRef = useRef<HTMLElement>(null)
   const emailInputRef = useRef<HTMLInputElement>(null)
   const codeInputRef = useRef<HTMLInputElement>(null)
+  const previouslyFocusedRef = useRef<HTMLElement | null>(null)
   const busy =
     finishing ||
     googlePending ||
+    maintenanceAction !== null ||
     signInFetchStatus === 'fetching' ||
     signUpFetchStatus === 'fetching'
+
+  useEffect(() => {
+    // The sheet is conditionally mounted over a still-interactive page. Remembering
+    // the opener keeps keyboard users in the same place after every dismissal path,
+    // including Escape and a Clerk reset failure.
+    previouslyFocusedRef.current =
+      document.activeElement instanceof HTMLElement
+        ? document.activeElement
+        : null
+
+    return () => {
+      const previous = previouslyFocusedRef.current
+      if (previous?.isConnected) previous.focus({ preventScroll: true })
+    }
+  }, [])
 
   useEffect(() => {
     const input = verificationMode ? codeInputRef.current : emailInputRef.current
@@ -250,10 +282,10 @@ export function EmailCodeAuthFlow({
   }
 
   const prepareSecondFactor = async () => {
-    const emailFactorAvailable = signIn.supportedSecondFactors.some(
+    const emailFactor = signIn.supportedSecondFactors.find(
       (factor) => factor.strategy === 'email_code',
     )
-    if (!emailFactorAvailable) {
+    if (!emailFactor) {
       setErrorMessage(
         'This account needs an additional verification method. Contact your family organizer for help.',
       )
@@ -266,6 +298,17 @@ export function EmailCodeAuthFlow({
       return
     }
     setCode('')
+    // OAuth can reach MFA without ever populating our email input. Clerk's masked
+    // factor identifier is therefore the authoritative, privacy-safe destination;
+    // the literal fallback prevents an empty sentence if an older SDK omits it.
+    setVerificationDestination(
+      ('safeIdentifier' in emailFactor &&
+      typeof emailFactor.safeIdentifier === 'string'
+        ? emailFactor.safeIdentifier.trim()
+        : '') ||
+        emailAddress.trim() ||
+        'your email address',
+    )
     setVerificationMode('second-factor')
     setErrorMessage(null)
   }
@@ -461,6 +504,7 @@ export function EmailCodeAuthFlow({
       }
 
       setEmailAddress(normalizedEmail)
+      setVerificationDestination(normalizedEmail)
       setCode('')
       setVerificationMode('primary')
     } catch (error) {
@@ -528,27 +572,91 @@ export function EmailCodeAuthFlow({
   const resendCode = async () => {
     if (busy || !verificationMode) return
     setErrorMessage(null)
-    const { error } =
-      verificationMode === 'second-factor'
-        ? await signIn.mfa.sendEmailCode()
-        : await signIn.emailCode.sendCode()
-    setErrorMessage(
-      error ? authErrorMessage(error) : 'A fresh code is on its way.',
-    )
+    setMaintenanceAction('resend')
+    try {
+      const { error } =
+        verificationMode === 'second-factor'
+          ? await signIn.mfa.sendEmailCode()
+          : await signIn.emailCode.sendCode()
+      setErrorMessage(
+        error ? authErrorMessage(error) : 'A fresh code is on its way.',
+      )
+    } catch (error) {
+      // Clerk may reject instead of returning its structured error result when the
+      // network drops. Always translate that branch and release the visual lock.
+      setErrorMessage(authErrorMessage(error))
+    } finally {
+      setMaintenanceAction(null)
+    }
   }
 
   const startOver = async () => {
     if (busy) return
-    await Promise.all([signIn.reset(), signUp.reset()])
-    setCode('')
-    setVerificationMode(null)
     setErrorMessage(null)
+    setMaintenanceAction('start-over')
+    try {
+      await Promise.all([signIn.reset(), signUp.reset()])
+      setCode('')
+      setVerificationDestination('')
+      setVerificationMode(null)
+    } catch (error) {
+      // Keep the current verification UI when Clerk could not clear its attempt;
+      // moving back locally would make the next submit race stale Clerk state.
+      setErrorMessage(authErrorMessage(error))
+    } finally {
+      setMaintenanceAction(null)
+    }
   }
 
   const close = async () => {
     if (busy) return
-    await Promise.all([signIn.reset(), signUp.reset()])
-    onClose()
+    setMaintenanceAction('close')
+    // Dismissal must never strand someone in the modal because an optional remote
+    // reset failed. allSettled drains both attempts without creating an unhandled
+    // rejection; the next open starts by resetting Clerk again before submission.
+    try {
+      await Promise.allSettled([
+        Promise.resolve().then(() => signIn.reset()),
+        Promise.resolve().then(() => signUp.reset()),
+      ])
+    } finally {
+      setMaintenanceAction(null)
+      onClose()
+    }
+  }
+
+  const handleDialogKeyDown = (event: ReactKeyboardEvent<HTMLElement>) => {
+    if (event.key === 'Escape') {
+      event.preventDefault()
+      event.stopPropagation()
+      void close()
+      return
+    }
+    if (event.key !== 'Tab') return
+
+    const focusable = Array.from(
+      dialogRef.current?.querySelectorAll<HTMLElement>(dialogFocusSelector) ?? [],
+    ).filter((element) => element.getAttribute('aria-hidden') !== 'true')
+    if (focusable.length === 0) {
+      event.preventDefault()
+      dialogRef.current?.focus({ preventScroll: true })
+      return
+    }
+
+    const first = focusable[0]
+    const last = focusable[focusable.length - 1]
+    if (event.shiftKey && document.activeElement === first) {
+      event.preventDefault()
+      last.focus()
+    } else if (!event.shiftKey && document.activeElement === last) {
+      event.preventDefault()
+      first.focus()
+    } else if (!dialogRef.current?.contains(document.activeElement)) {
+      // Programmatic focus can occasionally escape while an OAuth window closes.
+      // Pull it back into the modal on the next keyboard navigation gesture.
+      event.preventDefault()
+      ;(event.shiftKey ? last : first).focus()
+    }
   }
 
   const visibleError =
@@ -568,10 +676,13 @@ export function EmailCodeAuthFlow({
         disabled={busy}
       />
       <section
+        ref={dialogRef}
         className="email-auth__sheet"
         role="dialog"
         aria-modal="true"
         aria-labelledby="email-auth-title"
+        tabIndex={-1}
+        onKeyDown={handleDialogKeyDown}
       >
         <button
           className="email-auth__close"
@@ -592,7 +703,9 @@ export function EmailCodeAuthFlow({
                 {verificationMode === 'second-factor'
                   ? 'One more security code was sent to'
                   : 'We sent a six-digit code to'}{' '}
-                <strong>{emailAddress}</strong>
+                <strong>
+                  {verificationDestination || emailAddress || 'your email address'}
+                </strong>
               </span>
             </div>
             <label className="email-auth__field" htmlFor="bubble-email-code">
@@ -630,10 +743,10 @@ export function EmailCodeAuthFlow({
             </button>
             <div className="email-auth__secondary-actions">
               <button type="button" onClick={() => void resendCode()} disabled={busy}>
-                Send a new code
+                {maintenanceAction === 'resend' ? 'Sending…' : 'Send a new code'}
               </button>
               <button type="button" onClick={() => void startOver()} disabled={busy}>
-                Change email
+                {maintenanceAction === 'start-over' ? 'Resetting…' : 'Change email'}
               </button>
             </div>
           </form>

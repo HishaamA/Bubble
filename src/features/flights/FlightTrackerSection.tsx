@@ -398,6 +398,7 @@ function FlightTrackerBody({
   const addRequestRef = useRef<AbortController | null>(null)
   const refreshRequestRef = useRef<AbortController | null>(null)
   const deleteRequestRef = useRef<AbortController | null>(null)
+  const notificationRequestRef = useRef<string | null>(null)
   const automaticRequestRefs = useRef(new Set<AbortController>())
   flightsRef.current = flights
   const [showAddFlight, setShowAddFlight] = useState(false)
@@ -416,6 +417,10 @@ function FlightTrackerBody({
   const updateFlights = useCallback((
     updater: (current: TrackedFlight[]) => TrackedFlight[],
   ) => {
+    // The account-scoped cache is the immediate source of truth while the
+    // family backend is offline. Advance both revisions before React queues
+    // the state update so a family fetch that started earlier cannot land in
+    // the small gap between a successful mutation and its local persistence.
     localMutationRevisionRef.current += 1
     familyFetchGenerationRef.current += 1
     setFlights((current) => {
@@ -431,6 +436,9 @@ function FlightTrackerBody({
     return () => {
       bodyActiveRef.current = false
       familyFetchGenerationRef.current += 1
+      // Network helpers accept AbortSignals, so ownership stays with this
+      // mounted body. Notification setup is not abortable; that path observes
+      // bodyActiveRef and explicitly revokes any schedule completed too late.
       addRequestRef.current?.abort()
       refreshRequestRef.current?.abort()
       deleteRequestRef.current?.abort()
@@ -443,6 +451,10 @@ function FlightTrackerBody({
     let active = true
     let unsubscribe: () => void = () => undefined
     async function refreshFamily() {
+      // Realtime callbacks and initial hydration may overlap. A generation
+      // identifies the newest fetch, while the mutation revision prevents an
+      // older empty server response from erasing a create/delete that the user
+      // just completed and persisted locally.
       const requestGeneration = familyFetchGenerationRef.current + 1
       familyFetchGenerationRef.current = requestGeneration
       const mutationRevision = localMutationRevisionRef.current
@@ -453,42 +465,53 @@ function FlightTrackerBody({
           || requestGeneration !== familyFetchGenerationRef.current
           || mutationRevision !== localMutationRevisionRef.current
         ) return
-        setFlights((current) => {
+        const current = flightsRef.current
+        const sharedIds = new Set(shared.map((flight) => flight.id))
+        for (const removed of current) {
           if (
-            !active
-            || requestGeneration !== familyFetchGenerationRef.current
-            || mutationRevision !== localMutationRevisionRef.current
-          ) return current
-          const sharedIds = new Set(shared.map((flight) => flight.id))
-          for (const removed of current) {
-            if (
-              removed.synced
-              && !sharedIds.has(removed.id)
-              && removed.notificationEnabled
-            ) void cancelFlightNotifications(removed.id, flightSubject)
-          }
-          const merged = mergeTrackedFlights(current, shared)
-          writeTrackedFlights(flightSubject, merged)
-          flightsRef.current = merged
-          for (const updated of merged) {
-            const previous = current.find((flight) => flight.id === updated.id)
-            if (
-              previous?.notificationEnabled
-              && previous.snapshot.updatedAt !== updated.snapshot.updatedAt
-            ) {
-              void rescheduleFlightNotifications(updated, flightSubject).then((enabled) => {
-                if (active && !enabled) {
-                  updateFlights((latest) => latest.map((flight) =>
-                    flight.id === updated.id
-                      ? { ...flight, notificationEnabled: false }
-                      : flight,
-                  ))
+            removed.synced
+            && !sharedIds.has(removed.id)
+            && removed.notificationEnabled
+          ) void cancelFlightNotifications(removed.id, flightSubject)
+        }
+        const merged = mergeTrackedFlights(current, shared)
+        // Family data wins for synced records, but local-only demo/offline
+        // cards survive the merge. Persisting the exact merged array keeps
+        // the next cold launch consistent with the screen the user saw. Keep
+        // notification side effects outside a React updater because StrictMode
+        // may invoke an updater more than once to check that it is pure.
+        writeTrackedFlights(flightSubject, merged)
+        flightsRef.current = merged
+        setFlights(merged)
+        for (const updated of merged) {
+          const previous = current.find((flight) => flight.id === updated.id)
+          if (
+            previous?.notificationEnabled
+            && previous.snapshot.updatedAt !== updated.snapshot.updatedAt
+          ) {
+            void rescheduleFlightNotifications(updated, flightSubject).then(async (enabled) => {
+              const latest = flightsRef.current.find((flight) =>
+                flight.id === updated.id,
+              )
+              // Revocation can finish while this non-abortable native call is
+              // open. Remove a late schedule if the subject disappeared, the
+              // row was deleted, or this device's alert preference is now off.
+              if (!active || !latest?.notificationEnabled) {
+                if (enabled) {
+                  await cancelFlightNotifications(updated.id, flightSubject)
                 }
-              })
-            }
+                return
+              }
+              if (!enabled) {
+                updateFlights((latest) => latest.map((flight) =>
+                  flight.id === updated.id
+                    ? { ...flight, notificationEnabled: false }
+                    : flight,
+                ))
+              }
+            })
           }
-          return merged
-        })
+        }
       } catch {
         // Account-scoped local flights remain usable while offline.
       }
@@ -565,6 +588,10 @@ function FlightTrackerBody({
     }
     function handleModalKey(event: KeyboardEvent) {
       if (event.key === 'Escape') {
+        // Treat Escape like the visible Close control and stop it propagating
+        // to page-level shortcuts beneath this modal sheet.
+        event.preventDefault()
+        event.stopPropagation()
         closeModal()
         return
       }
@@ -600,6 +627,9 @@ function FlightTrackerBody({
   }, [showAddFlight])
 
   useEffect(() => {
+    // Automatic refresh is deliberately budgeted before requests are launched
+    // (see flightAutomaticRefresh). The controllers still belong here so a
+    // subject change or unmount cannot apply a response to another family.
     const candidates = takeAutomaticRefreshCandidates(
       flights,
       flightSubject,
@@ -627,13 +657,26 @@ function FlightTrackerBody({
             }
             return
           }
+          const latestAfterSchedule = flightsRef.current.find((item) =>
+            item.id === flight.id,
+          )
+          // A user may turn alerts off while an automatic refresh is awaiting
+          // the native scheduler. Revoke a schedule that completed after that
+          // preference change instead of silently turning alerts back on.
+          if (
+            current.notificationEnabled
+            && notificationsRemainEnabled
+            && (!latestAfterSchedule || !latestAfterSchedule.notificationEnabled)
+          ) {
+            await cancelFlightNotifications(flight.id, flightSubject)
+          }
           updateFlights((latest) => latest.map((item) => item.id === flight.id
               ? {
                   ...item,
                   snapshot,
                   synced: true,
                   notificationEnabled: current.notificationEnabled
-                    ? notificationsRemainEnabled
+                    ? item.notificationEnabled && notificationsRemainEnabled
                     : item.notificationEnabled,
                 }
               : item,
@@ -649,8 +692,10 @@ function FlightTrackerBody({
     id: string,
     providerFlightId?: string,
   ) {
+    // React state does not update synchronously. This ref is the same-tick
+    // latch that makes a double submit/choice tap a single idempotent request.
+    if (addRequestRef.current) return
     const controller = new AbortController()
-    addRequestRef.current?.abort()
     addRequestRef.current = controller
     setSaving(true)
     try {
@@ -668,6 +713,9 @@ function FlightTrackerBody({
         || addRequestRef.current !== controller
       ) return
       if (result.kind === 'choices') {
+        // Ambiguous codeshares remain tied to the original normalized form and
+        // pending ID. Choosing a provider result therefore continues the same
+        // logical create instead of creating a second family row.
         setPendingFlightChoices({ id, identity, choices: result.choices })
         return
       }
@@ -684,6 +732,9 @@ function FlightTrackerBody({
         synced: true,
       }
       updateFlights((current) => {
+        // Realtime hydration can arrive before this response. Upsert by the
+        // client-generated ID and retain any alert preference already merged
+        // from that authoritative family record.
         const hydrated = current.find((item) => item.id === flight.id)
         return [
           ...current.filter((item) => item.id !== flight.id),
@@ -701,6 +752,9 @@ function FlightTrackerBody({
         error instanceof FlightStatusError
         && (error.code === 'invalid' || error.code === 'not-found')
       ) {
+        // Only definitive input failures discard the pending ID. Connectivity
+        // and server failures are uncertain, so retrying must reuse the ID to
+        // avoid duplicate rows if the first request actually committed.
         clearPendingFlightCreateIntent(flightSubject, identity)
       }
       if (
@@ -728,7 +782,7 @@ function FlightTrackerBody({
 
   async function addFlight(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
-    if (pendingFlightChoices) return
+    if (pendingFlightChoices || addRequestRef.current) return
     setStatusMessage('')
     const form = new FormData(event.currentTarget)
     const optionalHeader = String(form.get('travelerName') ?? '')
@@ -748,6 +802,8 @@ function FlightTrackerBody({
 
     setFormError(null)
     const identity = validation.value
+    // Persist the client ID before crossing the network. This is the durable
+    // idempotency key used again after an ambiguous timeout or app restart.
     const id = getOrCreatePendingFlightCreateId(
       flightSubject,
       identity,
@@ -767,8 +823,16 @@ function FlightTrackerBody({
   }
 
   async function refreshFlight(flight: TrackedFlight) {
+    // One user-driven flight mutation at a time keeps refresh, deletion, and
+    // alert rescheduling from racing to write different notificationEnabled
+    // values for the same cached card. Refs cover taps before disabled state
+    // has rendered.
+    if (
+      refreshRequestRef.current
+      || deleteRequestRef.current
+      || notificationRequestRef.current
+    ) return
     const controller = new AbortController()
-    refreshRequestRef.current?.abort()
     refreshRequestRef.current = controller
     setRefreshingId(flight.id)
     setStatusMessage('')
@@ -827,7 +891,12 @@ function FlightTrackerBody({
   }
 
   async function toggleNotifications(flight: TrackedFlight) {
-    if (notificationPendingId) return
+    if (
+      notificationRequestRef.current
+      || refreshRequestRef.current
+      || deleteRequestRef.current
+    ) return
+    notificationRequestRef.current = flight.id
     setStatusMessage('')
     setNotificationPendingId(flight.id)
     try {
@@ -850,9 +919,23 @@ function FlightTrackerBody({
         return
       }
       const result = await enableFlightNotifications(flight, flightSubject)
+      // Permission is requested only from this explicit button gesture. If the
+      // screen/subject disappeared while the OS prompt was open, immediately
+      // revoke a late successful schedule so it cannot leak to the next user.
       if (!bodyActiveRef.current) {
         if (result.enabled) {
           await cancelFlightNotifications(flight.id, flightSubject)
+        }
+        return
+      }
+      const latest = flightsRef.current.find((item) => item.id === flight.id)
+      if (
+        result.enabled
+        && (!latest || isFlightCancelled(latest.snapshot))
+      ) {
+        await cancelFlightNotifications(flight.id, flightSubject)
+        if (latest) {
+          setStatusMessage('Alerts stay off because this flight was cancelled.')
         }
         return
       }
@@ -866,7 +949,10 @@ function FlightTrackerBody({
       if (!bodyActiveRef.current) return
       setStatusMessage('Flight alerts could not be changed. Check notification permission and try again.')
     } finally {
-      if (bodyActiveRef.current) setNotificationPendingId(null)
+      if (notificationRequestRef.current === flight.id) {
+        notificationRequestRef.current = null
+        if (bodyActiveRef.current) setNotificationPendingId(null)
+      }
     }
   }
 
@@ -879,6 +965,8 @@ function FlightTrackerBody({
   }
 
   function closeAddFlight() {
+    // Close, Escape, and native Back all intentionally own cancellation of the
+    // modal request. A late response is also rejected by controller identity.
     addRequestRef.current?.abort()
     addRequestRef.current = null
     setSaving(false)
@@ -888,19 +976,27 @@ function FlightTrackerBody({
   }
 
   function toggleFlightActions(flightId: string) {
+    if (deleteRequestRef.current) return
     setStatusMessage('')
     setConfirmDeleteId(null)
     setExpandedFlightId((current) => current === flightId ? null : flightId)
   }
 
   async function stopTracking(flight: TrackedFlight) {
+    if (
+      deleteRequestRef.current
+      || refreshRequestRef.current
+      || notificationRequestRef.current
+    ) return
     const controller = new AbortController()
-    deleteRequestRef.current?.abort()
     deleteRequestRef.current = controller
     setDeletingId(flight.id)
     setStatusMessage('')
     try {
       if (flight.synced) {
+        // Do not optimistically remove shared cards: the server enforces owner
+        // permissions. Keeping the local card until acknowledgement also makes
+        // offline and authorization failures recoverable without data loss.
         const removed = await removeFamilyFlight(
           flight.id,
           { signal: controller.signal },
@@ -952,6 +1048,11 @@ function FlightTrackerBody({
   }
 
   function openDeleteConfirmation(flightId: string) {
+    if (
+      deleteRequestRef.current
+      || refreshRequestRef.current
+      || notificationRequestRef.current
+    ) return
     setStatusMessage('')
     setExpandedFlightId(flightId)
     setConfirmDeleteId(flightId)
@@ -960,7 +1061,9 @@ function FlightTrackerBody({
   function flightToolbar(flight: TrackedFlight, cancelled: boolean) {
     const changingAlerts = notificationPendingId === flight.id
     const refreshing = refreshingId === flight.id
-    const deleting = deletingId === flight.id
+    const userMutationPending = notificationPendingId !== null
+      || refreshingId !== null
+      || deletingId !== null
     return (
       <div className="flight-card__toolbar" aria-label={`${flight.flightNumber} controls`}>
         <button
@@ -972,7 +1075,7 @@ function FlightTrackerBody({
               ? `Changing alerts for ${flight.flightNumber}`
               : `${flight.notificationEnabled ? 'Turn off' : 'Turn on'} alerts for ${flight.flightNumber}`}
           aria-pressed={flight.notificationEnabled}
-          disabled={notificationPendingId !== null || deleting || cancelled}
+          disabled={userMutationPending || cancelled}
           onClick={() => void toggleNotifications(flight)}
         >
           <BellIcon />
@@ -981,7 +1084,7 @@ function FlightTrackerBody({
           type="button"
           className="flight-card__icon-action"
           aria-label={refreshing ? `Refreshing ${flight.flightNumber}` : `Refresh ${flight.flightNumber}`}
-          disabled={refreshing || deleting}
+          disabled={userMutationPending}
           onClick={() => void refreshFlight(flight)}
         >
           <RefreshIcon />
@@ -990,7 +1093,7 @@ function FlightTrackerBody({
           type="button"
           className="flight-card__icon-action flight-card__icon-action--remove"
           aria-label={`Stop tracking ${flight.flightNumber}`}
-          disabled={refreshing || deleting}
+          disabled={userMutationPending}
           onClick={() => openDeleteConfirmation(flight.id)}
         >
           <CloseIcon />
@@ -1055,10 +1158,9 @@ function FlightTrackerBody({
             <div>
               <button
                 type="button"
+                disabled={deletingId === flight.id}
                 onClick={() => {
-                  deleteRequestRef.current?.abort()
-                  deleteRequestRef.current = null
-                  setDeletingId(null)
+                  if (deleteRequestRef.current) return
                   setConfirmDeleteId(null)
                 }}
               >
@@ -1067,7 +1169,11 @@ function FlightTrackerBody({
               <button
                 type="button"
                 className="flight-detail__delete-confirm-action"
-                disabled={deletingId === flight.id || refreshingId === flight.id}
+                disabled={
+                  deletingId !== null
+                  || refreshingId !== null
+                  || notificationPendingId !== null
+                }
                 onClick={() => void stopTracking(flight)}
               >
                 {deletingId === flight.id ? 'Stopping…' : 'Yes, stop tracking'}
@@ -1095,12 +1201,16 @@ function FlightTrackerBody({
       </header>
 
       {flights.length === 0 ? (
-        <div className="flight-empty">
-          <span className="flight-empty__icon" aria-hidden="true"><PlaneIcon /></span>
-          <div>
-            <h3>No flights tracked</h3>
-            <p>Add a flight number to keep arrival timing and travel progress together.</p>
+        <div className="flight-empty-journey">
+          {/* The route is decoration only. Keeping it out of the accessibility
+              tree lets the short empty-state copy remain the useful message. */}
+          <div className="flight-empty-journey__route" aria-hidden="true">
+            <span className="flight-empty-journey__stop" />
+            <span className="flight-empty-journey__plane"><PlaneIcon /></span>
+            <span className="flight-empty-journey__stop" />
           </div>
+          <h3>No journeys on the board yet</h3>
+          <p>When travel is booked, add the flight so everyone can follow along.</p>
           <button type="button" onClick={openAddFlight}>Track a flight</button>
         </div>
       ) : (
@@ -1171,6 +1281,7 @@ function FlightTrackerBody({
                     aria-label={`${expanded ? 'Hide' : 'Show'} all info for ${flight.flightNumber}`}
                     aria-expanded={expanded}
                     aria-controls={`flight-details-${flight.id}`}
+                    disabled={deletingId === flight.id}
                     onClick={() => toggleFlightActions(flight.id)}
                   >
                     <svg viewBox="0 0 24 24" aria-hidden="true">
@@ -1211,7 +1322,7 @@ function FlightTrackerBody({
                 name="travelerName"
                 maxLength={60}
                 placeholder="Family trip"
-                disabled={pendingFlightChoices !== null}
+                disabled={saving || pendingFlightChoices !== null}
                 aria-invalid={formError?.field === 'travelerName'}
                 aria-describedby={formError?.field === 'travelerName' ? formErrorId : undefined}
               />
@@ -1226,7 +1337,7 @@ function FlightTrackerBody({
                 autoCapitalize="characters"
                 autoCorrect="off"
                 spellCheck={false}
-                disabled={pendingFlightChoices !== null}
+                disabled={saving || pendingFlightChoices !== null}
                 aria-invalid={formError?.field === 'flightNumber'}
                 aria-describedby={formError?.field === 'flightNumber' ? formErrorId : undefined}
                 required
@@ -1241,7 +1352,7 @@ function FlightTrackerBody({
                 aria-label="Departure date"
                 min={shiftLocalCalendarDate(now, -1)}
                 max={shiftLocalCalendarDate(now, 365)}
-                disabled={pendingFlightChoices !== null}
+                disabled={saving || pendingFlightChoices !== null}
                 aria-invalid={formError?.field === 'travelDate'}
                 aria-describedby={formError?.field === 'travelDate' ? formErrorId : undefined}
                 required
@@ -1259,6 +1370,7 @@ function FlightTrackerBody({
                   </div>
                   <button
                     type="button"
+                    disabled={saving}
                     onClick={() => setPendingFlightChoices(null)}
                   >
                     Change search

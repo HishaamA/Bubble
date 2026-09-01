@@ -131,6 +131,9 @@ export async function enableFlightNotifications(
     try {
       let permission = (await LocalNotifications.checkPermissions()).display
       if (permission === 'prompt' || permission === 'prompt-with-rationale') {
+        // This function is called only by the visible alert toggle. Background
+        // ETA refreshes use rescheduleFlightNotifications below, which checks
+        // existing permission and must never surface an OS prompt by itself.
         permission = (await LocalNotifications.requestPermissions()).display
       }
       if (permission !== 'granted') {
@@ -140,6 +143,8 @@ export async function enableFlightNotifications(
           message: 'Allow notifications in your phone Settings to receive flight alerts.',
         }
       }
+      // IDs are deterministic for subject + flight + event. Cancel first so a
+      // changed ETA replaces the old request rather than leaving two alerts.
       await cancelFlightNotifications(flight.id, accountId)
       await LocalNotifications.schedule({
         notifications: targets.map((target) =>
@@ -168,6 +173,9 @@ export async function enableFlightNotifications(
     }
   }
   try {
+    // As on native, browser permission is requested only after a direct user
+    // action. Browser timers are intentionally described as best-effort: the
+    // browser can discard them when the tab or process is suspended.
     const permission = Notification.permission === 'default'
       ? await Notification.requestPermission()
       : Notification.permission
@@ -212,7 +220,11 @@ export async function enableFlightNotifications(
   }
 }
 
-/** Replaces existing alerts after a trusted ETA/status refresh, without prompting. */
+/**
+ * Replaces existing alerts after a trusted ETA/status refresh. This path never
+ * prompts: an automatic refresh must not manufacture user consent. Cancelling
+ * first also removes an outdated ETA when the replacement cannot be scheduled.
+ */
 export async function rescheduleFlightNotifications(
   flight: TrackedFlight,
   accountId: string,
@@ -261,6 +273,9 @@ export async function cancelFlightNotifications(
   flightId: string,
   accountId: string,
 ) {
+  // Clear both delivery mechanisms because a subject can move between browser
+  // and native runtimes. The same deterministic IDs make cancellation safe to
+  // repeat after sign-out, deletion, cancellation, or a partially failed setup.
   const ids = flightNotificationIds(flightId, accountId)
   for (const id of ids) {
     const timer = browserTimers.get(id)
@@ -268,6 +283,9 @@ export async function cancelFlightNotifications(
     browserTimers.delete(id)
   }
   if (!canUseNativeNotifications()) return
+  // Pending and already-delivered notifications are separate native stores.
+  // allSettled makes revocation best-effort across plugin/OS version skew and
+  // ensures failure in one store does not leave the other untouched.
   await Promise.allSettled([
     LocalNotifications.cancel({ notifications: ids.map((id) => ({ id })) }),
     LocalNotifications.removeDeliveredNotificationsById({ ids }),

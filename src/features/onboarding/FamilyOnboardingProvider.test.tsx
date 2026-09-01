@@ -1,7 +1,12 @@
 import { useEffect } from 'react'
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { MemoryRouter, Route, Routes } from 'react-router-dom'
+import {
+  MemoryRouter,
+  Route,
+  Routes,
+  useLocation,
+} from 'react-router-dom'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { AuthProvider, type AuthContextValue } from '../auth'
 import {
@@ -62,6 +67,12 @@ function StateProbe() {
       </button>
     </div>
   )
+}
+
+function OnboardingDestination() {
+  const location = useLocation()
+  const returnTo = (location.state as { returnTo?: string } | null)?.returnTo
+  return <output aria-label="Family setup return route">{returnTo}</output>
 }
 
 function TestTree({
@@ -173,6 +184,29 @@ describe('FamilyOnboardingProvider', () => {
     await act(async () => resolveRefresh?.(approved))
     expect(screen.getByText('Mounted capture draft')).toBeInTheDocument()
     expect(onUnmount).not.toHaveBeenCalled()
+  })
+
+  it('preserves the complete deep link while redirecting through family setup', async () => {
+    const adapter = createAdapter()
+    render(
+      <AuthProvider value={signedInValue('user_A')}>
+        <FamilyOnboardingProvider adapter={adapter}>
+          <MemoryRouter initialEntries={['/journal?tab=plans#birthday-task']}>
+            <Routes>
+              <Route path="/onboarding" element={<OnboardingDestination />} />
+              <Route element={<RequireFamilyMembership />}>
+                <Route path="/journal" element={<p>Private journal</p>} />
+              </Route>
+            </Routes>
+          </MemoryRouter>
+        </FamilyOnboardingProvider>
+      </AuthProvider>,
+    )
+
+    expect(
+      await screen.findByLabelText('Family setup return route'),
+    ).toHaveTextContent('/journal?tab=plans#birthday-task')
+    expect(screen.queryByText('Private journal')).not.toBeInTheDocument()
   })
 
   it('maps service failures without exposing raw database messages', () => {

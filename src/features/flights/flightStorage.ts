@@ -285,6 +285,9 @@ export function writeTrackedFlights(
   accountId: string,
   flights: TrackedFlight[],
 ) {
+  // Revalidate at the persistence boundary. Provider/cache corruption is
+  // dropped before it becomes durable, while the memory fallback preserves
+  // the same account isolation when localStorage is unavailable or full.
   const safeFlights = flights.filter(isTrackedFlight)
   const key = flightStorageKey(accountId)
   try {
@@ -301,6 +304,9 @@ export function mergeTrackedFlights(
   familyFlights: TrackedFlight[],
 ) {
   const localById = new Map(localFlights.map((flight) => [flight.id, flight]))
+  // Synced rows are authoritative on the server, so absence means deletion;
+  // genuinely local rows survive offline. Alert opt-in remains device-local
+  // and is deliberately overlaid instead of being shared with family members.
   const merged = new Map(
     localFlights
       .filter((flight) => !flight.synced)

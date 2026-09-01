@@ -1,6 +1,7 @@
 import { act, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import type { FlightNotificationResult } from './flightNotifications'
 import type { CreateTrackedFamilyFlightResult, FlightLookupChoice } from './flightStatusService'
 import type { FlightStatusSnapshot } from './types'
 
@@ -200,7 +201,10 @@ describe('FlightTrackerSection', () => {
   it('starts with a real empty state and no example flight cards', () => {
     render(<FlightTrackerSection now={new Date('2026-08-29T12:00:00Z')} />)
     expect(screen.getByRole('heading', { name: 'Family flights' })).toBeInTheDocument()
-    expect(screen.getByRole('heading', { name: 'No flights tracked' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'No journeys on the board yet' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Track a flight' })).toBeInTheDocument()
+    expect(screen.getByText('When travel is booked, add the flight so everyone can follow along.'))
+      .toBeInTheDocument()
     expect(screen.queryByText('EK202')).not.toBeInTheDocument()
   })
 
@@ -229,7 +233,7 @@ describe('FlightTrackerSection', () => {
     expect(screen.getByText('SV301')).toBeInTheDocument()
     expect(screen.queryByText('Boarding pass')).not.toBeInTheDocument()
     expect(screen.queryByText('Passenger')).not.toBeInTheDocument()
-    expect(screen.queryByRole('heading', { name: 'No flights tracked' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: 'No journeys on the board yet' })).not.toBeInTheDocument()
 
     await expandFlightInfo(user, 'EK001')
     expect(screen.queryByRole('dialog', { name: 'EK001' })).not.toBeInTheDocument()
@@ -369,6 +373,7 @@ describe('FlightTrackerSection', () => {
   })
 
   it('asks the user to choose only when the lookup returns multiple departures', async () => {
+    let resolveSelection!: (value: CreateTrackedFamilyFlightResult) => void
     const selectedSnapshot: FlightStatusSnapshot = {
       ...status,
       providerFlightId: lookupChoices[1].providerFlightId,
@@ -387,7 +392,9 @@ describe('FlightTrackerSection', () => {
     }
     serviceMocks.createTrackedFamilyFlight
       .mockResolvedValueOnce({ kind: 'choices', choices: lookupChoices })
-      .mockResolvedValueOnce(createdResult(selectedSnapshot))
+      .mockReturnValueOnce(new Promise((resolve) => {
+        resolveSelection = resolve
+      }))
 
     render(<FlightTrackerSection now={new Date('2026-08-29T12:00:00Z')} />)
     const user = await addFlight()
@@ -402,6 +409,10 @@ describe('FlightTrackerSection', () => {
     }))
 
     await waitFor(() => expect(serviceMocks.createTrackedFamilyFlight).toHaveBeenCalledTimes(2))
+    expect(screen.getByRole('button', { name: 'Change search' })).toBeDisabled()
+    for (const choice of screen.getAllByRole('button', {
+      name: /Choose .* to DXB, departing/,
+    })) expect(choice).toBeDisabled()
     expect(serviceMocks.createTrackedFamilyFlight.mock.calls[1][0]).toEqual(
       expect.objectContaining({
         id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
@@ -410,8 +421,31 @@ describe('FlightTrackerSection', () => {
         providerFlightId: lookupChoices[1].providerFlightId,
       }),
     )
+    await act(async () => resolveSelection(createdResult(selectedSnapshot)))
     expect(await screen.findByText('LAX')).toBeInTheDocument()
     expect(screen.queryByText(/flights that day/i)).not.toBeInTheDocument()
+  })
+
+  it('lets an ambiguous lookup return to its original editable search', async () => {
+    serviceMocks.createTrackedFamilyFlight.mockResolvedValueOnce({
+      kind: 'choices',
+      choices: lookupChoices,
+    })
+    render(<FlightTrackerSection now={new Date('2026-08-29T12:00:00Z')} />)
+    const user = await addFlight()
+    const changeSearch = await screen.findByRole('button', { name: 'Change search' })
+
+    expect(screen.getByLabelText('Flight number')).toBeDisabled()
+    expect(screen.getByLabelText('Departure date')).toBeDisabled()
+    await user.click(changeSearch)
+
+    expect(screen.queryByRole('heading', {
+      name: 'We found 2 flights that day',
+    })).not.toBeInTheDocument()
+    expect(screen.getByLabelText('Flight number')).toBeEnabled()
+    expect(screen.getByLabelText('Flight number')).toHaveValue('ek 202')
+    expect(screen.getByLabelText('Departure date')).toBeEnabled()
+    expect(screen.getByLabelText('Departure date')).toHaveValue('2026-09-10')
   })
 
   it('uses a friendly card label when the optional header is blank', async () => {
@@ -460,6 +494,48 @@ describe('FlightTrackerSection', () => {
     expect(screen.queryByText('JFK')).not.toBeInTheDocument()
     expect(serviceMocks.createTrackedFamilyFlight.mock.calls[0][1].signal.aborted)
       .toBe(true)
+  })
+
+  it('closes the add sheet with Escape and restores focus to its opener', async () => {
+    render(<FlightTrackerSection now={new Date('2026-08-29T12:00:00Z')} />)
+    const user = userEvent.setup()
+    const opener = screen.getByRole('button', { name: 'Track a flight' })
+
+    await user.click(opener)
+    await waitFor(() => expect(screen.getByRole('button', {
+      name: 'Close add flight',
+    })).toHaveFocus())
+    await user.keyboard('{Escape}')
+
+    expect(screen.queryByRole('dialog', { name: 'Track a flight' }))
+      .not.toBeInTheDocument()
+    await waitFor(() => expect(opener).toHaveFocus())
+  })
+
+  it('latches same-tick add submissions and locks their captured fields', async () => {
+    let resolveCreate!: (value: CreateTrackedFamilyFlightResult) => void
+    serviceMocks.createTrackedFamilyFlight.mockReturnValueOnce(new Promise((resolve) => {
+      resolveCreate = resolve
+    }))
+    render(<FlightTrackerSection now={new Date('2026-08-29T12:00:00Z')} />)
+    const user = userEvent.setup()
+    await user.click(screen.getByRole('button', { name: 'Track a flight' }))
+    await user.type(screen.getByLabelText(/Header/), 'Sara')
+    await user.type(screen.getByLabelText('Flight number'), 'EK202')
+    await user.type(screen.getByLabelText('Departure date'), '2026-09-10')
+    const submit = screen.getByRole('button', { name: 'Track flight' })
+
+    act(() => {
+      submit.click()
+      submit.click()
+    })
+
+    expect(serviceMocks.createTrackedFamilyFlight).toHaveBeenCalledTimes(1)
+    expect(screen.getByLabelText(/Header/)).toBeDisabled()
+    expect(screen.getByLabelText('Flight number')).toBeDisabled()
+    expect(screen.getByLabelText('Departure date')).toBeDisabled()
+    await act(async () => resolveCreate(createdResult()))
+    expect(await screen.findByText('JFK')).toBeInTheDocument()
   })
 
   it('reuses one create ID after an uncertain failure', async () => {
@@ -560,6 +636,51 @@ describe('FlightTrackerSection', () => {
     expect(screen.getByRole('status')).toHaveTextContent(/alerts set on this phone/i)
   })
 
+  it('serializes alert and refresh controls across same-tick taps', async () => {
+    let resolveAlerts!: (value: FlightNotificationResult) => void
+    notificationMocks.enableFlightNotifications.mockReturnValueOnce(new Promise((resolve) => {
+      resolveAlerts = resolve
+    }))
+    render(<FlightTrackerSection now={new Date('2026-08-29T12:00:00Z')} />)
+    await addFlight()
+    const alertButton = screen.getByRole('button', {
+      name: 'Turn on alerts for EK202',
+    })
+
+    act(() => {
+      alertButton.click()
+      alertButton.click()
+    })
+
+    expect(notificationMocks.enableFlightNotifications).toHaveBeenCalledTimes(1)
+    expect(screen.getByRole('button', { name: 'Changing alerts for EK202' }))
+      .toBeDisabled()
+    expect(screen.getByRole('button', { name: 'Refresh EK202' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: 'Stop tracking EK202' })).toBeDisabled()
+
+    await act(async () => resolveAlerts({
+      enabled: true,
+      mode: 'native',
+      message: 'Departure and arrival alerts set on this phone.',
+    }))
+    await waitFor(() => expect(screen.getByRole('button', {
+      name: 'Turn off alerts for EK202',
+    })).toBeEnabled())
+
+    let resolveRefresh!: (value: FlightStatusSnapshot) => void
+    serviceMocks.refreshTrackedFamilyFlight.mockReturnValueOnce(new Promise((resolve) => {
+      resolveRefresh = resolve
+    }))
+    act(() => screen.getByRole('button', { name: 'Refresh EK202' }).click())
+
+    expect(screen.getByRole('button', { name: 'Refreshing EK202' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: 'Turn off alerts for EK202' }))
+      .toBeDisabled()
+    expect(screen.getByRole('button', { name: 'Stop tracking EK202' })).toBeDisabled()
+    await act(async () => resolveRefresh({ ...status, status: 'Boarding' }))
+    expect(await screen.findByRole('status')).toHaveTextContent(/was updated/i)
+  })
+
   it('stops a shared tracker only after the server authorizes deletion', async () => {
     render(<FlightTrackerSection now={new Date('2026-08-29T12:00:00Z')} />)
     const user = await addFlight()
@@ -578,6 +699,34 @@ describe('FlightTrackerSection', () => {
     expect(screen.queryByRole('button', {
       name: /all info for EK202/,
     })).not.toBeInTheDocument()
+  })
+
+  it('keeps delete confirmation stable while server authorization is pending', async () => {
+    let resolveDelete!: (value: boolean) => void
+    serviceMocks.removeFamilyFlight.mockReturnValueOnce(new Promise((resolve) => {
+      resolveDelete = resolve
+    }))
+    render(<FlightTrackerSection now={new Date('2026-08-29T12:00:00Z')} />)
+    const user = await addFlight()
+    await user.click(screen.getByRole('button', { name: 'Stop tracking EK202' }))
+    const confirm = screen.getByRole('button', { name: 'Yes, stop tracking' })
+
+    act(() => {
+      confirm.click()
+      confirm.click()
+    })
+
+    expect(serviceMocks.removeFamilyFlight).toHaveBeenCalledTimes(1)
+    expect(screen.getByRole('button', { name: 'Keep flight' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: 'Stopping…' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: 'Hide all info for EK202' }))
+      .toBeDisabled()
+    expect(screen.getByRole('button', { name: 'Refresh EK202' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: 'Turn on alerts for EK202' }))
+      .toBeDisabled()
+
+    await act(async () => resolveDelete(true))
+    await waitFor(() => expect(screen.queryByText('EK202')).not.toBeInTheDocument())
   })
 
   it('keeps the card when an in-flight delete is aborted by unmounting', async () => {
@@ -653,6 +802,54 @@ describe('FlightTrackerSection', () => {
     await waitFor(() => expect(serviceMocks.refreshTrackedFamilyFlight).toHaveBeenCalledTimes(4))
   })
 
+  it('does not let an automatic ETA reschedule turn alerts back on', async () => {
+    const tracked = {
+      id: 'ffffffff-ffff-4fff-8fff-ffffffffffff',
+      travelerName: 'Sara',
+      flightNumber: 'EK202',
+      travelDate: '2026-09-10',
+      createdAt: '2026-08-29T12:00:00.000Z',
+      notificationEnabled: true,
+      synced: true,
+      snapshot: status,
+    }
+    writeTrackedFlights(testFlightSubject(), [tracked])
+    serviceMocks.fetchFamilyFlights.mockResolvedValue([tracked])
+    let resolveRefresh!: (value: FlightStatusSnapshot) => void
+    serviceMocks.refreshTrackedFamilyFlight.mockReturnValueOnce(new Promise((resolve) => {
+      resolveRefresh = resolve
+    }))
+    let resolveReschedule!: (value: boolean) => void
+    notificationMocks.rescheduleFlightNotifications.mockReturnValueOnce(new Promise((resolve) => {
+      resolveReschedule = resolve
+    }))
+    render(<FlightTrackerSection now={new Date('2026-09-10T09:00:00Z')} />)
+
+    await waitFor(() => expect(serviceMocks.refreshTrackedFamilyFlight)
+      .toHaveBeenCalledTimes(1))
+    await act(async () => resolveRefresh({
+      ...status,
+      updatedAt: '2026-09-10T09:00:00.000Z',
+    }))
+    await waitFor(() => expect(notificationMocks.rescheduleFlightNotifications)
+      .toHaveBeenCalledTimes(1))
+
+    const user = userEvent.setup()
+    await user.click(screen.getByRole('button', { name: 'Turn off alerts for EK202' }))
+    expect(screen.getByRole('button', { name: 'Turn on alerts for EK202' }))
+      .toHaveAttribute('aria-pressed', 'false')
+    const cancellationsBeforeLateSchedule = notificationMocks.cancelFlightNotifications.mock.calls.length
+
+    await act(async () => resolveReschedule(true))
+
+    await waitFor(() => expect(notificationMocks.cancelFlightNotifications.mock.calls.length)
+      .toBeGreaterThan(cancellationsBeforeLateSchedule))
+    expect(screen.getByRole('button', { name: 'Turn on alerts for EK202' }))
+      .toHaveAttribute('aria-pressed', 'false')
+    expect(localStorage.getItem(flightStorageKey(testFlightSubject())))
+      .toContain('"notificationEnabled":false')
+  })
+
   it('isolates cached flights and cancels old alerts when the family changes', async () => {
     const oldSubject = familyFlightStorageSubject('user_test', 'family_old')
     writeTrackedFlights(oldSubject, [{
@@ -671,7 +868,7 @@ describe('FlightTrackerSection', () => {
     render(<FlightTrackerSection now={new Date('2026-08-29T12:00:00Z')} />)
 
     expect(screen.queryByText('Old family traveler')).not.toBeInTheDocument()
-    expect(screen.getByRole('heading', { name: 'No flights tracked' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'No journeys on the board yet' })).toBeInTheDocument()
     await waitFor(() => expect(notificationMocks.cancelFlightNotifications).toHaveBeenCalledWith(
       'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
       oldSubject,

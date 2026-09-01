@@ -23,7 +23,11 @@ export function RequireFamilyMembership() {
     <Navigate
       to="/onboarding"
       replace
-      state={{ returnTo: `${location.pathname}${location.search}` }}
+      state={{
+        // Family setup is a temporary gate, not a new destination. Preserve the
+        // entire in-app deep link so joining a family returns to the exact view.
+        returnTo: `${location.pathname}${location.search}${location.hash}`,
+      }}
     />
   )
 }

@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from '@testing-library/react'
+import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import {
   MemoryRouter,
@@ -19,7 +19,10 @@ const clerkMocks = vi.hoisted(() => ({
     status: 'needs_first_factor',
     isTransferable: false,
     existingSession: undefined as { sessionId: string } | undefined,
-    supportedSecondFactors: [] as Array<{ strategy: string }>,
+    supportedSecondFactors: [] as Array<{
+      strategy: string
+      safeIdentifier?: string
+    }>,
     create: vi.fn(),
     sso: vi.fn(),
     emailCode: {
@@ -183,6 +186,40 @@ describe('AuthPage', () => {
     expect(window.sessionStorage.getItem('kinsphere.auth.returnTo')).toBeNull()
   })
 
+  it('contains keyboard focus, closes with Escape, and restores the opener even if Clerk reset fails', async () => {
+    const user = userEvent.setup()
+    clerkMocks.signIn.reset.mockRejectedValueOnce(new Error('offline'))
+    render(
+      <AuthProvider value={authValue('signed-out')}>
+        <MemoryRouter initialEntries={['/login']}>
+          <AuthPage />
+        </MemoryRouter>
+      </AuthProvider>,
+    )
+
+    const opener = screen.getByRole('button', { name: 'Get started' })
+    await user.click(opener)
+    const dialog = screen.getByRole('dialog')
+    const closeButton = within(dialog).getByRole('button', {
+      name: 'Close sign in',
+    })
+    const lastFocusable = within(dialog).getByLabelText('Email address')
+
+    closeButton.focus()
+    await user.tab({ shift: true })
+    expect(lastFocusable).toHaveFocus()
+    await user.tab()
+    expect(closeButton).toHaveFocus()
+
+    await user.keyboard('{Escape}')
+    await waitFor(() =>
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument(),
+    )
+    expect(opener).toHaveFocus()
+    expect(clerkMocks.signIn.reset).toHaveBeenCalledOnce()
+    expect(clerkMocks.signUp.reset).toHaveBeenCalledOnce()
+  })
+
   it('uses a Google popup, preserves the return route, and finalizes sign-in', async () => {
     const user = userEvent.setup()
     const popupState = { closed: false }
@@ -301,6 +338,45 @@ describe('AuthPage', () => {
     expect(clerkMocks.signUp.create).toHaveBeenCalledWith({ transfer: true })
   })
 
+  it('shows Clerk\'s masked email destination for Google MFA', async () => {
+    const user = userEvent.setup()
+    const popupState = { closed: false }
+    const popup = {
+      get closed() {
+        return popupState.closed
+      },
+      close: vi.fn(() => {
+        popupState.closed = true
+      }),
+      location: { href: 'about:blank' },
+    } as unknown as Window
+    vi.spyOn(window, 'open').mockReturnValue(popup)
+    clerkMocks.signIn.supportedSecondFactors = [
+      { strategy: 'email_code', safeIdentifier: 's***@example.com' },
+    ]
+    clerkMocks.signIn.sso.mockImplementation(async () => {
+      clerkMocks.signIn.status = 'needs_second_factor'
+      return { error: null }
+    })
+
+    render(
+      <AuthProvider value={authValue('signed-out')}>
+        <MemoryRouter initialEntries={['/login']}>
+          <AuthPage />
+        </MemoryRouter>
+      </AuthProvider>,
+    )
+
+    await user.click(screen.getByRole('button', { name: 'Get started' }))
+    await user.click(screen.getByRole('button', { name: 'Continue with Google' }))
+
+    expect(
+      await screen.findByRole('heading', { name: 'Enter your code' }),
+    ).toBeInTheDocument()
+    expect(screen.getByText('s***@example.com')).toBeInTheDocument()
+    expect(clerkMocks.signIn.mfa.sendEmailCode).toHaveBeenCalledOnce()
+  })
+
   it('closes native Google auth only after Clerk activates a session', async () => {
     const user = userEvent.setup()
     authPlatformMocks.native = true
@@ -415,6 +491,40 @@ describe('AuthPage', () => {
     expect(window.sessionStorage.getItem('kinsphere.auth.returnTo')).toBe(
       '/journal?view=list',
     )
+  })
+
+  it('recovers from rejected resend and change-email resets without trapping the form', async () => {
+    const user = userEvent.setup()
+    render(
+      <AuthProvider value={authValue('signed-out')}>
+        <MemoryRouter initialEntries={['/login']}>
+          <AuthPage />
+        </MemoryRouter>
+      </AuthProvider>,
+    )
+
+    await user.click(screen.getByRole('button', { name: 'Get started' }))
+    await user.type(screen.getByLabelText('Email address'), 'family@example.com')
+    await user.click(screen.getByRole('button', { name: 'Send me a code' }))
+
+    clerkMocks.signIn.emailCode.sendCode.mockRejectedValueOnce(
+      new Error('offline'),
+    )
+    await user.click(screen.getByRole('button', { name: 'Send a new code' }))
+    expect(
+      await screen.findByText(/check your connection and try again/i),
+    ).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Send a new code' })).toBeEnabled()
+
+    clerkMocks.signIn.reset.mockRejectedValueOnce(new Error('offline'))
+    await user.click(screen.getByRole('button', { name: 'Change email' }))
+    expect(
+      await screen.findByText(/check your connection and try again/i),
+    ).toBeInTheDocument()
+    expect(
+      screen.getByRole('heading', { name: 'Enter your code' }),
+    ).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Change email' })).toBeEnabled()
   })
 
   it('verifies an existing user and activates the Clerk session', async () => {
@@ -738,7 +848,7 @@ describe('AuthPage', () => {
     async (status) => {
       render(
         <AuthProvider value={authValue(status)}>
-          <MemoryRouter initialEntries={['/events?view=week']}>
+          <MemoryRouter initialEntries={['/events?view=week#task-42']}>
             <Routes>
               <Route path="/login" element={<LoginDestination />} />
               <Route element={<RequireAuthentication />}>
@@ -751,7 +861,7 @@ describe('AuthPage', () => {
 
       expect(
         await screen.findByLabelText('Requested return route'),
-      ).toHaveTextContent('/events?view=week')
+      ).toHaveTextContent('/events?view=week#task-42')
       expect(screen.queryByText('Private events')).not.toBeInTheDocument()
     },
   )

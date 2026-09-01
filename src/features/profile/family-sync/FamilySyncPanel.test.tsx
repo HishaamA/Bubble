@@ -1,4 +1,10 @@
-import { render, screen, waitFor } from '@testing-library/react'
+import {
+  act,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter } from 'react-router-dom'
 import { describe, expect, it, vi } from 'vitest'
@@ -161,6 +167,47 @@ describe('FamilySyncPanel', () => {
     expect(
       screen.getByRole('heading', { name: 'Waiting for your family' }),
     ).toBeInTheDocument()
+  })
+
+  it('coalesces rapid pending-membership refresh taps into one request', async () => {
+    const pendingSnapshot: FamilySyncSnapshot = {
+      kind: 'unjoined',
+      person,
+      pendingRequest: {
+        id: 'cccccccc-cccc-4ccc-8ccc-cccccccccccc',
+        createdAt: '2026-08-26T12:00:00.000Z',
+      },
+    }
+    const setup = createAdapter(pendingSnapshot)
+    let resolveRefresh:
+      | ((snapshot: FamilySyncSnapshot) => void)
+      | undefined
+    vi.mocked(setup.adapter.loadSnapshot)
+      .mockResolvedValueOnce(pendingSnapshot)
+      .mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            resolveRefresh = resolve
+          }),
+      )
+
+    renderPanel(<FamilySyncPanel adapter={setup.adapter} />)
+    const checkAgain = await screen.findByRole('button', {
+      name: 'Check again',
+    })
+
+    fireEvent.click(checkAgain)
+    fireEvent.click(checkAgain)
+
+    expect(setup.adapter.loadSnapshot).toHaveBeenCalledTimes(2)
+    expect(
+      screen.getByRole('button', { name: 'Checking…' }),
+    ).toBeDisabled()
+
+    await act(async () => resolveRefresh?.(pendingSnapshot))
+    expect(
+      await screen.findByRole('button', { name: 'Check again' }),
+    ).toBeEnabled()
   })
 
   it('keeps the persistent code visible, copies and shares it, and handles legacy requests', async () => {

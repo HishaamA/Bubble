@@ -162,6 +162,9 @@ function createResponse(value: unknown): CreateTrackedFamilyFlightResult | null 
   }
   if (
     response.kind === 'choices'
+    // A single validated match should be returned as `created`; accepting a
+    // singleton choice would strand the UI in an ambiguity step the user cannot
+    // resolve meaningfully. Cap the list before rendering provider input.
     && Array.isArray(response.choices)
     && response.choices.length > 1
     && response.choices.length <= 20
@@ -217,6 +220,9 @@ async function requestFlightStatus(
 
   const controller = new AbortController()
   let timedOut = false
+  // One internal signal covers token acquisition, fetch, and JSON parsing. The
+  // caller owns lifecycle cancellation; this controller additionally enforces
+  // a hard timeout so a hung auth or response body cannot pin the UI forever.
   const timeout = window.setTimeout(() => {
     timedOut = true
     controller.abort(new DOMException('Flight status request timed out', 'TimeoutError'))
@@ -358,6 +364,9 @@ export async function createTrackedFamilyFlight(
     )
   }
   if (result.kind === 'choices') {
+    // Choice payloads are untrusted provider output. Every option must preserve
+    // the normalized identity submitted by the user before it can be shown or
+    // selected, including codeshare ambiguity resolved by providerFlightId.
     if (result.choices.some((choice) =>
       choice.flightNumber !== expectedFlightNumber,
     )) {
@@ -459,6 +468,9 @@ export async function removeFamilyFlight(
 ) {
   const controller = new AbortController()
   let timedOut = false
+  // Deletion uses the same composed lifecycle/timeout ownership as lookup. The
+  // component waits for this RPC because row-level authorization determines
+  // whether removing the shared card is permitted at all.
   const timeout = window.setTimeout(() => {
     timedOut = true
     controller.abort(new DOMException('Flight removal timed out', 'TimeoutError'))

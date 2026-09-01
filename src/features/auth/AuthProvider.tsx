@@ -357,7 +357,11 @@ export function RequireAuthentication() {
       <Navigate
         to="/login"
         replace
-        state={{ returnTo: `${location.pathname}${location.search}` }}
+        state={{
+          // Hash fragments can select a specific memory or settings panel. Treat the
+          // authentication detour as transparent so that deep-linked intent survives.
+          returnTo: `${location.pathname}${location.search}${location.hash}`,
+        }}
       />
     )
   }

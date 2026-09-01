@@ -83,8 +83,10 @@ export function FamilySyncPanel({
   const messageId = useId()
   const loadVersion = useRef(0)
   const loadedIdentity = useRef<string | null>(null)
+  const manualRefreshInFlight = useRef(false)
   const [snapshot, setSnapshot] = useState<FamilySyncSnapshot | null>(null)
   const [loading, setLoading] = useState(true)
+  const [refreshing, setRefreshing] = useState(false)
   const [busy, setBusy] = useState(false)
   const [sharing, setSharing] = useState(false)
   const [confirmingRotation, setConfirmingRotation] = useState(false)
@@ -247,6 +249,21 @@ export function FamilySyncPanel({
     )
   }
 
+  async function handleManualRefresh() {
+    if (busy || manualRefreshInFlight.current) return
+    // State alone does not close the tiny gap between two rapid taps and React's
+    // next render. The ref is the synchronous request latch; the state exists so
+    // assistive technology and the button label expose the pending refresh.
+    manualRefreshInFlight.current = true
+    setRefreshing(true)
+    try {
+      await refresh(false)
+    } finally {
+      manualRefreshInFlight.current = false
+      setRefreshing(false)
+    }
+  }
+
   const describedBy = error || message ? messageId : undefined
 
   return (
@@ -254,7 +271,7 @@ export function FamilySyncPanel({
       className="family-sync"
       aria-labelledby={headingId}
       aria-describedby={describedBy}
-      aria-busy={busy || loading}
+      aria-busy={busy || loading || refreshing}
     >
       <header className="family-sync__header">
         <h2 className="screen-reader-only" id={headingId}>Family Sync</h2>
@@ -322,10 +339,10 @@ export function FamilySyncPanel({
               <button
                 className="family-sync__secondary"
                 type="button"
-                onClick={() => void refresh(false)}
-                disabled={busy}
+                onClick={() => void handleManualRefresh()}
+                disabled={busy || refreshing}
               >
-                Check again
+                {refreshing ? 'Checking…' : 'Check again'}
               </button>
             </div>
           ) : (

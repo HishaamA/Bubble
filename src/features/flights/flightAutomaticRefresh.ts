@@ -73,7 +73,9 @@ function refreshAge(flight: TrackedFlight, nowMs: number) {
 /**
  * Records and returns a small automatic batch. The persisted rolling budget is
  * per account/family on this device, so reopening the app cannot burn the free
- * provider allowance repeatedly.
+ * provider allowance repeatedly. Attempts are reserved before callers launch
+ * network work: concurrent effects/remounts therefore share the same budget,
+ * and failures intentionally consume a slot rather than creating a retry loop.
  */
 export function takeAutomaticRefreshCandidates(
   flights: TrackedFlight[],
@@ -110,6 +112,9 @@ export function takeAutomaticRefreshCandidates(
   }).slice(0, available)
 
   if (candidates.length > 0) {
+    // Write reservations as one batch before returning any candidates. A crash
+    // after this point may defer an update, but it cannot cause an uncontrolled
+    // provider burst on the next launch.
     for (const candidate of candidates) state.attempts[candidate.id] = nowMs
     state.budget.push(...candidates.map(() => nowMs))
   }
