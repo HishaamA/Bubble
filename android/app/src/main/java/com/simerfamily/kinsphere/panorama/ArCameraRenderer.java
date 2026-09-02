@@ -17,8 +17,12 @@ import javax.microedition.khronos.opengles.GL10;
 /** Draws ARCore's camera texture and forwards each synchronized pose/image frame. */
 final class ArCameraRenderer implements GLSurfaceView.Renderer {
 
+    /** Receives synchronized frame data or the renderer's first terminal failure. */
     interface Listener {
+        /** Delivers pose, projection, and CPU-image access from the same ARCore frame. */
         void onFrame(Frame frame, Camera camera, float[] cameraToWorld, float[] projection);
+
+        /** Reports a failure that makes further GL-frame processing unsafe. */
         void onFailure(Exception error);
     }
 
@@ -49,6 +53,8 @@ final class ArCameraRenderer implements GLSurfaceView.Renderer {
     private final Listener listener;
     private final FloatBuffer quadCoordinates = floatBuffer(QUAD);
     private final FloatBuffer textureCoordinates = floatBuffer(new float[8]);
+    private final float[] cameraToWorld = new float[16];
+    private final float[] projection = new float[16];
     private volatile Session session;
     private volatile int displayRotation;
     private volatile int viewportWidth;
@@ -60,27 +66,50 @@ final class ArCameraRenderer implements GLSurfaceView.Renderer {
     private int textureAttribute;
     private int textureUniform;
     private boolean textureCoordinatesReady;
-    private boolean failurePublished;
+    private volatile boolean failurePublished;
 
+    /** Creates a renderer that forwards accepted frame data to one Activity listener. */
     ArCameraRenderer(Listener listener) {
         this.listener = listener;
     }
 
+    /** Rebinds camera texture state when the Activity creates or replaces its ARCore session. */
     void setSession(Session session) {
-        this.session = session;
         textureCoordinatesReady = false;
         failurePublished = false;
+        this.session = session;
     }
 
+    /** Records Android display rotation for ARCore's next texture-coordinate transform. */
     void setDisplayRotation(int displayRotation) {
         this.displayRotation = displayRotation;
     }
 
+    /** Recreates all GL resources because handles never survive an EGL context replacement. */
     @Override
     public void onSurfaceCreated(GL10 ignored, EGLConfig config) {
+        textureId = -1;
+        program = 0;
+        // Every EGL context owns different texture names, even when the ARCore
+        // Session object itself survived a short pause.
+        textureSession = null;
+        textureCoordinatesReady = false;
+        try {
+            initializeGlResources();
+        } catch (RuntimeException error) {
+            releaseGlResources();
+            publishFailure(error);
+        }
+    }
+
+    /** Allocates the external camera texture and links the preview shader program. */
+    private void initializeGlResources() {
         GLES20.glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
         int[] textures = new int[1];
         GLES20.glGenTextures(1, textures, 0);
+        if (textures[0] == 0) {
+            throw new IllegalStateException("AR camera texture allocation failed");
+        }
         textureId = textures[0];
         GLES20.glBindTexture(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, textureId);
         GLES20.glTexParameteri(
@@ -105,23 +134,41 @@ final class ArCameraRenderer implements GLSurfaceView.Renderer {
         );
 
         int vertexShader = compileShader(GLES20.GL_VERTEX_SHADER, VERTEX_SHADER);
-        int fragmentShader = compileShader(GLES20.GL_FRAGMENT_SHADER, FRAGMENT_SHADER);
+        final int fragmentShader;
+        try {
+            fragmentShader = compileShader(GLES20.GL_FRAGMENT_SHADER, FRAGMENT_SHADER);
+        } catch (RuntimeException error) {
+            GLES20.glDeleteShader(vertexShader);
+            throw error;
+        }
         program = GLES20.glCreateProgram();
+        if (program == 0) {
+            GLES20.glDeleteShader(vertexShader);
+            GLES20.glDeleteShader(fragmentShader);
+            throw new IllegalStateException("AR camera shader program allocation failed");
+        }
         GLES20.glAttachShader(program, vertexShader);
         GLES20.glAttachShader(program, fragmentShader);
         GLES20.glLinkProgram(program);
         int[] linked = new int[1];
         GLES20.glGetProgramiv(program, GLES20.GL_LINK_STATUS, linked, 0);
-        if (linked[0] == 0) {
-            throw new IllegalStateException("AR camera shader link failed: " + GLES20.glGetProgramInfoLog(program));
-        }
         GLES20.glDeleteShader(vertexShader);
         GLES20.glDeleteShader(fragmentShader);
+        if (linked[0] == 0) {
+            String detail = GLES20.glGetProgramInfoLog(program);
+            GLES20.glDeleteProgram(program);
+            program = 0;
+            throw new IllegalStateException("AR camera shader link failed: " + detail);
+        }
         positionAttribute = GLES20.glGetAttribLocation(program, "aPosition");
         textureAttribute = GLES20.glGetAttribLocation(program, "aTexCoord");
         textureUniform = GLES20.glGetUniformLocation(program, "uTexture");
+        if (positionAttribute < 0 || textureAttribute < 0 || textureUniform < 0) {
+            throw new IllegalStateException("AR camera shader inputs are unavailable");
+        }
     }
 
+    /** Updates the viewport and invalidates texture coordinates after a surface resize. */
     @Override
     public void onSurfaceChanged(GL10 ignored, int width, int height) {
         viewportWidth = Math.max(1, width);
@@ -130,9 +177,13 @@ final class ArCameraRenderer implements GLSurfaceView.Renderer {
         GLES20.glViewport(0, 0, viewportWidth, viewportHeight);
     }
 
+    /** Advances ARCore once, draws its camera texture, and publishes matching pose data. */
     @Override
     public void onDrawFrame(GL10 ignored) {
         GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT | GLES20.GL_DEPTH_BUFFER_BIT);
+        if (failurePublished) {
+            return;
+        }
         Session activeSession = session;
         if (activeSession == null || textureId < 0 || viewportWidth <= 0 || viewportHeight <= 0) {
             return;
@@ -166,20 +217,15 @@ final class ArCameraRenderer implements GLSurfaceView.Renderer {
             }
 
             Camera camera = frame.getCamera();
-            float[] cameraToWorld = new float[16];
             camera.getDisplayOrientedPose().toMatrix(cameraToWorld, 0);
-            float[] projection = new float[16];
             camera.getProjectionMatrix(projection, 0, 0.1f, 100.0f);
             listener.onFrame(frame, camera, cameraToWorld, projection);
         } catch (Exception error) {
-            if (!failurePublished) {
-                failurePublished = true;
-                Log.e(TAG, "AR camera rendering stopped", error);
-                listener.onFailure(error);
-            }
+            publishFailure(error);
         }
     }
 
+    /** Draws ARCore's external texture using its display-corrected coordinates. */
     private void drawCamera() {
         GLES20.glDisable(GLES20.GL_DEPTH_TEST);
         GLES20.glDepthMask(false);
@@ -215,8 +261,12 @@ final class ArCameraRenderer implements GLSurfaceView.Renderer {
         GLES20.glEnable(GLES20.GL_DEPTH_TEST);
     }
 
+    /** Compiles one shader and deletes its handle before reporting compilation failure. */
     private static int compileShader(int type, String source) {
         int shader = GLES20.glCreateShader(type);
+        if (shader == 0) {
+            throw new IllegalStateException("AR camera shader allocation failed");
+        }
         GLES20.glShaderSource(shader, source);
         GLES20.glCompileShader(shader);
         int[] compiled = new int[1];
@@ -229,6 +279,29 @@ final class ArCameraRenderer implements GLSurfaceView.Renderer {
         return shader;
     }
 
+    /** Publishes only the first renderer failure to prevent repeated Activity shutdown. */
+    private void publishFailure(Exception error) {
+        if (failurePublished) {
+            return;
+        }
+        failurePublished = true;
+        Log.e(TAG, "AR camera rendering stopped", error);
+        listener.onFailure(error);
+    }
+
+    /** Deletes handles that belong to the current EGL context. */
+    private void releaseGlResources() {
+        if (textureId > 0) {
+            GLES20.glDeleteTextures(1, new int[] { textureId }, 0);
+            textureId = -1;
+        }
+        if (program != 0) {
+            GLES20.glDeleteProgram(program);
+            program = 0;
+        }
+    }
+
+    /** Copies coordinate arrays into native-order storage accepted by OpenGL ES. */
     private static FloatBuffer floatBuffer(float[] values) {
         FloatBuffer buffer = ByteBuffer
             .allocateDirect(values.length * 4)

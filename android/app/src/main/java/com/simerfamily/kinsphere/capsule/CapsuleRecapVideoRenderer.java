@@ -32,6 +32,7 @@ final class CapsuleRecapVideoRenderer {
     private static final long CODEC_TIMEOUT_MICROSECONDS = 10_000L;
     private static final long END_OF_STREAM_TIMEOUT_NANOSECONDS = 10_000_000_000L;
 
+    /** Writes one complete MP4 or deletes the partial output after any failure. */
     void render(List<File> images, File output) throws IOException {
         if (
             images == null ||
@@ -39,6 +40,9 @@ final class CapsuleRecapVideoRenderer {
             images.size() > CapsuleRecapContract.MAXIMUM_IMAGE_COUNT
         ) {
             throw new IOException("Add between one and 150 staged images to create a recap.");
+        }
+        if (output == null) {
+            throw new IOException("The capsule recap output file is unavailable.");
         }
 
         MediaCodec encoder = null;
@@ -97,6 +101,7 @@ final class CapsuleRecapVideoRenderer {
 
             long frameIndex = 0;
             for (File image : images) {
+                ensureRenderActive();
                 Bitmap decoded = BitmapFactory.decodeFile(image.getAbsolutePath());
                 if (decoded == null) {
                     throw new IOException("This capsule image could not be decoded.");
@@ -124,6 +129,7 @@ final class CapsuleRecapVideoRenderer {
 
                 textureRenderer.upload(frame);
                 for (int repeat = 0; repeat < CapsuleRecapContract.FRAMES_PER_IMAGE; repeat++) {
+                    ensureRenderActive();
                     textureRenderer.draw();
                     inputSurface.setPresentationTime(
                         frameIndex * 1_000_000_000L / CapsuleRecapContract.FRAME_RATE
@@ -209,6 +215,10 @@ final class CapsuleRecapVideoRenderer {
         }
     }
 
+    /**
+     * Moves available codec buffers into the muxer. Regular drains return as
+     * soon as output pauses; the final drain waits only within a fixed deadline.
+     */
     private static void drainEncoder(
         MediaCodec encoder,
         MediaMuxer muxer,
@@ -219,16 +229,14 @@ final class CapsuleRecapVideoRenderer {
         long deadline = System.nanoTime() + END_OF_STREAM_TIMEOUT_NANOSECONDS;
 
         while (true) {
-            int status = encoder.dequeueOutputBuffer(info, CODEC_TIMEOUT_MICROSECONDS);
-            if (status == MediaCodec.INFO_TRY_AGAIN_LATER) {
-                if (!endOfStream) {
-                    return;
-                }
-                if (System.nanoTime() >= deadline) {
-                    throw new IOException("The capsule recap encoder did not finish in time.");
-                }
-                continue;
+            ensureRenderActive();
+            // Apply one absolute deadline to the entire final drain. A broken
+            // codec may keep returning zero-byte or configuration buffers, so
+            // checking only dequeue timeouts would not actually bound this loop.
+            if (endOfStream) {
+                ensureBeforeDeadline(System.nanoTime(), deadline);
             }
+            int status = encoder.dequeueOutputBuffer(info, CODEC_TIMEOUT_MICROSECONDS);
             if (status == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED) {
                 if (state.started) {
                     throw new IOException("The capsule recap encoder changed format twice.");
@@ -239,6 +247,12 @@ final class CapsuleRecapVideoRenderer {
                 continue;
             }
             if (status < 0) {
+                // Negative statuses contain no encoded buffer. A regular drain
+                // can return until the next submitted frame; the final drain is
+                // allowed to poll only within its fixed completion deadline.
+                if (!endOfStream) {
+                    return;
+                }
                 continue;
             }
 
@@ -265,6 +279,17 @@ final class CapsuleRecapVideoRenderer {
         }
     }
 
+    /** Throws once the final codec drain reaches its absolute deadline. */
+    static void ensureBeforeDeadline(
+        long currentTimeNanos,
+        long deadlineNanos
+    ) throws IOException {
+        if (currentTimeNanos >= deadlineNanos) {
+            throw new IOException("The capsule recap encoder did not finish in time.");
+        }
+    }
+
+    /** Supplies a stable diagnostic suffix when an exception carries no message. */
     private static String safeDetail(Throwable error) {
         String message = error.getMessage();
         return message == null || message.trim().isEmpty()
@@ -272,6 +297,14 @@ final class CapsuleRecapVideoRenderer {
             : message;
     }
 
+    /** Stops lifecycle-cancelled renders instead of draining the full image list. */
+    private static void ensureRenderActive() throws IOException {
+        if (Thread.currentThread().isInterrupted()) {
+            throw new IOException("The capsule recap render was cancelled.");
+        }
+    }
+
+    /** Mutable track state shared across incremental codec drains. */
     private static final class MuxerState {
         int trackIndex = -1;
         boolean started;
@@ -287,6 +320,7 @@ final class CapsuleRecapVideoRenderer {
         private EGLContext context = EGL14.EGL_NO_CONTEXT;
         private EGLSurface eglSurface = EGL14.EGL_NO_SURFACE;
 
+        /** Takes ownership of the codec surface and initializes its recordable EGL context. */
         CodecInputSurface(Surface surface) throws IOException {
             if (surface == null) {
                 throw new IOException("The capsule recap encoder has no input surface.");
@@ -300,20 +334,26 @@ final class CapsuleRecapVideoRenderer {
             }
         }
 
+        /** Binds this encoder surface and context to the calling render thread. */
         void makeCurrent() throws IOException {
             if (!EGL14.eglMakeCurrent(display, eglSurface, eglSurface, context)) {
                 throw new IOException("The capsule recap drawing surface could not be activated.");
             }
         }
 
+        /** Submits the current GL frame to the encoder's input queue. */
         boolean swapBuffers() {
             return EGL14.eglSwapBuffers(display, eglSurface);
         }
 
-        void setPresentationTime(long nanoseconds) {
-            EGLExt.eglPresentationTimeANDROID(display, eglSurface, nanoseconds);
+        /** Associates a monotonic media timestamp with the next submitted frame. */
+        void setPresentationTime(long nanoseconds) throws IOException {
+            if (!EGLExt.eglPresentationTimeANDROID(display, eglSurface, nanoseconds)) {
+                throw new IOException("The capsule recap frame timestamp could not be submitted.");
+            }
         }
 
+        /** Releases EGL objects in dependency order, then releases the owned codec surface. */
         void release() {
             if (display != EGL14.EGL_NO_DISPLAY) {
                 EGL14.eglMakeCurrent(
@@ -340,6 +380,7 @@ final class CapsuleRecapVideoRenderer {
             eglSurface = EGL14.EGL_NO_SURFACE;
         }
 
+        /** Selects an ES2 config that Android permits MediaCodec to record. */
         private void setupEgl() throws IOException {
             display = EGL14.eglGetDisplay(EGL14.EGL_DEFAULT_DISPLAY);
             if (display == EGL14.EGL_NO_DISPLAY) {
@@ -392,6 +433,7 @@ final class CapsuleRecapVideoRenderer {
             checkEgl("create window surface");
         }
 
+        /** Converts the pending EGL error into an actionable render failure. */
         private static void checkEgl(String operation) throws IOException {
             int error = EGL14.eglGetError();
             if (error != EGL14.EGL_SUCCESS) {
@@ -403,6 +445,7 @@ final class CapsuleRecapVideoRenderer {
         }
     }
 
+    /** Owns the reusable GL program and texture that draw each prepared bitmap. */
     private static final class TextureRenderer {
 
         private static final float[] VERTICES = {
@@ -442,10 +485,22 @@ final class CapsuleRecapVideoRenderer {
         private int textureCoordinateHandle;
         private int samplerHandle;
 
+        /** Compiles the shaders and allocates a clamped 2D texture in the active context. */
         void initialize() throws IOException {
             int vertexShader = compileShader(GLES20.GL_VERTEX_SHADER, VERTEX_SHADER);
-            int fragmentShader = compileShader(GLES20.GL_FRAGMENT_SHADER, FRAGMENT_SHADER);
+            final int fragmentShader;
+            try {
+                fragmentShader = compileShader(GLES20.GL_FRAGMENT_SHADER, FRAGMENT_SHADER);
+            } catch (IOException | RuntimeException exception) {
+                GLES20.glDeleteShader(vertexShader);
+                throw exception;
+            }
             program = GLES20.glCreateProgram();
+            if (program == 0) {
+                GLES20.glDeleteShader(vertexShader);
+                GLES20.glDeleteShader(fragmentShader);
+                throw new IOException("The capsule recap shader program could not be allocated.");
+            }
             GLES20.glAttachShader(program, vertexShader);
             GLES20.glAttachShader(program, fragmentShader);
             GLES20.glLinkProgram(program);
@@ -469,6 +524,9 @@ final class CapsuleRecapVideoRenderer {
 
             int[] textures = new int[1];
             GLES20.glGenTextures(1, textures, 0);
+            if (textures[0] == 0) {
+                throw new IOException("The capsule recap texture could not be allocated.");
+            }
             texture = textures[0];
             GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, texture);
             GLES20.glTexParameteri(
@@ -494,12 +552,14 @@ final class CapsuleRecapVideoRenderer {
             checkGl("create texture");
         }
 
+        /** Replaces the reusable texture contents with the next fixed-size bitmap frame. */
         void upload(Bitmap frame) throws IOException {
             GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, texture);
             GLUtils.texImage2D(GLES20.GL_TEXTURE_2D, 0, frame, 0);
             checkGl("upload image");
         }
 
+        /** Draws the current texture once across the encoder's full output surface. */
         void draw() throws IOException {
             GLES20.glViewport(0, 0, CapsuleRecapContract.WIDTH, CapsuleRecapContract.HEIGHT);
             GLES20.glClearColor(0f, 0f, 0f, 1f);
@@ -535,6 +595,7 @@ final class CapsuleRecapVideoRenderer {
             checkGl("draw frame");
         }
 
+        /** Deletes this renderer's texture and program from the current GL context. */
         void release() {
             if (texture != 0) {
                 GLES20.glDeleteTextures(1, new int[] { texture }, 0);
@@ -546,8 +607,12 @@ final class CapsuleRecapVideoRenderer {
             }
         }
 
+        /** Compiles one GL shader and deletes the failed handle before throwing. */
         private static int compileShader(int type, String source) throws IOException {
             int shader = GLES20.glCreateShader(type);
+            if (shader == 0) {
+                throw new IOException("The capsule recap shader could not be allocated.");
+            }
             GLES20.glShaderSource(shader, source);
             GLES20.glCompileShader(shader);
             int[] compiled = new int[1];
@@ -560,6 +625,7 @@ final class CapsuleRecapVideoRenderer {
             return shader;
         }
 
+        /** Copies vertex data into native-order memory accepted by OpenGL ES. */
         private static FloatBuffer floatBuffer(float[] values) {
             ByteBuffer bytes = ByteBuffer.allocateDirect(values.length * 4);
             bytes.order(ByteOrder.nativeOrder());
@@ -569,6 +635,7 @@ final class CapsuleRecapVideoRenderer {
             return buffer;
         }
 
+        /** Converts the pending GL error into an actionable render failure. */
         private static void checkGl(String operation) throws IOException {
             int error = GLES20.glGetError();
             if (error != GLES20.GL_NO_ERROR) {

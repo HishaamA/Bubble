@@ -13,13 +13,16 @@ final class PanoramaCapturePolicy {
     static final float MAX_HOLD_ANGULAR_DRIFT_DEGREES = 3.0f;
     static final float MAX_HOLD_LINEAR_DRIFT_METERS = 0.03f;
 
+    /** Prevents construction of this pure threshold policy. */
     private PanoramaCapturePolicy() {}
 
+    /** Shows final-target navigation only for the last small group of uncaptured dots. */
     static boolean shouldShowCompletionChevron(int remainingTargetCount) {
         return remainingTargetCount > 0 &&
             remainingTargetCount <= COMPLETION_CHEVRON_TARGET_COUNT;
     }
 
+    /** Requires both instantaneous and smoothed camera velocities below safe limits. */
     static boolean isMotionSteady(
         float instantaneousAngularSpeed,
         float instantaneousLinearSpeed,
@@ -36,6 +39,7 @@ final class PanoramaCapturePolicy {
             smoothedLinearSpeed < MAX_SMOOTHED_LINEAR_SPEED_METERS;
     }
 
+    /** Rejects a hold window when the camera drifts too far from its starting pose. */
     static boolean isWithinHoldDrift(float angularDriftDegrees, float linearDriftMeters) {
         return Float.isFinite(angularDriftDegrees) &&
             Float.isFinite(linearDriftMeters) &&

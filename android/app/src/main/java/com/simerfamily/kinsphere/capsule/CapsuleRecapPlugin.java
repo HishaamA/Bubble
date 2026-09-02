@@ -1,12 +1,13 @@
 package com.simerfamily.kinsphere.capsule;
 
 import android.app.Activity;
+import android.app.PendingIntent;
 import android.content.ActivityNotFoundException;
 import android.content.ClipData;
-import android.content.ComponentName;
 import android.content.Context;
 import android.content.Intent;
 import android.net.Uri;
+import android.os.Build;
 import androidx.activity.result.ActivityResult;
 import androidx.core.content.FileProvider;
 import com.getcapacitor.JSArray;
@@ -22,6 +23,7 @@ import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
+import java.util.UUID;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.RejectedExecutionException;
@@ -33,14 +35,15 @@ public final class CapsuleRecapPlugin extends Plugin {
 
     private static final String SHARE_CALLBACK = "shareFinished";
 
-    private final ExecutorService workQueue = Executors.newSingleThreadExecutor((task) -> {
-        Thread thread = new Thread(task, "kinsphere-capsule-recap");
-        thread.setPriority(Thread.NORM_PRIORITY + 1);
-        return thread;
-    });
-    private final AtomicBoolean renderInProgress = new AtomicBoolean(false);
-    private final AtomicBoolean shareInProgress = new AtomicBoolean(false);
+    private final ExecutorService workQueue = Executors.newSingleThreadExecutor(
+        task -> new Thread(task, "bubble-capsule-recap")
+    );
+    private final AtomicBoolean renderInProgress = new AtomicBoolean();
+    private final AtomicBoolean shareInProgress = new AtomicBoolean();
+    private PendingIntent shareResultCallback;
+    private String activeShareToken;
 
+    /** Decodes and normalizes one bridge image into the private staging cache. */
     @PluginMethod
     public void stageImage(PluginCall call) {
         String dataUrl = call.getString("dataUrl");
@@ -51,17 +54,28 @@ public final class CapsuleRecapPlugin extends Plugin {
             );
             return;
         }
+        if (dataUrl.length() > CapsuleRecapContract.MAXIMUM_DATA_URL_CHARACTERS) {
+            call.reject(
+                "This image is too large to prepare safely on this device.",
+                "IMAGE_STAGING_FAILED"
+            );
+            return;
+        }
 
         try {
-            workQueue.submit(() -> {
+            workQueue.execute(() -> {
                 try {
-                    CapsuleRecapFiles files = files();
-                    File staged = new CapsuleRecapImageStager(files).stage(dataUrl);
+                    CapsuleRecapFiles recapFiles = recapFiles();
+                    File stagedImage = new CapsuleRecapImageStager(recapFiles).stage(dataUrl);
                     JSObject result = new JSObject();
-                    result.put("path", files.bridgeUri(staged));
+                    result.put("path", recapFiles.bridgeUri(stagedImage));
                     call.resolve(result);
-                } catch (IOException exception) {
-                    call.reject(exception.getMessage(), "IMAGE_STAGING_FAILED", exception);
+                } catch (IOException | RuntimeException exception) {
+                    call.reject(
+                        messageOrFallback(exception, "The capsule image could not be prepared."),
+                        "IMAGE_STAGING_FAILED",
+                        exception
+                    );
                 }
             });
         } catch (RejectedExecutionException exception) {
@@ -69,6 +83,7 @@ public final class CapsuleRecapPlugin extends Plugin {
         }
     }
 
+    /** Encodes ordered staged images into the fixed cross-platform recap format. */
     @PluginMethod
     public void renderRecap(PluginCall call) {
         final List<String> imagePaths;
@@ -101,18 +116,18 @@ public final class CapsuleRecapPlugin extends Plugin {
         }
 
         try {
-            workQueue.submit(() -> {
+            workQueue.execute(() -> {
                 List<File> stagedImages = new ArrayList<>();
                 try {
-                    CapsuleRecapFiles files = files();
+                    CapsuleRecapFiles recapFiles = recapFiles();
                     for (String imagePath : imagePaths) {
-                        stagedImages.add(files.validateStagedImage(imagePath));
+                        stagedImages.add(recapFiles.validateStagedImage(imagePath));
                     }
-                    File output = files.createRecapFile();
-                    new CapsuleRecapVideoRenderer().render(stagedImages, output);
+                    File recapVideo = recapFiles.createRecapFile();
+                    new CapsuleRecapVideoRenderer().render(stagedImages, recapVideo);
 
                     JSObject result = new JSObject();
-                    result.put("fileUri", files.bridgeUri(output));
+                    result.put("fileUri", recapFiles.bridgeUri(recapVideo));
                     result.put("width", CapsuleRecapContract.WIDTH);
                     result.put("height", CapsuleRecapContract.HEIGHT);
                     result.put("frameRate", CapsuleRecapContract.FRAME_RATE);
@@ -151,6 +166,7 @@ public final class CapsuleRecapPlugin extends Plugin {
         }
     }
 
+    /** Opens Android's chooser with read access to one validated recap video. */
     @PluginMethod
     public void shareRecap(PluginCall call) {
         String fileUri = call.getString("fileUri");
@@ -167,38 +183,69 @@ public final class CapsuleRecapPlugin extends Plugin {
         }
 
         Activity activity = getActivity();
-        if (activity == null) {
+        if (!activityAvailable(activity)) {
             shareInProgress.set(false);
             call.reject("The share sheet could not be presented.", "PRESENTATION_FAILED");
             return;
         }
 
         activity.runOnUiThread(() -> {
+            if (!activityAvailable(activity)) {
+                shareInProgress.set(false);
+                call.reject("The share sheet could not be presented.", "PRESENTATION_FAILED");
+                return;
+            }
             Uri grantedUri = null;
             try {
-                CapsuleRecapFiles files = files();
-                File recap = files.validateRecap(fileUri);
+                abandonShareSelection();
+                CapsuleRecapFiles recapFiles = recapFiles();
+                File recapVideo = recapFiles.validateRecap(fileUri);
                 Context context = getContext();
                 Uri contentUri = FileProvider.getUriForFile(
                     context,
                     context.getPackageName() + ".fileprovider",
-                    recap
+                    recapVideo
                 );
                 grantedUri = contentUri;
-                Intent send = new Intent(Intent.ACTION_SEND);
-                send.setType("video/mp4");
-                send.putExtra(Intent.EXTRA_STREAM, contentUri);
-                send.setClipData(ClipData.newUri(
+                Intent sendIntent = new Intent(Intent.ACTION_SEND);
+                sendIntent.setType("video/mp4");
+                sendIntent.putExtra(Intent.EXTRA_STREAM, contentUri);
+                sendIntent.setClipData(ClipData.newUri(
                     context.getContentResolver(),
                     "Bubble Capsule recap",
                     contentUri
                 ));
-                send.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+                sendIntent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
 
-                Intent chooser = Intent.createChooser(send, "Save or share family recap");
-                chooser.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
-                startActivityForResult(call, chooser, SHARE_CALLBACK);
+                String shareToken = UUID.randomUUID().toString();
+                Intent shareResultIntent = new Intent(
+                    context,
+                    CapsuleShareTargetReceiver.class
+                ).putExtra(CapsuleShareTargetReceiver.EXTRA_SHARE_TOKEN, shareToken);
+                int pendingIntentFlags = PendingIntent.FLAG_CANCEL_CURRENT |
+                    PendingIntent.FLAG_ONE_SHOT;
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                    // The chooser must append its result, so mutability is
+                    // required; the explicit non-exported receiver limits scope.
+                    pendingIntentFlags |= PendingIntent.FLAG_MUTABLE;
+                }
+                CapsuleShareTargetReceiver.prepareSelection(shareToken);
+                activeShareToken = shareToken;
+                shareResultCallback = PendingIntent.getBroadcast(
+                    context,
+                    shareToken.hashCode(),
+                    shareResultIntent,
+                    pendingIntentFlags
+                );
+                Intent chooserIntent = Intent.createChooser(
+                    sendIntent,
+                    "Save or share family recap",
+                    shareResultCallback.getIntentSender()
+                );
+                chooserIntent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+                startActivityForResult(call, chooserIntent, SHARE_CALLBACK);
             } catch (ActivityNotFoundException exception) {
+                abandonShareSelection();
                 revokeSharePermission(grantedUri);
                 shareInProgress.set(false);
                 call.reject(
@@ -207,6 +254,7 @@ public final class CapsuleRecapPlugin extends Plugin {
                     exception
                 );
             } catch (IOException | IllegalArgumentException exception) {
+                abandonShareSelection();
                 revokeSharePermission(grantedUri);
                 shareInProgress.set(false);
                 call.reject(
@@ -218,6 +266,7 @@ public final class CapsuleRecapPlugin extends Plugin {
                     exception
                 );
             } catch (RuntimeException exception) {
+                abandonShareSelection();
                 revokeSharePermission(grantedUri);
                 shareInProgress.set(false);
                 call.reject(
@@ -229,44 +278,45 @@ public final class CapsuleRecapPlugin extends Plugin {
         });
     }
 
+    /** Resolves one chooser result, revokes access, and consumes its temporary file. */
     @ActivityCallback
-    private void shareFinished(PluginCall call, ActivityResult activityResult) {
+    private void shareFinished(PluginCall call, ActivityResult ignoredResult) {
         shareInProgress.set(false);
+        // Chooser Activity result codes describe dismissal, not selection; the
+        // system's IntentSender callback is the authoritative completion signal.
+        CapsuleShareTargetReceiver.Selection selection = consumeShareSelection();
         if (call == null) {
             return;
         }
 
         String fileUri = call.getString("fileUri");
         try {
-            CapsuleRecapFiles files = files();
-            File recap = files.validateRecap(fileUri);
+            CapsuleRecapFiles recapFiles = recapFiles();
+            File recapVideo = recapFiles.validateRecap(fileUri);
             Uri contentUri = FileProvider.getUriForFile(
                 getContext(),
                 getContext().getPackageName() + ".fileprovider",
-                recap
+                recapVideo
             );
             getContext().revokeUriPermission(
                 contentUri,
                 Intent.FLAG_GRANT_READ_URI_PERMISSION
             );
             //noinspection ResultOfMethodCallIgnored -- sharing consumes the temporary recap.
-            recap.delete();
-        } catch (IOException | IllegalArgumentException ignored) {
+            recapVideo.delete();
+        } catch (IOException | RuntimeException ignored) {
             // The TypeScript finally path also retries constrained cleanup.
         }
 
         JSObject result = new JSObject();
-        result.put("completed", activityResult.getResultCode() == Activity.RESULT_OK);
-        Intent data = activityResult.getData();
-        if (data != null) {
-            ComponentName chosen = data.getParcelableExtra(Intent.EXTRA_CHOSEN_COMPONENT);
-            if (chosen != null) {
-                result.put("activityType", chosen.flattenToShortString());
-            }
+        result.put("completed", selection != null);
+        if (selection != null && selection.activityType != null) {
+            result.put("activityType", selection.activityType);
         }
         call.resolve(result);
     }
 
+    /** Removes only UUID-named artifacts from the two private recap caches. */
     @PluginMethod
     public void discardArtifacts(PluginCall call) {
         final List<String> fileUris;
@@ -289,18 +339,18 @@ public final class CapsuleRecapPlugin extends Plugin {
         }
 
         try {
-            workQueue.submit(() -> {
+            workQueue.execute(() -> {
                 int removedCount = 0;
                 try {
-                    CapsuleRecapFiles files = files();
+                    CapsuleRecapFiles recapFiles = recapFiles();
                     Set<String> uniqueUris = new HashSet<>(fileUris);
                     for (String fileUri : uniqueUris) {
-                        File artifact = files.removableArtifact(fileUri);
+                        File artifact = recapFiles.removableArtifact(fileUri);
                         if (artifact != null && artifact.isFile() && artifact.delete()) {
                             removedCount += 1;
                         }
                     }
-                } catch (IOException ignored) {
+                } catch (IOException | RuntimeException ignored) {
                     // Cleanup is best effort and can be retried safely.
                 }
                 JSObject result = new JSObject();
@@ -314,17 +364,21 @@ public final class CapsuleRecapPlugin extends Plugin {
         }
     }
 
+    /** Cancels background work and releases chooser state when Capacitor tears down. */
     @Override
     protected void handleOnDestroy() {
+        abandonShareSelection();
         workQueue.shutdownNow();
         renderInProgress.set(false);
         shareInProgress.set(false);
     }
 
-    private CapsuleRecapFiles files() throws IOException {
+    /** Creates a path validator rooted at this app's private cache directory. */
+    private CapsuleRecapFiles recapFiles() throws IOException {
         return new CapsuleRecapFiles(getContext().getCacheDir());
     }
 
+    /** Revokes a temporary URI grant without turning cleanup into a user failure. */
     private void revokeSharePermission(Uri contentUri) {
         if (contentUri == null) {
             return;
@@ -339,6 +393,34 @@ public final class CapsuleRecapPlugin extends Plugin {
         }
     }
 
+    /** Consumes the active chooser token and cancels its one-shot PendingIntent. */
+    private CapsuleShareTargetReceiver.Selection consumeShareSelection() {
+        String shareToken = activeShareToken;
+        activeShareToken = null;
+        if (shareResultCallback != null) {
+            shareResultCallback.cancel();
+            shareResultCallback = null;
+        }
+        return CapsuleShareTargetReceiver.consumeSelection(shareToken);
+    }
+
+    /** Clears chooser state after cancellation, failure, or plugin teardown. */
+    private void abandonShareSelection() {
+        String shareToken = activeShareToken;
+        activeShareToken = null;
+        if (shareResultCallback != null) {
+            shareResultCallback.cancel();
+            shareResultCallback = null;
+        }
+        CapsuleShareTargetReceiver.clearSelection(shareToken);
+    }
+
+    /** Rejects Activities that can no longer present Android UI safely. */
+    private static boolean activityAvailable(Activity activity) {
+        return activity != null && !activity.isFinishing() && !activity.isDestroyed();
+    }
+
+    /** Converts an untrusted bridge array only when every member is a string. */
     private static List<String> stringArray(JSArray values) {
         if (values == null) {
             throw new IllegalArgumentException("A string array is required.");
@@ -354,6 +436,7 @@ public final class CapsuleRecapPlugin extends Plugin {
         return result;
     }
 
+    /** Returns a non-empty operation detail, falling back when the exception has none. */
     private static String messageOrFallback(Exception exception, String fallback) {
         String message = exception.getMessage();
         return message == null || message.trim().isEmpty() ? fallback : message;

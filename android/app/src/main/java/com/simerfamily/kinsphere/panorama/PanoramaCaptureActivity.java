@@ -63,6 +63,7 @@ import java.util.TimeZone;
 import java.util.UUID;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.RejectedExecutionException;
 import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
@@ -77,10 +78,10 @@ import org.json.JSONObject;
  */
 public final class PanoramaCaptureActivity extends AppCompatActivity implements ArCameraRenderer.Listener {
 
-    public static final String EXTRA_OPTIONS_JSON = "panoramaCaptureOptions";
-    public static final String EXTRA_RESULT_JSON = "panoramaCaptureResult";
-    public static final String EXTRA_ERROR_CODE = "panoramaCaptureErrorCode";
-    public static final String EXTRA_ERROR_MESSAGE = "panoramaCaptureErrorMessage";
+    static final String EXTRA_OPTIONS_JSON = "panoramaCaptureOptions";
+    static final String EXTRA_RESULT_JSON = "panoramaCaptureResult";
+    static final String EXTRA_ERROR_CODE = "panoramaCaptureErrorCode";
+    static final String EXTRA_ERROR_MESSAGE = "panoramaCaptureErrorMessage";
 
     private static final String TAG = "PanoramaCapture";
     private static final int CAMERA_PERMISSION_REQUEST = 360;
@@ -123,7 +124,9 @@ public final class PanoramaCaptureActivity extends AppCompatActivity implements 
     private volatile boolean cameraReady;
     private volatile boolean captureInFlight;
     private volatile boolean finishingCapture;
+    private volatile int remainingTargetCount;
 
+    /** Establishes fullscreen capture or requests the one runtime permission it requires. */
     @Override
     protected void onCreate(@Nullable Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
@@ -141,18 +144,27 @@ public final class PanoramaCaptureActivity extends AppCompatActivity implements 
         initializeCapture();
     }
 
+    /** Creates the private capture session, deterministic targets, worker, and camera UI. */
     private void initializeCapture() {
         options = CaptureOptions.fromJson(getIntent().getStringExtra(EXTRA_OPTIONS_JSON));
         targets = createTargets(options.mode);
+        remainingTargetCount = targets.size();
         sessionId = UUID.randomUUID().toString();
         capturesRoot = new File(getCacheDir(), "panorama_captures");
         sessionDirectory = new File(capturesRoot, sessionId);
-        if ((!capturesRoot.exists() && !capturesRoot.mkdirs()) || !sessionDirectory.mkdirs()) {
+        if (
+            (!capturesRoot.exists() && !capturesRoot.mkdirs()) ||
+            !capturesRoot.isDirectory() ||
+            (!sessionDirectory.exists() && !sessionDirectory.mkdirs()) ||
+            !sessionDirectory.isDirectory()
+        ) {
             failCapture("CAPTURE_FAILED", "The panorama capture directory could not be created.");
             return;
         }
 
-        imageExecutor = Executors.newSingleThreadExecutor();
+        imageExecutor = Executors.newSingleThreadExecutor(
+            task -> new Thread(task, "bubble-panorama-image")
+        );
         captureSurfaceRotation = getWindowManager().getDefaultDisplay().getRotation();
         buildCaptureInterface();
         guideView.setTargets(targets);
@@ -162,6 +174,7 @@ public final class PanoramaCaptureActivity extends AppCompatActivity implements 
         getOnBackPressedDispatcher().addCallback(
             this,
             new OnBackPressedCallback(true) {
+                /** Routes back through session cleanup instead of abandoning partial frames. */
                 @Override
                 public void handleOnBackPressed() {
                     cancelCapture();
@@ -170,6 +183,7 @@ public final class PanoramaCaptureActivity extends AppCompatActivity implements 
         );
     }
 
+    /** Continues initialization only for the Activity's own successful camera request. */
     @Override
     public void onRequestPermissionsResult(
         int requestCode,
@@ -187,6 +201,7 @@ public final class PanoramaCaptureActivity extends AppCompatActivity implements 
         failCapture("PERMISSION_DENIED", "Camera permission is required for panorama capture.");
     }
 
+    /** Keeps the camera edge-to-edge and awake while preserving transient system-bar access. */
     private void configureFullscreenWindow() {
         WindowCompat.setDecorFitsSystemWindows(getWindow(), false);
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
@@ -198,6 +213,7 @@ public final class PanoramaCaptureActivity extends AppCompatActivity implements 
         controller.hide(WindowInsetsCompat.Type.systemBars());
     }
 
+    /** Builds the camera surface, guide overlay, progress header, and safe-area layout. */
     private void buildCaptureInterface() {
         float density = getResources().getDisplayMetrics().density;
         FrameLayout root = new FrameLayout(this);
@@ -315,9 +331,18 @@ public final class PanoramaCaptureActivity extends AppCompatActivity implements 
                 Insets safeInsets = windowInsets.getInsets(
                     WindowInsetsCompat.Type.displayCutout() | WindowInsetsCompat.Type.systemBars()
                 );
-                headerParams.leftMargin = Math.max(Math.round(14.0f * density), safeInsets.left + Math.round(14.0f * density));
-                headerParams.rightMargin = Math.max(Math.round(14.0f * density), safeInsets.right + Math.round(14.0f * density));
-                headerParams.topMargin = Math.max(Math.round(12.0f * density), safeInsets.top + Math.round(8.0f * density));
+                headerParams.leftMargin = Math.max(
+                    Math.round(14.0f * density),
+                    safeInsets.left + Math.round(14.0f * density)
+                );
+                headerParams.rightMargin = Math.max(
+                    Math.round(14.0f * density),
+                    safeInsets.right + Math.round(14.0f * density)
+                );
+                headerParams.topMargin = Math.max(
+                    Math.round(12.0f * density),
+                    safeInsets.top + Math.round(8.0f * density)
+                );
                 instructionParams.bottomMargin = Math.max(
                     Math.round(22.0f * density),
                     safeInsets.bottom + Math.round(20.0f * density)
@@ -332,6 +357,7 @@ public final class PanoramaCaptureActivity extends AppCompatActivity implements 
         ViewCompat.requestApplyInsets(root);
     }
 
+    /** Returns full-parent layout parameters shared by the preview and guide layers. */
     private static FrameLayout.LayoutParams matchParentLayout() {
         return new FrameLayout.LayoutParams(
             FrameLayout.LayoutParams.MATCH_PARENT,
@@ -339,6 +365,7 @@ public final class PanoramaCaptureActivity extends AppCompatActivity implements 
         );
     }
 
+    /** Creates a compact text-only action for the capture header. */
     private AppCompatButton createHeaderButton(String text) {
         AppCompatButton button = new AppCompatButton(this);
         button.setText(text);
@@ -351,6 +378,7 @@ public final class PanoramaCaptureActivity extends AppCompatActivity implements 
         return button;
     }
 
+    /** Resumes one ARCore session before restarting its dependent GL surface. */
     @Override
     protected void onResume() {
         super.onResume();
@@ -372,13 +400,16 @@ public final class PanoramaCaptureActivity extends AppCompatActivity implements 
         }
     }
 
+    /** Stops the GL thread before pausing ARCore and resetting cross-thread motion state. */
     @Override
     protected void onPause() {
-        cameraReady = false;
-        resetSteadiness();
         if (surfaceView != null) {
+            // GLSurfaceView.onPause waits for its renderer thread, so mutable
+            // motion state is reset only after that thread has stopped using it.
             surfaceView.onPause();
         }
+        cameraReady = false;
+        resetSteadiness();
         if (arSession != null && sessionResumed) {
             arSession.pause();
             sessionResumed = false;
@@ -386,6 +417,7 @@ public final class PanoramaCaptureActivity extends AppCompatActivity implements 
         super.onPause();
     }
 
+    /** Installs if needed, configures once, and retains the Activity-owned ARCore session. */
     private boolean ensureArSession() {
         if (arSession != null) {
             return true;
@@ -426,6 +458,7 @@ public final class PanoramaCaptureActivity extends AppCompatActivity implements 
         return false;
     }
 
+    /** Selects the highest-resolution supported rear CPU-image stream for stitching. */
     private void selectBestCameraConfiguration(Session session) {
         CameraConfigFilter filter = new CameraConfigFilter(session);
         filter.setFacingDirection(CameraConfig.FacingDirection.BACK);
@@ -446,6 +479,7 @@ public final class PanoramaCaptureActivity extends AppCompatActivity implements 
         }
     }
 
+    /** Derives the rotation needed to store the sensor image upright in the current display. */
     private void updateImageRotation(Session session) {
         try {
             CameraManager manager = (CameraManager) getSystemService(CAMERA_SERVICE);
@@ -464,6 +498,7 @@ public final class PanoramaCaptureActivity extends AppCompatActivity implements 
         }
     }
 
+    /** Processes synchronized preview, pose, tracking, and capture guidance on the GL thread. */
     @Override
     public void onFrame(Frame frame, Camera camera, float[] cameraToWorld, float[] projection) {
         if (finishingCapture) {
@@ -477,12 +512,13 @@ public final class PanoramaCaptureActivity extends AppCompatActivity implements 
         }
 
         cameraReady = true;
-        PanoramaPose pose = PanoramaPose.fromCameraTransform(cameraToWorld, frame.getTimestamp());
+        PanoramaPose pose = PanoramaPose.fromCameraTransform(cameraToWorld);
         currentPose = pose;
         boolean steady = updateMotion(pose, frame.getTimestamp());
         updateGuidance(frame, camera, pose, projection, steady);
     }
 
+    /** Converts a terminal renderer failure into one Activity result on the UI thread. */
     @Override
     public void onFailure(Exception error) {
         runOnUiThread(() -> {
@@ -492,6 +528,7 @@ public final class PanoramaCaptureActivity extends AppCompatActivity implements 
         });
     }
 
+    /** Updates instantaneous and exponentially smoothed six-degree motion estimates. */
     private boolean updateMotion(PanoramaPose pose, long timestampNanos) {
         PanoramaPose previous = previousPose;
         long previousTimestamp = previousFrameTimestampNanos;
@@ -535,6 +572,7 @@ public final class PanoramaCaptureActivity extends AppCompatActivity implements 
         );
     }
 
+    /** Chooses the nearest target, advances its steady hold, and captures when eligible. */
     private void updateGuidance(Frame frame, Camera camera, PanoramaPose pose, float[] projection, boolean steady) {
         PanoramaTarget activeTarget = findNearestUncapturedTarget(pose);
         if (activeTarget == null) {
@@ -579,7 +617,7 @@ public final class PanoramaCaptureActivity extends AppCompatActivity implements 
         if (captureInFlight) {
             instruction = "Capturing…";
         } else if (!aligned) {
-            instruction = PanoramaCapturePolicy.shouldShowCompletionChevron(remainingTargetCount())
+            instruction = PanoramaCapturePolicy.shouldShowCompletionChevron(remainingTargetCount)
                 ? "Follow the arrow to a remaining dot"
                 : "Move a dot into the circle";
         } else if (holdProgress > 0.0f) {
@@ -599,6 +637,7 @@ public final class PanoramaCaptureActivity extends AppCompatActivity implements 
         );
     }
 
+    /** Maps ARCore tracking loss to throttled guidance without accepting a frame. */
     private void publishTrackingState(Camera camera, float[] projection) {
         String message;
         TrackingFailureReason reason = camera.getTrackingFailureReason();
@@ -620,11 +659,15 @@ public final class PanoramaCaptureActivity extends AppCompatActivity implements 
         float[] rotationCopy = (pose == null ? IDENTITY_ROTATION : pose.rotation).clone();
         float[] projectionCopy = projection.clone();
         runOnUiThread(() -> {
+            if (finishingCapture) {
+                return;
+            }
             guideView.updatePose(rotationCopy, projectionCopy, -1, 0.0f, false, false, false);
             instructionLabel.setText(message);
         });
     }
 
+    /** Copies GL-thread pose values before publishing throttled guide state on the UI thread. */
     private void publishGuide(
         PanoramaPose pose,
         float[] projection,
@@ -659,6 +702,7 @@ public final class PanoramaCaptureActivity extends AppCompatActivity implements 
         });
     }
 
+    /** Detaches one synchronized CPU image and queues encoding without blocking GL. */
     private void captureFrame(Frame frame, Camera camera, PanoramaTarget target, PanoramaPose pose) {
         if (captureInFlight || target.captured || finishingCapture) {
             return;
@@ -668,9 +712,13 @@ public final class PanoramaCaptureActivity extends AppCompatActivity implements 
         try (Image image = frame.acquireCameraImage()) {
             capturedImage = ArCapturedImage.copyOf(image);
         } catch (NotYetAvailableException unavailable) {
+            // ARCore commonly needs another CPU-image cycle. Restarting the
+            // hold avoids retrying acquisition on every rendered frame.
+            resetHoldWindow();
             return;
         } catch (Exception error) {
             Log.e(TAG, "Unable to copy synchronized AR camera frame", error);
+            resetHoldWindow();
             publishCaptureRetry("Couldn't read that camera frame. Keep holding still.");
             return;
         }
@@ -691,9 +739,15 @@ public final class PanoramaCaptureActivity extends AppCompatActivity implements 
 
         captureInFlight = true;
         resetHoldWindow();
-        imageExecutor.execute(() -> encodeCapturedFrame(snapshot));
+        try {
+            imageExecutor.execute(() -> encodeCapturedFrame(snapshot));
+        } catch (RejectedExecutionException error) {
+            captureInFlight = false;
+            Log.w(TAG, "Image encoding was rejected during activity shutdown", error);
+        }
     }
 
+    /** Encodes one detached frame and posts either atomic acceptance or a retry to UI. */
     private void encodeCapturedFrame(CaptureSnapshot snapshot) {
         File output = new File(
             sessionDirectory,
@@ -707,8 +761,8 @@ public final class PanoramaCaptureActivity extends AppCompatActivity implements 
                 options.jpegQualityPercent
             );
             JSONObject metadata = buildFrameMetadata(snapshot, encoded);
-            runOnUiThread(() -> acceptCapturedFrame(snapshot.target, metadata));
-        } catch (Exception error) {
+            runOnUiThread(() -> acceptCapturedFrame(snapshot.target, metadata, encoded.file));
+        } catch (Exception | OutOfMemoryError error) {
             Log.e(TAG, "Unable to encode synchronized AR panorama frame", error);
             deleteFileQuietly(output);
             runOnUiThread(() -> recoverFromFrameFailure(
@@ -717,7 +771,11 @@ public final class PanoramaCaptureActivity extends AppCompatActivity implements 
         }
     }
 
-    private JSONObject buildFrameMetadata(CaptureSnapshot snapshot, ArCapturedImage.EncodedFrame encoded) throws JSONException {
+    /** Serializes one accepted frame with its pose, target, calibrated intrinsics, and provenance. */
+    private JSONObject buildFrameMetadata(
+        CaptureSnapshot snapshot,
+        ArCapturedImage.EncodedFrame encoded
+    ) throws JSONException {
         double[] uprightIntrinsics = adjustedIntrinsics(
             snapshot.focalLength,
             snapshot.principalPoint,
@@ -755,7 +813,10 @@ public final class PanoramaCaptureActivity extends AppCompatActivity implements 
         frame.put("transform", floatArrayToJson(pose.transform));
         frame.put("intrinsics", doubleArrayToJson(uprightIntrinsics));
         frame.put("intrinsicsSource", "arcoreImageIntrinsics+uprightRotation");
-        frame.put("horizontalFovDegrees", fieldOfViewDegrees(uprightIntrinsics[0], uprightIntrinsics[2], encoded.width));
+        frame.put(
+            "horizontalFovDegrees",
+            fieldOfViewDegrees(uprightIntrinsics[0], uprightIntrinsics[2], encoded.width)
+        );
         frame.put("verticalFovDegrees", fieldOfViewDegrees(uprightIntrinsics[4], uprightIntrinsics[5], encoded.height));
         frame.put("imageOrientation", "up");
         frame.put("rotationDegrees", 0);
@@ -770,6 +831,7 @@ public final class PanoramaCaptureActivity extends AppCompatActivity implements 
         return frame;
     }
 
+    /** Rotates and rescales ARCore intrinsics to match the saved upright JPEG. */
     static double[] adjustedIntrinsics(
         float[] focalLength,
         float[] principalPoint,
@@ -780,8 +842,35 @@ public final class PanoramaCaptureActivity extends AppCompatActivity implements 
         int outputWidth,
         int outputHeight
     ) {
-        double referenceWidth = Math.max(1, intrinsicDimensions[0]);
-        double referenceHeight = Math.max(1, intrinsicDimensions[1]);
+        if (
+            focalLength == null ||
+            focalLength.length < 2 ||
+            principalPoint == null ||
+            principalPoint.length < 2 ||
+            intrinsicDimensions == null ||
+            intrinsicDimensions.length < 2 ||
+            !Float.isFinite(focalLength[0]) ||
+            !Float.isFinite(focalLength[1]) ||
+            !Float.isFinite(principalPoint[0]) ||
+            !Float.isFinite(principalPoint[1]) ||
+            focalLength[0] <= 0.0f ||
+            focalLength[1] <= 0.0f ||
+            intrinsicDimensions[0] <= 0 ||
+            intrinsicDimensions[1] <= 0 ||
+            sourceWidth <= 0 ||
+            sourceHeight <= 0 ||
+            outputWidth <= 0 ||
+            outputHeight <= 0
+        ) {
+            throw new IllegalArgumentException("Camera intrinsics and image dimensions must be valid.");
+        }
+        int normalizedRotation = ((rotationDegrees % 360) + 360) % 360;
+        if (normalizedRotation % 90 != 0) {
+            throw new IllegalArgumentException("Image rotation must be a multiple of 90 degrees.");
+        }
+
+        double referenceWidth = intrinsicDimensions[0];
+        double referenceHeight = intrinsicDimensions[1];
         double rawFx = focalLength[0] * sourceWidth / referenceWidth;
         double rawFy = focalLength[1] * sourceHeight / referenceHeight;
         double rawCx = principalPoint[0] * sourceWidth / referenceWidth;
@@ -793,21 +882,21 @@ public final class PanoramaCaptureActivity extends AppCompatActivity implements 
         int uprightWidth;
         int uprightHeight;
 
-        if (rotationDegrees == 90) {
+        if (normalizedRotation == 90) {
             fx = rawFy;
             fy = rawFx;
             cx = sourceHeight - 1.0 - rawCy;
             cy = rawCx;
             uprightWidth = sourceHeight;
             uprightHeight = sourceWidth;
-        } else if (rotationDegrees == 180) {
+        } else if (normalizedRotation == 180) {
             fx = rawFx;
             fy = rawFy;
             cx = sourceWidth - 1.0 - rawCx;
             cy = sourceHeight - 1.0 - rawCy;
             uprightWidth = sourceWidth;
             uprightHeight = sourceHeight;
-        } else if (rotationDegrees == 270) {
+        } else if (normalizedRotation == 270) {
             fx = rawFy;
             fy = rawFx;
             cx = rawCy;
@@ -823,8 +912,8 @@ public final class PanoramaCaptureActivity extends AppCompatActivity implements 
             uprightHeight = sourceHeight;
         }
 
-        double outputScaleX = outputWidth / (double) Math.max(1, uprightWidth);
-        double outputScaleY = outputHeight / (double) Math.max(1, uprightHeight);
+        double outputScaleX = outputWidth / (double) uprightWidth;
+        double outputScaleY = outputHeight / (double) uprightHeight;
         return new double[] {
             fx * outputScaleX,
             0.0,
@@ -838,15 +927,26 @@ public final class PanoramaCaptureActivity extends AppCompatActivity implements 
         };
     }
 
-    private void acceptCapturedFrame(PanoramaTarget target, JSONObject metadata) {
+    /** Commits one encoded frame on UI and releases the cross-thread capture barrier last. */
+    private void acceptCapturedFrame(
+        PanoramaTarget target,
+        JSONObject metadata,
+        File encodedImage
+    ) {
         if (finishingCapture || isFinishing()) {
+            // Cancellation may win the race after encoding but before the UI
+            // thread accepts the result; never leave that late frame behind.
+            deleteFileQuietly(encodedImage);
             return;
         }
         target.captured = true;
         frames.add(metadata);
-        captureInFlight = false;
+        remainingTargetCount = targets.size() - frames.size();
         lastCaptureCompletedAtMillis = SystemClock.uptimeMillis();
         alignedTargetIndex = -1;
+        // Publish completion last; the GL thread treats this volatile flag as
+        // the handoff barrier for the accepted frame and its cooldown state.
+        captureInFlight = false;
         guideView.pulseCapture();
         guideView.setContentDescription(
             String.format(Locale.US, "Guided panorama capture, %d of %d frames captured", frames.size(), targets.size())
@@ -858,23 +958,27 @@ public final class PanoramaCaptureActivity extends AppCompatActivity implements 
         }
     }
 
+    /** Shows a transient CPU-image retry without changing accepted frame state. */
     private void publishCaptureRetry(String message) {
         runOnUiThread(() -> {
-            resetHoldWindow();
-            instructionLabel.setText(message);
+            if (!finishingCapture) {
+                instructionLabel.setText(message);
+            }
         });
     }
 
+    /** Resets target hold state after encoding fails so the same direction can be retried. */
     private void recoverFromFrameFailure(String message) {
         if (finishingCapture || isFinishing()) {
             return;
         }
-        captureInFlight = false;
         alignedTargetIndex = -1;
         resetHoldWindow();
         instructionLabel.setText(message);
+        captureInFlight = false;
     }
 
+    /** Keeps the textual and native progress indicators synchronized with accepted frames. */
     private void updateProgressInterface() {
         if (progressLabel == null) {
             return;
@@ -884,11 +988,14 @@ public final class PanoramaCaptureActivity extends AppCompatActivity implements 
         progressBar.setProgress(frames.size(), true);
     }
 
+    /** Finds the uncaptured direction with the smallest camera-angle delta. */
     private PanoramaTarget findNearestUncapturedTarget(PanoramaPose pose) {
         PanoramaTarget nearest = null;
         float nearestDistance = Float.POSITIVE_INFINITY;
         for (PanoramaTarget target : targets) {
-            if (target.captured) continue;
+            if (target.captured) {
+                continue;
+            }
             float distance = pose.angularDistanceDegrees(target);
             if (distance < nearestDistance) {
                 nearest = target;
@@ -898,24 +1005,19 @@ public final class PanoramaCaptureActivity extends AppCompatActivity implements 
         return nearest;
     }
 
-    private int remainingTargetCount() {
-        int remaining = 0;
-        for (PanoramaTarget target : targets) {
-            if (!target.captured) remaining += 1;
-        }
-        return remaining;
-    }
-
+    /** Begins a steady-hold window from an immutable pose and ARCore timestamp. */
     private void startHoldWindow(PanoramaPose pose, long timestampNanos) {
         holdStartPose = pose;
         alignedSinceNanos = timestampNanos;
     }
 
+    /** Clears only the active target's hold progress. */
     private void resetHoldWindow() {
         holdStartPose = null;
         alignedSinceNanos = -1L;
     }
 
+    /** Resets motion history whenever tracking or rendering continuity is lost. */
     private void resetSteadiness() {
         previousPose = null;
         previousFrameTimestampNanos = 0L;
@@ -925,6 +1027,7 @@ public final class PanoramaCaptureActivity extends AppCompatActivity implements 
         alignedTargetIndex = -1;
     }
 
+    /** Atomically writes final metadata and returns the completed session to Capacitor. */
     private void finishCaptureSuccessfully() {
         if (finishingCapture || frames.size() != targets.size() || captureInFlight) {
             return;
@@ -944,6 +1047,7 @@ public final class PanoramaCaptureActivity extends AppCompatActivity implements 
         }
     }
 
+    /** Builds the bridge result from accepted frames without reading in-flight work. */
     private JSONObject buildResultJson() throws JSONException {
         JSONObject result = new JSONObject();
         result.put("sessionId", sessionId);
@@ -953,13 +1057,18 @@ public final class PanoramaCaptureActivity extends AppCompatActivity implements 
         result.put("capturedCount", frames.size());
         result.put("requiresStitching", true);
         JSONArray frameArray = new JSONArray();
-        for (JSONObject frame : frames) frameArray.put(frame);
+        for (JSONObject frame : frames) {
+            frameArray.put(frame);
+        }
         result.put("frames", frameArray);
         return result;
     }
 
+    /** Persists a best-effort recovery manifest after each session state change. */
     private void writeMetadataSnapshot(String state) {
-        if (sessionDirectory == null || !sessionDirectory.exists()) return;
+        if (sessionDirectory == null || !sessionDirectory.exists()) {
+            return;
+        }
         try {
             writeMetadata(buildResultJson(), state);
         } catch (Exception error) {
@@ -967,6 +1076,7 @@ public final class PanoramaCaptureActivity extends AppCompatActivity implements 
         }
     }
 
+    /** Writes a complete manifest through a temporary file before replacing metadata.json. */
     private void writeMetadata(JSONObject result, String state) throws IOException, JSONException {
         JSONObject manifest = new JSONObject(result.toString());
         manifest.put("state", state);
@@ -1004,8 +1114,11 @@ public final class PanoramaCaptureActivity extends AppCompatActivity implements 
         }
     }
 
+    /** Returns an explicit cancellation result after deleting the partial private session. */
     private void cancelCapture() {
-        if (finishingCapture) return;
+        if (finishingCapture) {
+            return;
+        }
         finishingCapture = true;
         cleanupCancelledSession();
         Intent data = new Intent();
@@ -1015,8 +1128,11 @@ public final class PanoramaCaptureActivity extends AppCompatActivity implements 
         finish();
     }
 
+    /** Returns one terminal native error after deleting the unusable partial session. */
     private void failCapture(String code, String message) {
-        if (finishingCapture && isFinishing()) return;
+        if (finishingCapture && isFinishing()) {
+            return;
+        }
         finishingCapture = true;
         cleanupCancelledSession();
         Intent data = new Intent();
@@ -1026,22 +1142,32 @@ public final class PanoramaCaptureActivity extends AppCompatActivity implements 
         finish();
     }
 
+    /** Deletes only the session directory directly owned by this Activity's cache root. */
     private void cleanupCancelledSession() {
         if (sessionDirectory != null && capturesRoot != null && capturesRoot.equals(sessionDirectory.getParentFile())) {
             deleteRecursively(sessionDirectory);
         }
     }
 
+    /** Closes ARCore and interrupts queued encodes after result state is settled. */
     @Override
     protected void onDestroy() {
+        if (!finishingCapture) {
+            // An external finish cannot return a usable result, so retain no
+            // partial frames that JavaScript would have no URI to discard.
+            cleanupCancelledSession();
+        }
         if (arSession != null) {
             arSession.close();
             arSession = null;
         }
-        if (imageExecutor != null) imageExecutor.shutdown();
+        if (imageExecutor != null) {
+            imageExecutor.shutdownNow();
+        }
         super.onDestroy();
     }
 
+    /** Builds the ordered quick, standard, or detailed spherical capture grid. */
     static List<PanoramaTarget> createTargets(String mode) {
         ArrayList<PanoramaTarget> targets = new ArrayList<>();
         if ("quick".equals(mode)) {
@@ -1070,16 +1196,25 @@ public final class PanoramaCaptureActivity extends AppCompatActivity implements 
         return targets;
     }
 
-    private static void addRing(List<PanoramaTarget> targets, double pitch, int count, double firstYaw, double yawStep) {
+    /** Appends one evenly spaced ring while preserving global target order. */
+    private static void addRing(
+        List<PanoramaTarget> targets,
+        double pitch,
+        int count,
+        double firstYaw,
+        double yawStep
+    ) {
         for (int index = 0; index < count; index++) {
             addTarget(targets, firstYaw + index * yawStep, pitch);
         }
     }
 
+    /** Appends one normalized target with the next stable metadata index. */
     private static void addTarget(List<PanoramaTarget> targets, double yaw, double pitch) {
         targets.add(new PanoramaTarget(targets.size(), yaw, pitch));
     }
 
+    /** Serializes a three-component vector with named axes for the web stitcher. */
     private static JSONObject vectorJson(float[] vector) throws JSONException {
         JSONObject json = new JSONObject();
         json.put("x", vector[0]);
@@ -1088,74 +1223,102 @@ public final class PanoramaCaptureActivity extends AppCompatActivity implements 
         return json;
     }
 
+    /** Serializes a normalized quaternion as named vector components plus {@code w}. */
     private static JSONObject quaternionJson(float[] quaternion) throws JSONException {
         JSONObject json = vectorJson(quaternion);
         json.put("w", quaternion[3]);
         return json;
     }
 
+    /** Serializes one float matrix without changing element order. */
     private static JSONArray floatArrayToJson(float[] values) throws JSONException {
         JSONArray array = new JSONArray();
-        for (float value : values) array.put(value);
+        for (float value : values) {
+            array.put(value);
+        }
         return array;
     }
 
+    /** Serializes one double matrix without changing element order. */
     private static JSONArray doubleArrayToJson(double[] values) throws JSONException {
         JSONArray array = new JSONArray();
-        for (double value : values) array.put(value);
+        for (double value : values) {
+            array.put(value);
+        }
         return array;
     }
 
+    /** Computes asymmetric camera field of view from focal length and principal point. */
     private static double fieldOfViewDegrees(double focalLength, double principalPoint, int pixelCount) {
-        if (focalLength <= 0.0 || pixelCount <= 1) return 0.0;
+        if (focalLength <= 0.0 || pixelCount <= 1) {
+            return 0.0;
+        }
         double negativeExtent = Math.max(0.0, principalPoint);
         double positiveExtent = Math.max(0.0, pixelCount - 1.0 - principalPoint);
         return Math.toDegrees(Math.atan(negativeExtent / focalLength) + Math.atan(positiveExtent / focalLength));
     }
 
+    /** Maps Android display rotation constants to clockwise image degrees. */
     private static int surfaceRotationDegrees(int rotation) {
-        if (rotation == Surface.ROTATION_90) return 90;
-        if (rotation == Surface.ROTATION_180) return 180;
-        if (rotation == Surface.ROTATION_270) return 270;
-        return 0;
+        return switch (rotation) {
+            case Surface.ROTATION_90 -> 90;
+            case Surface.ROTATION_180 -> 180;
+            case Surface.ROTATION_270 -> 270;
+            default -> 0;
+        };
     }
 
+    /** Returns the user-facing label for a validated capture density. */
     private static String modeDisplayName(String mode) {
-        if ("quick".equals(mode)) return "Quick";
-        if ("detailed".equals(mode)) return "Detailed";
-        return "Standard";
+        return switch (mode) {
+            case "quick" -> "Quick";
+            case "detailed" -> "Detailed";
+            default -> "Standard";
+        };
     }
 
+    /** Formats capture metadata in stable UTC ISO-8601 form. */
     private static String iso8601(long timestampMillis) {
         SimpleDateFormat formatter = new SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", Locale.US);
         formatter.setTimeZone(TimeZone.getTimeZone("UTC"));
         return formatter.format(new Date(timestampMillis));
     }
 
+    /** Copies a metadata file in bounded chunks when atomic rename is unavailable. */
     private static void copyFile(File source, File destination) throws IOException {
         byte[] buffer = new byte[32 * 1024];
-        try (FileInputStream input = new FileInputStream(source); FileOutputStream output = new FileOutputStream(destination)) {
+        try (
+            FileInputStream input = new FileInputStream(source);
+            FileOutputStream output = new FileOutputStream(destination)
+        ) {
             int read;
-            while ((read = input.read(buffer)) != -1) output.write(buffer, 0, read);
+            while ((read = input.read(buffer)) != -1) {
+                output.write(buffer, 0, read);
+            }
         }
     }
 
+    /** Removes a private session tree after its root has already been validated. */
     private static void deleteRecursively(File file) {
         if (file.isDirectory()) {
             File[] children = file.listFiles();
             if (children != null) {
-                for (File child : children) deleteRecursively(child);
+                for (File child : children) {
+                    deleteRecursively(child);
+                }
             }
         }
         deleteFileQuietly(file);
     }
 
+    /** Logs but does not replace the terminal result when cache cleanup fails. */
     private static void deleteFileQuietly(File file) {
         if (file != null && file.exists() && !file.delete()) {
             Log.w(TAG, "Unable to delete " + file.getAbsolutePath());
         }
     }
 
+    /** Immutable handoff from the GL thread to the single image-encoding worker. */
     private static final class CaptureSnapshot {
         final int frameIndex;
         final PanoramaTarget target;
@@ -1168,6 +1331,7 @@ public final class PanoramaCaptureActivity extends AppCompatActivity implements 
         final long capturedAtMillis;
         final int rotationDegrees;
 
+        /** Defensively copies mutable ARCore calibration arrays before leaving the GL frame. */
         CaptureSnapshot(
             int frameIndex,
             PanoramaTarget target,
@@ -1193,7 +1357,8 @@ public final class PanoramaCaptureActivity extends AppCompatActivity implements 
         }
     }
 
-    private static final class CaptureOptions {
+    /** Validated options accepted from the JavaScript bridge. */
+    static final class CaptureOptions {
         final String mode;
         final int outputWidth;
         final double jpegQuality;
@@ -1201,7 +1366,14 @@ public final class PanoramaCaptureActivity extends AppCompatActivity implements 
         final float alignmentDegrees;
         final long steadyDurationMillis;
 
-        private CaptureOptions(String mode, int outputWidth, double jpegQuality, float alignmentDegrees, long steadyDurationMillis) {
+        /** Stores the normalized values used throughout one native capture session. */
+        private CaptureOptions(
+            String mode,
+            int outputWidth,
+            double jpegQuality,
+            float alignmentDegrees,
+            long steadyDurationMillis
+        ) {
             this.mode = mode;
             this.outputWidth = outputWidth;
             this.jpegQuality = jpegQuality;
@@ -1210,6 +1382,7 @@ public final class PanoramaCaptureActivity extends AppCompatActivity implements 
             this.steadyDurationMillis = steadyDurationMillis;
         }
 
+        /** Parses untrusted bridge options and clamps every numeric value to native limits. */
         static CaptureOptions fromJson(@Nullable String json) {
             JSONObject object;
             try {
@@ -1217,21 +1390,48 @@ public final class PanoramaCaptureActivity extends AppCompatActivity implements 
             } catch (JSONException ignored) {
                 object = new JSONObject();
             }
-            String mode = object.optString("mode", "standard").toLowerCase(Locale.US);
-            if (!"quick".equals(mode) && !"standard".equals(mode) && !"detailed".equals(mode)) mode = "standard";
+            String mode = object.optString("mode", "standard").toLowerCase(Locale.ROOT);
+            if (!"quick".equals(mode) && !"standard".equals(mode) && !"detailed".equals(mode)) {
+                mode = "standard";
+            }
             int requestedWidth = object.optInt("outputWidth", 0);
             int outputWidth = requestedWidth <= 0 ? 0 : clamp(requestedWidth, 640, 4096);
-            double jpegQuality = clamp(object.optDouble("jpegQuality", 0.92), 0.5, 1.0);
-            float alignment = (float) clamp(object.optDouble("alignmentDegrees", 4.5), 2.0, 12.0);
-            long steadyDuration = Math.round(clamp(object.optDouble("steadyDurationMs", 650.0), 300.0, 2000.0));
+            double jpegQuality = finiteClamp(
+                object.optDouble("jpegQuality", 0.92),
+                0.92,
+                0.5,
+                1.0
+            );
+            float alignment = (float) finiteClamp(
+                object.optDouble("alignmentDegrees", 4.5),
+                4.5,
+                2.0,
+                12.0
+            );
+            long steadyDuration = Math.round(finiteClamp(
+                object.optDouble("steadyDurationMs", 650.0),
+                650.0,
+                300.0,
+                2000.0
+            ));
             return new CaptureOptions(mode, outputWidth, jpegQuality, alignment, steadyDuration);
         }
 
+        /** Clamps a requested integer option to its inclusive native range. */
         private static int clamp(int value, int minimum, int maximum) {
             return Math.max(minimum, Math.min(maximum, value));
         }
 
-        private static double clamp(double value, double minimum, double maximum) {
+        /** Replaces non-finite bridge numbers before applying an inclusive range. */
+        static double finiteClamp(
+            double value,
+            double fallback,
+            double minimum,
+            double maximum
+        ) {
+            if (!Double.isFinite(value)) {
+                return fallback;
+            }
             return Math.max(minimum, Math.min(maximum, value));
         }
     }

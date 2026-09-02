@@ -37,21 +37,35 @@ public final class PanoramaCapturePlugin extends Plugin {
     private static final String CALLBACK_PERMISSION = "cameraPermissionResult";
     private boolean captureInProgress;
 
+    /** Requests permission if needed, then opens one native guided capture session. */
     @PluginMethod
     public void startCapture(PluginCall call) {
         if (captureInProgress) {
             call.reject("A panorama capture is already in progress.", "CAPTURE_IN_PROGRESS");
             return;
         }
+        // Reserve the single capture slot before asking for permission so two
+        // rapid bridge calls cannot open two activities from separate callbacks.
+        captureInProgress = true;
 
         if (getPermissionState("camera") != PermissionState.GRANTED) {
-            requestPermissionForAlias("camera", call, CALLBACK_PERMISSION);
+            try {
+                requestPermissionForAlias("camera", call, CALLBACK_PERMISSION);
+            } catch (RuntimeException error) {
+                captureInProgress = false;
+                call.reject(
+                    "Camera permission could not be requested.",
+                    "PERMISSION_REQUEST_FAILED",
+                    error
+                );
+            }
             return;
         }
 
         launchCapture(call);
     }
 
+    /** Deletes one UUID-named capture session from the app's private cache. */
     @PluginMethod
     public void discardCapture(PluginCall call) {
         if (captureInProgress) {
@@ -106,6 +120,7 @@ public final class PanoramaCapturePlugin extends Plugin {
         }
     }
 
+    /** Deletes one validated session tree without traversing symbolic links. */
     private static boolean deleteSessionTree(File sessionRoot, File entry) throws IOException {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && Files.isSymbolicLink(entry.toPath())) {
             return entry.delete();
@@ -136,13 +151,16 @@ public final class PanoramaCapturePlugin extends Plugin {
         return !entry.exists() || entry.delete();
     }
 
+    /** Continues the reserved capture request only after camera permission is granted. */
     @PermissionCallback
     private void cameraPermissionResult(PluginCall call) {
         if (call == null) {
+            captureInProgress = false;
             return;
         }
 
         if (getPermissionState("camera") != PermissionState.GRANTED) {
+            captureInProgress = false;
             call.reject("Camera permission is required for panorama capture.", "PERMISSION_DENIED");
             return;
         }
@@ -150,13 +168,26 @@ public final class PanoramaCapturePlugin extends Plugin {
         launchCapture(call);
     }
 
+    /** Transfers validated bridge options into a single native capture Activity. */
     private void launchCapture(PluginCall call) {
-        captureInProgress = true;
-        Intent intent = new Intent(getContext(), PanoramaCaptureActivity.class);
-        intent.putExtra(PanoramaCaptureActivity.EXTRA_OPTIONS_JSON, call.getData().toString());
-        startActivityForResult(call, intent, CALLBACK_CAPTURE);
+        try {
+            Intent captureIntent = new Intent(getContext(), PanoramaCaptureActivity.class);
+            captureIntent.putExtra(
+                PanoramaCaptureActivity.EXTRA_OPTIONS_JSON,
+                call.getData().toString()
+            );
+            startActivityForResult(call, captureIntent, CALLBACK_CAPTURE);
+        } catch (RuntimeException error) {
+            captureInProgress = false;
+            call.reject(
+                "The panorama capture screen could not be opened.",
+                "CAPTURE_FAILED",
+                error
+            );
+        }
     }
 
+    /** Resolves one native result and always releases the plugin's capture slot. */
     @ActivityCallback
     private void captureFinished(PluginCall call, ActivityResult activityResult) {
         captureInProgress = false;

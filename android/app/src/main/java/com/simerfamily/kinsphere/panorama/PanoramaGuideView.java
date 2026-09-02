@@ -29,9 +29,10 @@ final class PanoramaGuideView extends View {
     private final Paint scrimPaint = new Paint();
     private final RectF progressBounds = new RectF();
     private final Path chevronPath = new Path();
+    private final float[] deviceDirection = new float[3];
     private final float density;
     private List<PanoramaTarget> targets = Collections.emptyList();
-    private float[] cameraToWorld = IDENTITY_ROTATION.clone();
+    private final float[] cameraRotation = IDENTITY_ROTATION.clone();
     private float[] projection = identityProjection();
     private int activeTargetIndex = -1;
     private float holdProgress;
@@ -42,25 +43,31 @@ final class PanoramaGuideView extends View {
     private LinearGradient topScrim;
     private LinearGradient bottomScrim;
 
+    /** Creates the guide using default view attributes. */
     PanoramaGuideView(Context context) {
         this(context, null);
     }
 
+    /** Initializes density-aware drawing state and an accessible overlay label. */
     PanoramaGuideView(Context context, @Nullable AttributeSet attrs) {
         super(context, attrs);
         density = getResources().getDisplayMetrics().density;
+        // Software rendering is required for the deliberately soft target and
+        // reticle shadows drawn above the hardware-accelerated camera surface.
         setLayerType(View.LAYER_TYPE_SOFTWARE, null);
         setImportantForAccessibility(IMPORTANT_FOR_ACCESSIBILITY_YES);
         setContentDescription("Guided panorama capture");
     }
 
+    /** Replaces the deterministic capture grid displayed by this overlay. */
     void setTargets(List<PanoramaTarget> targets) {
         this.targets = targets;
         invalidate();
     }
 
+    /** Copies the latest pose state from the GL thread and schedules one UI redraw. */
     void updatePose(
-        float[] cameraToWorld,
+        float[] cameraRotation,
         float[] projection,
         int activeTargetIndex,
         float holdProgress,
@@ -68,7 +75,7 @@ final class PanoramaGuideView extends View {
         boolean steady,
         boolean capturing
     ) {
-        System.arraycopy(cameraToWorld, 0, this.cameraToWorld, 0, 9);
+        System.arraycopy(cameraRotation, 0, this.cameraRotation, 0, 9);
         if (projection != null && projection.length == 16) {
             System.arraycopy(projection, 0, this.projection, 0, 16);
         }
@@ -80,11 +87,13 @@ final class PanoramaGuideView extends View {
         postInvalidateOnAnimation();
     }
 
+    /** Starts the short visual acknowledgement after a frame is accepted. */
     void pulseCapture() {
         flashStartedAtMillis = SystemClock.uptimeMillis();
         postInvalidateOnAnimation();
     }
 
+    /** Rebuilds edge scrims for the current portrait or landscape surface size. */
     @Override
     protected void onSizeChanged(int width, int height, int oldWidth, int oldHeight) {
         super.onSizeChanged(width, height, oldWidth, oldHeight);
@@ -109,24 +118,32 @@ final class PanoramaGuideView extends View {
         );
     }
 
+    /** Draws uncaptured targets, off-screen navigation, reticle progress, and flash. */
     @Override
     protected void onDraw(Canvas canvas) {
         super.onDraw(canvas);
         drawScrims(canvas);
 
         boolean activeWasDrawn = false;
+        PanoramaTarget activeTarget = null;
+        int remainingTargetCount = 0;
         for (PanoramaTarget target : targets) {
+            if (!target.captured) {
+                remainingTargetCount += 1;
+            }
             boolean drawn = drawProjectedTarget(canvas, target);
             if (target.index == activeTargetIndex) {
+                activeTarget = target;
                 activeWasDrawn = drawn;
             }
         }
 
         boolean showCompletionChevron =
-            PanoramaCapturePolicy.shouldShowCompletionChevron(remainingTargetCount());
+            PanoramaCapturePolicy.shouldShowCompletionChevron(remainingTargetCount);
         if (!activeWasDrawn || showCompletionChevron) {
             drawActiveEdgeMarker(
                 canvas,
+                activeTarget,
                 showCompletionChevron
             );
         }
@@ -134,6 +151,7 @@ final class PanoramaGuideView extends View {
         drawCaptureFlash(canvas);
     }
 
+    /** Preserves guide readability over bright camera content near system controls. */
     private void drawScrims(Canvas canvas) {
         if (topScrim == null || bottomScrim == null) {
             return;
@@ -146,30 +164,31 @@ final class PanoramaGuideView extends View {
         scrimPaint.setShader(null);
     }
 
+    /** Projects and draws one visible, uncaptured world-space target. */
     private boolean drawProjectedTarget(Canvas canvas, PanoramaTarget target) {
         if (target.captured) {
             return false;
         }
-        float[] device = worldToDevice(target.direction);
-        float depth = -device[2];
+        worldToDevice(target.direction, deviceDirection);
+        float depth = -deviceDirection[2];
         if (depth <= 0.12f) {
             return false;
         }
 
         float clipX =
-            projection[0] * device[0] +
-            projection[4] * device[1] +
-            projection[8] * device[2] +
+            projection[0] * deviceDirection[0] +
+            projection[4] * deviceDirection[1] +
+            projection[8] * deviceDirection[2] +
             projection[12];
         float clipY =
-            projection[1] * device[0] +
-            projection[5] * device[1] +
-            projection[9] * device[2] +
+            projection[1] * deviceDirection[0] +
+            projection[5] * deviceDirection[1] +
+            projection[9] * deviceDirection[2] +
             projection[13];
         float clipW =
-            projection[3] * device[0] +
-            projection[7] * device[1] +
-            projection[11] * device[2] +
+            projection[3] * deviceDirection[0] +
+            projection[7] * deviceDirection[1] +
+            projection[11] * deviceDirection[2] +
             projection[15];
         if (clipW <= 0.0001f) {
             return false;
@@ -201,15 +220,22 @@ final class PanoramaGuideView extends View {
         return true;
     }
 
-    private void drawActiveEdgeMarker(Canvas canvas, boolean showCompletionChevron) {
-        PanoramaTarget target = findActiveTarget();
+    /** Pins guidance to the safe edge when the active target is outside the viewport. */
+    private void drawActiveEdgeMarker(
+        Canvas canvas,
+        PanoramaTarget target,
+        boolean showCompletionChevron
+    ) {
         if (target == null || target.captured) {
             return;
         }
 
-        float[] device = worldToDevice(target.direction);
-        double horizontal = Math.atan2(device[0], -device[2]);
-        double vertical = Math.atan2(device[1], Math.hypot(device[0], device[2]));
+        worldToDevice(target.direction, deviceDirection);
+        double horizontal = Math.atan2(deviceDirection[0], -deviceDirection[2]);
+        double vertical = Math.atan2(
+            deviceDirection[1],
+            Math.hypot(deviceDirection[0], deviceDirection[2])
+        );
         float directionX = (float) (horizontal / Math.PI);
         float directionY = (float) (-vertical / (Math.PI * 0.5));
         if (Math.abs(directionX) < 0.001f && Math.abs(directionY) < 0.001f) {
@@ -263,6 +289,7 @@ final class PanoramaGuideView extends View {
         paint.setAlpha(255);
     }
 
+    /** Draws the high-contrast final-target arrow in the supplied screen direction. */
     private void drawCompletionChevron(
         Canvas canvas,
         float x,
@@ -304,6 +331,7 @@ final class PanoramaGuideView extends View {
         paint.setStrokeJoin(Paint.Join.MITER);
     }
 
+    /** Draws alignment state and the continuous steady-hold progress ring. */
     private void drawCenterReticle(Canvas canvas) {
         float centerX = getWidth() * 0.5f;
         float centerY = getHeight() * 0.5f;
@@ -341,6 +369,7 @@ final class PanoramaGuideView extends View {
         paint.setAlpha(255);
     }
 
+    /** Fades the accepted-frame flash over a fixed monotonic duration. */
     private void drawCaptureFlash(Canvas canvas) {
         if (flashStartedAtMillis == 0L) {
             return;
@@ -361,35 +390,28 @@ final class PanoramaGuideView extends View {
         postInvalidateOnAnimation();
     }
 
-    private PanoramaTarget findActiveTarget() {
-        for (PanoramaTarget target : targets) {
-            if (target.index == activeTargetIndex) {
-                return target;
-            }
-        }
-        return null;
+    /** Rotates one world-space direction into the current device camera frame. */
+    private void worldToDevice(float[] world, float[] destination) {
+        destination[0] =
+            cameraRotation[0] * world[0] +
+            cameraRotation[3] * world[1] +
+            cameraRotation[6] * world[2];
+        destination[1] =
+            cameraRotation[1] * world[0] +
+            cameraRotation[4] * world[1] +
+            cameraRotation[7] * world[2];
+        destination[2] =
+            cameraRotation[2] * world[0] +
+            cameraRotation[5] * world[1] +
+            cameraRotation[8] * world[2];
     }
 
-    private int remainingTargetCount() {
-        int remaining = 0;
-        for (PanoramaTarget target : targets) {
-            if (!target.captured) remaining += 1;
-        }
-        return remaining;
-    }
-
-    private float[] worldToDevice(float[] world) {
-        return new float[] {
-            cameraToWorld[0] * world[0] + cameraToWorld[3] * world[1] + cameraToWorld[6] * world[2],
-            cameraToWorld[1] * world[0] + cameraToWorld[4] * world[1] + cameraToWorld[7] * world[2],
-            cameraToWorld[2] * world[0] + cameraToWorld[5] * world[1] + cameraToWorld[8] * world[2],
-        };
-    }
-
+    /** Converts density-independent drawing units to physical pixels. */
     private float dp(float value) {
         return value * density;
     }
 
+    /** Supplies a stable pre-tracking projection until ARCore publishes the real matrix. */
     private static float[] identityProjection() {
         return new float[] {
             2.4f, 0.0f, 0.0f, 0.0f,

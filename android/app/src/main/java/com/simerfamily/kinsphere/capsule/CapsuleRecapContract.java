@@ -17,8 +17,10 @@ final class CapsuleRecapContract {
     static final String STAGING_DIRECTORY = "CapsuleRecapStaging";
     static final String RECAP_DIRECTORY = "CapsuleRecaps";
 
+    /** Prevents construction of this constants-only contract. */
     private CapsuleRecapContract() {}
 
+    /** Accepts only bounded base64 data URLs whose media type is an image. */
     static boolean hasSupportedImageDataUrlHeader(String value) {
         if (value == null || value.length() > MAXIMUM_DATA_URL_CHARACTERS) {
             return false;
@@ -31,6 +33,7 @@ final class CapsuleRecapContract {
         return header.startsWith("data:image/") && header.endsWith(";base64");
     }
 
+    /** Computes deterministic playback length after enforcing the image-count limit. */
     static int durationMilliseconds(int imageCount) {
         if (imageCount < 0 || imageCount > MAXIMUM_IMAGE_COUNT) {
             throw new IllegalArgumentException("imageCount is outside the Capsule recap limit");

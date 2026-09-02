@@ -12,6 +12,7 @@ import com.simerfamily.kinsphere.BuildConfig;
 @CapacitorPlugin(name = "DebugAccess")
 public final class DebugAccessPlugin extends Plugin {
 
+    /** Returns whether this APK may expose the explicitly requested test bypass. */
     @PluginMethod
     public void getStatus(PluginCall call) {
         int applicationFlags = getContext().getApplicationInfo().flags;
@@ -27,6 +28,7 @@ public final class DebugAccessPlugin extends Plugin {
         call.resolve(result);
     }
 
+    /** Requires every build-time and package-level debug guard before enabling test access. */
     static boolean isEnabled(
         boolean debugBuild,
         boolean testAccessRequested,

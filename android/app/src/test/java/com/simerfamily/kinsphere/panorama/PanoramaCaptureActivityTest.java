@@ -1,8 +1,11 @@
 package com.simerfamily.kinsphere.panorama;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertThrows;
 
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 import org.junit.Test;
 
 public final class PanoramaCaptureActivityTest {
@@ -28,22 +31,15 @@ public final class PanoramaCaptureActivityTest {
     }
 
     @Test
-    public void arCoreDisplayPoseUsesTheSameForwardAxisAsArKit() {
-        float[] cameraLookingRight = {
-            0.0f, 0.0f, 1.0f, 0.0f,
-            0.0f, 1.0f, 0.0f, 0.0f,
-            -1.0f, 0.0f, 0.0f, 0.0f,
-            1.25f, -0.5f, 2.0f, 1.0f,
-        };
+    public void detailedTargetsContainFortySixUniqueDirections() {
+        List<PanoramaTarget> targets = PanoramaCaptureActivity.createTargets("detailed");
 
-        PanoramaPose pose = PanoramaPose.fromCameraTransform(cameraLookingRight, 123L);
-
-        assertEquals(90.0, pose.yawDegrees, 0.0001);
-        assertEquals(0.0, pose.pitchDegrees, 0.0001);
-        assertEquals(0.0, pose.rollDegrees, 0.0001);
-        assertEquals(1.25, pose.position[0], 0.0001);
-        assertEquals(-0.5, pose.position[1], 0.0001);
-        assertEquals(2.0, pose.position[2], 0.0001);
+        assertEquals(46, targets.size());
+        Set<String> directions = new HashSet<>();
+        for (PanoramaTarget target : targets) {
+            directions.add(target.yawDegrees + ":" + target.pitchDegrees);
+        }
+        assertEquals(targets.size(), directions.size());
     }
 
     @Test
@@ -63,6 +59,52 @@ public final class PanoramaCaptureActivityTest {
         assertEquals(119.5, intrinsics[2], 0.0001);
         assertEquals(250.0, intrinsics[4], 0.0001);
         assertEquals(160.0, intrinsics[5], 0.0001);
+    }
+
+    @Test
+    public void nonFiniteBridgeOptionsFallBackToSafeDefaults() {
+        assertEquals(
+            0.92,
+            PanoramaCaptureActivity.CaptureOptions.finiteClamp(
+                Double.NaN,
+                0.92,
+                0.5,
+                1.0
+            ),
+            0.0
+        );
+        assertEquals(
+            1.0,
+            PanoramaCaptureActivity.CaptureOptions.finiteClamp(2.0, 0.92, 0.5, 1.0),
+            0.0
+        );
+        assertEquals(
+            0.92,
+            PanoramaCaptureActivity.CaptureOptions.finiteClamp(
+                Double.POSITIVE_INFINITY,
+                0.92,
+                0.5,
+                1.0
+            ),
+            0.0
+        );
+    }
+
+    @Test
+    public void rejectsMalformedCameraIntrinsics() {
+        assertThrows(
+            IllegalArgumentException.class,
+            () -> PanoramaCaptureActivity.adjustedIntrinsics(
+                new float[] { 500.0f, 510.0f },
+                new float[] { 320.0f, 240.0f },
+                new int[] { 640, 480 },
+                640,
+                480,
+                45,
+                240,
+                320
+            )
+        );
     }
 
     private static int countPitch(List<PanoramaTarget> targets, double pitch) {

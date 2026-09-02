@@ -5,7 +5,6 @@ import java.util.Arrays;
 /** A display-oriented camera-to-world pose captured from one ARCore frame. */
 final class PanoramaPose {
 
-    final long sensorTimestampNanos;
     final float[] rotation;
     final float[] transform;
     final float[] quaternion;
@@ -14,8 +13,8 @@ final class PanoramaPose {
     final double pitchDegrees;
     final double rollDegrees;
 
+    /** Stores defensive pose components derived from one display-oriented ARCore frame. */
     private PanoramaPose(
-        long sensorTimestampNanos,
         float[] rotation,
         float[] transform,
         float[] quaternion,
@@ -24,7 +23,6 @@ final class PanoramaPose {
         double pitchDegrees,
         double rollDegrees
     ) {
-        this.sensorTimestampNanos = sensorTimestampNanos;
         this.rotation = rotation;
         this.transform = transform;
         this.quaternion = quaternion;
@@ -34,31 +32,15 @@ final class PanoramaPose {
         this.rollDegrees = rollDegrees;
     }
 
-    static PanoramaPose fromRelativeRotation(float[] rotation, long sensorTimestampNanos) {
-        float[] copy = Arrays.copyOf(rotation, 9);
-        float forwardX = -copy[2];
-        float forwardY = -copy[5];
-        float forwardZ = -copy[8];
-
-        double yaw = Math.toDegrees(Math.atan2(forwardX, -forwardZ));
-        double pitch = Math.toDegrees(Math.asin(clamp(forwardY, -1.0f, 1.0f)));
-        double roll = Math.toDegrees(Math.atan2(copy[3], copy[4]));
-
-        return new PanoramaPose(
-            sensorTimestampNanos,
-            copy,
-            toColumnMajorTransform(copy),
-            quaternionFromRotation(copy),
-            new float[] { 0.0f, 0.0f, 0.0f },
-            yaw,
-            pitch,
-            roll
-        );
-    }
-
-    static PanoramaPose fromCameraTransform(float[] transform, long frameTimestampNanos) {
-        if (transform.length != 16) {
-            throw new IllegalArgumentException("Camera transform must contain 16 values.");
+    /** Validates a 4x4 camera transform and derives orientation, position, and quaternion. */
+    static PanoramaPose fromCameraTransform(float[] transform) {
+        if (transform == null || transform.length != 16) {
+            throw new IllegalArgumentException("Camera transform must contain 16 finite values.");
+        }
+        for (float value : transform) {
+            if (!Float.isFinite(value)) {
+                throw new IllegalArgumentException("Camera transform must contain 16 finite values.");
+            }
         }
         float[] copy = Arrays.copyOf(transform, transform.length);
         float[] rotation = new float[] {
@@ -85,7 +67,6 @@ final class PanoramaPose {
         );
 
         return new PanoramaPose(
-            frameTimestampNanos,
             rotation,
             copy,
             quaternionFromRotation(rotation),
@@ -96,6 +77,7 @@ final class PanoramaPose {
         );
     }
 
+    /** Returns the camera's angular distance from one spherical capture target. */
     float angularDistanceDegrees(PanoramaTarget target) {
         float forwardX = -rotation[2];
         float forwardY = -rotation[5];
@@ -107,6 +89,7 @@ final class PanoramaPose {
         return (float) Math.toDegrees(Math.acos(clamp(dot, -1.0, 1.0)));
     }
 
+    /** Returns the shortest orientation delta between two camera poses. */
     float angularDistanceDegrees(PanoramaPose other) {
         double quaternionDot = Math.abs(
             quaternion[0] * other.quaternion[0] +
@@ -117,6 +100,7 @@ final class PanoramaPose {
         return (float) Math.toDegrees(2.0 * Math.acos(clamp(quaternionDot, 0.0, 1.0)));
     }
 
+    /** Returns the translation delta between two camera poses in ARCore meters. */
     float linearDistanceMeters(PanoramaPose other) {
         double deltaX = position[0] - other.position[0];
         double deltaY = position[1] - other.position[1];
@@ -124,15 +108,7 @@ final class PanoramaPose {
         return (float) Math.sqrt(deltaX * deltaX + deltaY * deltaY + deltaZ * deltaZ);
     }
 
-    private static float[] toColumnMajorTransform(float[] rotation) {
-        return new float[] {
-            rotation[0], rotation[3], rotation[6], 0.0f,
-            rotation[1], rotation[4], rotation[7], 0.0f,
-            rotation[2], rotation[5], rotation[8], 0.0f,
-            0.0f, 0.0f, 0.0f, 1.0f,
-        };
-    }
-
+    /** Converts a row-major 3x3 rotation matrix to a normalized quaternion. */
     private static float[] quaternionFromRotation(float[] matrix) {
         float x;
         float y;
@@ -176,6 +152,7 @@ final class PanoramaPose {
         return new float[] { x, y, z, w };
     }
 
+    /** Clamps a scalar before inverse-trigonometric operations. */
     private static double clamp(double value, double minimum, double maximum) {
         return Math.max(minimum, Math.min(maximum, value));
     }

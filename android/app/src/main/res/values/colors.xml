@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Native surfaces use the same default plum-and-cream palette as the web app. -->
+    <color name="colorPrimary">#240918</color>
+    <color name="colorPrimaryDark">#180611</color>
+    <color name="colorAccent">#FFF1D2</color>
+</resources>

@@ -13,6 +13,7 @@ final class CapsuleRecapFiles {
     private final File stagingRoot;
     private final File recapRoot;
 
+    /** Creates and canonicalizes the two private cache roots used by recap artifacts. */
     CapsuleRecapFiles(File cacheRoot) throws IOException {
         if (cacheRoot == null) {
             throw new IOException("The app cache directory is unavailable.");
@@ -21,14 +22,17 @@ final class CapsuleRecapFiles {
         recapRoot = ensureDirectory(cacheRoot, CapsuleRecapContract.RECAP_DIRECTORY);
     }
 
+    /** Allocates a collision-resistant staged JPEG path without creating the file. */
     File createStagedImageFile() {
         return new File(stagingRoot, UUID.randomUUID().toString().toLowerCase(Locale.ROOT) + ".jpg");
     }
 
+    /** Allocates a collision-resistant recap MP4 path without creating the file. */
     File createRecapFile() {
         return new File(recapRoot, UUID.randomUUID().toString().toLowerCase(Locale.ROOT) + ".mp4");
     }
 
+    /** Resolves a bridge value to an existing app-owned staged JPEG. */
     File validateStagedImage(String value) throws IOException {
         File candidate = validateArtifact(value, stagingRoot, "jpg");
         if (!candidate.isFile()) {
@@ -37,6 +41,7 @@ final class CapsuleRecapFiles {
         return candidate;
     }
 
+    /** Resolves a bridge value to an existing app-owned recap MP4. */
     File validateRecap(String value) throws IOException {
         File candidate = validateArtifact(value, recapRoot, "mp4");
         if (!candidate.isFile()) {
@@ -45,6 +50,7 @@ final class CapsuleRecapFiles {
         return candidate;
     }
 
+    /** Returns a cleanup-safe app artifact, or {@code null} for every untrusted path. */
     File removableArtifact(String value) {
         try {
             File parsed = localFile(value);
@@ -61,10 +67,12 @@ final class CapsuleRecapFiles {
         return null;
     }
 
+    /** Exposes an app-owned cache file through the bridge's local file-URI contract. */
     String bridgeUri(File file) {
         return file.toURI().toString();
     }
 
+    /** Creates one direct child cache directory and rejects any canonical-path mismatch. */
     private static File ensureDirectory(File cacheRoot, String child) throws IOException {
         File root = new File(cacheRoot, child).getCanonicalFile();
         File canonicalCache = cacheRoot.getCanonicalFile();
@@ -77,6 +85,7 @@ final class CapsuleRecapFiles {
         return root;
     }
 
+    /** Enforces parent directory, file suffix, and UUID filename for a bridge artifact. */
     private static File validateArtifact(
         String value,
         File expectedParent,
@@ -99,6 +108,7 @@ final class CapsuleRecapFiles {
         return candidate;
     }
 
+    /** Accepts an absolute path or local file URI and rejects all remote URI schemes. */
     private static File localFile(String value) throws IOException {
         if (value == null || value.trim().isEmpty()) {
             throw new IOException("A local Capsule recap artifact is required.");
@@ -118,6 +128,7 @@ final class CapsuleRecapFiles {
         }
     }
 
+    /** Returns a lowercase suffix without the final period. */
     private static String extension(String name) {
         int separator = name.lastIndexOf('.');
         return separator < 0 ? "" : name.substring(separator + 1).toLowerCase(Locale.ROOT);

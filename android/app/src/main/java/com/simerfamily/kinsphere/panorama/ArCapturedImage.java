@@ -20,12 +20,14 @@ final class ArCapturedImage {
     final int height;
     private final byte[] nv21;
 
+    /** Owns the detached NV21 bytes for one even-sized ARCore image. */
     private ArCapturedImage(int width, int height, byte[] nv21) {
         this.width = width;
         this.height = height;
         this.nv21 = nv21;
     }
 
+    /** Copies cropped YUV planes before ARCore closes the source {@link Image}. */
     static ArCapturedImage copyOf(Image image) throws IOException {
         if (image.getFormat() != ImageFormat.YUV_420_888) {
             throw new IOException("ARCore returned an unsupported camera image format.");
@@ -41,7 +43,16 @@ final class ArCapturedImage {
         if (planes.length < 3) {
             throw new IOException("ARCore returned incomplete YUV camera planes.");
         }
-        byte[] output = new byte[width * height * 3 / 2];
+        long outputByteCount = (long) width * height * 3L / 2L;
+        if (outputByteCount > Integer.MAX_VALUE) {
+            throw new IOException("ARCore returned a camera image that is too large.");
+        }
+        final byte[] output;
+        try {
+            output = new byte[(int) outputByteCount];
+        } catch (OutOfMemoryError error) {
+            throw new IOException("The AR camera image is too large to copy safely.", error);
+        }
         copyPlane(
             planes[0],
             crop.left,
@@ -80,6 +91,7 @@ final class ArCapturedImage {
         return new ArCapturedImage(width, height, output);
     }
 
+    /** Rotates, downsizes, and writes an upright JPEG while retaining source dimensions. */
     EncodedFrame encode(
         File destination,
         int rotationDegrees,
@@ -151,6 +163,7 @@ final class ArCapturedImage {
         }
     }
 
+    /** Copies a strided image plane into the packed NV21 destination with bounds checks. */
     private static void copyPlane(
         Image.Plane plane,
         int left,
@@ -168,6 +181,23 @@ final class ArCapturedImage {
         int destinationIndex = destinationOffset;
         for (int row = 0; row < height; row += 1) {
             int rowStart = bufferOffset + (top + row) * rowStride + left * pixelStride;
+            if (pixelStride == 1 && destinationPixelStride == 1) {
+                int rowEnd = rowStart + width;
+                int destinationEnd = destinationIndex + width;
+                if (
+                    rowStart < 0 ||
+                    rowEnd < rowStart ||
+                    rowEnd > buffer.limit() ||
+                    destinationEnd < destinationIndex ||
+                    destinationEnd > destination.length
+                ) {
+                    throw new IOException("The AR camera image planes were truncated.");
+                }
+                buffer.position(rowStart);
+                buffer.get(destination, destinationIndex, width);
+                destinationIndex = destinationEnd;
+                continue;
+            }
             for (int column = 0; column < width; column += 1) {
                 int sourceIndex = rowStart + column * pixelStride;
                 if (sourceIndex < 0 || sourceIndex >= buffer.limit() || destinationIndex >= destination.length) {
@@ -179,6 +209,7 @@ final class ArCapturedImage {
         }
     }
 
+    /** Describes one durable JPEG and the source transform needed for intrinsics. */
     static final class EncodedFrame {
         final File file;
         final int width;
@@ -187,6 +218,7 @@ final class ArCapturedImage {
         final int sourceHeight;
         final int sourceRotationDegrees;
 
+        /** Captures both saved-image dimensions and the original ARCore image geometry. */
         EncodedFrame(
             File file,
             int width,

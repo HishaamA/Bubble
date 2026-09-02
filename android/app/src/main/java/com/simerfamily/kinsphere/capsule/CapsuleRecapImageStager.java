@@ -13,13 +13,16 @@ import java.io.IOException;
 /** Decodes, bounds, normalizes, and metadata-strips one bridge image. */
 final class CapsuleRecapImageStager {
 
-    private final CapsuleRecapFiles files;
+    private final CapsuleRecapFiles recapFiles;
 
-    CapsuleRecapImageStager(CapsuleRecapFiles files) {
-        this.files = files;
+    /** Uses the supplied cache boundary for every staged output. */
+    CapsuleRecapImageStager(CapsuleRecapFiles recapFiles) {
+        this.recapFiles = recapFiles;
     }
 
+    /** Produces an orientation-normalized, bounded JPEG through an atomic cache write. */
     File stage(String dataUrl) throws IOException {
+        ensureStagingActive();
         if (dataUrl == null) {
             throw new IOException("Choose a valid image for the capsule recap.");
         }
@@ -42,6 +45,7 @@ final class CapsuleRecapImageStager {
         if (sourceData.length == 0) {
             throw new IOException("Choose a valid image for the capsule recap.");
         }
+        ensureStagingActive();
 
         BitmapFactory.Options bounds = new BitmapFactory.Options();
         bounds.inJustDecodeBounds = true;
@@ -54,51 +58,66 @@ final class CapsuleRecapImageStager {
             throw new IOException("This image is too large to prepare safely on this device.");
         }
 
-        BitmapFactory.Options decode = new BitmapFactory.Options();
-        decode.inPreferredConfig = Bitmap.Config.ARGB_8888;
-        decode.inSampleSize = sampleSize(bounds.outWidth, bounds.outHeight);
-        Bitmap source;
+        BitmapFactory.Options decodeOptions = new BitmapFactory.Options();
+        decodeOptions.inPreferredConfig = Bitmap.Config.ARGB_8888;
+        decodeOptions.inSampleSize = sampleSize(bounds.outWidth, bounds.outHeight);
+        Bitmap sourceBitmap;
         try {
-            source = BitmapFactory.decodeByteArray(sourceData, 0, sourceData.length, decode);
+            sourceBitmap = BitmapFactory.decodeByteArray(
+                sourceData,
+                0,
+                sourceData.length,
+                decodeOptions
+            );
         } catch (OutOfMemoryError error) {
             throw new IOException("This image is too large to prepare safely on this device.", error);
         }
-        if (source == null) {
+        if (sourceBitmap == null) {
             throw new IOException("This capsule image could not be decoded.");
         }
         sourceData = null;
 
-        Bitmap normalized = null;
-        File temporary = null;
+        Bitmap normalizedBitmap = null;
+        File temporaryFile = null;
         try {
-            normalized = normalizedBitmap(source);
-            File destination = files.createStagedImageFile();
-            temporary = new File(destination.getParentFile(), destination.getName() + ".tmp");
-            try (FileOutputStream output = new FileOutputStream(temporary)) {
-                if (!normalized.compress(Bitmap.CompressFormat.JPEG, 90, output)) {
+            ensureStagingActive();
+            normalizedBitmap = normalizedBitmap(sourceBitmap);
+            File destinationFile = recapFiles.createStagedImageFile();
+            temporaryFile = new File(
+                destinationFile.getParentFile(),
+                destinationFile.getName() + ".tmp"
+            );
+            try (FileOutputStream outputStream = new FileOutputStream(temporaryFile)) {
+                if (!normalizedBitmap.compress(Bitmap.CompressFormat.JPEG, 90, outputStream)) {
                     throw new IOException("This capsule image could not be prepared.");
                 }
-                output.getFD().sync();
+                outputStream.getFD().sync();
             }
-            if (!temporary.renameTo(destination)) {
+            ensureStagingActive();
+            if (!temporaryFile.renameTo(destinationFile)) {
                 throw new IOException("This capsule image could not be prepared.");
             }
-            temporary = null;
-            return destination;
+            temporaryFile = null;
+            return destinationFile;
         } finally {
-            if (temporary != null) {
+            if (temporaryFile != null) {
                 //noinspection ResultOfMethodCallIgnored -- best-effort failed-stage cleanup.
-                temporary.delete();
+                temporaryFile.delete();
             }
-            if (normalized != null && normalized != source && !normalized.isRecycled()) {
-                normalized.recycle();
+            if (
+                normalizedBitmap != null &&
+                normalizedBitmap != sourceBitmap &&
+                !normalizedBitmap.isRecycled()
+            ) {
+                normalizedBitmap.recycle();
             }
-            if (!source.isRecycled()) {
-                source.recycle();
+            if (!sourceBitmap.isRecycled()) {
+                sourceBitmap.recycle();
             }
         }
     }
 
+    /** Chooses the largest power-of-two decode sample that stays near the staging limit. */
     private static int sampleSize(int width, int height) {
         int sample = 1;
         int longEdge = Math.max(width, height);
@@ -108,6 +127,7 @@ final class CapsuleRecapImageStager {
         return sample;
     }
 
+    /** Removes metadata and alpha while resizing the decoded image to a safe long edge. */
     private static Bitmap normalizedBitmap(Bitmap source) throws IOException {
         int longEdge = Math.max(source.getWidth(), source.getHeight());
         float scale = longEdge > CapsuleRecapContract.MAXIMUM_STAGED_LONG_EDGE
@@ -116,16 +136,33 @@ final class CapsuleRecapImageStager {
         int width = Math.max(1, Math.round(source.getWidth() * scale));
         int height = Math.max(1, Math.round(source.getHeight() * scale));
 
-        final Bitmap output;
+        Bitmap output = null;
         try {
             output = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888);
+            Canvas canvas = new Canvas(output);
+            canvas.drawColor(Color.BLACK);
+            Paint paint = new Paint(
+                Paint.ANTI_ALIAS_FLAG | Paint.FILTER_BITMAP_FLAG | Paint.DITHER_FLAG
+            );
+            canvas.drawBitmap(source, null, new android.graphics.Rect(0, 0, width, height), paint);
+            return output;
         } catch (OutOfMemoryError error) {
+            if (output != null && !output.isRecycled()) {
+                output.recycle();
+            }
             throw new IOException("This image is too large to prepare safely on this device.", error);
+        } catch (RuntimeException error) {
+            if (output != null && !output.isRecycled()) {
+                output.recycle();
+            }
+            throw new IOException("This capsule image could not be prepared.", error);
         }
-        Canvas canvas = new Canvas(output);
-        canvas.drawColor(Color.BLACK);
-        Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG | Paint.FILTER_BITMAP_FLAG | Paint.DITHER_FLAG);
-        canvas.drawBitmap(source, null, new android.graphics.Rect(0, 0, width, height), paint);
-        return output;
+    }
+
+    /** Converts worker interruption into the staging operation's checked cancellation contract. */
+    private static void ensureStagingActive() throws IOException {
+        if (Thread.currentThread().isInterrupted()) {
+            throw new IOException("The capsule image preparation was cancelled.");
+        }
     }
 }
