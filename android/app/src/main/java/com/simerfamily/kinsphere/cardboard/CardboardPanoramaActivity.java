@@ -25,7 +25,6 @@ import java.util.concurrent.atomic.AtomicBoolean;
 public final class CardboardPanoramaActivity extends AppCompatActivity {
 
     private static final String EXTRA_PANORAMA_PATH = "panorama_path";
-    private static final String EXTRA_TITLE = "panorama_title";
     private static final String EXTRA_INITIAL_YAW = "initial_yaw";
     private static final String EXTRA_INITIAL_PITCH = "initial_pitch";
 
@@ -34,20 +33,20 @@ public final class CardboardPanoramaActivity extends AppCompatActivity {
     private EquirectangularPanoramaRenderer panoramaRenderer;
     private File panoramaFile;
 
+    /** Builds the explicit, app-local launch intent consumed by this Activity. */
     static Intent createIntent(
         Context context,
         File panoramaFile,
-        String title,
         float initialYaw,
         float initialPitch
     ) {
         return new Intent(context, CardboardPanoramaActivity.class)
             .putExtra(EXTRA_PANORAMA_PATH, panoramaFile.getAbsolutePath())
-            .putExtra(EXTRA_TITLE, title)
             .putExtra(EXTRA_INITIAL_YAW, initialYaw)
             .putExtra(EXTRA_INITIAL_PITCH, initialPitch);
     }
 
+    /** Validates the staged file and attaches a calibrated Cardboard renderer. */
     @Override
     protected void onCreate(@Nullable Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
@@ -94,6 +93,7 @@ public final class CardboardPanoramaActivity extends AppCompatActivity {
         }
     }
 
+    /** Resumes head tracking only while the renderer still owns its native resources. */
     @Override
     protected void onResume() {
         super.onResume();
@@ -103,6 +103,7 @@ public final class CardboardPanoramaActivity extends AppCompatActivity {
         }
     }
 
+    /** Pauses Cardboard tracking before Android backgrounds the Activity. */
     @Override
     protected void onPause() {
         if (cardboardView != null && !shutdown.get()) {
@@ -111,27 +112,34 @@ public final class CardboardPanoramaActivity extends AppCompatActivity {
         super.onPause();
     }
 
+    /** Restores immersive UI after transient system panels release window focus. */
     @Override
     public void onWindowFocusChanged(boolean hasFocus) {
         super.onWindowFocusChanged(hasFocus);
-        if (hasFocus) applyImmersiveMode();
+        if (hasFocus) {
+            applyImmersiveMode();
+        }
     }
 
+    /** Releases renderer state once and deletes only the app-owned staged panorama. */
     @Override
     protected void onDestroy() {
         shutdownViewer();
         if (isFinishing() && panoramaFile != null) {
             // The image is a short-lived copy inside this app's own cache.
+            //noinspection ResultOfMethodCallIgnored
             panoramaFile.delete();
         }
         super.onDestroy();
     }
 
+    /** Treats the system back action as an ordinary viewer dismissal. */
     @Override
     public void onBackPressed() {
         finish();
     }
 
+    /** Configures a bright, wake-locked, edge-to-edge window for a headset session. */
     private void configureWindow() {
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
         WindowManager.LayoutParams attributes = getWindow().getAttributes();
@@ -146,6 +154,7 @@ public final class CardboardPanoramaActivity extends AppCompatActivity {
         applyImmersiveMode();
     }
 
+    /** Hides system bars through both current and legacy Android window APIs. */
     private void applyImmersiveMode() {
         WindowCompat.setDecorFitsSystemWindows(getWindow(), false);
         WindowInsetsControllerCompat controller = WindowCompat.getInsetsController(
@@ -166,16 +175,22 @@ public final class CardboardPanoramaActivity extends AppCompatActivity {
         );
     }
 
+    /** Surfaces a renderer failure once on the UI thread and closes the unusable view. */
     private void handleRendererFailure(String message) {
         runOnUiThread(() -> {
-            if (isFinishing() || isDestroyed()) return;
+            if (isFinishing() || isDestroyed()) {
+                return;
+            }
             Toast.makeText(this, message, Toast.LENGTH_LONG).show();
             finish();
         });
     }
 
+    /** Prompts for a headset profile only when Cardboard has no saved optical parameters. */
     private void showViewerSetup() {
-        if (isFinishing() || isDestroyed() || cardboardView == null) return;
+        if (isFinishing() || isDestroyed() || cardboardView == null) {
+            return;
+        }
         new AlertDialog.Builder(this)
             .setTitle("Set up your VR headset")
             .setMessage(
@@ -190,14 +205,24 @@ public final class CardboardPanoramaActivity extends AppCompatActivity {
             .show();
     }
 
+    /** Requests GL shutdown exactly once before the Cardboard view releases its context. */
     private void shutdownViewer() {
-        if (!shutdown.compareAndSet(false, true)) return;
-        if (panoramaRenderer != null) panoramaRenderer.requestShutdown();
-        if (cardboardView != null) cardboardView.onDestroy();
+        if (!shutdown.compareAndSet(false, true)) {
+            return;
+        }
+        if (panoramaRenderer != null) {
+            panoramaRenderer.requestShutdown();
+        }
+        if (cardboardView != null) {
+            cardboardView.onDestroy();
+        }
     }
 
+    /** Accepts only canonical files directly beneath the Cardboard cache directory. */
     private File resolveSafePanoramaFile(String path) {
-        if (path == null || path.isEmpty()) return null;
+        if (path == null || path.isEmpty()) {
+            return null;
+        }
         try {
             File allowedDirectory = new File(getCacheDir(), "cardboard-panoramas").getCanonicalFile();
             File candidate = new File(path).getCanonicalFile();

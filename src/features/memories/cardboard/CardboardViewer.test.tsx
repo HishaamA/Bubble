@@ -58,7 +58,6 @@ vi.mock('./StereoPanoramaRenderer', async () => {
         resize: typeof stereoMocks.resize
       }>,
     ) {
-      stereoMocks.lastProps = props
       React.useImperativeHandle(
         ref,
         () => ({
@@ -69,7 +68,11 @@ vi.mock('./StereoPanoramaRenderer', async () => {
         [],
       )
       React.useEffect(() => {
-        const notifyReady = () => props.onReady?.()
+        stereoMocks.lastProps = props
+      }, [props])
+      const { onReady, scene } = props
+      React.useEffect(() => {
+        const notifyReady = () => onReady?.()
         if (stereoMocks.deferReady) {
           stereoMocks.readyCallback = notifyReady
         } else {
@@ -80,7 +83,7 @@ vi.mock('./StereoPanoramaRenderer', async () => {
             stereoMocks.readyCallback = null
           }
         }
-      }, [props.scene])
+      }, [onReady, scene])
 
       return (
         <div

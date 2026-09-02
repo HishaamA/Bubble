@@ -21,20 +21,24 @@ const FAST_TIME_CONSTANT_MS = 8
 const REST_SPEED_DEGREES_PER_SECOND = 2
 const FAST_SPEED_DEGREES_PER_SECOND = 25
 
+/** Bounds interpolation factors and thresholds to their supported range. */
 function clamp(value: number, minimum: number, maximum: number): number {
   return Math.max(minimum, Math.min(maximum, value))
 }
 
+/** Smoothly blends filter strength between stationary and fast movement. */
 function smoothstep(edge0: number, edge1: number, value: number): number {
   const position = clamp((value - edge0) / (edge1 - edge0), 0, 1)
   return position * position * (3 - 2 * position)
 }
 
+/** Snaps browser orientation readings to the four supported screen rotations. */
 export function normalizeScreenOrientationAngle(angle: number): number {
   if (!Number.isFinite(angle)) return 0
   return ((Math.round(angle / 90) * 90) % 360 + 360) % 360
 }
 
+/** Rejects quaternions containing unusable sensor values. */
 export function isFiniteQuaternion(value: Quaternion): boolean {
   return value.every(Number.isFinite)
 }
@@ -63,33 +67,25 @@ export class CardboardPoseTracker {
     this.displayPose = normalized
   }
 
+  /** Replaces both the displayed view and its future sensor anchor. */
   reset(initialView: Quaternion): void {
     const normalized = normalizeQuaternion(initialView)
-    this.anchorDevice = null
-    this.anchorView = normalized
-    this.filteredPose = normalized
     this.displayPose = normalized
-    this.lastRaw = null
-    this.screenAngle = null
-    this.lastSampleTime = null
-    this.lastReceiptTime = null
-    this.state = 'waiting'
-    this.rebasePending = false
+    this.resetSensorFrame()
   }
 
+  /** Keeps the displayed pose while waiting to anchor a new sensor stream. */
   prepareForTracking(): void {
-    this.anchorDevice = null
-    this.anchorView = this.displayPose
-    this.filteredPose = this.displayPose
-    this.lastRaw = null
-    this.screenAngle = null
-    this.lastSampleTime = null
-    this.lastReceiptTime = null
-    this.state = 'waiting'
-    this.rebasePending = false
+    this.resetSensorFrame()
   }
 
+  /** Detaches the current sensor frame without moving the visible panorama. */
   stopTracking(): void {
+    this.resetSensorFrame()
+  }
+
+  /** Clears sample history shared by reset, start, and stop transitions. */
+  private resetSensorFrame(): void {
     this.anchorDevice = null
     this.anchorView = this.displayPose
     this.filteredPose = this.displayPose
@@ -101,18 +97,22 @@ export class CardboardPoseTracker {
     this.rebasePending = false
   }
 
+  /** Returns the filtered pose currently shown to both eyes. */
   getPose(): Quaternion {
     return this.displayPose
   }
 
+  /** Reports whether sensors are waiting, active, or stale. */
   getState(): CardboardTrackingState {
     return this.state
   }
 
+  /** Rebases the next sensor sample after the screen coordinate system moves. */
   markScreenOrientationChanged(): void {
     this.rebasePending = true
   }
 
+  /** Marks active sensor input stale and preserves the current display pose. */
   markStale(): boolean {
     if (this.state !== 'active') return false
     this.state = 'stale'
@@ -120,6 +120,7 @@ export class CardboardPoseTracker {
     return true
   }
 
+  /** Marks tracking stale when no sample has arrived within the grace period. */
   updateStaleness(receiptTime: number): boolean {
     if (
       this.state === 'active' &&
@@ -149,6 +150,10 @@ export class CardboardPoseTracker {
     return this.displayPose
   }
 
+  /**
+   * Ingests one sensor sample, rebasing discontinuities and filtering ordinary
+   * motion. Invalid samples return null without mutating tracking state.
+   */
   sample(
     devicePose: Quaternion,
     screenAngleDegrees: number,

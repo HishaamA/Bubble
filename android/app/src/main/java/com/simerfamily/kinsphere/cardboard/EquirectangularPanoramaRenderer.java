@@ -18,7 +18,9 @@ import javax.microedition.khronos.egl.EGLConfig;
 /** Draws one monoscopic equirectangular image through Cardboard's calibrated eye pass. */
 final class EquirectangularPanoramaRenderer implements CardboardView.Renderer {
 
+    /** Receives the first terminal renderer failure on the Activity thread. */
     interface FailureListener {
+        /** Reports a user-safe reason the VR image can no longer be drawn. */
         void onFailure(String message);
     }
 
@@ -75,6 +77,7 @@ final class EquirectangularPanoramaRenderer implements CardboardView.Renderer {
     private int panoramaSamplerLocation;
     private volatile boolean ready;
 
+    /** Prepares immutable panorama inputs and the initial camera orientation. */
     EquirectangularPanoramaRenderer(
         File panoramaFile,
         float initialYaw,
@@ -91,15 +94,21 @@ final class EquirectangularPanoramaRenderer implements CardboardView.Renderer {
         Matrix.rotateM(modelMatrix, 0, initialYaw, 0f, 1f, 0f);
     }
 
+    /** Copies Cardboard's latest head transform for the subsequent eye passes. */
     @Override
     public void onNewFrame(HeadTransform headTransform) {
-        if (shuttingDown.get()) return;
+        if (shuttingDown.get()) {
+            return;
+        }
         headTransform.getHeadView(headView, 0);
     }
 
+    /** Projects one monoscopic panorama ray through the profile-calibrated eye frustum. */
     @Override
     public void onDrawEye(CardboardView.Eye eye) {
-        if (!ready || shuttingDown.get()) return;
+        if (!ready || shuttingDown.get()) {
+            return;
+        }
 
         eye.applyHeadView(headView);
         System.arraycopy(eye.getEyeView(), 0, monoscopicEyeView, 0, 16);
@@ -170,20 +179,28 @@ final class EquirectangularPanoramaRenderer implements CardboardView.Renderer {
         GLES20.glDisableVertexAttribArray(positionLocation);
     }
 
+    /** Leaves final lens distortion and frame submission to {@link CardboardView}. */
     @Override
     public void onFinishFrame(Viewport viewport) {
         // CardboardView performs the profile-derived distortion pass after both eyes.
     }
 
+    /** Leaves per-eye viewport sizing to {@link CardboardView}. */
     @Override
     public void onSurfaceChanged(int width, int height) {
         // CardboardView owns the per-eye viewport and rebuilds it for profile changes.
     }
 
+    /** Rebuilds every GL handle whenever Cardboard creates or replaces its EGL context. */
     @Override
     public void onSurfaceCreated(EGLConfig config) {
-        if (shuttingDown.get()) return;
+        if (shuttingDown.get()) {
+            return;
+        }
         ready = false;
+        // A recreated EGL context does not retain handles from the old context.
+        program = 0;
+        texture = 0;
         try {
             buildFullscreenQuad();
             program = createProgram(VERTEX_SHADER, FRAGMENT_SHADER);
@@ -208,21 +225,26 @@ final class EquirectangularPanoramaRenderer implements CardboardView.Renderer {
             texture = loadPanoramaTexture(panoramaFile);
             GLES20.glClearColor(0f, 0f, 0f, 1f);
             ready = true;
-        } catch (Throwable error) {
+        } catch (RuntimeException | OutOfMemoryError error) {
+            releaseGlResources();
             reportFailure("This 360 image could not be rendered in VR.");
         }
     }
 
+    /** Marks rendering closed before releasing objects owned by the active GL context. */
     @Override
     public void onRendererShutdown() {
         requestShutdown();
+        releaseGlResources();
     }
 
+    /** Prevents new draw work while Activity teardown waits for the renderer callback. */
     void requestShutdown() {
         shuttingDown.set(true);
         ready = false;
     }
 
+    /** Allocates the clip-space quad whose fragments reconstruct panorama rays. */
     private void buildFullscreenQuad() {
         // iOS uses the same four-vertex ray projection. The panorama direction
         // is reconstructed for every fragment, so no sphere facets can become
@@ -232,6 +254,7 @@ final class EquirectangularPanoramaRenderer implements CardboardView.Renderer {
         );
     }
 
+    /** Copies vertex data into native-order storage accepted by OpenGL ES. */
     private static FloatBuffer directFloatBuffer(float[] values) {
         FloatBuffer buffer = ByteBuffer
             .allocateDirect(values.length * Float.BYTES)
@@ -241,6 +264,7 @@ final class EquirectangularPanoramaRenderer implements CardboardView.Renderer {
         return buffer;
     }
 
+    /** Decodes within device texture limits and uploads one clamped panorama texture. */
     private static int loadPanoramaTexture(File file) {
         int[] maximumTextureSize = new int[1];
         GLES20.glGetIntegerv(GLES20.GL_MAX_TEXTURE_SIZE, maximumTextureSize, 0);
@@ -266,49 +290,66 @@ final class EquirectangularPanoramaRenderer implements CardboardView.Renderer {
         BitmapFactory.Options decodeOptions = new BitmapFactory.Options();
         decodeOptions.inSampleSize = sampleSize;
         decodeOptions.inPreferredConfig = Bitmap.Config.ARGB_8888;
-        Bitmap bitmap = BitmapFactory.decodeFile(file.getAbsolutePath(), decodeOptions);
-        if (bitmap == null) {
+        Bitmap panoramaBitmap = BitmapFactory.decodeFile(file.getAbsolutePath(), decodeOptions);
+        if (panoramaBitmap == null) {
             throw new IllegalArgumentException("Panorama bitmap could not be decoded");
         }
 
         int[] textures = new int[1];
         GLES20.glGenTextures(1, textures, 0);
         if (textures[0] == 0) {
-            bitmap.recycle();
+            panoramaBitmap.recycle();
             throw new IllegalStateException("Panorama texture could not be allocated");
         }
-
-        GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, textures[0]);
-        GLES20.glTexParameteri(
-            GLES20.GL_TEXTURE_2D,
-            GLES20.GL_TEXTURE_MIN_FILTER,
-            GLES20.GL_LINEAR
-        );
-        GLES20.glTexParameteri(
-            GLES20.GL_TEXTURE_2D,
-            GLES20.GL_TEXTURE_MAG_FILTER,
-            GLES20.GL_LINEAR
-        );
-        GLES20.glTexParameteri(
-            GLES20.GL_TEXTURE_2D,
-            GLES20.GL_TEXTURE_WRAP_S,
-            GLES20.GL_CLAMP_TO_EDGE
-        );
-        GLES20.glTexParameteri(
-            GLES20.GL_TEXTURE_2D,
-            GLES20.GL_TEXTURE_WRAP_T,
-            GLES20.GL_CLAMP_TO_EDGE
-        );
-        GLUtils.texImage2D(GLES20.GL_TEXTURE_2D, 0, bitmap, 0);
-        bitmap.recycle();
-        assertNoGlError("upload panorama texture");
-        return textures[0];
+        try {
+            GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, textures[0]);
+            GLES20.glTexParameteri(
+                GLES20.GL_TEXTURE_2D,
+                GLES20.GL_TEXTURE_MIN_FILTER,
+                GLES20.GL_LINEAR
+            );
+            GLES20.glTexParameteri(
+                GLES20.GL_TEXTURE_2D,
+                GLES20.GL_TEXTURE_MAG_FILTER,
+                GLES20.GL_LINEAR
+            );
+            GLES20.glTexParameteri(
+                GLES20.GL_TEXTURE_2D,
+                GLES20.GL_TEXTURE_WRAP_S,
+                GLES20.GL_CLAMP_TO_EDGE
+            );
+            GLES20.glTexParameteri(
+                GLES20.GL_TEXTURE_2D,
+                GLES20.GL_TEXTURE_WRAP_T,
+                GLES20.GL_CLAMP_TO_EDGE
+            );
+            GLUtils.texImage2D(GLES20.GL_TEXTURE_2D, 0, panoramaBitmap, 0);
+            assertNoGlError("upload panorama texture");
+            return textures[0];
+        } catch (RuntimeException | OutOfMemoryError error) {
+            GLES20.glDeleteTextures(1, textures, 0);
+            throw error;
+        } finally {
+            panoramaBitmap.recycle();
+        }
     }
 
+    /** Compiles and links a complete shader program, releasing intermediate handles. */
     private static int createProgram(String vertexSource, String fragmentSource) {
         int vertexShader = compileShader(GLES20.GL_VERTEX_SHADER, vertexSource);
-        int fragmentShader = compileShader(GLES20.GL_FRAGMENT_SHADER, fragmentSource);
+        final int fragmentShader;
+        try {
+            fragmentShader = compileShader(GLES20.GL_FRAGMENT_SHADER, fragmentSource);
+        } catch (RuntimeException | OutOfMemoryError error) {
+            GLES20.glDeleteShader(vertexShader);
+            throw error;
+        }
         int linkedProgram = GLES20.glCreateProgram();
+        if (linkedProgram == 0) {
+            GLES20.glDeleteShader(vertexShader);
+            GLES20.glDeleteShader(fragmentShader);
+            throw new IllegalStateException("Panorama program could not be allocated");
+        }
         GLES20.glAttachShader(linkedProgram, vertexShader);
         GLES20.glAttachShader(linkedProgram, fragmentShader);
         GLES20.glLinkProgram(linkedProgram);
@@ -325,8 +366,12 @@ final class EquirectangularPanoramaRenderer implements CardboardView.Renderer {
         return linkedProgram;
     }
 
+    /** Compiles one shader or deletes its failed GL handle before throwing. */
     private static int compileShader(int type, String source) {
         int shader = GLES20.glCreateShader(type);
+        if (shader == 0) {
+            throw new IllegalStateException("Panorama shader could not be allocated");
+        }
         GLES20.glShaderSource(shader, source);
         GLES20.glCompileShader(shader);
         int[] compileStatus = new int[1];
@@ -339,6 +384,7 @@ final class EquirectangularPanoramaRenderer implements CardboardView.Renderer {
         return shader;
     }
 
+    /** Converts the pending GL error into a terminal renderer failure. */
     private static void assertNoGlError(String operation) {
         int error = GLES20.glGetError();
         if (error != GLES20.GL_NO_ERROR) {
@@ -346,10 +392,23 @@ final class EquirectangularPanoramaRenderer implements CardboardView.Renderer {
         }
     }
 
+    /** Publishes only the first failure so Activity teardown cannot be re-entered. */
     private void reportFailure(String message) {
         ready = false;
         if (failureReported.compareAndSet(false, true) && failureListener != null) {
             failureListener.onFailure(message);
+        }
+    }
+
+    /** Deletes only handles owned by the currently active GL context. */
+    private void releaseGlResources() {
+        if (texture != 0) {
+            GLES20.glDeleteTextures(1, new int[] { texture }, 0);
+            texture = 0;
+        }
+        if (program != 0) {
+            GLES20.glDeleteProgram(program);
+            program = 0;
         }
     }
 }

@@ -36,6 +36,7 @@ export type CardboardSetupFlowProps = {
   onClose: () => void
 }
 
+/** Draws the headset mark used by the setup dialog. */
 function CardboardGlyph() {
   return (
     <svg viewBox="0 0 56 38" aria-hidden="true">
@@ -47,6 +48,7 @@ function CardboardGlyph() {
   )
 }
 
+/** Draws the close mark used by the setup dialog. */
 function CloseGlyph() {
   return (
     <svg viewBox="0 0 24 24" aria-hidden="true">
@@ -55,6 +57,7 @@ function CloseGlyph() {
   )
 }
 
+/** Renders a cropped choice preview without leaking presentation rules upward. */
 function ChoiceThumbnail({ choice }: { choice: CardboardMemoryChoice }) {
   const crop = choice.crop
   const imageStyle = crop
@@ -72,11 +75,13 @@ function ChoiceThumbnail({ choice }: { choice: CardboardMemoryChoice }) {
   )
 }
 
+/** Mounts the guided Cardboard preparation dialog only while it is open. */
 export function CardboardSetupFlow(props: CardboardSetupFlowProps) {
   if (!props.open) return null
   return <CardboardSetupContents {...props} />
 }
 
+/** Owns focus restoration, step progression, and optional memory selection. */
 function CardboardSetupContents({
   open,
   choices,
@@ -138,10 +143,12 @@ function CardboardSetupContents({
     // Device rotation is the preferred transition. The explicit override remains
     // separate state so an undetected orientation can never masquerade as native
     // ownership when the viewer later decides how to restore the app.
+    // oxlint-disable-next-line react/set-state-in-effect -- Landscape is an external device-orientation signal.
     setForceLandscape(false)
     setStep('cardboard')
   }, [landscape, step])
 
+  /** Closes on Escape and loops Tab focus through the modal controls. */
   function handleDialogKeyDown(event: ReactKeyboardEvent<HTMLElement>) {
     if (event.key === 'Escape') {
       event.preventDefault()

@@ -17,11 +17,16 @@ export const STEREO_LENS_HEIGHT_FRACTION = 0.90
 export const YOUTUBE_FALLBACK_LENS_WIDTH_FRACTION = 0.40
 export const YOUTUBE_FALLBACK_LENS_HEIGHT_FRACTION = 1.0
 
+/** Restricts user/profile optical shifts to a comfortable inward range. */
 export function clampOpticalCenterShift(shift: number): number {
   if (!Number.isFinite(shift)) return 0
   return Math.max(0, Math.min(0.18, shift))
 }
 
+/**
+ * Calculates mirrored eye rectangles and optical centers for one canvas.
+ * Dimensions are always positive so callers can pass unsettled layout values.
+ */
 export function resolveStereoViewports(
   canvasWidth: number,
   canvasHeight: number,
@@ -44,14 +49,8 @@ export function resolveStereoViewports(
       ? YOUTUBE_FALLBACK_LENS_HEIGHT_FRACTION
       : STEREO_LENS_HEIGHT_FRACTION
   const leftCenterFraction = profile === 'youtube-fallback' ? 0.30 : 0.25
-  const eyeWidth = Math.max(
-    1,
-    Math.floor(width * lensWidthFraction),
-  )
-  const eyeHeight = Math.max(
-    1,
-    Math.floor(height * lensHeightFraction),
-  )
+  const eyeWidth = Math.max(1, Math.floor(width * lensWidthFraction))
+  const eyeHeight = Math.max(1, Math.floor(height * lensHeightFraction))
   const leftEyeX = Math.max(
     0,
     Math.round(width * leftCenterFraction - eyeWidth / 2),
@@ -77,43 +76,67 @@ export function resolveStereoViewports(
   ]
 }
 
+/** Rounds a canvas buffer width to the nearest usable even pixel count. */
 export function evenPixelWidth(width: number): number {
   const rounded = Math.max(2, Math.round(width))
   return rounded % 2 === 0 ? rounded : rounded - 1
 }
 
-export function multiplyQuaternions(a: Quaternion, b: Quaternion): Quaternion {
-  const [ax, ay, az, aw] = a
-  const [bx, by, bz, bw] = b
+/** Composes two rotations using Hamilton product order. */
+export function multiplyQuaternions(
+  first: Quaternion,
+  second: Quaternion,
+): Quaternion {
+  const [firstX, firstY, firstZ, firstW] = first
+  const [secondX, secondY, secondZ, secondW] = second
   return [
-    aw * bx + ax * bw + ay * bz - az * by,
-    aw * by - ax * bz + ay * bw + az * bx,
-    aw * bz + ax * by - ay * bx + az * bw,
-    aw * bw - ax * bx - ay * by - az * bz,
+    firstW * secondX + firstX * secondW + firstY * secondZ - firstZ * secondY,
+    firstW * secondY - firstX * secondZ + firstY * secondW + firstZ * secondX,
+    firstW * secondZ + firstX * secondY - firstY * secondX + firstZ * secondW,
+    firstW * secondW - firstX * secondX - firstY * secondY - firstZ * secondZ,
   ]
 }
 
-export function invertQuaternion(q: Quaternion): Quaternion {
-  const [x, y, z, w] = q
+/** Returns the inverse rotation, with identity as the zero-length fallback. */
+export function invertQuaternion(quaternion: Quaternion): Quaternion {
+  const [x, y, z, w] = quaternion
   const lengthSquared = x * x + y * y + z * z + w * w
   if (lengthSquared === 0) return [0, 0, 0, 1]
-  return [-x / lengthSquared, -y / lengthSquared, -z / lengthSquared, w / lengthSquared]
+  return [
+    -x / lengthSquared,
+    -y / lengthSquared,
+    -z / lengthSquared,
+    w / lengthSquared,
+  ]
 }
 
-export function normalizeQuaternion(q: Quaternion): Quaternion {
-  const [x, y, z, w] = q
+/** Produces a unit quaternion and rejects non-finite sensor input as identity. */
+export function normalizeQuaternion(quaternion: Quaternion): Quaternion {
+  const [x, y, z, w] = quaternion
   const length = Math.hypot(x, y, z, w)
   return !Number.isFinite(length) || length === 0
     ? [0, 0, 0, 1]
     : [x / length, y / length, z / length, w / length]
 }
 
-export function quaternionDot(a: Quaternion, b: Quaternion): number {
-  return a[0] * b[0] + a[1] * b[1] + a[2] * b[2] + a[3] * b[3]
+/** Returns the four-dimensional dot product of two quaternions. */
+export function quaternionDot(first: Quaternion, second: Quaternion): number {
+  return (
+    first[0] * second[0] +
+    first[1] * second[1] +
+    first[2] * second[2] +
+    first[3] * second[3]
+  )
 }
 
-export function negateQuaternion(q: Quaternion): Quaternion {
-  return [-q[0], -q[1], -q[2], -q[3]]
+/** Returns the equivalent antipodal representation of a rotation. */
+export function negateQuaternion(quaternion: Quaternion): Quaternion {
+  return [
+    -quaternion[0],
+    -quaternion[1],
+    -quaternion[2],
+    -quaternion[3],
+  ]
 }
 
 /** q and -q encode the same rotation; keep interpolation on the short arc. */
@@ -126,19 +149,23 @@ export function alignQuaternionHemisphere(
     : candidate
 }
 
+/** Measures the shortest rotational separation between two orientations. */
 export function quaternionAngularDistanceDegrees(
-  a: Quaternion,
-  b: Quaternion,
+  first: Quaternion,
+  second: Quaternion,
 ): number {
-  const normalizedA = normalizeQuaternion(a)
-  const normalizedB = normalizeQuaternion(b)
-  const dot = Math.min(1, Math.max(0, Math.abs(quaternionDot(normalizedA, normalizedB))))
+  const normalizedFirst = normalizeQuaternion(first)
+  const normalizedSecond = normalizeQuaternion(second)
+  const dot = Math.min(
+    1,
+    Math.abs(quaternionDot(normalizedFirst, normalizedSecond)),
+  )
   return 2 * Math.acos(dot) / DEGREES_TO_RADIANS
 }
 
 /** Pitch of the camera's forward ray, used to keep drag fallback upright. */
-export function quaternionViewPitchDegrees(q: Quaternion): number {
-  const [x, y, z, w] = normalizeQuaternion(q)
+export function quaternionViewPitchDegrees(quaternion: Quaternion): number {
+  const [x, y, z, w] = normalizeQuaternion(quaternion)
   const forwardY = Math.max(-1, Math.min(1, 2 * (x * w - y * z)))
   return Math.asin(forwardY) / DEGREES_TO_RADIANS
 }
@@ -151,23 +178,26 @@ export function slerpQuaternions(
 ): Quaternion {
   const start = normalizeQuaternion(from)
   const end = normalizeQuaternion(alignQuaternionHemisphere(start, to))
-  const t = Math.max(0, Math.min(1, Number.isFinite(amount) ? amount : 0))
+  const interpolationAmount = Math.max(
+    0,
+    Math.min(1, Number.isFinite(amount) ? amount : 0),
+  )
   const dot = Math.max(-1, Math.min(1, quaternionDot(start, end)))
 
   if (dot > 0.9995) {
     return normalizeQuaternion([
-      start[0] + (end[0] - start[0]) * t,
-      start[1] + (end[1] - start[1]) * t,
-      start[2] + (end[2] - start[2]) * t,
-      start[3] + (end[3] - start[3]) * t,
+      start[0] + (end[0] - start[0]) * interpolationAmount,
+      start[1] + (end[1] - start[1]) * interpolationAmount,
+      start[2] + (end[2] - start[2]) * interpolationAmount,
+      start[3] + (end[3] - start[3]) * interpolationAmount,
     ])
   }
 
   const theta = Math.acos(dot)
   const sineTheta = Math.sin(theta)
   if (Math.abs(sineTheta) < 1e-7) return start
-  const fromWeight = Math.sin((1 - t) * theta) / sineTheta
-  const toWeight = Math.sin(t * theta) / sineTheta
+  const fromWeight = Math.sin((1 - interpolationAmount) * theta) / sineTheta
+  const toWeight = Math.sin(interpolationAmount * theta) / sineTheta
   return normalizeQuaternion([
     start[0] * fromWeight + end[0] * toWeight,
     start[1] * fromWeight + end[1] * toWeight,
@@ -176,6 +206,7 @@ export function slerpQuaternions(
   ])
 }
 
+/** Builds a unit quaternion for one normalized axis rotation. */
 function axisAngleQuaternion(x: number, y: number, z: number, radians: number): Quaternion {
   const half = radians / 2
   const sine = Math.sin(half)
@@ -226,6 +257,7 @@ export function viewQuaternion(yawDegrees: number, pitchDegrees: number): Quater
   return normalizeQuaternion(multiplyQuaternions(yaw, pitch))
 }
 
+/** Applies device movement relative to the sensor pose captured at entry. */
 export function relativeDeviceViewQuaternion(
   initialView: Quaternion,
   initialDevice: Quaternion,
@@ -236,8 +268,8 @@ export function relativeDeviceViewQuaternion(
 }
 
 /** Column-major rotation matrix accepted directly by WebGL uniformMatrix3fv. */
-export function quaternionToMatrix3(q: Quaternion): Float32Array {
-  const [x, y, z, w] = normalizeQuaternion(q)
+export function quaternionToMatrix3(quaternion: Quaternion): Float32Array {
+  const [x, y, z, w] = normalizeQuaternion(quaternion)
   const xx = x * x
   const xy = x * y
   const xz = x * z

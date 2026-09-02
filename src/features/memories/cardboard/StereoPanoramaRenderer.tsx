@@ -23,8 +23,11 @@ import {
 import './StereoPanoramaRenderer.css'
 
 export interface StereoPanoramaRendererHandle {
+  /** Attaches motion sensors and resolves after the first usable sample. */
   startOrientation: (options?: PanoramaOrientationStartOptions) => Promise<boolean>
+  /** Removes sensor listeners while preserving the displayed pose. */
   stopOrientation: () => void
+  /** Reconciles the canvas buffer with its rendered CSS dimensions. */
   resize: () => void
 }
 
@@ -93,7 +96,12 @@ interface ShaderLocations {
   opticalCenter: WebGLUniformLocation
 }
 
-function compileShader(gl: WebGLRenderingContext, type: number, source: string) {
+/** Compiles one shader and includes the driver log in any actionable failure. */
+function compileShader(
+  gl: WebGLRenderingContext,
+  type: number,
+  source: string,
+): WebGLShader {
   const shader = gl.createShader(type)
   if (!shader) throw new Error('The panorama shader could not be created.')
   gl.shaderSource(shader, source)
@@ -106,13 +114,19 @@ function compileShader(gl: WebGLRenderingContext, type: number, source: string) 
   return shader
 }
 
-function requiredUniform(gl: WebGLRenderingContext, program: WebGLProgram, name: string) {
+/** Resolves a required uniform instead of letting a broken program render black. */
+function requiredUniform(
+  gl: WebGLRenderingContext,
+  program: WebGLProgram,
+  name: string,
+): WebGLUniformLocation {
   const location = gl.getUniformLocation(program, name)
   if (!location) throw new Error(`The panorama shader is missing ${name}.`)
   return location
 }
 
-export class StereoWebGlPanoramaRenderer {
+/** Owns the single WebGL program, texture, and draw path shared by both eyes. */
+class StereoWebGlPanoramaRenderer {
   readonly gl: WebGLRenderingContext
   private readonly canvas: HTMLCanvasElement
   private readonly program: WebGLProgram
@@ -124,6 +138,7 @@ export class StereoWebGlPanoramaRenderer {
   private textureReady = false
   private destroyed = false
 
+  /** Allocates the renderer's complete GPU resource set for one canvas. */
   constructor(canvas: HTMLCanvasElement) {
     const gl = canvas.getContext('webgl', {
       alpha: false,
@@ -174,7 +189,8 @@ export class StereoWebGlPanoramaRenderer {
     gl.clearColor(0, 0, 0, 1)
   }
 
-  uploadPanorama(image: HTMLImageElement) {
+  /** Replaces the panorama texture after its browser image has decoded. */
+  uploadPanorama(image: HTMLImageElement): void {
     if (this.destroyed) return
     const { gl } = this
     gl.activeTexture(gl.TEXTURE0)
@@ -184,7 +200,8 @@ export class StereoWebGlPanoramaRenderer {
     this.textureReady = true
   }
 
-  resize() {
+  /** Sizes the backing buffer without exceeding a 2x device pixel ratio. */
+  resize(): void {
     if (this.destroyed) return
     const bounds = this.canvas.getBoundingClientRect()
     // A portrait fallback rotates an outer element. clientWidth/clientHeight
@@ -200,12 +217,13 @@ export class StereoWebGlPanoramaRenderer {
     if (this.canvas.height !== height) this.canvas.height = height
   }
 
+  /** Draws synchronized left and right lens viewports from one camera pose. */
   render(
     cameraRotation: Float32Array,
     horizontalFovDegrees: number,
     opticalCenterShift: number,
     viewportProfile: StereoViewportProfile,
-  ) {
+  ): void {
     if (this.destroyed || !this.textureReady) return
     // ResizeObserver and the native orientation settle timers own measurement;
     // never force layout from the animation loop once the buffer has dimensions.
@@ -222,14 +240,17 @@ export class StereoWebGlPanoramaRenderer {
       viewportProfile,
     )
     const eyeAspect = eyes[0].width / Math.max(eyes[0].height, 1)
-    const hfov = Math.max(55, Math.min(110, horizontalFovDegrees))
+    const horizontalFov = Math.max(55, Math.min(110, horizontalFovDegrees))
     gl.useProgram(this.program)
     gl.bindBuffer(gl.ARRAY_BUFFER, this.quadBuffer)
     gl.activeTexture(gl.TEXTURE0)
     gl.bindTexture(gl.TEXTURE_2D, this.texture)
     gl.uniformMatrix3fv(this.locations.cameraRotation, false, cameraRotation)
     gl.uniform1f(this.locations.eyeAspect, eyeAspect)
-    gl.uniform1f(this.locations.tanHalfHorizontalFov, Math.tan((hfov * Math.PI) / 360))
+    gl.uniform1f(
+      this.locations.tanHalfHorizontalFov,
+      Math.tan((horizontalFov * Math.PI) / 360),
+    )
     gl.clear(gl.COLOR_BUFFER_BIT)
     eyes.forEach((eye) => {
       gl.viewport(eye.x, eye.y, eye.width, eye.height)
@@ -238,7 +259,8 @@ export class StereoWebGlPanoramaRenderer {
     })
   }
 
-  destroy() {
+  /** Releases every GPU resource once; subsequent calls are harmless. */
+  destroy(): void {
     if (this.destroyed) return
     this.destroyed = true
     const { gl } = this
@@ -250,14 +272,16 @@ export class StereoWebGlPanoramaRenderer {
   }
 }
 
-function screenOrientationAngle() {
+/** Reads standard and legacy screen rotation for sensor-axis correction. */
+function screenOrientationAngle(): number {
   const angle = globalThis.screen?.orientation?.angle
   if (typeof angle === 'number') return angle
   const legacy = (window as Window & { orientation?: number }).orientation
   return typeof legacy === 'number' ? legacy : 0
 }
 
-function needsAnonymousCors(source: string) {
+/** Enables anonymous CORS only for cross-origin HTTP textures. */
+function needsAnonymousCors(source: string): boolean {
   try {
     const url = new URL(source, window.location.href)
     return url.protocol.startsWith('http') && url.origin !== window.location.origin
@@ -266,6 +290,10 @@ function needsAnonymousCors(source: string) {
   }
 }
 
+/**
+ * Loads a panorama into the shared-eye WebGL renderer and coordinates motion,
+ * stale-sensor detection, drag fallback, and accessible image fallback.
+ */
 export const StereoPanoramaRenderer = forwardRef<
   StereoPanoramaRendererHandle,
   StereoPanoramaRendererProps
@@ -297,7 +325,11 @@ export const StereoPanoramaRenderer = forwardRef<
     ),
   )
   const notifiedTrackingStateRef = useRef<CardboardTrackingState>('waiting')
-  const sceneViewRef = useRef({ yaw: scene.yaw ?? 0, pitch: scene.pitch ?? 0, hfov: scene.hfov ?? 92 })
+  const sceneViewRef = useRef({
+    yaw: scene.yaw ?? 0,
+    pitch: scene.pitch ?? 0,
+    horizontalFov: scene.hfov ?? 92,
+  })
   const centerShiftRef = useRef(opticalCenterShift)
   const viewportProfileRef = useRef(viewportProfile)
   const horizontalFovOverrideRef = useRef(horizontalFovOverride)
@@ -314,17 +346,23 @@ export const StereoPanoramaRenderer = forwardRef<
     horizontalFovOverrideRef.current = horizontalFovOverride
   }, [horizontalFovOverride])
   useEffect(() => {
-    sceneViewRef.current = { yaw: scene.yaw ?? 0, pitch: scene.pitch ?? 0, hfov: scene.hfov ?? 92 }
+    sceneViewRef.current = {
+      yaw: scene.yaw ?? 0,
+      pitch: scene.pitch ?? 0,
+      horizontalFov: scene.hfov ?? 92,
+    }
     poseTracker.reset(viewQuaternion(scene.yaw ?? 0, scene.pitch ?? 0))
     notifiedTrackingStateRef.current = 'waiting'
   }, [poseTracker, scene.id, scene.hfov, scene.pitch, scene.yaw])
 
+  /** Emits tracker transitions once so parent status updates do not churn. */
   const notifyTrackingState = useCallback((state: CardboardTrackingState) => {
     if (notifiedTrackingStateRef.current === state) return
     notifiedTrackingStateRef.current = state
     callbacksRef.current.onTrackingStateChange?.(state)
   }, [])
 
+  /** Settles pending startup and removes every sensor lifecycle listener. */
   const stopOrientation = useCallback(() => {
     // startOrientation may still be waiting for its first usable sample. Settle
     // that promise before removing every listener so an exit/unmount cannot
@@ -349,6 +387,7 @@ export const StereoPanoramaRenderer = forwardRef<
     notifiedTrackingStateRef.current = 'waiting'
   }, [poseTracker])
 
+  /** Attaches one validated sensor stream and resolves after its first sample. */
   const startOrientation = useCallback(async (_options?: PanoramaOrientationStartOptions) => {
     if (!rendererRef.current || typeof globalThis.DeviceOrientationEvent === 'undefined') return false
     // CardboardViewer already consumed any iOS permission prompt in the original
@@ -359,6 +398,7 @@ export const StereoPanoramaRenderer = forwardRef<
     return new Promise<boolean>((resolve) => {
       let settled = false
       let timeout = 0
+      /** Validates and converts a browser orientation sample into viewer space. */
       const listener = (event: DeviceOrientationEvent) => {
         if (
           event.alpha === null ||
@@ -385,12 +425,14 @@ export const StereoPanoramaRenderer = forwardRef<
         if (state) notifyTrackingState(state)
         settle(true)
       }
+      /** Rebases sensor coordinates after the physical screen rotates. */
       const handleScreenOrientationChange = () => {
         // DeviceOrientation axes change with the screen. Rebase on the next
         // sample instead of composing across coordinate systems and producing a
         // sudden quarter-turn while the native controller settles landscape.
         poseTracker.markScreenOrientationChanged()
       }
+      /** Marks hidden-page sensors stale and rebases them on return. */
       const handleVisibilityChange = () => {
         if (document.visibilityState !== 'hidden') {
           poseTracker.markScreenOrientationChanged()
@@ -398,6 +440,7 @@ export const StereoPanoramaRenderer = forwardRef<
         }
         if (poseTracker.markStale()) notifyTrackingState('stale')
       }
+      /** Resolves startup exactly once and performs failure-only cleanup. */
       const settle = (started: boolean) => {
         if (settled) return
         settled = true
@@ -458,6 +501,7 @@ export const StereoPanoramaRenderer = forwardRef<
       rendererRef.current = new StereoWebGlPanoramaRenderer(canvas)
     } catch (error) {
       const normalized = error instanceof Error ? error : new Error('WebGL could not start.')
+      // oxlint-disable-next-line react/set-state-in-effect -- WebGL allocation is an external browser resource check.
       setStatus('fallback')
       setErrorMessage(normalized.message)
       callbacksRef.current.onError?.(normalized)
@@ -469,6 +513,7 @@ export const StereoPanoramaRenderer = forwardRef<
     observer?.observe(canvas)
     rendererRef.current.resize()
 
+    /** Renders one pose to both eyes and schedules the next synchronized frame. */
     const draw = () => {
       const renderer = rendererRef.current
       if (!renderer) return
@@ -479,7 +524,7 @@ export const StereoPanoramaRenderer = forwardRef<
       const pose = poseTracker.getPose()
       renderer.render(
         quaternionToMatrix3(pose),
-        horizontalFovOverrideRef.current ?? view.hfov,
+        horizontalFovOverrideRef.current ?? view.horizontalFov,
         centerShiftRef.current,
         viewportProfileRef.current,
       )
@@ -499,6 +544,7 @@ export const StereoPanoramaRenderer = forwardRef<
   useEffect(() => {
     const renderer = rendererRef.current
     const request = ++requestRef.current
+    // oxlint-disable-next-line react/set-state-in-effect -- Loading follows the external image resource lifecycle.
     setStatus('loading')
     setErrorMessage(null)
     if (!renderer) {
@@ -539,6 +585,7 @@ export const StereoPanoramaRenderer = forwardRef<
     }
   }, [scene.panorama])
 
+  /** Starts manual synchronized drag only when head tracking is unavailable. */
   const pointerDown = useCallback((event: ReactPointerEvent<HTMLCanvasElement>) => {
     // Touch / pointer drag is a synchronized fallback only while sensors are
     // absent or stale. Active head tracking remains the sole pose owner so a
@@ -547,19 +594,28 @@ export const StereoPanoramaRenderer = forwardRef<
     pointerRef.current = { id: event.pointerId, x: event.clientX, y: event.clientY }
     event.currentTarget.setPointerCapture?.(event.pointerId)
   }, [poseTracker])
+  /** Converts pointer movement into bounded yaw/pitch fallback deltas. */
   const pointerMove = useCallback((event: ReactPointerEvent<HTMLCanvasElement>) => {
     const pointer = pointerRef.current
     if (!pointer || pointer.id !== event.pointerId) return
-    const dx = event.clientX - pointer.x
-    const dy = event.clientY - pointer.y
+    const horizontalDelta = event.clientX - pointer.x
+    const verticalDelta = event.clientY - pointer.y
     pointer.x = event.clientX
     pointer.y = event.clientY
-    poseTracker.applyManualDelta(-dx * 0.16, dy * 0.14)
+    poseTracker.applyManualDelta(
+      -horizontalDelta * 0.16,
+      verticalDelta * 0.14,
+    )
   }, [poseTracker])
+  /** Ends the matching manual-drag pointer and releases capture defensively. */
   const pointerEnd = useCallback((event: ReactPointerEvent<HTMLCanvasElement>) => {
     if (pointerRef.current?.id !== event.pointerId) return
     pointerRef.current = null
-    event.currentTarget.releasePointerCapture?.(event.pointerId)
+    try {
+      event.currentTarget.releasePointerCapture?.(event.pointerId)
+    } catch {
+      // Pointer cancellation may release capture before React dispatches it.
+    }
   }, [])
 
   const fallback = status === 'fallback' || status === 'error'

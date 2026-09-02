@@ -20,6 +20,7 @@ public final class CardboardWindowController {
     private boolean previousNavigationBarsVisible;
     private int previousCutoutMode;
 
+    /** Saves the current window flags once, then applies Cardboard presentation. */
     public synchronized void enter(AppCompatActivity activity) {
         Window window = activity.getWindow();
         View decor = window.getDecorView();
@@ -40,13 +41,19 @@ public final class CardboardWindowController {
         applyImmersiveWindow(activity);
     }
 
+    /** Reapplies immersive flags that Android may clear when focus changes. */
     public synchronized void reapply(AppCompatActivity activity) {
-        if (!active) return;
+        if (!active) {
+            return;
+        }
         applyImmersiveWindow(activity);
     }
 
+    /** Restores the exact window state captured by {@link #enter(AppCompatActivity)}. */
     public synchronized void exit(AppCompatActivity activity) {
-        if (!active) return;
+        if (!active) {
+            return;
+        }
         Window window = activity.getWindow();
         View decor = window.getDecorView();
         WindowInsetsControllerCompat controller =
@@ -76,10 +83,12 @@ public final class CardboardWindowController {
         active = false;
     }
 
+    /** Returns whether a Cardboard presentation currently owns the window. */
     public synchronized boolean isActive() {
         return active;
     }
 
+    /** Applies modern insets control plus legacy flags needed by older WebViews. */
     private void applyImmersiveWindow(AppCompatActivity activity) {
         Window window = activity.getWindow();
         View decor = window.getDecorView();

@@ -12,6 +12,7 @@ const CardboardOrientation = registerPlugin<CardboardOrientationPlugin>(
   'CardboardOrientation',
 )
 
+/** Reports whether this native build installed the orientation bridge. */
 export function nativeCardboardOrientationAvailable(): boolean {
   const platform = Capacitor.getPlatform()
   return (
@@ -31,6 +32,7 @@ export function shouldRequestCardboardDomFullscreenFallback(): boolean {
   return nativeCardboardOrientationAvailable() && Capacitor.getPlatform() === 'android'
 }
 
+/** Requests native landscape/immersive presentation without throwing to UI. */
 export async function requestNativeCardboardLandscape(): Promise<boolean> {
   if (!nativeCardboardOrientationAvailable()) return false
 
@@ -46,6 +48,7 @@ export async function requestNativeCardboardLandscape(): Promise<boolean> {
   }
 }
 
+/** Restores the orientation policy captured by the native bridge on entry. */
 export async function restoreNativeAppOrientation(): Promise<boolean> {
   if (!nativeCardboardOrientationAvailable()) return false
 

@@ -1,7 +1,6 @@
 package com.simerfamily.kinsphere.cardboard;
 
 import android.content.pm.ActivityInfo;
-import android.os.Build;
 import android.os.SystemClock;
 import com.getcapacitor.JSObject;
 import com.getcapacitor.Plugin;
@@ -18,6 +17,7 @@ public final class CardboardOrientationPlugin extends Plugin {
     private final OrientationSession orientationSession = new OrientationSession();
     private final AtomicLong requestGeneration = new AtomicLong();
 
+    /** Requests fixed landscape and resolves only after immersive layout settles. */
     @PluginMethod
     public void requestLandscape(PluginCall call) {
         long requestId = requestGeneration.incrementAndGet();
@@ -62,6 +62,7 @@ public final class CardboardOrientationPlugin extends Plugin {
         });
     }
 
+    /** Restores the app orientation that preceded the current Cardboard session. */
     @PluginMethod
     public void restoreAppOrientation(PluginCall call) {
         requestGeneration.incrementAndGet();
@@ -107,6 +108,7 @@ public final class CardboardOrientationPlugin extends Plugin {
         });
     }
 
+    /** Invalidates pending settle callbacks and drops Activity-scoped restore state. */
     @Override
     protected void handleOnDestroy() {
         // A finishing Activity no longer needs an orientation restoration. Avoid
@@ -115,6 +117,7 @@ public final class CardboardOrientationPlugin extends Plugin {
         orientationSession.markRestored();
     }
 
+    /** Rolls back both window and orientation state after a failed landscape request. */
     private void restoreAfterFailedRequest(MainActivity activity) {
         try {
             activity.restoreAppPresentation();
@@ -133,6 +136,7 @@ public final class CardboardOrientationPlugin extends Plugin {
         }
     }
 
+    /** Polls the bounded Android layout transition until the immersive WebView is ready. */
     private void resolveWhenPresentationSettles(
         MainActivity activity,
         PluginCall call,
@@ -174,24 +178,26 @@ public final class CardboardOrientationPlugin extends Plugin {
         );
     }
 
+    /** Returns the normalized Android orientation label expected by the web bridge. */
     private static void resolveRestored(PluginCall call, int orientation) {
         JSObject result = new JSObject();
         result.put("orientation", orientationLabel(orientation));
         call.resolve(result);
     }
 
+    /** Returns the host only when Capacitor is attached to KinSphere's main Activity. */
     private MainActivity mainActivity() {
-        return getActivity() instanceof MainActivity
-            ? (MainActivity) getActivity()
-            : null;
+        return getActivity() instanceof MainActivity activity ? activity : null;
     }
 
+    /** Rejects an Activity that can no longer safely mutate its window. */
     private static boolean isActivityAvailable(MainActivity activity) {
         return activity != null &&
             !activity.isFinishing() &&
-            (Build.VERSION.SDK_INT < Build.VERSION_CODES.JELLY_BEAN_MR1 || !activity.isDestroyed());
+            !activity.isDestroyed();
     }
 
+    /** Maps sensor-like restore modes to portrait so the ordinary app remains stable. */
     static int normalizedRestoreOrientation(int orientation) {
         if (
             orientation == ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED ||
@@ -205,6 +211,7 @@ public final class CardboardOrientationPlugin extends Plugin {
         return orientation;
     }
 
+    /** Converts Android's orientation constants into the bridge's small string contract. */
     static String orientationLabel(int orientation) {
         if (
             orientation == ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE ||
@@ -225,19 +232,23 @@ public final class CardboardOrientationPlugin extends Plugin {
         return "unspecified";
     }
 
+    /** Thread-safe holder for the single orientation value owned by one VR session. */
     static final class OrientationSession {
         private Integer previousOrientation;
 
+        /** Captures the pre-VR orientation once, preserving it across repeated requests. */
         synchronized void rememberIfNeeded(int orientation) {
             if (previousOrientation == null) {
                 previousOrientation = orientation;
             }
         }
 
+        /** Returns the saved orientation without transferring ownership. */
         synchronized Integer previousOrientation() {
             return previousOrientation;
         }
 
+        /** Clears the saved orientation once restoration or Activity teardown completes. */
         synchronized void markRestored() {
             previousOrientation = null;
         }

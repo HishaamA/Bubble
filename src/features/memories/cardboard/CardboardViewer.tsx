@@ -98,10 +98,12 @@ const MOTION_FALLBACK_MESSAGES: Partial<Record<MotionStatus, string>> = {
     'This browser does not expose phone motion sensors. Synchronized drag is still available.',
 }
 
+/** Recognizes installed-app protocols as trusted motion contexts. */
 function isNativeAppProtocol(protocol: string): boolean {
   return protocol === 'capacitor:' || protocol === 'ionic:'
 }
 
+/** Allows browser motion testing only on explicit loopback hosts. */
 function isLocalDevelopmentHost(hostname: string): boolean {
   return (
     hostname === 'localhost' ||
@@ -110,6 +112,7 @@ function isLocalDevelopmentHost(hostname: string): boolean {
   )
 }
 
+/** Mirrors secure-context requirements for device-orientation access. */
 function isTrustedMotionContext(): boolean {
   if (typeof window === 'undefined') return false
   const { protocol, hostname } = window.location
@@ -120,6 +123,7 @@ function isTrustedMotionContext(): boolean {
   return protocol === 'https:' || isLocalDevelopmentHost(hostname)
 }
 
+/** Keeps a requested scene only when it exists, otherwise selects the first scene. */
 function resolveInitialSceneId(
   scenes: readonly PanoramaScene[],
   requestedSceneId?: string,
@@ -130,6 +134,7 @@ function resolveInitialSceneId(
   return scenes[0]?.id ?? ''
 }
 
+/** Normalizes browser-specific motion permission behavior into viewer states. */
 async function requestMotionPermission(): Promise<CardboardMotionPermission> {
   if (!isTrustedMotionContext()) return 'insecure'
 
@@ -150,6 +155,7 @@ async function requestMotionPermission(): Promise<CardboardMotionPermission> {
   }
 }
 
+/** Claims fullscreen only when no other feature currently owns it. */
 async function requestElementFullscreen(element: HTMLElement): Promise<boolean> {
   if (currentFullscreenElement() === element) return true
   if (currentFullscreenElement()) return false
@@ -168,6 +174,7 @@ async function requestElementFullscreen(element: HTMLElement): Promise<boolean> 
   }
 }
 
+/** Reads standard and legacy WebKit fullscreen ownership consistently. */
 function currentFullscreenElement(): Element | null {
   const fullscreenDocument = document as WebkitFullscreenDocument
   return (
@@ -177,6 +184,7 @@ function currentFullscreenElement(): Element | null {
   )
 }
 
+/** Leaves fullscreen only when this session still owns the exact root element. */
 async function leaveOwnedFullscreen(
   root: HTMLElement | null,
   fullscreenWasRequested: boolean,
@@ -201,6 +209,7 @@ async function leaveOwnedFullscreen(
   }
 }
 
+/** Requests browser landscape lock as a best-effort enhancement. */
 async function lockLandscape(): Promise<void> {
   const orientation = globalThis.screen?.orientation as
     | LockableScreenOrientation
@@ -214,6 +223,7 @@ async function lockLandscape(): Promise<void> {
   }
 }
 
+/** Releases any browser orientation lock without making viewer exit fail. */
 function unlockOrientation(): void {
   const orientation = globalThis.screen?.orientation as
     | LockableScreenOrientation
@@ -225,6 +235,7 @@ function unlockOrientation(): void {
   }
 }
 
+/** Returns visible, enabled controls in DOM order for the VR focus loop. */
 function focusableDialogControls(root: HTMLElement): HTMLElement[] {
   return Array.from(
     root.querySelectorAll<HTMLElement>(
@@ -237,6 +248,7 @@ function focusableDialogControls(root: HTMLElement): HTMLElement[] {
   )
 }
 
+/** Temporarily removes every underlying app viewport from keyboard interaction. */
 function makeAppViewportInert(): () => void {
   const snapshots: InertSnapshot[] = Array.from(
     document.querySelectorAll<HTMLElement>('.app-viewport'),
@@ -259,6 +271,7 @@ function makeAppViewportInert(): () => void {
   }
 }
 
+/** Draws the viewer's dependency-free close glyph. */
 function ExitGlyph() {
   return (
     <svg viewBox="0 0 24 24" aria-hidden="true">
@@ -267,6 +280,10 @@ function ExitGlyph() {
   )
 }
 
+/**
+ * Owns the modal Cardboard session, including fullscreen, orientation, motion,
+ * focus containment, and symmetric cleanup through its imperative handle.
+ */
 export const CardboardViewer = forwardRef<
   CardboardViewerHandle,
   CardboardViewerProps
@@ -340,15 +357,18 @@ export const CardboardViewer = forwardRef<
     setCurrentSceneId(nextSceneId)
   }, [initialSceneId, scenes])
 
+  /** Stops sensor input while preserving the displayed panorama orientation. */
   const stopStereoViewer = useCallback(() => {
     motionActiveRef.current = false
     stereoViewerRef.current?.stopOrientation()
   }, [])
 
+  /** Reconciles the stereo backing buffer with current viewport geometry. */
   const resizeStereoViewer = useCallback(() => {
     stereoViewerRef.current?.resize()
   }, [])
 
+  /** Re-measures across native rotation's immediate and settling layout phases. */
   const scheduleSettledViewerResizes = useCallback(() => {
     settleResizeTimersRef.current.forEach(window.clearTimeout)
     settleResizeTimersRef.current = [0, 100, 300].map((delay) =>
@@ -400,6 +420,7 @@ export const CardboardViewer = forwardRef<
     }
   }, [stopStereoViewer])
 
+  /** Starts one sensor stream for the current viewer and session generations. */
   const startPrimaryViewer = useCallback(async (
     permissionAlreadyGranted = false,
   ) => {
@@ -432,6 +453,7 @@ export const CardboardViewer = forwardRef<
     setMotionStatus(started ? 'active' : 'unavailable')
   }, [])
 
+  /** Maps low-level tracker freshness into the viewer's fallback messaging. */
   const handleTrackingStateChange = useCallback(
     (state: 'waiting' | 'active' | 'stale') => {
       if (!activeRef.current || state === 'waiting') return
@@ -442,6 +464,7 @@ export const CardboardViewer = forwardRef<
     [],
   )
 
+  /** Performs idempotent session teardown and restores all global browser state. */
   const exit = useCallback((): Promise<void> => {
     if (exitPromiseRef.current) return exitPromiseRef.current
     if (!activeRef.current) return Promise.resolve()
@@ -499,6 +522,7 @@ export const CardboardViewer = forwardRef<
     return exitPromise
   }, [stopStereoViewer])
 
+  /** Enters once per user activation and shares the in-flight entry result. */
   const enter = useCallback(function enterCardboardViewer(
     options: CardboardEntryOptions = {},
   ): Promise<CardboardEntryResult> {
@@ -671,6 +695,7 @@ export const CardboardViewer = forwardRef<
     if (!active) return
 
     const root = rootRef.current
+    /** Closes on Escape and contains keyboard focus within the VR portal. */
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
         event.preventDefault()
@@ -695,6 +720,7 @@ export const CardboardViewer = forwardRef<
         first.focus()
       }
     }
+    /** Tears down VR when browser chrome revokes this session's fullscreen. */
     const handleFullscreenChange = () => {
       if (
         activeRef.current &&
@@ -737,6 +763,7 @@ export const CardboardViewer = forwardRef<
   useEffect(() => {
     if (!active) return
     let frame: number | null = null
+    /** Coalesces viewport changes into one animation-frame resize. */
     const scheduleResize = () => {
       if (frame !== null) window.cancelAnimationFrame(frame)
       frame = window.requestAnimationFrame(() => {
@@ -756,6 +783,7 @@ export const CardboardViewer = forwardRef<
     }
   }, [active, forceLandscape, landscape, resizeStereoViewer, viewerReady])
 
+  /** Lets a person continue with synchronized drag when rotation is unavailable. */
   const useSplitViewAnyway = useCallback(() => {
     setLandscapeOverride(true)
     window.requestAnimationFrame(() => {

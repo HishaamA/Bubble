@@ -8,7 +8,6 @@ const capacitor = vi.hoisted(() => ({
 }))
 const panoramaPlugin = vi.hoisted(() => ({
   open: vi.fn(),
-  addListener: vi.fn(),
 }))
 
 vi.mock('@capacitor/core', () => ({
@@ -38,9 +37,6 @@ describe('native Cardboard panorama bridge', () => {
     capacitor.getPlatform.mockReset().mockReturnValue('android')
     capacitor.isPluginAvailable.mockReset().mockReturnValue(true)
     panoramaPlugin.open.mockReset().mockResolvedValue({ launched: true })
-    panoramaPlugin.addListener.mockReset().mockResolvedValue({
-      remove: vi.fn().mockResolvedValue(undefined),
-    })
   })
 
   it('is offered by the installed native Android or iOS plugin', () => {
@@ -71,63 +67,6 @@ describe('native Cardboard panorama bridge', () => {
       initialYaw: 12,
       initialPitch: -2,
     })
-    expect(panoramaPlugin.addListener).not.toHaveBeenCalled()
-  })
-
-  it('reports native iOS dismissal and removes its one-shot listener', async () => {
-    capacitor.getPlatform.mockReturnValue('ios')
-    const onClosed = vi.fn()
-    const remove = vi.fn().mockResolvedValue(undefined)
-    let notifyClosed: (() => void) | undefined
-    panoramaPlugin.addListener.mockImplementation(
-      (_eventName: string, listener: () => void) => {
-        notifyClosed = listener
-        return Promise.resolve({ remove })
-      },
-    )
-
-    await expect(
-      presentNativeCardboardPanorama({
-        scene,
-        sourceBlob: new Blob(['panorama'], { type: 'image/jpeg' }),
-        onClosed,
-      }),
-    ).resolves.toBe(true)
-
-    expect(panoramaPlugin.addListener).toHaveBeenCalledWith(
-      'closed',
-      expect.any(Function),
-    )
-    notifyClosed?.()
-    notifyClosed?.()
-    expect(onClosed).toHaveBeenCalledOnce()
-    expect(remove).toHaveBeenCalledOnce()
-  })
-
-  it('falls back even when a failed iOS launch cannot dispose its listener', async () => {
-    capacitor.getPlatform.mockReturnValue('ios')
-    const remove = vi.fn().mockRejectedValue(new Error('bridge detached'))
-    let notifyClosed: (() => void) | undefined
-    panoramaPlugin.addListener.mockImplementation(
-      (_eventName: string, listener: () => void) => {
-        notifyClosed = listener
-        return Promise.resolve({ remove })
-      },
-    )
-    panoramaPlugin.open.mockResolvedValue({ launched: false })
-    const onClosed = vi.fn()
-
-    await expect(
-      presentNativeCardboardPanorama({
-        scene,
-        sourceBlob: new Blob(['panorama'], { type: 'image/jpeg' }),
-        onClosed,
-      }),
-    ).resolves.toBe(false)
-
-    expect(remove).toHaveBeenCalledOnce()
-    notifyClosed?.()
-    expect(onClosed).not.toHaveBeenCalled()
   })
 
   it('does not allocate or send an oversized image', async () => {

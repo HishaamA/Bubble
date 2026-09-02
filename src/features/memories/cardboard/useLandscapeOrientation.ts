@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 
+/** Resolves landscape state across modern, legacy, and native WebView signals. */
 export function isLandscapeOrientation(): boolean {
   if (typeof window === 'undefined') return false
   const orientationType = globalThis.screen?.orientation?.type
@@ -16,10 +17,12 @@ export function isLandscapeOrientation(): boolean {
     : false
 }
 
+/** Subscribes to every browser signal that may reflect a rotation transition. */
 export function useLandscapeOrientation(): boolean {
   const [landscape, setLandscape] = useState(isLandscapeOrientation)
 
   useEffect(() => {
+    /** Re-derives orientation from all geometry sources after any signal fires. */
     const update = () => setLandscape(isLandscapeOrientation())
     // Native UIWindowScene rotation, visualViewport settling, CSS media-query
     // changes and browser resize do not arrive in a guaranteed order. Listen to
