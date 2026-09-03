@@ -9,6 +9,7 @@ export const demoLoginAvailable =
   import.meta.env.DEV ||
   import.meta.env.VITE_DEMO_LOGIN_ENABLED?.trim().toLowerCase() === 'true'
 
+/** Restores the durable prototype demo flag when that build capability is enabled. */
 export function readDemoLoginSession() {
   if (!demoLoginAvailable || typeof window === 'undefined') return false
 
@@ -19,6 +20,7 @@ export function readDemoLoginSession() {
   }
 }
 
+/** Enables prototype demo access, falling back to the caller's in-memory state. */
 export function startDemoLoginSession() {
   if (!demoLoginAvailable || typeof window === 'undefined') return false
 
@@ -31,6 +33,7 @@ export function startDemoLoginSession() {
   return true
 }
 
+/** Removes any durable prototype demo access from the current browser. */
 export function clearDemoLoginSession() {
   if (typeof window === 'undefined') return
 

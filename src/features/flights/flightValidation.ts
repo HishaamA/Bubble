@@ -13,10 +13,12 @@ export type FlightFormValidation =
   | { valid: true; value: ValidatedFlightForm }
   | { valid: false; field: keyof FlightFormInput; message: string }
 
+/** Canonicalizes common airline-number spacing and punctuation. */
 export function normalizeFlightNumber(value: string) {
   return value.trim().toUpperCase().replace(/[\s-]+/g, '')
 }
 
+/** Distinguishes unsupported 13-digit ticket numbers from flight numbers. */
 export function looksLikeTicketNumber(value: string) {
   return /^\d{13}$/.test(value.trim().replace(/[\s-]+/g, ''))
 }
@@ -29,6 +31,7 @@ export function localCalendarDate(date: Date) {
   return `${year}-${month}-${day}`
 }
 
+/** Shifts a local calendar date without introducing UTC or DST drift. */
 export function shiftLocalCalendarDate(date: Date, days: number) {
   const shifted = new Date(
     date.getFullYear(),
@@ -39,6 +42,7 @@ export function shiftLocalCalendarDate(date: Date, days: number) {
   return localCalendarDate(shifted)
 }
 
+/** Parses a real local calendar date while rejecting rollover such as Feb 31. */
 function parseIsoDate(value: string) {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return null
   const [year, month, day] = value.split('-').map(Number)
@@ -51,10 +55,12 @@ function parseIsoDate(value: string) {
   return date
 }
 
+/** Produces a DST-independent day number for range comparisons. */
 function localCalendarDay(date: Date) {
   return Date.UTC(date.getFullYear(), date.getMonth(), date.getDate())
 }
 
+/** Validates and canonicalizes user input before any provider request. */
 export function validateFlightForm(
   input: FlightFormInput,
   now = new Date(),
@@ -112,12 +118,14 @@ export function validateFlightForm(
   }
 }
 
+/** Converts an optional timestamp into a finite number for progress arithmetic. */
 function timestamp(value: string | null) {
   if (!value) return null
   const result = new Date(value).getTime()
   return Number.isFinite(result) ? result : null
 }
 
+/** Derives bounded journey progress when the provider omits a live percentage. */
 export function calculateFlightProgress(
   snapshot: FlightStatusSnapshot,
   now = new Date(),
@@ -145,12 +153,14 @@ export function calculateFlightProgress(
   )
 }
 
+/** Returns the best available arrival timestamp in actual-to-scheduled order. */
 export function flightArrivalTime(snapshot: FlightStatusSnapshot) {
   return snapshot.actualArrival
     ?? snapshot.estimatedArrival
     ?? snapshot.scheduledArrival
 }
 
+/** Returns the best available departure timestamp in actual-to-scheduled order. */
 export function flightDepartureTime(snapshot: FlightStatusSnapshot) {
   return snapshot.actualDeparture
     ?? snapshot.estimatedDeparture
@@ -159,6 +169,7 @@ export function flightDepartureTime(snapshot: FlightStatusSnapshot) {
 
 export const livePositionFreshnessMs = 15 * 60 * 1000
 
+/** Downgrades stale live positions without discarding useful ETA information. */
 export function effectiveFlightDataQuality(
   snapshot: FlightStatusSnapshot,
   now = new Date(),
@@ -176,6 +187,7 @@ export function effectiveFlightDataQuality(
     : 'scheduled' as const
 }
 
+/** Treats arrival and cancellation as terminal tracking states. */
 export function isFlightComplete(snapshot: FlightStatusSnapshot) {
   const status = snapshot.status.trim().toLowerCase()
   return Boolean(snapshot.actualArrival)
@@ -184,6 +196,7 @@ export function isFlightComplete(snapshot: FlightStatusSnapshot) {
     || status === 'canceled'
 }
 
+/** Normalizes provider spelling before checking cancellation state. */
 export function isFlightCancelled(snapshot: FlightStatusSnapshot) {
   const status = snapshot.status.trim().toLowerCase()
   return status === 'cancelled' || status === 'canceled'
@@ -195,6 +208,7 @@ export type FormattedFlightDateTime = {
   timeZone: string
 }
 
+/** Formats a flight timestamp in the airport's IANA time zone. */
 export function formatFlightDateTime(
   value: string | null,
   timeZone: string,

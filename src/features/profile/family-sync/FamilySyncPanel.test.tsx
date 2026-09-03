@@ -15,9 +15,6 @@ function createAdapter(initialSnapshot: FamilySyncSnapshot) {
   let snapshot = initialSnapshot
   const adapter: FamilySyncAdapter = {
     loadSnapshot: vi.fn(async () => snapshot),
-    signIn: vi.fn(async () => undefined),
-    signUp: vi.fn(async () => ({ requiresEmailConfirmation: false })),
-    signOut: vi.fn(async () => undefined),
     createCircle: vi.fn(async () => undefined),
     requestCircleJoin: vi.fn(async () => undefined),
     rotateFamilyCode: vi.fn(async () =>
@@ -66,7 +63,6 @@ describe('FamilySyncPanel', () => {
     expect(
       screen.getByRole('link', { name: 'Sign in or create an account' }),
     ).toHaveAttribute('href', '/login')
-    expect(setup.adapter.signIn).not.toHaveBeenCalled()
   })
 
   it('creates a circle for an authenticated person', async () => {

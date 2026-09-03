@@ -11,9 +11,9 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { AuthProvider, type AuthContextValue } from '../auth'
 import {
   FamilyOnboardingProvider,
-  toFamilyOnboardingMessage,
-  useFamilyOnboarding,
 } from './FamilyOnboardingProvider'
+import { useFamilyOnboarding } from './familyOnboardingContext'
+import { toFamilyOnboardingMessage } from './familyOnboardingErrors'
 import { RequireFamilyMembership } from './RequireFamilyMembership'
 import type { FamilyOnboardingAdapter } from './types'
 

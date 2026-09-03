@@ -5,6 +5,7 @@ const familyBubbles = [
   },
 ] as const
 
+/** Renders the decorative family-memory artwork on the authentication cover. */
 export function AuthFamilyIllustration() {
   return (
     <div className="auth-illustration" aria-hidden="true">

@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react'
+import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import {
   MemoryRouter,
@@ -19,8 +19,15 @@ import {
   canUseDevelopmentPreview,
   developmentPreviewAvailable,
 } from './developmentPreview'
+import { startDemoLoginSession } from './demoLogin'
 
 vi.mock('./config', () => ({ clerkConfigured: false }))
+
+const flightNotifications = vi.hoisted(() => ({
+  cancelActiveSubjectFlightNotifications: vi.fn(async () => undefined),
+}))
+
+vi.mock('../flights/flightNotifications', () => flightNotifications)
 
 function PreviewDestination() {
   const { signOut, user } = useAuth()
@@ -56,6 +63,8 @@ function PreviewRoutes() {
 }
 
 afterEach(() => {
+  vi.clearAllMocks()
+  window.localStorage.clear()
   window.sessionStorage.clear()
 })
 
@@ -106,5 +115,27 @@ describe('development preview authentication', () => {
     expect(
       await screen.findByRole('button', { name: 'Explore the demo' }),
     ).toBeInTheDocument()
+  })
+
+  it('cancels subject-specific flight alerts when a demo session signs out', async () => {
+    const user = userEvent.setup()
+    expect(startDemoLoginSession()).toBe(true)
+
+    render(
+      <AuthProvider>
+        <PreviewDestination />
+      </AuthProvider>,
+    )
+
+    await screen.findByText('Bubble Preview')
+    await user.click(
+      screen.getByRole('button', { name: 'Sign out of preview' }),
+    )
+
+    await waitFor(() => {
+      expect(
+        flightNotifications.cancelActiveSubjectFlightNotifications,
+      ).toHaveBeenCalledTimes(1)
+    })
   })
 })

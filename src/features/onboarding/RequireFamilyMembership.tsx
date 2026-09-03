@@ -1,7 +1,8 @@
 import { Navigate, Outlet, useLocation } from 'react-router-dom'
 import { useAuth } from '../auth'
-import { useFamilyOnboarding } from './FamilyOnboardingProvider'
+import { useFamilyOnboarding } from './familyOnboardingContext'
 
+/** Protects nested routes until cloud users have joined a family. */
 export function RequireFamilyMembership() {
   const { isDevelopmentPreview } = useAuth()
   const { status } = useFamilyOnboarding()

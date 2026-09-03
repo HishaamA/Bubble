@@ -1,6 +1,8 @@
 import type { CapacitorConfig } from '@capacitor/cli'
 
 const config: CapacitorConfig = {
+  // The native identifier remains stable across the product's Bubble rename so
+  // existing keychain data, notifications, and installed upgrades keep working.
   appId: 'com.simerfamily.kinsphere',
   appName: 'Bubble',
   webDir: 'dist',

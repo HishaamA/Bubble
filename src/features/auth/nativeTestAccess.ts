@@ -6,6 +6,10 @@ type DebugAccessPlugin = {
 
 const DebugAccess = registerPlugin<DebugAccessPlugin>('DebugAccess')
 
+/**
+ * Checks Android's native debug gate and fails closed on timeout or plugin error.
+ * A web flag alone can therefore never unlock the native test identity.
+ */
 export async function isNativeTestAccessEnabled() {
   if (
     Capacitor.getPlatform() !== 'android' ||

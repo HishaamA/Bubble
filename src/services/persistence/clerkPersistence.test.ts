@@ -236,6 +236,14 @@ describe('Clerk-backed persistence service', () => {
     })
   })
 
+  it('rejects malformed family codes before making a backend request', async () => {
+    await expect(joinFamilyByCode('not a family code')).rejects.toThrow(
+      'invalid_family_code',
+    )
+
+    expect(mocks.client.rpc).not.toHaveBeenCalled()
+  })
+
   it('loads the family roster and manages the owner share code', async () => {
     await expect(readFamilyMembers()).resolves.toEqual([
       {
@@ -308,6 +316,22 @@ describe('Clerk-backed persistence service', () => {
       notifications_enabled: false,
       quiet_hours_start: null,
       quiet_hours_end: null,
+    })
+  })
+
+  it('reads preferences once when an update contains no supported fields', async () => {
+    await expect(updateProfilePreferences({})).resolves.toEqual({
+      notificationsEnabled: true,
+      quietHoursEnabled: true,
+      quietHoursStart: '22:00:00',
+      quietHoursEnd: '08:00:00',
+    })
+
+    expect(mocks.preferences.update).not.toHaveBeenCalled()
+    expect(mocks.client.rpc).toHaveBeenCalledTimes(1)
+    expect(mocks.client.rpc).toHaveBeenCalledWith('bootstrap_current_user', {
+      p_display_name: 'Alice Ahmed',
+      p_email: 'alice@example.test',
     })
   })
 })

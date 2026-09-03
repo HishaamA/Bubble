@@ -333,7 +333,25 @@ supabase test db supabase/tests/clerk_third_party_auth.sql
 supabase test db supabase/tests/family_capsules.sql
 supabase test db supabase/tests/family_journal_photos.sql
 supabase test db supabase/tests/family_flights.sql
+supabase test db supabase/tests/persistent_family_groups.sql
 ```
+
+## Backend maintenance rules
+
+- Treat request bodies, provider responses, JWT claims, and Storage metadata as
+  untrusted until a narrowly named validator has accepted them.
+- Keep every `security definer` function on an empty `search_path`, qualify
+  referenced schemas explicitly, and revoke the default public execute grant
+  before granting only the roles that need the function.
+- Authorize before spending provider quota. Because external calls cannot share
+  a database transaction, recheck membership and immutable row identity before
+  every service-role write.
+- Name values for their domain role (`flightIdentity`, `responseBody`,
+  `databaseClient`) rather than their runtime type (`object`, `data`, `client`).
+- Explain security boundaries, concurrency locks, and intentional fallbacks in
+  comments. Avoid comments that merely restate a SQL or TypeScript expression.
+- Add a pgTAP regression for every policy or RPC change and a focused unit test
+  for every provider-normalization change.
 
 ## Assumptions and current limits
 

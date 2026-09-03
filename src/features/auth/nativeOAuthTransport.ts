@@ -7,6 +7,7 @@ import {
 } from '@capacitor/core'
 import type { OAuthTransport } from '@clerk/react/types'
 
+/** Deep link registered by both native platforms for OAuth completion. */
 export const NATIVE_OAUTH_CALLBACK_URL =
   'com.simerfamily.kinsphere://callback'
 
@@ -21,6 +22,7 @@ type NativeWebAuthPlugin = {
 
 const NativeWebAuth = registerPlugin<NativeWebAuthPlugin>('NativeWebAuth')
 
+/** Normalizes native browser dismissal to the cancellation code used by the UI. */
 class NativeOAuthCancelledError extends Error {
   readonly code = 'AUTH_CANCELLED'
 
@@ -30,9 +32,10 @@ class NativeOAuthCancelledError extends Error {
   }
 }
 
-function isExpectedCallbackUrl(value: string) {
+/** Accepts only Bubble's exact callback authority while allowing query results. */
+function isExpectedCallbackUrl(callbackUrl: string) {
   try {
-    const callback = new URL(value)
+    const callback = new URL(callbackUrl)
     return (
       callback.protocol === 'com.simerfamily.kinsphere:' &&
       callback.hostname === 'callback' &&
@@ -46,11 +49,13 @@ function isExpectedCallbackUrl(value: string) {
   }
 }
 
+/** Best-effort cleanup for Custom Tabs that may already have dismissed themselves. */
 async function closeAndroidBrowser() {
   await Browser.close().catch(() => undefined)
 }
 
-async function openAndroidOAuth(url: URL) {
+/** Owns the Android Custom Tab and races its deep link against user dismissal. */
+async function openAndroidOAuth(authorizationUrl: URL) {
   let callbackListener: PluginListenerHandle | undefined
   let browserFinishedListener: PluginListenerHandle | undefined
   let cancellationTimer: ReturnType<typeof setTimeout> | undefined
@@ -79,9 +84,12 @@ async function openAndroidOAuth(url: URL) {
   }
 
   try {
-    callbackListener = await App.addListener('appUrlOpen', ({ url: value }) => {
-      if (isExpectedCallbackUrl(value)) resolveOnce(value)
-    })
+    callbackListener = await App.addListener(
+      'appUrlOpen',
+      ({ url: callbackUrl }) => {
+        if (isExpectedCallbackUrl(callbackUrl)) resolveOnce(callbackUrl)
+      },
+    )
     browserFinishedListener = await Browser.addListener(
       'browserFinished',
       () => {
@@ -95,7 +103,7 @@ async function openAndroidOAuth(url: URL) {
     )
 
     await Browser.open({
-      url: url.toString(),
+      url: authorizationUrl.toString(),
       toolbarColor: '#090909',
     })
     return await callbackPromise
@@ -109,34 +117,39 @@ async function openAndroidOAuth(url: URL) {
   }
 }
 
-async function openNativeOAuth(url: URL) {
-  if (url.protocol !== 'https:') {
+/** Opens a secure authorization URL with the platform-appropriate native UI. */
+async function openNativeOAuth(authorizationUrl: URL) {
+  if (authorizationUrl.protocol !== 'https:') {
     throw new Error('Native OAuth can only open a secure HTTPS URL.')
   }
 
   if (Capacitor.getPlatform() === 'ios') {
-    const result = await NativeWebAuth.authenticate({
-      url: url.toString(),
+    const authenticationResult = await NativeWebAuth.authenticate({
+      url: authorizationUrl.toString(),
       callbackUrl: NATIVE_OAUTH_CALLBACK_URL,
       ephemeral: false,
     })
-    if (!isExpectedCallbackUrl(result.callbackUrl)) {
-      throw new Error('The authentication service returned an invalid callback URL.')
+    if (!isExpectedCallbackUrl(authenticationResult.callbackUrl)) {
+      throw new Error(
+        'The authentication service returned an invalid callback URL.',
+      )
     }
-    return result
+    return authenticationResult
   }
 
   if (Capacitor.getPlatform() === 'android') {
-    return openAndroidOAuth(url)
+    return openAndroidOAuth(authorizationUrl)
   }
 
   throw new Error('Native OAuth is not supported on this platform.')
 }
 
+/** Reports whether Clerk should use the native OAuth transport. */
 export function isNativeOAuthPlatform() {
   return Capacitor.isNativePlatform()
 }
 
+/** Builds Clerk's OAuth transport only inside a native Capacitor app. */
 export function createNativeOAuthTransport(): OAuthTransport | undefined {
   if (!isNativeOAuthPlatform()) return undefined
 
@@ -146,4 +159,5 @@ export function createNativeOAuthTransport(): OAuthTransport | undefined {
   }
 }
 
+/** Runtime OAuth transport supplied to Clerk, or undefined for browser flows. */
 export const nativeOAuthTransport = createNativeOAuthTransport()

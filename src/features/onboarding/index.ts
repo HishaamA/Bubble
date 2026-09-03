@@ -1,4 +1,10 @@
-export { FamilyOnboardingProvider, useFamilyOnboarding } from './FamilyOnboardingProvider'
+export { FamilyOnboardingProvider } from './FamilyOnboardingProvider'
+export { useFamilyOnboarding } from './familyOnboardingContext'
+export type {
+  FamilyOnboardingContextValue,
+  FamilyOnboardingStatus,
+} from './familyOnboardingContext'
+export { toFamilyOnboardingMessage } from './familyOnboardingErrors'
 export { OnboardingPage } from './OnboardingPage'
 export { RequireFamilyMembership } from './RequireFamilyMembership'
 export {

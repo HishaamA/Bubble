@@ -28,6 +28,7 @@ const maximumNotificationId = 2_147_483_647
 const departureLead = 3 * 60 * 60 * 1000
 const arrivalLead = 30 * 60 * 1000
 
+/** Computes the deterministic unsigned hash used for notification ownership. */
 function hashText(value: string) {
   let hash = 2_166_136_261
   for (const character of value) {
@@ -37,6 +38,7 @@ function hashText(value: string) {
   return hash >>> 0
 }
 
+/** Produces stable account-scoped IDs for departure and arrival alerts. */
 export function flightNotificationIds(flightId: string, accountId: string) {
   return ['departure', 'arrival'].map(
     (kind) => hashText(`${accountId}\u0000${flightId}\u0000${kind}`)
@@ -44,6 +46,7 @@ export function flightNotificationIds(flightId: string, accountId: string) {
   ) as [number, number]
 }
 
+/** Derives only future departure/arrival alerts for a non-terminal flight. */
 function notificationTargets(
   flight: TrackedFlight,
   accountId: string,
@@ -84,11 +87,13 @@ function notificationTargets(
   return targets
 }
 
+/** Checks both the native runtime and plugin before calling Capacitor APIs. */
 function canUseNativeNotifications() {
   return Capacitor.isNativePlatform()
     && Capacitor.isPluginAvailable('LocalNotifications')
 }
 
+/** Builds a private native payload tagged to its account and flight. */
 function nativeNotification(
   target: ReturnType<typeof notificationTargets>[number],
   flight: TrackedFlight,
@@ -113,6 +118,7 @@ function nativeNotification(
   }
 }
 
+/** Requests user permission and schedules alerts for one tracked flight. */
 export async function enableFlightNotifications(
   flight: TrackedFlight,
   accountId: string,
@@ -269,6 +275,7 @@ export async function rescheduleFlightNotifications(
   return scheduled
 }
 
+/** Cancels pending and delivered notifications for the supplied flights. */
 export async function cancelFlightNotifications(
   flightId: string,
   accountId: string,

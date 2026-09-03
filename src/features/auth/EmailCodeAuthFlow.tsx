@@ -36,25 +36,37 @@ type ClerkErrorLike = {
   }>
 }
 
-function firstClerkError(error: unknown) {
-  if (!error || typeof error !== 'object') return undefined
-  return (error as ClerkErrorLike).errors?.[0]
+/** Extracts Clerk's primary structured error without trusting thrown values. */
+function firstClerkError(errorReason: unknown) {
+  if (!errorReason || typeof errorReason !== 'object') return undefined
+  return (errorReason as ClerkErrorLike).errors?.[0]
 }
 
-function clerkErrorCode(error: unknown) {
-  return firstClerkError(error)?.code
+/** Reads Clerk's nested error code when the SDK returned its standard envelope. */
+function clerkErrorCode(errorReason: unknown) {
+  return firstClerkError(errorReason)?.code
 }
 
-function directErrorCode(error: unknown) {
-  if (!error || typeof error !== 'object' || !('code' in error)) return undefined
-  return typeof error.code === 'string' ? error.code : undefined
+/** Reads cancellation codes thrown directly by native transports. */
+function directErrorCode(errorReason: unknown) {
+  if (
+    !errorReason ||
+    typeof errorReason !== 'object' ||
+    !('code' in errorReason)
+  ) {
+    return undefined
+  }
+  return typeof errorReason.code === 'string' ? errorReason.code : undefined
 }
 
-function isOAuthCancellation(error: unknown) {
-  const code = directErrorCode(error) ?? clerkErrorCode(error)
-  return code === 'AUTH_CANCELLED' || code === 'oauth_access_denied'
+/** Treats both native and Clerk popup dismissal codes as deliberate cancellation. */
+function isOAuthCancellation(errorReason: unknown) {
+  const errorCode =
+    directErrorCode(errorReason) ?? clerkErrorCode(errorReason)
+  return errorCode === 'AUTH_CANCELLED' || errorCode === 'oauth_access_denied'
 }
 
+/** Represents a user closing the Google popup, not an authentication failure. */
 class PopupClosedError extends Error {
   readonly code = 'AUTH_CANCELLED'
 
@@ -64,17 +76,23 @@ class PopupClosedError extends Error {
   }
 }
 
-function appLoginUrl() {
+/** Builds Clerk's absolute completion URL while preserving the hash-router entry. */
+function getAppLoginUrl() {
   return new URL('/#/login', window.location.href).toString()
 }
 
-function isExistingSessionError(error: unknown) {
-  const code = clerkErrorCode(error)
-  return code === 'session_exists' || code === 'identifier_already_signed_in'
+/** Detects Clerk attempts that should attach to an already-open device session. */
+function isExistingSessionError(errorReason: unknown) {
+  const errorCode = clerkErrorCode(errorReason)
+  return (
+    errorCode === 'session_exists' ||
+    errorCode === 'identifier_already_signed_in'
+  )
 }
 
-function authErrorMessage(error: unknown) {
-  const clerkError = firstClerkError(error)
+/** Maps Clerk errors to concise copy while retaining safe SDK messages. */
+function authErrorMessage(errorReason: unknown) {
+  const clerkError = firstClerkError(errorReason)
   switch (clerkError?.code) {
     case 'form_identifier_invalid':
     case 'form_param_format_invalid':
@@ -98,6 +116,11 @@ function authErrorMessage(error: unknown) {
   }
 }
 
+/**
+ * Runs Bubble's email-code and Google sign-in flows inside an accessible modal.
+ * Clerk owns authentication state; this component coordinates transitions,
+ * cancellation, focus restoration, and user-facing errors.
+ */
 export function EmailCodeAuthFlow({
   onClose,
   onStart,
@@ -114,7 +137,7 @@ export function EmailCodeAuthFlow({
     signUp,
   } = useSignUp()
   const [emailAddress, setEmailAddress] = useState('')
-  const [code, setCode] = useState('')
+  const [verificationCode, setVerificationCode] = useState('')
   const [verificationMode, setVerificationMode] =
     useState<VerificationMode | null>(null)
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
@@ -126,8 +149,8 @@ export function EmailCodeAuthFlow({
   const dialogRef = useRef<HTMLElement>(null)
   const emailInputRef = useRef<HTMLInputElement>(null)
   const codeInputRef = useRef<HTMLInputElement>(null)
-  const previouslyFocusedRef = useRef<HTMLElement | null>(null)
-  const busy =
+  const previouslyFocusedElementRef = useRef<HTMLElement | null>(null)
+  const requestPending =
     finishing ||
     googlePending ||
     maintenanceAction !== null ||
@@ -138,22 +161,27 @@ export function EmailCodeAuthFlow({
     // The sheet is conditionally mounted over a still-interactive page. Remembering
     // the opener keeps keyboard users in the same place after every dismissal path,
     // including Escape and a Clerk reset failure.
-    previouslyFocusedRef.current =
+    previouslyFocusedElementRef.current =
       document.activeElement instanceof HTMLElement
         ? document.activeElement
         : null
 
     return () => {
-      const previous = previouslyFocusedRef.current
-      if (previous?.isConnected) previous.focus({ preventScroll: true })
+      const previouslyFocusedElement = previouslyFocusedElementRef.current
+      if (previouslyFocusedElement?.isConnected) {
+        previouslyFocusedElement.focus({ preventScroll: true })
+      }
     }
   }, [])
 
+  // Each verification transition moves focus to the newly actionable field;
+  // this also prevents focus from remaining on controls removed from the DOM.
   useEffect(() => {
     const input = verificationMode ? codeInputRef.current : emailInputRef.current
     input?.focus({ preventScroll: true })
   }, [verificationMode])
 
+  /** Finalizes a verified sign-in unless Clerk reports an unsupported pending task. */
   const finishSignIn = async () => {
     setFinishing(true)
     let hasPendingTask = false
@@ -188,6 +216,7 @@ export function EmailCodeAuthFlow({
     }
   }
 
+  /** Finalizes a verified sign-up under the same pending-task guard as sign-in. */
   const finishSignUp = async () => {
     setFinishing(true)
     let hasPendingTask = false
@@ -222,6 +251,7 @@ export function EmailCodeAuthFlow({
     }
   }
 
+  /** Reuses an existing device session instead of starting a conflicting attempt. */
   const recoverExistingSession = async (
     normalizedEmail: string,
     preferredSessionId?: string,
@@ -281,6 +311,7 @@ export function EmailCodeAuthFlow({
     }
   }
 
+  /** Requests Clerk's supported email factor and advances the modal to MFA entry. */
   const prepareSecondFactor = async () => {
     const emailFactor = signIn.supportedSecondFactors.find(
       (factor) => factor.strategy === 'email_code',
@@ -297,7 +328,7 @@ export function EmailCodeAuthFlow({
       setErrorMessage(authErrorMessage(error))
       return
     }
-    setCode('')
+    setVerificationCode('')
     // OAuth can reach MFA without ever populating our email input. Clerk's masked
     // factor identifier is therefore the authoritative, privacy-safe destination;
     // the literal fallback prevents an empty sentence if an older SDK omits it.
@@ -313,6 +344,7 @@ export function EmailCodeAuthFlow({
     setErrorMessage(null)
   }
 
+  /** Routes a successful first factor to completion, MFA, or an actionable error. */
   const handleCompletedSignInStep = async () => {
     if (signIn.status === 'complete') {
       await finishSignIn()
@@ -331,6 +363,7 @@ export function EmailCodeAuthFlow({
     )
   }
 
+  /** Converts a transferable Google sign-in into the corresponding sign-up attempt. */
   const transferGoogleToSignUp = async () => {
     const { error } = await signUp.create({ transfer: true })
     if (error) {
@@ -350,6 +383,7 @@ export function EmailCodeAuthFlow({
     )
   }
 
+  /** Interprets Clerk's post-OAuth state rather than assuming OAuth completed login. */
   const handleGoogleResult = async () => {
     const activeSession = client.signedInSessions.find(
       (session) =>
@@ -380,8 +414,9 @@ export function EmailCodeAuthFlow({
     )
   }
 
+  /** Starts Google OAuth through the registered native callback transport. */
   const startNativeGoogleFlow = async () => {
-    const returnUrl = appLoginUrl()
+    const returnUrl = getAppLoginUrl()
     const stayInApp = async () => undefined
 
     await client.signIn.authenticateWithRedirect({
@@ -404,13 +439,14 @@ export function EmailCodeAuthFlow({
     await handleGoogleResult()
   }
 
+  /** Runs Google OAuth in a popup and rejects promptly when the user closes it. */
   const startWebGoogleFlow = async () => {
-    const popup = window.open(
+    const googlePopup = window.open(
       'about:blank',
       'bubble-google-sign-in',
       'popup=yes,width=520,height=720',
     )
-    if (!popup) {
+    if (!googlePopup) {
       setErrorMessage(
         'Google sign-in could not open. Allow pop-ups for Bubble and try again.',
       )
@@ -418,27 +454,27 @@ export function EmailCodeAuthFlow({
     }
 
     let popupClosedTimer: number | undefined
-    const popupClosed = new Promise<never>((_, reject) => {
+    const popupClosedPromise = new Promise<never>((_, reject) => {
       popupClosedTimer = window.setInterval(() => {
-        if (!popup.closed) return
+        if (!googlePopup.closed) return
         window.clearInterval(popupClosedTimer)
         reject(new PopupClosedError())
       }, 250)
     })
 
     try {
-      const returnUrl = appLoginUrl()
-      const result = await Promise.race([
+      const returnUrl = getAppLoginUrl()
+      const authenticationResult = await Promise.race([
         signIn.sso({
           strategy: 'oauth_google',
           redirectCallbackUrl: returnUrl,
           redirectUrl: returnUrl,
-          popup,
+          popup: googlePopup,
         }),
-        popupClosed,
+        popupClosedPromise,
       ])
-      if (result.error) {
-        setErrorMessage(authErrorMessage(result.error))
+      if (authenticationResult.error) {
+        setErrorMessage(authErrorMessage(authenticationResult.error))
         return
       }
       await handleGoogleResult()
@@ -446,12 +482,13 @@ export function EmailCodeAuthFlow({
       if (popupClosedTimer !== undefined) {
         window.clearInterval(popupClosedTimer)
       }
-      if (!popup.closed) popup.close()
+      if (!googlePopup.closed) googlePopup.close()
     }
   }
 
+  /** Selects the platform OAuth flow while keeping cancellation out of error copy. */
   const startGoogleFlow = async () => {
-    if (busy || verificationMode) return
+    if (requestPending || verificationMode) return
     setErrorMessage(null)
     setGooglePending(true)
     onStart()
@@ -471,10 +508,11 @@ export function EmailCodeAuthFlow({
     }
   }
 
+  /** Creates or resumes an email attempt, then sends its first verification code. */
   const startEmailFlow = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
     const normalizedEmail = emailAddress.trim().toLowerCase()
-    if (!normalizedEmail || busy) return
+    if (!normalizedEmail || requestPending) return
 
     setErrorMessage(null)
     onStart()
@@ -505,13 +543,14 @@ export function EmailCodeAuthFlow({
 
       setEmailAddress(normalizedEmail)
       setVerificationDestination(normalizedEmail)
-      setCode('')
+      setVerificationCode('')
       setVerificationMode('primary')
     } catch (error) {
       setErrorMessage(authErrorMessage(error))
     }
   }
 
+  /** Converts a verified, previously unknown email into a Clerk sign-up. */
   const transferVerifiedEmailToSignUp = async () => {
     const { error } = await signUp.create({ transfer: true })
     if (error) {
@@ -538,14 +577,23 @@ export function EmailCodeAuthFlow({
     )
   }
 
+  /** Verifies the active primary or second-factor code against the matching API. */
   const verifyCode = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
-    if (code.length !== 6 || busy || !verificationMode) return
+    if (
+      verificationCode.length !== 6 ||
+      requestPending ||
+      !verificationMode
+    ) {
+      return
+    }
     setErrorMessage(null)
 
     try {
       if (verificationMode === 'second-factor') {
-        const { error } = await signIn.mfa.verifyEmailCode({ code })
+        const { error } = await signIn.mfa.verifyEmailCode({
+          code: verificationCode,
+        })
         if (error) {
           setErrorMessage(authErrorMessage(error))
           return
@@ -554,7 +602,9 @@ export function EmailCodeAuthFlow({
         return
       }
 
-      const { error } = await signIn.emailCode.verifyCode({ code })
+      const { error } = await signIn.emailCode.verifyCode({
+        code: verificationCode,
+      })
       if (clerkErrorCode(error) === 'sign_up_if_missing_transfer') {
         await transferVerifiedEmailToSignUp()
         return
@@ -569,8 +619,9 @@ export function EmailCodeAuthFlow({
     }
   }
 
+  /** Resends only the factor currently displayed in the modal. */
   const resendCode = async () => {
-    if (busy || !verificationMode) return
+    if (requestPending || !verificationMode) return
     setErrorMessage(null)
     setMaintenanceAction('resend')
     try {
@@ -590,13 +641,14 @@ export function EmailCodeAuthFlow({
     }
   }
 
+  /** Resets both Clerk attempts before returning to email selection. */
   const startOver = async () => {
-    if (busy) return
+    if (requestPending) return
     setErrorMessage(null)
     setMaintenanceAction('start-over')
     try {
       await Promise.all([signIn.reset(), signUp.reset()])
-      setCode('')
+      setVerificationCode('')
       setVerificationDestination('')
       setVerificationMode(null)
     } catch (error) {
@@ -608,8 +660,9 @@ export function EmailCodeAuthFlow({
     }
   }
 
+  /** Dismisses the modal even when remote attempt cleanup cannot complete. */
   const close = async () => {
-    if (busy) return
+    if (requestPending) return
     setMaintenanceAction('close')
     // Dismissal must never strand someone in the modal because an optional remote
     // reset failed. allSettled drains both attempts without creating an unhandled
@@ -625,6 +678,7 @@ export function EmailCodeAuthFlow({
     }
   }
 
+  /** Implements Escape dismissal and a wrapping keyboard focus trap. */
   const handleDialogKeyDown = (event: ReactKeyboardEvent<HTMLElement>) => {
     if (event.key === 'Escape') {
       event.preventDefault()
@@ -659,7 +713,7 @@ export function EmailCodeAuthFlow({
     }
   }
 
-  const visibleError =
+  const visibleErrorMessage =
     errorMessage ||
     signInErrors.fields?.identifier?.message ||
     signInErrors.fields?.code?.message ||
@@ -673,7 +727,7 @@ export function EmailCodeAuthFlow({
         type="button"
         aria-label="Close sign in"
         onClick={() => void close()}
-        disabled={busy}
+        disabled={requestPending}
       />
       <section
         ref={dialogRef}
@@ -689,7 +743,7 @@ export function EmailCodeAuthFlow({
           type="button"
           aria-label="Close sign in"
           onClick={() => void close()}
-          disabled={busy}
+          disabled={requestPending}
         >
           <span aria-hidden="true">×</span>
         </button>
@@ -720,32 +774,48 @@ export function EmailCodeAuthFlow({
                 enterKeyHint="done"
                 pattern="[0-9]*"
                 maxLength={6}
-                value={code}
+                value={verificationCode}
                 onChange={(event) =>
-                  setCode(event.target.value.replace(/\D/g, '').slice(0, 6))
+                  setVerificationCode(
+                    event.target.value.replace(/\D/g, '').slice(0, 6),
+                  )
                 }
-                aria-invalid={visibleError ? 'true' : undefined}
-                aria-describedby={visibleError ? 'email-auth-error' : undefined}
+                aria-invalid={visibleErrorMessage ? 'true' : undefined}
+                aria-describedby={
+                  visibleErrorMessage ? 'email-auth-error' : undefined
+                }
                 placeholder="000000"
               />
             </label>
-            {visibleError ? (
+            {visibleErrorMessage ? (
               <p className="email-auth__message" id="email-auth-error" role="status">
-                {visibleError}
+                {visibleErrorMessage}
               </p>
             ) : null}
             <button
               className="email-auth__primary"
               type="submit"
-              disabled={busy || code.length !== 6}
+              disabled={requestPending || verificationCode.length !== 6}
             >
-              {finishing ? 'Opening Bubble…' : busy ? 'Checking…' : 'Continue'}
+              {finishing
+                ? 'Opening Bubble…'
+                : requestPending
+                  ? 'Checking…'
+                  : 'Continue'}
             </button>
             <div className="email-auth__secondary-actions">
-              <button type="button" onClick={() => void resendCode()} disabled={busy}>
+              <button
+                type="button"
+                onClick={() => void resendCode()}
+                disabled={requestPending}
+              >
                 {maintenanceAction === 'resend' ? 'Sending…' : 'Send a new code'}
               </button>
-              <button type="button" onClick={() => void startOver()} disabled={busy}>
+              <button
+                type="button"
+                onClick={() => void startOver()}
+                disabled={requestPending}
+              >
                 {maintenanceAction === 'start-over' ? 'Resetting…' : 'Change email'}
               </button>
             </div>
@@ -763,7 +833,7 @@ export function EmailCodeAuthFlow({
               className="email-auth__google"
               type="button"
               onClick={() => void startGoogleFlow()}
-              disabled={busy}
+              disabled={requestPending}
             >
               <svg aria-hidden="true" viewBox="0 0 24 24">
                 <path
@@ -802,23 +872,25 @@ export function EmailCodeAuthFlow({
                 enterKeyHint="send"
                 value={emailAddress}
                 onChange={(event) => setEmailAddress(event.target.value)}
-                aria-invalid={visibleError ? 'true' : undefined}
-                aria-describedby={visibleError ? 'email-auth-error' : undefined}
+                aria-invalid={visibleErrorMessage ? 'true' : undefined}
+                aria-describedby={
+                  visibleErrorMessage ? 'email-auth-error' : undefined
+                }
                 placeholder="you@example.com"
                 required
               />
             </label>
-            {visibleError ? (
+            {visibleErrorMessage ? (
               <p className="email-auth__message" id="email-auth-error" role="status">
-                {visibleError}
+                {visibleErrorMessage}
               </p>
             ) : null}
             <button
               className="email-auth__primary"
               type="submit"
-              disabled={busy || !emailAddress.trim()}
+              disabled={requestPending || !emailAddress.trim()}
             >
-              {busy ? 'Sending code…' : 'Send me a code'}
+              {requestPending ? 'Sending code…' : 'Send me a code'}
             </button>
             <p className="email-auth__privacy">
               No phone number or password needed.

@@ -42,6 +42,7 @@ const cairo: FlightAirport = {
   timeZone: 'Africa/Cairo',
 }
 
+/** Serializes a UTC date used only by deterministic preview fixtures. */
 function calendarDate(date: Date) {
   const year = date.getUTCFullYear()
   const month = String(date.getUTCMonth() + 1).padStart(2, '0')
@@ -49,6 +50,7 @@ function calendarDate(date: Date) {
   return `${year}-${month}-${day}`
 }
 
+/** Places preview timestamps at a stable UTC offset from the supplied day. */
 function atUtcTime(base: Date, dayOffset: number, hours: number, minutes: number) {
   return new Date(Date.UTC(
     base.getUTCFullYear(),
@@ -59,6 +61,7 @@ function atUtcTime(base: Date, dayOffset: number, hours: number, minutes: number
   )).toISOString()
 }
 
+/** Creates deterministic preview flights positioned relative to the current day. */
 export function createDemoTrackedFlights(now = new Date()): TrackedFlight[] {
   const createdAt = now.toISOString()
   const firstTravelDate = calendarDate(new Date(atUtcTime(now, 2, 4, 40)))

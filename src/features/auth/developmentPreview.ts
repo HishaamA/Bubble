@@ -4,6 +4,10 @@ import { clerkConfigured } from './config'
 const DEVELOPMENT_PREVIEW_STORAGE_KEY =
   'kinsphere.development-preview.active.v1'
 
+/**
+ * Enables preview authentication only for a development build without Clerk.
+ * Native packaging is intentionally irrelevant to this decision.
+ */
 export function canUseDevelopmentPreview(
   developmentBuild: boolean,
   hasClerkConfiguration: boolean,
@@ -15,11 +19,13 @@ export function canUseDevelopmentPreview(
   return developmentBuild && !hasClerkConfiguration
 }
 
+/** Compile-time availability of the local development identity. */
 export const developmentPreviewAvailable = canUseDevelopmentPreview(
   import.meta.env.DEV,
   clerkConfigured,
 )
 
+/** Stable, non-cloud identity used by the development and demo providers. */
 export const developmentPreviewUser: AuthUser = {
   id: 'development-preview-user',
   displayName: 'Bubble Preview',
@@ -28,6 +34,7 @@ export const developmentPreviewUser: AuthUser = {
   imageUrl: null,
 }
 
+/** Restores development preview access for the current browser tab. */
 export function readDevelopmentPreviewSession() {
   if (!developmentPreviewAvailable || typeof window === 'undefined') {
     return false
@@ -42,6 +49,7 @@ export function readDevelopmentPreviewSession() {
   }
 }
 
+/** Starts development preview access for the current browser tab. */
 export function startDevelopmentPreviewSession() {
   if (!developmentPreviewAvailable || typeof window === 'undefined') {
     return false
@@ -58,6 +66,7 @@ export function startDevelopmentPreviewSession() {
   return true
 }
 
+/** Clears the tab-scoped development preview flag. */
 export function clearDevelopmentPreviewSession() {
   if (typeof window === 'undefined') return
   try {

@@ -17,7 +17,6 @@ export type {
   FamilySyncPendingRequest,
   FamilySyncPerson,
   FamilySyncSnapshot,
-  SignUpResult,
 } from './types'
 export type {
   FamilyInviteShareResult,

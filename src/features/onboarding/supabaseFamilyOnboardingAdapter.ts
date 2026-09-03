@@ -13,6 +13,7 @@ import type {
   FamilyOnboardingAdapter,
 } from './types'
 
+/** Prevents a stale screen from acting after the authenticated account changes. */
 function requireMatchingActor(actor: FamilyAccessActor) {
   const identity = getClerkSupabaseIdentity()
   if (!identity || identity.subject !== actor.userId) {
@@ -20,6 +21,7 @@ function requireMatchingActor(actor: FamilyAccessActor) {
   }
 }
 
+/** Maps persistence membership states onto the onboarding contract. */
 async function loadSnapshot(): Promise<FamilyAccessSnapshot> {
   const membership = await readFamilyMembership()
   if (membership.kind === 'member') {
@@ -40,6 +42,7 @@ async function loadSnapshot(): Promise<FamilyAccessSnapshot> {
     : { kind: 'needs-family' }
 }
 
+/** Production onboarding persistence backed by the active Supabase identity. */
 export const supabaseFamilyOnboardingAdapter: FamilyOnboardingAdapter = {
   configured: Boolean(getSupabaseClient()),
 

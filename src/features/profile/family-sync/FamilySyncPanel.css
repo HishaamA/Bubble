@@ -54,36 +54,6 @@
   letter-spacing: -0.035em;
 }
 
-.family-sync__eyebrow {
-  color: var(--app-eyebrow-color);
-  font-size: 0.63rem;
-  font-weight: 650;
-  letter-spacing: 0.075em;
-  text-transform: uppercase;
-}
-
-.family-sync__connected-badge {
-  display: inline-flex;
-  min-height: 1.75rem;
-  padding: 0.3rem 0.62rem;
-  align-items: center;
-  gap: 0.4rem;
-  border: 1px solid rgba(255, 255, 255, 0.16);
-  border-radius: 999px;
-  color: rgba(255, 255, 255, 0.68);
-  background: #0a0a0a;
-  font-size: 0.64rem;
-  font-weight: 620;
-  letter-spacing: 0.025em;
-}
-
-.family-sync__connected-badge > span {
-  width: 0.42rem;
-  height: 0.42rem;
-  border-radius: 50%;
-  background: rgba(255, 255, 255, 0.72);
-}
-
 .family-sync__notice {
   padding: 0.72rem 0;
   border: 0;
@@ -133,19 +103,6 @@
   background: transparent;
 }
 
-.family-sync__state-icon {
-  display: grid;
-  flex: 0 0 auto;
-  width: 2.6rem;
-  height: 2.6rem;
-  place-items: center;
-  border: 1px solid rgba(255, 255, 255, 0.16);
-  border-radius: 0.75rem;
-  color: rgba(255, 255, 255, 0.75);
-  background: #0a0a0a;
-  font-size: 1.25rem;
-}
-
 .family-sync__state h3,
 .family-sync__intro h3,
 .family-sync__option h3,
@@ -166,7 +123,6 @@
 .family-sync__option p,
 .family-sync__pending-card p,
 .family-sync__subheading p,
-.family-sync__member-note,
 .family-sync__privacy-note {
   color: rgba(255, 255, 255, 0.5);
   font-size: 0.72rem;
@@ -191,35 +147,6 @@
   gap: 0.32rem;
 }
 
-.family-sync__segmented {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 0.2rem;
-  padding: 0.2rem;
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  border-radius: 0.75rem;
-  background: #0a0a0a;
-}
-
-.family-sync__segmented button {
-  min-height: 2.65rem;
-  padding: 0.5rem 0.75rem;
-  border: 0;
-  border-radius: 0.55rem;
-  color: rgba(255, 255, 255, 0.48);
-  background: transparent;
-  font-size: 0.75rem;
-  font-weight: 600;
-  cursor: pointer;
-}
-
-.family-sync__segmented button[aria-pressed='true'] {
-  color: #000;
-  background: #f5f5f7;
-  box-shadow: none;
-}
-
-.family-sync__form,
 .family-sync__option {
   display: grid;
   gap: 0.78rem;
@@ -424,35 +351,8 @@
   background: transparent;
 }
 
-.family-sync__option-number {
-  position: absolute;
-  top: 1rem;
-  right: 0;
-  color: rgba(255, 255, 255, 0.3);
-  font-size: 0.65rem;
-  font-weight: 650;
-  letter-spacing: 0.08em;
-}
-
 .family-sync__option p {
   max-width: 90%;
-}
-
-.family-sync__or {
-  display: grid;
-  grid-template-columns: 1fr auto 1fr;
-  align-items: center;
-  gap: 0.6rem;
-  color: rgba(255, 255, 255, 0.28);
-  font-size: 0.62rem;
-  text-transform: uppercase;
-}
-
-.family-sync__or::before,
-.family-sync__or::after {
-  height: 1px;
-  background: rgba(255, 255, 255, 0.1);
-  content: '';
 }
 
 .family-sync__circle-card {
@@ -514,8 +414,7 @@
 }
 
 .family-sync__owner-tools,
-.family-sync__requests,
-.family-sync__member-note {
+.family-sync__requests {
   padding: 0.95rem 0;
   border: 0;
   border-bottom: 1px solid rgba(255, 255, 255, 0.1);
@@ -709,21 +608,12 @@
   color: rgba(255, 255, 255, 0.43);
 }
 
-.family-sync__empty-requests > span {
-  color: rgba(255, 255, 255, 0.66);
-}
-
 .family-sync__empty-requests p {
   font-size: 0.7rem;
 }
 
 .family-sync__account-row {
   padding: 0.22rem 0.15rem 0;
-}
-
-.family-sync__account-row .family-sync__text-button {
-  flex: 0 0 auto;
-  justify-self: auto;
 }
 
 @keyframes family-sync-spin {

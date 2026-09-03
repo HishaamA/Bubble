@@ -3,44 +3,14 @@ import { useLocation, useNavigate } from 'react-router-dom'
 import { useAuth } from './authContext'
 import { AuthFamilyIllustration } from './AuthFamilyIllustration'
 import { EmailCodeAuthFlow } from './EmailCodeAuthFlow'
+import { getSafeReturnPath } from './returnPath'
 import './AuthPage.css'
 
 const AUTH_RETURN_TO_STORAGE_KEY = 'kinsphere.auth.returnTo'
-const INTERNAL_RETURN_TO_ORIGIN = 'https://kinsphere.local'
+const AUTH_BLOCKED_ROUTES = ['/login'] as const
+const DEMO_BLOCKED_ROUTES = ['/login', '/onboarding'] as const
 
-function safeReturnTo(value: unknown) {
-  if (
-    typeof value !== 'string' ||
-    !value.startsWith('/') ||
-    value.startsWith('//')
-  ) {
-    return '/'
-  }
-
-  try {
-    const target = new URL(value, INTERNAL_RETURN_TO_ORIGIN)
-    if (
-      target.origin !== INTERNAL_RETURN_TO_ORIGIN ||
-      target.pathname === '/login' ||
-      target.pathname.startsWith('/login/')
-    ) {
-      return '/'
-    }
-    return `${target.pathname}${target.search}${target.hash}`
-  } catch {
-    return '/'
-  }
-}
-
-function safeDemoReturnTo(value: unknown) {
-  const safeValue = safeReturnTo(value)
-  const target = new URL(safeValue, INTERNAL_RETURN_TO_ORIGIN)
-  return target.pathname === '/onboarding' ||
-    target.pathname.startsWith('/onboarding/')
-    ? '/'
-    : safeValue
-}
-
+/** Reads the pending post-authentication route without assuming storage access. */
 function storedReturnTo() {
   if (typeof window === 'undefined') return undefined
   try {
@@ -50,18 +20,20 @@ function storedReturnTo() {
   }
 }
 
-function rememberReturnTo(value: string) {
+/** Persists only a sanitized in-app route for the next authentication render. */
+function rememberReturnTo(returnPath: string) {
   if (typeof window === 'undefined') return
   try {
     window.sessionStorage.setItem(
       AUTH_RETURN_TO_STORAGE_KEY,
-      safeReturnTo(value),
+      getSafeReturnPath(returnPath, AUTH_BLOCKED_ROUTES),
     )
   } catch {
     // Restricted web views can disable storage. The safe fallback is home.
   }
 }
 
+/** Clears the one-shot return route after authentication has consumed it. */
 function clearStoredReturnTo() {
   if (typeof window === 'undefined') return
   try {
@@ -71,6 +43,7 @@ function clearStoredReturnTo() {
   }
 }
 
+/** Performs a replace navigation only after the signed-in screen has mounted. */
 function SignedInRedirect({ to }: { to: string }) {
   const navigate = useNavigate()
 
@@ -87,6 +60,7 @@ function SignedInRedirect({ to }: { to: string }) {
   )
 }
 
+/** Explains unavailable cloud authentication while exposing approved local access. */
 function ClerkConfigurationState({
   onContinue,
   testingMode,
@@ -127,6 +101,7 @@ function ClerkConfigurationState({
   )
 }
 
+/** Offers the product demo without presenting it as a cloud-authenticated session. */
 function DemoLoginAction({ onContinue }: { onContinue: () => void }) {
   return (
     <div className="auth-demo-action">
@@ -138,6 +113,7 @@ function DemoLoginAction({ onContinue }: { onContinue: () => void }) {
   )
 }
 
+/** Presents sign-in choices and returns authenticated users to their safe route. */
 export function AuthPage() {
   const [authOpen, setAuthOpen] = useState(false)
   const {
@@ -151,8 +127,11 @@ export function AuthPage() {
   const requestedReturnTo = (
     location.state as { returnTo?: unknown } | null
   )?.returnTo
-  const returnTo = safeReturnTo(requestedReturnTo ?? storedReturnTo())
-  const demoReturnTo = safeDemoReturnTo(returnTo)
+  const returnTo = getSafeReturnPath(
+    requestedReturnTo ?? storedReturnTo(),
+    AUTH_BLOCKED_ROUTES,
+  )
+  const demoReturnTo = getSafeReturnPath(returnTo, DEMO_BLOCKED_ROUTES)
   const continueToDemo = startDevelopmentPreview
     ? () => {
         rememberReturnTo(demoReturnTo)

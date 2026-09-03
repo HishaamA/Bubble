@@ -23,6 +23,7 @@ type PendingFlightCreateIntent = PendingFlightCreateIdentity & {
   createdAt: number
 }
 
+/** Builds the cache namespace shared by one account and family membership. */
 export function familyFlightStorageSubject(
   userId: string | null | undefined,
   familyId: string | null | undefined,
@@ -32,10 +33,12 @@ export function familyFlightStorageSubject(
   return `${account}:family:${family}`
 }
 
+/** Encodes a subject into its tracked-flight storage key. */
 export function flightStorageKey(accountId: string) {
   return `${storagePrefix}${encodeURIComponent(accountId.trim() || 'signed-out')}`
 }
 
+/** Reads the subject whose notifications currently belong to this device. */
 export function readActiveFlightStorageSubject() {
   try {
     const subject = localStorage.getItem(activeSubjectStorageKey)?.trim()
@@ -45,6 +48,7 @@ export function readActiveFlightStorageSubject() {
   }
 }
 
+/** Records the subject that owns this device's active flight notifications. */
 export function writeActiveFlightStorageSubject(subject: string) {
   try {
     localStorage.setItem(activeSubjectStorageKey, subject)
@@ -53,6 +57,7 @@ export function writeActiveFlightStorageSubject(subject: string) {
   }
 }
 
+/** Clears the active notification subject during account transitions. */
 export function clearActiveFlightStorageSubject() {
   try {
     localStorage.removeItem(activeSubjectStorageKey)
@@ -61,10 +66,12 @@ export function clearActiveFlightStorageSubject() {
   }
 }
 
+/** Encodes one account/family subject into its pending-create registry key. */
 function pendingCreateStorageKey(subject: string) {
   return `${pendingCreateStoragePrefix}${encodeURIComponent(subject)}`
 }
 
+/** Compares the normalized fields that define one logical create attempt. */
 function samePendingCreateIdentity(
   intent: PendingFlightCreateIdentity,
   identity: PendingFlightCreateIdentity,
@@ -74,6 +81,7 @@ function samePendingCreateIdentity(
     && intent.travelDate === identity.travelDate
 }
 
+/** Drops malformed, expired, and implausibly future idempotency records. */
 function safePendingCreateIntents(value: unknown, now: number) {
   if (!Array.isArray(value)) return []
   return value.filter((item): item is PendingFlightCreateIntent => {
@@ -94,6 +102,7 @@ function safePendingCreateIntents(value: unknown, now: number) {
   })
 }
 
+/** Reads pending creates with an account-isolated in-memory fallback. */
 function readPendingCreateIntents(subject: string, now = Date.now()) {
   const key = pendingCreateStorageKey(subject)
   try {
@@ -105,6 +114,7 @@ function readPendingCreateIntents(subject: string, now = Date.now()) {
   }
 }
 
+/** Persists pending creates or retains them in memory when storage fails. */
 function writePendingCreateIntents(
   subject: string,
   intents: PendingFlightCreateIntent[],
@@ -139,6 +149,7 @@ export function getOrCreatePendingFlightCreateId(
   return id
 }
 
+/** Removes an idempotent create intent after the server confirms its row. */
 export function clearPendingFlightCreateIntent(
   subject: string,
   identity: PendingFlightCreateIdentity,
@@ -151,14 +162,17 @@ export function clearPendingFlightCreateIntent(
   )
 }
 
+/** Accepts only timestamp strings the runtime can parse. */
 function isIsoTimestamp(value: unknown): value is string {
   return typeof value === 'string' && Number.isFinite(new Date(value).getTime())
 }
 
+/** Validates nullable provider timestamp fields. */
 function isOptionalTimestamp(value: unknown): value is string | null {
   return value === null || isIsoTimestamp(value)
 }
 
+/** Bounds geographic coordinates before route-map projection. */
 function isCoordinates(value: unknown): value is {
   latitude: number
   longitude: number
@@ -175,6 +189,7 @@ function isCoordinates(value: unknown): value is {
     && item.longitude <= 180
 }
 
+/** Validates airport identity, coordinates, and IANA time-zone data. */
 function isAirport(value: unknown): value is FlightAirport {
   if (!isCoordinates(value)) return false
   const airport = value as Partial<FlightAirport>
@@ -186,6 +201,7 @@ function isAirport(value: unknown): value is FlightAirport {
     && isTimeZone(airport.timeZone)
 }
 
+/** Uses Intl as the source of truth for supported IANA time-zone names. */
 function isTimeZone(value: string) {
   try {
     new Intl.DateTimeFormat('en', { timeZone: value }).format(0)
@@ -195,6 +211,7 @@ function isTimeZone(value: string) {
   }
 }
 
+/** Validates an optional live position and its nullable telemetry. */
 function isPosition(value: unknown) {
   if (value === null) return true
   if (!isCoordinates(value)) return false
@@ -208,6 +225,7 @@ function isPosition(value: unknown) {
     && (position.recordedAt === null || isIsoTimestamp(position.recordedAt))
 }
 
+/** Validates an untrusted provider or persisted flight-status snapshot. */
 export function isFlightStatusSnapshot(
   value: unknown,
 ): value is FlightStatusSnapshot {
@@ -250,6 +268,7 @@ export function isFlightStatusSnapshot(
     && isIsoTimestamp(item.updatedAt)
 }
 
+/** Validates a complete tracked-flight record at storage boundaries. */
 export function isTrackedFlight(value: unknown): value is TrackedFlight {
   if (!value || typeof value !== 'object') return false
   const item = value as Partial<TrackedFlight>
@@ -268,6 +287,7 @@ export function isTrackedFlight(value: unknown): value is TrackedFlight {
     && item.snapshot.flightNumber === item.flightNumber
 }
 
+/** Reads only valid flights from the account/family-scoped cache. */
 export function readTrackedFlights(accountId: string): TrackedFlight[] {
   const key = flightStorageKey(accountId)
   try {
@@ -281,6 +301,7 @@ export function readTrackedFlights(accountId: string): TrackedFlight[] {
   }
 }
 
+/** Revalidates and persists tracked flights with an in-memory fallback. */
 export function writeTrackedFlights(
   accountId: string,
   flights: TrackedFlight[],
@@ -299,6 +320,10 @@ export function writeTrackedFlights(
   return safeFlights
 }
 
+/**
+ * Reconciles authoritative family rows with unsynced device rows while keeping
+ * each device's notification preference local.
+ */
 export function mergeTrackedFlights(
   localFlights: TrackedFlight[],
   familyFlights: TrackedFlight[],

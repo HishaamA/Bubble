@@ -25,4 +25,16 @@ describe('toFamilySyncErrorMessage', () => {
       'Only the family circle owner can do that.',
     )
   })
+
+  it('does not expose unknown backend details in the settings page', () => {
+    const backendMessage =
+      'SQL failed for service_role credential abc123 in private_table'
+
+    expect(toFamilySyncErrorMessage(new Error(backendMessage))).toBe(
+      'Family Sync could not complete that request.',
+    )
+    expect(toFamilySyncErrorMessage(new Error(backendMessage))).not.toContain(
+      'abc123',
+    )
+  })
 })

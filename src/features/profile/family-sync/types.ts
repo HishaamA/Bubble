@@ -1,15 +1,18 @@
+/** A signed-in person whose profile can participate in family sync. */
 export type FamilySyncPerson = {
   id: string
   email: string
   displayName: string
 }
 
+/** A join request visible to the owner of a connected family. */
 export type FamilySyncPendingRequest = {
   id: string
   requesterId: string
   createdAt: string
 }
 
+/** Every backend state the family-sync panel can render. */
 export type FamilySyncSnapshot =
   | { kind: 'local-only' }
   | { kind: 'signed-out' }
@@ -34,6 +37,7 @@ export type FamilySyncSnapshot =
       pendingRequests: FamilySyncPendingRequest[]
     }
 
+/** Legacy one-use invite metadata retained for backward-compatible sharing. */
 export type CreatedCircleInvite = {
   circleId: string
   code: string
@@ -41,20 +45,10 @@ export type CreatedCircleInvite = {
   maxUses: number
 }
 
-export type SignUpResult = {
-  requiresEmailConfirmation: boolean
-}
-
+/** Persistence operations required by the family-sync panel. */
 export type FamilySyncAdapter = {
   loadSnapshot: () => Promise<FamilySyncSnapshot>
   subscribeToAuthChanges?: (onChange: () => void) => () => void
-  signIn: (email: string, password: string) => Promise<void>
-  signUp: (
-    email: string,
-    password: string,
-    displayName: string,
-  ) => Promise<SignUpResult>
-  signOut: () => Promise<void>
   createCircle: (name: string) => Promise<void>
   requestCircleJoin: (inviteCode: string) => Promise<void>
   rotateFamilyCode: (circleId: string) => Promise<string>

@@ -1,7 +1,6 @@
 import {
   getClerkSupabaseIdentity,
   getSupabaseClient,
-  signOutClerkSupabaseSession,
   subscribeToSupabaseAuthChanges,
 } from '../../../lib/supabase'
 import {
@@ -19,33 +18,45 @@ import type {
 
 type UnknownRecord = Record<string, unknown>
 
-function asRecord(value: unknown): UnknownRecord | null {
-  return value && typeof value === 'object' ? (value as UnknownRecord) : null
+/** Narrows untrusted backend payloads before individual fields are read. */
+function asRecord(candidate: unknown): UnknownRecord | null {
+  return candidate && typeof candidate === 'object' && !Array.isArray(candidate)
+    ? (candidate as UnknownRecord)
+    : null
 }
 
-function requireString(record: UnknownRecord, key: string) {
-  const value = record[key]
-  if (typeof value !== 'string' || !value) {
+/** Reads a required non-empty string or fails the whole inconsistent snapshot. */
+function requireString(record: UnknownRecord, fieldName: string) {
+  const fieldValue = record[fieldName]
+  if (typeof fieldValue !== 'string' || !fieldValue) {
     throw new Error('Family Sync returned an incomplete response.')
   }
-  return value
+  return fieldValue
 }
 
+/** Browser event used to revalidate family membership after a mutation. */
 export const FAMILY_SYNC_REFRESH_EVENT = 'kinsphere:family-sync-refresh'
 
+/** Notifies other mounted family consumers that their snapshot may be stale. */
 export function announceFamilySyncChange() {
   if (typeof window !== 'undefined') {
     window.dispatchEvent(new CustomEvent(FAMILY_SYNC_REFRESH_EVENT))
   }
 }
 
-export function toFamilySyncErrorMessage(reason: unknown) {
+/** Maps backend and network failures to safe, actionable interface copy. */
+export function toFamilySyncErrorMessage(errorReason: unknown) {
+  const errorRecord = asRecord(errorReason)
   const rawMessage =
-    reason instanceof Error
-      ? reason.message
-      : asRecord(reason) && typeof asRecord(reason)?.message === 'string'
-        ? String(asRecord(reason)?.message)
+    errorReason instanceof Error
+      ? errorReason.message
+      : typeof errorRecord?.message === 'string'
+        ? errorRecord.message
         : ''
+  const errorCode =
+    typeof errorRecord?.code === 'string'
+      ? errorRecord.code.toLowerCase()
+      : ''
   const message = rawMessage.toLowerCase()
 
   if (message.includes('invalid login credentials')) {
@@ -82,10 +93,23 @@ export function toFamilySyncErrorMessage(reason: unknown) {
   if (message.includes('network') || message.includes('fetch')) {
     return 'Family Sync could not reach the server. Check your connection and try again.'
   }
+  if (
+    errorCode === '42501' ||
+    message.includes('permission') ||
+    message.includes('row-level security')
+  ) {
+    return 'Your family access may have changed. Sign in again or ask the family owner.'
+  }
+  if (message.includes('jwt') || message.includes('session')) {
+    return 'Your secure session needs to be renewed. Sign in again to continue.'
+  }
 
-  return rawMessage || 'Family Sync could not complete that request.'
+  // Database and authentication errors can contain implementation details.
+  // Unknown server copy must not be rendered directly into the settings page.
+  return 'Family Sync could not complete that request.'
 }
 
+/** Resolves the Clerk-backed Supabase identity used by every family query. */
 async function getAuthenticatedPerson(): Promise<{
   person: FamilySyncPerson
   userId: string
@@ -105,6 +129,7 @@ async function getAuthenticatedPerson(): Promise<{
   }
 }
 
+/** Loads one coherent panel snapshot instead of exposing query-level state. */
 async function loadSnapshot(): Promise<FamilySyncSnapshot> {
   const client = getSupabaseClient()
   if (!client) return { kind: 'local-only' }
@@ -114,7 +139,7 @@ async function loadSnapshot(): Promise<FamilySyncSnapshot> {
 
   const membership = await readFamilyMembership()
   if (membership.kind !== 'member') {
-    const { data: pendingData, error: pendingError } = await client
+    const { data: pendingRequestData, error: pendingRequestError } = await client
       .from('join_requests')
       .select('id,created_at')
       .eq('requester_id', authenticated.userId)
@@ -122,16 +147,19 @@ async function loadSnapshot(): Promise<FamilySyncSnapshot> {
       .order('created_at', { ascending: false })
       .limit(1)
       .maybeSingle()
-    if (pendingError) throw pendingError
+    if (pendingRequestError) throw pendingRequestError
 
-    const pending = asRecord(pendingData)
+    const pendingRequestRecord = asRecord(pendingRequestData)
     return {
       kind: 'unjoined',
       person: authenticated.person,
-      pendingRequest: pending
+      pendingRequest: pendingRequestRecord
         ? {
-            id: requireString(pending, 'id'),
-            createdAt: requireString(pending, 'created_at'),
+            id: requireString(pendingRequestRecord, 'id'),
+            createdAt: requireString(
+              pendingRequestRecord,
+              'created_at',
+            ),
           }
         : null,
     }
@@ -150,21 +178,23 @@ async function loadSnapshot(): Promise<FamilySyncSnapshot> {
   }> = []
 
   if (role === 'owner') {
-    const { data, error } = await client
+    const { data: requestData, error: requestError } = await client
       .from('join_requests')
       .select('id,requester_id,created_at')
       .eq('circle_id', circleId)
       .eq('status', 'pending')
       .order('created_at', { ascending: true })
-    if (error) throw error
+    if (requestError) throw requestError
 
-    pendingRequests = (data ?? []).map((value) => {
-      const request = asRecord(value)
-      if (!request) throw new Error('A join request could not be loaded.')
+    pendingRequests = (requestData ?? []).map((requestValue) => {
+      const requestRecord = asRecord(requestValue)
+      if (!requestRecord) {
+        throw new Error('A join request could not be loaded.')
+      }
       return {
-        id: requireString(request, 'id'),
-        requesterId: requireString(request, 'requester_id'),
-        createdAt: requireString(request, 'created_at'),
+        id: requireString(requestRecord, 'id'),
+        requesterId: requireString(requestRecord, 'requester_id'),
+        createdAt: requireString(requestRecord, 'created_at'),
       }
     })
   }
@@ -183,44 +213,38 @@ async function loadSnapshot(): Promise<FamilySyncSnapshot> {
   }
 }
 
+/** Production family-sync persistence backed by the active Supabase session. */
 export const familySyncAdapter: FamilySyncAdapter = {
   loadSnapshot,
 
+  /** Revalidates the panel whenever the authenticated Supabase identity changes. */
   subscribeToAuthChanges(onChange) {
     return subscribeToSupabaseAuthChanges(onChange)
   },
 
-  async signIn() {
-    throw new Error('Use the main Clerk sign-in page.')
-  },
-
-  async signUp() {
-    throw new Error('Use the main Clerk sign-up page.')
-  },
-
-  async signOut() {
-    await signOutClerkSupabaseSession()
-  },
-
+  /** Creates a family for the current authenticated profile. */
   async createCircle(name) {
     await createFamily(name)
   },
 
+  /** Resolves both current persistent codes and supported legacy invites. */
   async requestCircleJoin(inviteCode) {
     await joinFamilyByCode(inviteCode)
   },
 
+  /** Invalidates the old share code and returns its replacement. */
   async rotateFamilyCode(circleId) {
     return rotateFamilyShareCode(circleId)
   },
 
+  /** Applies an owner decision through the policy-enforced database function. */
   async decideJoinRequest(requestId, decision) {
     const client = getSupabaseClient()
     if (!client) throw new Error('Family Sync is not configured.')
-    const { error } = await client.rpc('decide_join_request', {
+    const { error: requestError } = await client.rpc('decide_join_request', {
       p_request_id: requestId,
       p_decision: decision,
     })
-    if (error) throw error
+    if (requestError) throw requestError
   },
 }

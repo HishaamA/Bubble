@@ -3,7 +3,14 @@ import {
   getSupabaseClient,
 } from '../../lib/supabase'
 
+// This module is the only UI-facing boundary for authenticated profile and
+// family RPCs. Every server payload is narrowed before it leaves the service.
 type UnknownRecord = Record<string, unknown>
+
+const FAMILY_SHARE_CODE_PATTERN = /^BUB-[0-9A-F]{4}(-[0-9A-F]{4}){5}$/
+const LEGACY_FAMILY_INVITE_PATTERN = /^ks1_[0-9a-f]{64}$/
+const UUID_PATTERN =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
 
 export type PersistentProfile = {
   userId: string
@@ -75,36 +82,46 @@ export type JoinedFamily = {
   shareCode: string
 }
 
+/** Narrows untrusted Supabase JSON to an object before field access. */
 function asRecord(value: unknown): UnknownRecord | null {
   return value && typeof value === 'object' ? (value as UnknownRecord) : null
 }
 
+/** RPCs may return one row directly or wrap it in a one-element array. */
 function firstRecord(value: unknown) {
   return asRecord(Array.isArray(value) ? value[0] : value)
 }
 
-function requiredString(record: UnknownRecord, key: string) {
+/** Requires a present string in a server response and preserves its value. */
+function requireStringField(record: UnknownRecord, key: string) {
   const value = record[key]
-  if (typeof value !== 'string' || !value) {
-    throw new Error('Supabase returned an incomplete persistent profile.')
+  if (typeof value !== 'string' || !value.trim()) {
+    throw new Error(`Supabase returned an invalid ${key} value.`)
   }
   return value
 }
 
-function optionalString(record: UnknownRecord, key: string) {
+/** Converts absent or empty optional server strings to null. */
+function readOptionalStringField(record: UnknownRecord, key: string) {
   const value = record[key]
   return typeof value === 'string' && value ? value : null
 }
 
-function requiredNumber(record: UnknownRecord, key: string) {
+/** Requires a count-like server field suitable for UI display. */
+function requireNonNegativeIntegerField(record: UnknownRecord, key: string) {
   const value = record[key]
-  if (typeof value !== 'number' || !Number.isFinite(value)) {
-    throw new Error('Supabase returned incomplete family data.')
+  if (
+    typeof value !== 'number' ||
+    !Number.isInteger(value) ||
+    value < 0
+  ) {
+    throw new Error(`Supabase returned an invalid ${key} value.`)
   }
   return value
 }
 
-function familyRole(record: UnknownRecord): 'owner' | 'member' {
+/** Narrows the database family role to the two client-supported values. */
+function readFamilyRole(record: UnknownRecord): 'owner' | 'member' {
   const role = record.family_role
   if (role !== 'owner' && role !== 'member') {
     throw new Error('Supabase returned an invalid family role.')
@@ -112,26 +129,29 @@ function familyRole(record: UnknownRecord): 'owner' | 'member' {
   return role
 }
 
-function familyFromRecord(record: UnknownRecord) {
+/** Maps a validated family RPC row to the shared client shape. */
+function parseFamily(record: UnknownRecord) {
   return {
-    id: requiredString(record, 'family_id'),
-    name: requiredString(record, 'family_name'),
-    role: familyRole(record),
-    ownerId: requiredString(record, 'owner_id'),
-    memberCount: requiredNumber(record, 'member_count'),
-    shareCode: requiredString(record, 'share_code'),
+    id: requireStringField(record, 'family_id'),
+    name: requireStringField(record, 'family_name'),
+    role: readFamilyRole(record),
+    ownerId: requireStringField(record, 'owner_id'),
+    memberCount: requireNonNegativeIntegerField(record, 'member_count'),
+    shareCode: requireStringField(record, 'share_code'),
   }
 }
 
-export function normalizeFamilyShareCode(value: string) {
+/** Converts a pasted family code to the canonical server format. */
+export function normalizeFamilyShareCode(value: string): string {
   return value.trim().toUpperCase()
 }
 
-function profilePreferencesFromRecord(
+/** Converts nullable quiet-hour fields to the UI's enabled-state model. */
+function parseProfilePreferences(
   record: UnknownRecord,
 ): ProfilePreferences {
-  const quietHoursStart = optionalString(record, 'quiet_hours_start')
-  const quietHoursEnd = optionalString(record, 'quiet_hours_end')
+  const quietHoursStart = readOptionalStringField(record, 'quiet_hours_start')
+  const quietHoursEnd = readOptionalStringField(record, 'quiet_hours_end')
   return {
     notificationsEnabled: record.notifications_enabled === true,
     quietHoursEnabled: Boolean(quietHoursStart && quietHoursEnd),
@@ -140,6 +160,7 @@ function profilePreferencesFromRecord(
   }
 }
 
+/** Requires both configured storage and a verified Clerk identity. */
 function requireAuthenticatedClient() {
   const client = getSupabaseClient()
   const identity = getClerkSupabaseIdentity()
@@ -167,24 +188,25 @@ export async function bootstrapCurrentClerkProfile(): Promise<PersistentProfile>
 
   const record = firstRecord(data)
   if (!record) throw new Error('The persistent profile could not be created.')
-  const subject = requiredString(record, 'subject')
+  const subject = requireStringField(record, 'subject')
   if (subject !== identity.subject) {
     throw new Error('The authenticated profile did not match the Clerk session.')
   }
 
   return {
-    userId: requiredString(record, 'user_id'),
+    userId: requireStringField(record, 'user_id'),
     subject,
-    displayName: requiredString(record, 'display_name'),
-    email: optionalString(record, 'email'),
+    displayName: requireStringField(record, 'display_name'),
+    email: readOptionalStringField(record, 'email'),
     onboardingCompleted: record.onboarding_completed === true,
-    onboardingCompletedAt: optionalString(
+    onboardingCompletedAt: readOptionalStringField(
       record,
       'onboarding_completed_at',
     ),
   }
 }
 
+/** Reads the current account's durable onboarding completion state. */
 export async function readOnboardingState(): Promise<OnboardingState> {
   const profile = await bootstrapCurrentClerkProfile()
   return {
@@ -193,6 +215,7 @@ export async function readOnboardingState(): Promise<OnboardingState> {
   }
 }
 
+/** Marks onboarding complete using the authenticated database identity. */
 export async function markTutorialComplete(): Promise<OnboardingState> {
   const { client } = requireAuthenticatedClient()
   await bootstrapCurrentClerkProfile()
@@ -206,6 +229,7 @@ export async function markTutorialComplete(): Promise<OnboardingState> {
   return { completed: true, completedAt: data }
 }
 
+/** Loads notification preferences scoped to the current account. */
 export async function readProfilePreferences(): Promise<ProfilePreferences> {
   const { client } = requireAuthenticatedClient()
   const profile = await bootstrapCurrentClerkProfile()
@@ -221,14 +245,13 @@ export async function readProfilePreferences(): Promise<ProfilePreferences> {
   if (!preferences) {
     throw new Error('Your profile preferences could not be loaded.')
   }
-  return profilePreferencesFromRecord(preferences)
+  return parseProfilePreferences(preferences)
 }
 
+/** Applies the supplied preference fields without overwriting omitted fields. */
 export async function updateProfilePreferences(
   patch: ProfilePreferencesPatch,
 ): Promise<ProfilePreferences> {
-  const { client } = requireAuthenticatedClient()
-  const profile = await bootstrapCurrentClerkProfile()
   const changes: UnknownRecord = {}
 
   if (typeof patch.notificationsEnabled === 'boolean') {
@@ -241,6 +264,9 @@ export async function updateProfilePreferences(
   if (Object.keys(changes).length === 0) {
     return readProfilePreferences()
   }
+
+  const { client } = requireAuthenticatedClient()
+  const profile = await bootstrapCurrentClerkProfile()
 
   const { data, error } = await client
     .from('profile_preferences')
@@ -255,9 +281,10 @@ export async function updateProfilePreferences(
   if (!preferences) {
     throw new Error('Your profile preferences could not be saved.')
   }
-  return profilePreferencesFromRecord(preferences)
+  return parseProfilePreferences(preferences)
 }
 
+/** Returns either the approved family membership or its pending join request. */
 export async function readFamilyMembership(): Promise<FamilyMembershipState> {
   const { client } = requireAuthenticatedClient()
   const profile = await bootstrapCurrentClerkProfile()
@@ -281,11 +308,11 @@ export async function readFamilyMembership(): Promise<FamilyMembershipState> {
     return {
       kind: 'unjoined',
       userId: profile.userId,
-      pendingRequestId: pending ? requiredString(pending, 'id') : null,
+      pendingRequestId: pending ? requireStringField(pending, 'id') : null,
     }
   }
 
-  const family = familyFromRecord(familyRecord)
+  const family = parseFamily(familyRecord)
 
   return {
     kind: 'member',
@@ -299,6 +326,7 @@ export async function readFamilyMembership(): Promise<FamilyMembershipState> {
   }
 }
 
+/** Creates a family and returns the reusable owner-managed share code. */
 export async function createFamily(name: string): Promise<CreatedFamily> {
   const normalizedName = name.trim()
   if (!normalizedName || normalizedName.length > 80) {
@@ -314,7 +342,7 @@ export async function createFamily(name: string): Promise<CreatedFamily> {
   if (error) throw error
   const record = firstRecord(data)
   if (!record) throw new Error('The family group could not be created.')
-  const family = familyFromRecord(record)
+  const family = parseFamily(record)
   if (family.role !== 'owner' || !family.shareCode) {
     throw new Error('The new family share code could not be created.')
   }
@@ -328,14 +356,22 @@ export async function createFamily(name: string): Promise<CreatedFamily> {
   }
 }
 
+/** Joins with a current reusable code or submits a legacy invite request. */
 export async function joinFamilyByCode(
   inviteCode: string,
 ): Promise<JoinedFamily | { requestId: string }> {
   const normalizedCode = normalizeFamilyShareCode(inviteCode)
+  const legacyCode = inviteCode.trim().toLowerCase()
+  const isCurrentCode = FAMILY_SHARE_CODE_PATTERN.test(normalizedCode)
+  const isLegacyCode = LEGACY_FAMILY_INVITE_PATTERN.test(legacyCode)
+  if (!isCurrentCode && !isLegacyCode) {
+    throw new Error('invalid_family_code')
+  }
+
   const { client } = requireAuthenticatedClient()
   await bootstrapCurrentClerkProfile()
 
-  if (/^BUB-[0-9A-F]{4}(-[0-9A-F]{4}){5}$/.test(normalizedCode)) {
+  if (isCurrentCode) {
     const { data, error } = await client.rpc(
       'join_family_by_share_code',
       { p_share_code: normalizedCode },
@@ -343,7 +379,7 @@ export async function joinFamilyByCode(
     if (error) throw error
     const record = firstRecord(data)
     if (!record) throw new Error('The family could not be joined.')
-    const family = familyFromRecord(record)
+    const family = parseFamily(record)
     return {
       id: family.id,
       name: family.name,
@@ -355,10 +391,6 @@ export async function joinFamilyByCode(
   }
 
   // Keep previously issued invite links functional during the transition.
-  const legacyCode = inviteCode.trim().toLowerCase()
-  if (!/^ks1_[0-9a-f]{64}$/.test(legacyCode)) {
-    throw new Error('invalid_family_code')
-  }
   const { data, error } = await client.rpc('request_circle_join', {
     p_invite_code: legacyCode,
   })
@@ -369,6 +401,7 @@ export async function joinFamilyByCode(
   return { requestId: data }
 }
 
+/** Lists approved members of the current account's family. */
 export async function readFamilyMembers(): Promise<FamilyMember[]> {
   const { client } = requireAuthenticatedClient()
   await bootstrapCurrentClerkProfile()
@@ -378,22 +411,26 @@ export async function readFamilyMembers(): Promise<FamilyMember[]> {
   if (error) throw error
 
   if (!Array.isArray(data)) return []
-  return data.map((value) => {
-    const member = asRecord(value)
+  return data.map((memberRow) => {
+    const member = asRecord(memberRow)
     if (!member) throw new Error('A family member could not be loaded.')
-    const role = familyRole(member)
+    const role = readFamilyRole(member)
     return {
-      familyId: requiredString(member, 'family_id'),
-      userId: requiredString(member, 'user_id'),
-      displayName: requiredString(member, 'display_name'),
-      avatarPath: optionalString(member, 'avatar_path'),
+      familyId: requireStringField(member, 'family_id'),
+      userId: requireStringField(member, 'user_id'),
+      displayName: requireStringField(member, 'display_name'),
+      avatarPath: readOptionalStringField(member, 'avatar_path'),
       role,
-      joinedAt: requiredString(member, 'joined_at'),
+      joinedAt: requireStringField(member, 'joined_at'),
     }
   })
 }
 
-export async function readFamilyShareCode(circleId: string) {
+/** Returns the current family share code, creating one server-side if needed. */
+export async function readFamilyShareCode(circleId: string): Promise<string> {
+  if (!UUID_PATTERN.test(circleId)) {
+    throw new TypeError('Choose a valid family before loading its share code.')
+  }
   const { client } = requireAuthenticatedClient()
   await bootstrapCurrentClerkProfile()
   const { data, error } = await client.rpc(
@@ -407,7 +444,11 @@ export async function readFamilyShareCode(circleId: string) {
   return data
 }
 
-export async function rotateFamilyShareCode(circleId: string) {
+/** Invalidates the previous family code and returns its replacement. */
+export async function rotateFamilyShareCode(circleId: string): Promise<string> {
+  if (!UUID_PATTERN.test(circleId)) {
+    throw new TypeError('Choose a valid family before rotating its share code.')
+  }
   const { client } = requireAuthenticatedClient()
   await bootstrapCurrentClerkProfile()
   const { data, error } = await client.rpc('rotate_family_share_code', {
@@ -420,7 +461,8 @@ export async function rotateFamilyShareCode(circleId: string) {
   return data
 }
 
-export async function leaveFamily() {
+/** Removes the current account from its family when server policy permits it. */
+export async function leaveFamily(): Promise<boolean> {
   const { client } = requireAuthenticatedClient()
   await bootstrapCurrentClerkProfile()
   const { data, error } = await client.rpc('leave_current_family')

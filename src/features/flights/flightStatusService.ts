@@ -22,6 +22,7 @@ type FamilyFlightRow = {
   created_at?: unknown
 }
 
+/** Typed service failure used to map provider errors to actionable UI states. */
 export class FlightStatusError extends Error {
   readonly code:
     | 'not-configured'
@@ -55,6 +56,7 @@ export type FlightStatusRequestOptions = {
   signal?: AbortSignal
 }
 
+/** Resolves an explicit endpoint first, then the project's Supabase function. */
 function configuredFlightEndpoint() {
   const explicit = import.meta.env.VITE_FLIGHT_TRACKER_ENDPOINT?.trim()
   if (explicit) return explicit
@@ -64,6 +66,7 @@ function configuredFlightEndpoint() {
   return null
 }
 
+/** Extracts a provider-safe error message from a failed JSON response. */
 async function responseMessage(response: Response) {
   try {
     const body = await response.json() as { error?: unknown }
@@ -106,10 +109,12 @@ export type CreateTrackedFamilyFlightResult =
   | { kind: 'created'; snapshot: TrackedFlight['snapshot'] }
   | { kind: 'choices'; choices: FlightLookupChoice[] }
 
+/** Narrows provider metadata that may be absent but never non-text. */
 function isNullableText(value: unknown): value is string | null {
   return value === null || typeof value === 'string'
 }
 
+/** Validates the compact airport data shown in ambiguity choices. */
 function isLookupAirport(value: unknown): value is FlightLookupChoice['origin'] {
   if (!value || typeof value !== 'object') return false
   const airport = value as Partial<FlightLookupChoice['origin']>
@@ -120,11 +125,13 @@ function isLookupAirport(value: unknown): value is FlightLookupChoice['origin'] 
     && isNullableText(airport.timeZone)
 }
 
+/** Accepts only timestamp strings the platform can parse. */
 function isIsoTimestamp(value: unknown): value is string {
   return typeof value === 'string'
     && Number.isFinite(new Date(value).getTime())
 }
 
+/** Validates one untrusted provider choice before exposing it to the UI. */
 function isFlightLookupChoice(value: unknown): value is FlightLookupChoice {
   if (!value || typeof value !== 'object') return false
   const choice = value as Partial<FlightLookupChoice>
@@ -150,6 +157,7 @@ function isFlightLookupChoice(value: unknown): value is FlightLookupChoice {
     )
 }
 
+/** Parses the two response shapes supported by the create workflow. */
 function createResponse(value: unknown): CreateTrackedFamilyFlightResult | null {
   if (!value || typeof value !== 'object') return null
   const response = value as {
@@ -178,6 +186,7 @@ function createResponse(value: unknown): CreateTrackedFamilyFlightResult | null 
   return null
 }
 
+/** Makes otherwise non-abortable token/JSON promises obey request ownership. */
 function waitWithSignal<T>(promise: Promise<T>, signal: AbortSignal) {
   if (signal.aborted) {
     return Promise.reject(signal.reason ?? new DOMException('Aborted', 'AbortError'))
@@ -200,6 +209,7 @@ function waitWithSignal<T>(promise: Promise<T>, signal: AbortSignal) {
   })
 }
 
+/** Executes one authenticated, timed provider request and normalizes failures. */
 async function requestFlightStatus(
   body: Record<string, string>,
   options: FlightStatusRequestOptions = {},
@@ -415,6 +425,7 @@ export async function refreshTrackedFamilyFlight(
   return snapshot
 }
 
+/** Resolves the active Supabase client and first approved family membership. */
 async function familyContext() {
   const client = getSupabaseClient()
   if (!client || !getClerkSupabaseIdentity()) return null
@@ -432,6 +443,7 @@ async function familyContext() {
   return { client, circleId: data.circle_id }
 }
 
+/** Converts and validates an untrusted family-flight database row. */
 function rowToTrackedFlight(row: FamilyFlightRow): TrackedFlight | null {
   const candidate = {
     id: row.id,
@@ -446,6 +458,7 @@ function rowToTrackedFlight(row: FamilyFlightRow): TrackedFlight | null {
   return isTrackedFlight(candidate) ? candidate : null
 }
 
+/** Fetches and validates every tracked flight visible to the active family. */
 export async function fetchFamilyFlights(now = new Date()): Promise<TrackedFlight[]> {
   const context = await familyContext()
   if (!context) return []
@@ -462,6 +475,7 @@ export async function fetchFamilyFlights(now = new Date()): Promise<TrackedFligh
     .filter((flight): flight is TrackedFlight => flight !== null)
 }
 
+/** Removes a server-backed family flight after authenticating its owner. */
 export async function removeFamilyFlight(
   flightId: string,
   options: FlightStatusRequestOptions = {},
@@ -509,6 +523,7 @@ export async function removeFamilyFlight(
   }
 }
 
+/** Subscribes to family flight changes and returns a cleanup callback. */
 export async function subscribeToFamilyFlights(onChange: () => void) {
   const context = await familyContext()
   if (!context) return () => undefined
@@ -530,6 +545,7 @@ export async function subscribeToFamilyFlights(onChange: () => void) {
   }
 }
 
+/** Creates a stable client ID so uncertain create retries remain idempotent. */
 export function createTrackedFlightId() {
   if (typeof crypto.randomUUID === 'function') return crypto.randomUUID()
   return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (character) => {

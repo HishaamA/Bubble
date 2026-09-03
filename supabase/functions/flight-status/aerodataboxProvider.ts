@@ -1,4 +1,7 @@
-import { isFreshProviderPosition } from './providerHelpers.ts'
+import {
+  isFreshProviderPosition,
+  normalizeAirlineFlightNumber,
+} from './providerHelpers.ts'
 
 type JsonObject = Record<string, unknown>
 
@@ -71,25 +74,43 @@ export type AeroDataBoxProviderErrorCode =
   | 'unavailable'
   | 'incomplete'
 
+/** A safe, finite error contract understood by the Edge Function boundary. */
 export class AeroDataBoxProviderError extends Error {
   readonly code: AeroDataBoxProviderErrorCode
 
-  constructor(message: string, code: AeroDataBoxProviderErrorCode) {
+  constructor(message: string, errorCode: AeroDataBoxProviderErrorCode) {
     super(message)
     this.name = 'AeroDataBoxProviderError'
-    this.code = code
+    this.code = errorCode
   }
 }
 
 const providerBaseUrl = 'https://aerodatabox.p.rapidapi.com'
 const providerHost = 'aerodatabox.p.rapidapi.com'
-const responseCacheTtl = 60_000
-const airportCacheTtl = 24 * 60 * 60 * 1000
-const livePositionFreshness = 15 * 60 * 1000
+const responseCacheTtlMs = 60_000
+const airportCacheTtlMs = 24 * 60 * 60 * 1000
+const livePositionFreshnessMs = 15 * 60 * 1000
 const maximumResponseCacheEntries = 256
 const maximumAirportCacheEntries = 512
-const providerMinimumRequestInterval = 1_000
-const maximumRetryAfterDelay = 5_000
+const providerMinimumRequestIntervalMs = 1_000
+const maximumRetryAfterDelayMs = 5_000
+
+const departureCompletedStatusTokens = new Set([
+  'departed',
+  'enroute',
+  'approaching',
+  'arrived',
+  'diverted',
+])
+const operationalStatusTokens = new Set([
+  'checkin',
+  'boarding',
+  'gateclosed',
+  'departed',
+  'enroute',
+  'approaching',
+  'delayed',
+])
 
 const responseCache = new Map<string, {
   expiresAt: number
@@ -106,32 +127,37 @@ const inFlightLookups = new Map<
 let providerRequestTail: Promise<void> = Promise.resolve()
 let nextProviderRequestAt = 0
 
-function object(value: unknown): JsonObject | null {
+/** Narrows untrusted provider JSON without accepting arrays or null. */
+function asJsonObject(value: unknown): JsonObject | null {
   return value && typeof value === 'object' && !Array.isArray(value)
     ? value as JsonObject
     : null
 }
 
-function text(value: unknown) {
+/** Trims non-empty provider text and rejects every other JSON value. */
+function normalizedText(value: unknown) {
   return typeof value === 'string' && value.trim() ? value.trim() : null
 }
 
-function numeric(value: unknown) {
+/** Converts finite provider numbers while rejecting blanks and infinities. */
+function finiteNumber(value: unknown) {
   if (typeof value === 'number' && Number.isFinite(value)) return value
   if (typeof value !== 'string' || !value.trim()) return null
   const parsed = Number(value)
   return Number.isFinite(parsed) ? parsed : null
 }
 
-function timestamp(value: unknown) {
-  const candidate = text(value)
+/** Normalizes provider timestamps before they enter the persisted snapshot. */
+function normalizedTimestamp(value: unknown) {
+  const candidate = normalizedText(value)
   if (!candidate) return null
   const parsed = new Date(candidate)
   return Number.isFinite(parsed.getTime()) ? parsed.toISOString() : null
 }
 
-function calendarDate(value: unknown) {
-  const candidate = text(value)
+/** Accepts only real calendar dates in the provider's YYYY-MM-DD format. */
+function normalizedCalendarDate(value: unknown) {
+  const candidate = normalizedText(value)
   if (!candidate || !/^\d{4}-\d{2}-\d{2}$/.test(candidate)) return null
   const [year, month, day] = candidate.split('-').map(Number)
   const parsed = new Date(Date.UTC(year, month - 1, day))
@@ -142,18 +168,8 @@ function calendarDate(value: unknown) {
     : null
 }
 
-function normalizedFlightNumber(value: unknown) {
-  if (typeof value !== 'string') return null
-  const normalized = value.trim().toUpperCase().replace(/[\s-]+/g, '')
-  return /^[A-Z0-9]{3,8}$/.test(normalized)
-    && /[A-Z]/.test(normalized)
-    && /\d/.test(normalized)
-    ? normalized
-    : null
-}
-
 function validTimeZone(value: unknown) {
-  const candidate = text(value)
+  const candidate = normalizedText(value)
   if (!candidate) return null
   try {
     new Intl.DateTimeFormat('en', { timeZone: candidate }).format(0)
@@ -163,8 +179,9 @@ function validTimeZone(value: unknown) {
   }
 }
 
-function code(value: unknown, length: 3 | 4) {
-  const candidate = text(value)?.toUpperCase()
+/** Normalizes an IATA or ICAO airport identifier. */
+function normalizeAirportCode(value: unknown, length: 3 | 4) {
+  const candidate = normalizedText(value)?.toUpperCase()
   return candidate && new RegExp(`^[A-Z0-9]{${length}}$`).test(candidate)
     ? candidate
     : null
@@ -174,9 +191,11 @@ function boundedCacheSet<T>(
   cache: Map<string, { expiresAt: number; value: T }>,
   key: string,
   value: T,
-  ttl: number,
+  ttlMs: number,
   maximumEntries: number,
 ) {
+  // Prune expired entries first, then evict insertion-order entries. The maps
+  // are small and this avoids a second cache implementation in the Edge worker.
   const now = Date.now()
   for (const [cachedKey, cached] of cache) {
     if (cached.expiresAt <= now) cache.delete(cachedKey)
@@ -186,13 +205,14 @@ function boundedCacheSet<T>(
     if (!oldestKey) break
     cache.delete(oldestKey)
   }
-  cache.set(key, { value, expiresAt: now + ttl })
+  cache.set(key, { value, expiresAt: now + ttlMs })
 }
 
+/** Flattens provider error contracts without exposing them to app clients. */
 function providerErrorText(value: unknown): string {
   if (typeof value === 'string') return value.toLowerCase()
   if (Array.isArray(value)) return value.map(providerErrorText).join(' ')
-  const record = object(value)
+  const record = asJsonObject(value)
   if (!record) return ''
   return [
     record.message,
@@ -214,8 +234,9 @@ function isPlanRestriction(details: string) {
   )
 }
 
-function mappedHttpError(response: Response, body: unknown) {
-  const details = providerErrorText(body)
+/** Maps provider-specific HTTP failures to the small public error taxonomy. */
+function mappedHttpError(response: Response, responseBody: unknown) {
+  const details = providerErrorText(responseBody)
   if (response.status === 401) {
     return new AeroDataBoxProviderError(
       'The configured AeroDataBox key was rejected.',
@@ -265,44 +286,45 @@ function mappedHttpError(response: Response, body: unknown) {
   )
 }
 
-function wait(delay: number) {
-  return new Promise<void>((resolve) => setTimeout(resolve, delay))
+function delayFor(delayMs: number) {
+  return new Promise<void>((resolve) => setTimeout(resolve, delayMs))
 }
 
 async function waitForProviderSlot(minimumDelay = 0) {
-  const delay = Math.max(
+  const delayMs = Math.max(
     0,
     minimumDelay,
     nextProviderRequestAt - Date.now(),
   )
-  if (delay > 0) await wait(delay)
-  nextProviderRequestAt = Date.now() + providerMinimumRequestInterval
+  if (delayMs > 0) await delayFor(delayMs)
+  nextProviderRequestAt = Date.now() + providerMinimumRequestIntervalMs
 }
 
-function scheduledProviderRequest<T>(request: () => Promise<T>) {
-  const scheduled = providerRequestTail.then(request)
-  providerRequestTail = scheduled.then(
+/** Serializes calls so concurrent lookups cannot exceed the provider quota. */
+function scheduledProviderRequest<T>(providerOperation: () => Promise<T>) {
+  const scheduledOperation = providerRequestTail.then(providerOperation)
+  providerRequestTail = scheduledOperation.then(
     () => undefined,
     () => undefined,
   )
-  return scheduled
+  return scheduledOperation
 }
 
 function retryAfterDelay(response: Response) {
-  const header = text(response.headers.get('retry-after'))
-  let requestedDelay = providerMinimumRequestInterval
-  if (header) {
-    const seconds = Number(header)
-    if (Number.isFinite(seconds) && seconds >= 0) {
-      requestedDelay = seconds * 1_000
+  const retryAfterHeader = normalizedText(response.headers.get('retry-after'))
+  let requestedDelayMs = providerMinimumRequestIntervalMs
+  if (retryAfterHeader) {
+    const retryAfterSeconds = Number(retryAfterHeader)
+    if (Number.isFinite(retryAfterSeconds) && retryAfterSeconds >= 0) {
+      requestedDelayMs = retryAfterSeconds * 1_000
     } else {
-      const retryAt = new Date(header).getTime()
-      if (Number.isFinite(retryAt)) requestedDelay = retryAt - Date.now()
+      const retryAt = new Date(retryAfterHeader).getTime()
+      if (Number.isFinite(retryAt)) requestedDelayMs = retryAt - Date.now()
     }
   }
   return Math.min(
-    maximumRetryAfterDelay,
-    Math.max(providerMinimumRequestInterval, requestedDelay),
+    maximumRetryAfterDelayMs,
+    Math.max(providerMinimumRequestIntervalMs, requestedDelayMs),
   )
 }
 
@@ -323,33 +345,33 @@ async function providerAttempt(path: string, apiKey: string) {
       'unavailable',
     )
   }
-  let body: unknown = null
+  let responseBody: unknown = null
   if (response.status !== 204) {
     try {
-      body = await response.json()
+      responseBody = await response.json()
     } catch {
       // Keep provider HTML and malformed error bodies away from the client.
     }
   }
-  return { response, body }
+  return { response, responseBody }
 }
 
 function providerAttemptValue(attempt: {
   response: Response
-  body: unknown
+  responseBody: unknown
 }) {
   if (attempt.response.status === 204) return null
   if (!attempt.response.ok) {
-    throw mappedHttpError(attempt.response, attempt.body)
+    throw mappedHttpError(attempt.response, attempt.responseBody)
   }
-  const { body } = attempt
-  if (body === null) {
+  const { responseBody } = attempt
+  if (responseBody === null) {
     throw new AeroDataBoxProviderError(
       'AeroDataBox returned an incomplete response.',
       'incomplete',
     )
   }
-  return body
+  return responseBody
 }
 
 async function providerRequest(path: string, apiKey: string) {
@@ -357,7 +379,7 @@ async function providerRequest(path: string, apiKey: string) {
     await waitForProviderSlot()
     let attempt = await providerAttempt(path, apiKey)
     if (attempt.response.status === 429) {
-      const error = mappedHttpError(attempt.response, attempt.body)
+      const error = mappedHttpError(attempt.response, attempt.responseBody)
       if (error.code === 'rate') {
         await waitForProviderSlot(retryAfterDelay(attempt.response))
         attempt = await providerAttempt(path, apiKey)
@@ -367,11 +389,12 @@ async function providerRequest(path: string, apiKey: string) {
   })
 }
 
+/** Reads the origin-local departure day used by the public flight lookup. */
 function localMovementDate(movement: JsonObject) {
-  const scheduled = object(movement.scheduledTime)
-  const local = text(scheduled?.local)
-  if (!local || local.length < 10) return null
-  return calendarDate(local.slice(0, 10))
+  const scheduledTime = asJsonObject(movement.scheduledTime)
+  const localTimestamp = normalizedText(scheduledTime?.local)
+  if (!localTimestamp || localTimestamp.length < 10) return null
+  return normalizedCalendarDate(localTimestamp.slice(0, 10))
 }
 
 function canonicalFlightSuffix(value: string) {
@@ -381,10 +404,10 @@ function canonicalFlightSuffix(value: string) {
 }
 
 function airlineDesignators(row: JsonObject) {
-  const airline = object(row.airline)
+  const airline = asJsonObject(row.airline)
   return [
-    text(airline?.iata)?.toUpperCase(),
-    text(airline?.icao)?.toUpperCase(),
+    normalizedText(airline?.iata)?.toUpperCase(),
+    normalizedText(airline?.icao)?.toUpperCase(),
   ].filter((value): value is string =>
     value !== undefined
       && value !== null
@@ -409,10 +432,12 @@ function equivalentFlightNumber(
   row: JsonObject,
   requestedFlightNumber: string,
 ) {
-  const returnedFlightNumber = normalizedFlightNumber(row.number)
+  const returnedFlightNumber = normalizeAirlineFlightNumber(row.number)
   if (!returnedFlightNumber) return false
   if (returnedFlightNumber === requestedFlightNumber) return true
 
+  // AeroDataBox may return an operating IATA/ICAO number for a requested
+  // codeshare. Compare the canonical numeric suffix across both designators.
   const designators = airlineDesignators(row)
   for (const requestedDesignator of designators) {
     const requestedSuffix = suffixAfterDesignator(
@@ -437,14 +462,14 @@ function equivalentFlightNumber(
 }
 
 function rowMatchesDepartureDate(row: JsonObject, travelDate: string) {
-  const departure = object(row.departure)
+  const departure = asJsonObject(row.departure)
   return departure !== null && localMovementDate(departure) === travelDate
 }
 
 function candidateProviderFlightId(row: JsonObject) {
-  const providerNumber = normalizedFlightNumber(row.number)
+  const providerNumber = normalizeAirlineFlightNumber(row.number)
   const scheduledDeparture = movementTimestamp(
-    object(row.departure),
+    asJsonObject(row.departure),
     'scheduledTime',
   )
   return providerNumber && scheduledDeparture
@@ -453,20 +478,22 @@ function candidateProviderFlightId(row: JsonObject) {
 }
 
 function matchingFlightRows(
-  response: unknown,
+  providerResponse: unknown,
   flightNumber: string,
   travelDate: string,
 ) {
-  if (!Array.isArray(response)) return []
-  const datedRows = response
-    .map(object)
+  if (!Array.isArray(providerResponse)) return []
+  const datedRows = providerResponse
+    .map(asJsonObject)
     .filter((row): row is JsonObject => row !== null)
     .filter((row) => rowMatchesDepartureDate(row, travelDate))
   const exactMatches = datedRows.filter((row) =>
     equivalentFlightNumber(row, flightNumber),
   )
+  // The endpoint is already scoped to the requested number. An operator-row
+  // fallback covers codeshares whose returned number uses another designator.
   const operatorMatches = datedRows.filter((row) =>
-    text(row.codeshareStatus)?.toLowerCase() === 'isoperator',
+    normalizedText(row.codeshareStatus)?.toLowerCase() === 'isoperator',
   )
   const matches = exactMatches.length > 0 ? exactMatches : operatorMatches
   const uniqueMatches = new Map<string, JsonObject>()
@@ -475,23 +502,23 @@ function matchingFlightRows(
     if (identity) uniqueMatches.set(identity, row)
   }
   return [...uniqueMatches.values()].sort((left, right) => {
-    const leftDeparture = movementTimestamp(object(left.departure), 'scheduledTime')
-    const rightDeparture = movementTimestamp(object(right.departure), 'scheduledTime')
+    const leftDeparture = movementTimestamp(asJsonObject(left.departure), 'scheduledTime')
+    const rightDeparture = movementTimestamp(asJsonObject(right.departure), 'scheduledTime')
     return (leftDeparture ?? '').localeCompare(rightDeparture ?? '')
   })
 }
 
 function embeddedAirportChoice(value: unknown) {
-  const airport = object(value)
+  const airport = asJsonObject(value)
   if (!airport) return null
-  const iata = code(airport.iata, 3)
-  const icao = code(airport.icao, 4)
+  const iata = normalizeAirportCode(airport.iata, 3)
+  const icao = normalizeAirportCode(airport.icao, 4)
   const airportCode = iata ?? icao
   if (!airportCode) return null
   return {
     code: airportCode,
-    name: text(airport.name) ?? text(airport.shortName),
-    city: text(airport.municipalityName),
+    name: normalizedText(airport.name) ?? normalizedText(airport.shortName),
+    city: normalizedText(airport.municipalityName),
     timeZone: validTimeZone(airport.timeZone),
   }
 }
@@ -501,9 +528,9 @@ function flightChoice(
   requestedFlightNumber: string,
 ): AeroDataBoxFlightChoice | null {
   const providerFlightId = candidateProviderFlightId(row)
-  const providerFlightNumber = normalizedFlightNumber(row.number)
-  const departure = object(row.departure)
-  const arrival = object(row.arrival)
+  const providerFlightNumber = normalizeAirlineFlightNumber(row.number)
+  const departure = asJsonObject(row.departure)
+  const arrival = asJsonObject(row.arrival)
   const origin = embeddedAirportChoice(departure?.airport)
   const destination = embeddedAirportChoice(arrival?.airport)
   const scheduledDeparture = movementTimestamp(departure, 'scheduledTime')
@@ -532,21 +559,23 @@ function movementTimestamp(
   movement: JsonObject | null,
   field: 'scheduledTime' | 'revisedTime' | 'predictedTime' | 'runwayTime',
 ) {
-  const value = object(movement?.[field])
-  return timestamp(value?.utc) ?? timestamp(value?.local)
+  const movementTime = asJsonObject(movement?.[field])
+  return normalizedTimestamp(movementTime?.utc)
+    ?? normalizedTimestamp(movementTime?.local)
 }
 
 function embeddedAirportIdentity(value: JsonObject) {
-  const iata = code(value.iata, 3)
-  const icao = code(value.icao, 4)
-  if (!iata && !icao) {
+  const iata = normalizeAirportCode(value.iata, 3)
+  const icao = normalizeAirportCode(value.icao, 4)
+  const airportCode = iata ?? icao
+  if (!airportCode) {
     throw new AeroDataBoxProviderError(
       'AeroDataBox omitted an airport identifier.',
       'incomplete',
     )
   }
   return {
-    code: iata ?? icao as string,
+    code: airportCode,
     kind: iata ? 'Iata' as const : 'Icao' as const,
     iata,
     icao,
@@ -557,12 +586,12 @@ function normalizedAirport(
   value: JsonObject,
   expectedCode: string,
 ): NormalizedAirport | null {
-  const location = object(value.location)
-  const latitude = numeric(location?.lat)
-  const longitude = numeric(location?.lon)
+  const location = asJsonObject(value.location)
+  const latitude = finiteNumber(location?.lat)
+  const longitude = finiteNumber(location?.lon)
   const timeZone = validTimeZone(value.timeZone)
-  const candidateIata = code(value.iata, 3)
-  const candidateIcao = code(value.icao, 4)
+  const candidateIata = normalizeAirportCode(value.iata, 3)
+  const candidateIcao = normalizeAirportCode(value.icao, 4)
   if (
     expectedCode !== candidateIata
     && expectedCode !== candidateIcao
@@ -578,8 +607,8 @@ function normalizedAirport(
   ) return null
   return {
     code: expectedCode,
-    name: text(value.name) ?? text(value.shortName),
-    city: text(value.municipalityName),
+    name: normalizedText(value.name) ?? normalizedText(value.shortName),
+    city: normalizedText(value.municipalityName),
     latitude,
     longitude,
     timeZone,
@@ -587,8 +616,8 @@ function normalizedAirport(
 }
 
 function previousAirport(value: unknown, expectedCode: string) {
-  const previous = object(value)
-  if (text(previous?.code)?.toUpperCase() !== expectedCode) return null
+  const previous = asJsonObject(value)
+  if (normalizedText(previous?.code)?.toUpperCase() !== expectedCode) return null
   return previous ? normalizedAirport({
     iata: expectedCode.length === 3 ? expectedCode : null,
     icao: expectedCode.length === 4 ? expectedCode : null,
@@ -607,8 +636,8 @@ async function airportDetails(
   apiKey: string,
   previousValue: unknown,
 ) {
-  const movement = object(movementValue)
-  const embedded = object(movement?.airport)
+  const movement = asJsonObject(movementValue)
+  const embedded = asJsonObject(movement?.airport)
   if (!embedded) {
     throw new AeroDataBoxProviderError(
       'AeroDataBox omitted airport details.',
@@ -619,12 +648,16 @@ async function airportDetails(
   const completeEmbedded = normalizedAirport(embedded, identity.code)
   if (completeEmbedded) return completeEmbedded
 
+  // A prior verified snapshot is preferable to spending another provider unit
+  // when the current flight payload omits coordinates or its time zone.
   const fromPrevious = previousAirport(previousValue, identity.code)
   if (fromPrevious) {
     return {
       ...fromPrevious,
-      name: text(embedded.name) ?? text(embedded.shortName) ?? fromPrevious.name,
-      city: text(embedded.municipalityName) ?? fromPrevious.city,
+      name: normalizedText(embedded.name)
+        ?? normalizedText(embedded.shortName)
+        ?? fromPrevious.name,
+      city: normalizedText(embedded.municipalityName) ?? fromPrevious.city,
       timeZone: validTimeZone(embedded.timeZone) ?? fromPrevious.timeZone,
     }
   }
@@ -632,38 +665,42 @@ async function airportDetails(
   const cacheKey = `aerodatabox:airport:${identity.kind}:${identity.code}`
   const cached = airportCache.get(cacheKey)
   if (cached && cached.expiresAt > Date.now()) return cached.value
-  const response = await providerRequest(
+  const airportResponse = await providerRequest(
     `/airports/${identity.kind}/${encodeURIComponent(identity.code)}`,
     apiKey,
   )
-  const fallback = object(response)
-  const normalized = fallback
-    ? normalizedAirport(fallback, identity.code)
+  const responseAirport = asJsonObject(airportResponse)
+  const normalizedResponseAirport = responseAirport
+    ? normalizedAirport(responseAirport, identity.code)
     : null
-  if (!normalized) {
+  if (!normalizedResponseAirport) {
     throw new AeroDataBoxProviderError(
       'AeroDataBox returned incomplete airport details.',
       'incomplete',
     )
   }
-  const merged = {
-    ...normalized,
-    name: text(embedded.name) ?? text(embedded.shortName) ?? normalized.name,
-    city: text(embedded.municipalityName) ?? normalized.city,
-    timeZone: validTimeZone(embedded.timeZone) ?? normalized.timeZone,
+  const mergedAirport = {
+    ...normalizedResponseAirport,
+    name: normalizedText(embedded.name)
+      ?? normalizedText(embedded.shortName)
+      ?? normalizedResponseAirport.name,
+    city: normalizedText(embedded.municipalityName)
+      ?? normalizedResponseAirport.city,
+    timeZone: validTimeZone(embedded.timeZone)
+      ?? normalizedResponseAirport.timeZone,
   }
   boundedCacheSet(
     airportCache,
     cacheKey,
-    merged,
-    airportCacheTtl,
+    mergedAirport,
+    airportCacheTtlMs,
     maximumAirportCacheEntries,
   )
-  return merged
+  return mergedAirport
 }
 
 function normalizedStatus(value: unknown) {
-  const raw = text(value) ?? 'Unknown'
+  const raw = normalizedText(value) ?? 'Unknown'
   const token = raw.toLowerCase().replace(/[^a-z]/g, '')
   const labels: Record<string, string> = {
     unknown: 'Status unavailable',
@@ -696,18 +733,21 @@ function movementTimes(movement: JsonObject | null, completed: boolean) {
     scheduled,
     actual,
     estimated: actual ? null : revised ?? runway ?? predicted,
+    hasProviderUpdate: revised !== null
+      || runway !== null
+      || predicted !== null,
   }
 }
 
 function normalizedPosition(value: unknown): NormalizedPosition | null {
-  const location = object(value)
-  const latitude = numeric(location?.lat)
-  const longitude = numeric(location?.lon)
-  const altitude = object(location?.altitude)
-  const track = object(location?.trueTrack)
-  const altitudeFeet = numeric(altitude?.feet)
-  const heading = numeric(track?.deg)
-  const recordedAt = timestamp(location?.reportedAtUtc)
+  const location = asJsonObject(value)
+  const latitude = finiteNumber(location?.lat)
+  const longitude = finiteNumber(location?.lon)
+  const altitude = asJsonObject(location?.altitude)
+  const track = asJsonObject(location?.trueTrack)
+  const altitudeFeet = finiteNumber(altitude?.feet)
+  const heading = finiteNumber(track?.deg)
+  const recordedAt = normalizedTimestamp(location?.reportedAtUtc)
   if (
     latitude === null
     || latitude < -90
@@ -729,17 +769,20 @@ function normalizedPosition(value: unknown): NormalizedPosition | null {
 function movementHasLiveQuality(value: JsonObject | null) {
   const quality = value?.quality
   return Array.isArray(quality)
-    && quality.some((item) => text(item)?.toLowerCase() === 'live')
+    && quality.some((item) => normalizedText(item)?.toLowerCase() === 'live')
 }
 
 function latestTimestamp(...values: Array<string | null | undefined>) {
-  let latest: { timestamp: number; value: string } | null = null
+  let latest: { epochMilliseconds: number; value: string } | null = null
   for (const value of values) {
     if (!value) continue
     const parsed = new Date(value).getTime()
     if (!Number.isFinite(parsed)) continue
-    if (!latest || parsed > latest.timestamp) {
-      latest = { timestamp: parsed, value: new Date(parsed).toISOString() }
+    if (!latest || parsed > latest.epochMilliseconds) {
+      latest = {
+        epochMilliseconds: parsed,
+        value: new Date(parsed).toISOString(),
+      }
     }
   }
   return latest?.value ?? null
@@ -751,7 +794,7 @@ async function buildNormalizedStatus(
   apiKey: string,
   previousSnapshot: unknown,
 ): Promise<AeroDataBoxStatusSnapshot> {
-  const providerFlightNumber = normalizedFlightNumber(selected.number)
+  const providerFlightNumber = normalizeAirlineFlightNumber(selected.number)
   if (!providerFlightNumber) {
     throw new AeroDataBoxProviderError(
       'AeroDataBox omitted the operating flight number.',
@@ -759,55 +802,35 @@ async function buildNormalizedStatus(
     )
   }
 
-  const departure = object(selected.departure)
-  const arrival = object(selected.arrival)
+  const departure = asJsonObject(selected.departure)
+  const arrival = asJsonObject(selected.arrival)
   if (!departure || !arrival) {
     throw new AeroDataBoxProviderError(
       'AeroDataBox omitted flight movement details.',
       'incomplete',
     )
   }
-  const previous = object(previousSnapshot)
+  const previous = asJsonObject(previousSnapshot)
   const [origin, destination] = await Promise.all([
     airportDetails(departure, apiKey, previous?.origin),
     airportDetails(arrival, apiKey, previous?.destination),
   ])
   const status = normalizedStatus(selected.status)
-  const departureCompleted = new Set([
-    'departed',
-    'enroute',
-    'approaching',
-    'arrived',
-    'diverted',
-  ]).has(status.token)
-  const arrivalCompleted = new Set(['arrived']).has(status.token)
+  const departureCompleted = departureCompletedStatusTokens.has(status.token)
+  const arrivalCompleted = status.token === 'arrived'
   const departureTimes = movementTimes(departure, departureCompleted)
   const arrivalTimes = movementTimes(arrival, arrivalCompleted)
   const position = normalizedPosition(selected.location)
   const freshPosition = isFreshProviderPosition(
     position,
     Date.now(),
-    livePositionFreshness,
+    livePositionFreshnessMs,
   )
-  const operationalStatus = new Set([
-    'checkin',
-    'boarding',
-    'gateclosed',
-    'departed',
-    'enroute',
-    'approaching',
-    'delayed',
-  ]).has(status.token)
+  const operationalStatus = operationalStatusTokens.has(status.token)
   const liveMovement = operationalStatus
     && (movementHasLiveQuality(departure) || movementHasLiveQuality(arrival))
-  const hasEstimate = departureTimes.estimated !== null
-    || arrivalTimes.estimated !== null
-    || movementTimestamp(departure, 'revisedTime') !== null
-    || movementTimestamp(departure, 'predictedTime') !== null
-    || movementTimestamp(departure, 'runwayTime') !== null
-    || movementTimestamp(arrival, 'revisedTime') !== null
-    || movementTimestamp(arrival, 'predictedTime') !== null
-    || movementTimestamp(arrival, 'runwayTime') !== null
+  const hasEstimate = departureTimes.hasProviderUpdate
+    || arrivalTimes.hasProviderUpdate
     || movementHasLiveQuality(departure)
     || movementHasLiveQuality(arrival)
   const dataQuality = freshPosition || liveMovement
@@ -817,7 +840,7 @@ async function buildNormalizedStatus(
       : 'scheduled'
   const updatedAt = latestTimestamp(
     position?.recordedAt,
-    timestamp(selected.lastUpdatedUtc),
+    normalizedTimestamp(selected.lastUpdatedUtc),
   )
     ?? new Date().toISOString()
   const providerFlightId = candidateProviderFlightId(selected)
@@ -853,17 +876,21 @@ async function buildLookupResult(
   previousSnapshot: unknown,
   selectedProviderFlightId: string | null,
 ): Promise<AeroDataBoxLookupResult | null> {
-  const response = await providerRequest(
+  const providerResponse = await providerRequest(
     `/flights/number/${encodeURIComponent(flightNumber)}/${travelDate}`
       + '?dateLocalRole=Departure&withLocation=true&withAircraftImage=false',
     apiKey,
   )
-  if (response === null) return null
-  const matches = matchingFlightRows(response, flightNumber, travelDate)
+  if (providerResponse === null) return null
+  const matches = matchingFlightRows(
+    providerResponse,
+    flightNumber,
+    travelDate,
+  )
   if (matches.length === 0) return null
 
-  const previous = object(previousSnapshot)
-  const previousProviderFlightId = text(previous?.providerFlightId)
+  const previous = asJsonObject(previousSnapshot)
+  const previousProviderFlightId = normalizedText(previous?.providerFlightId)
   const requestedProviderFlightId = selectedProviderFlightId
     ?? previousProviderFlightId
   if (requestedProviderFlightId) {
@@ -906,6 +933,11 @@ async function buildLookupResult(
   return { kind: 'choices', choices }
 }
 
+/**
+ * Resolves an exact departure-day flight, returning choices when the provider
+ * reports multiple occurrences. Responses are short-lived and coalesced to
+ * protect the shared provider quota.
+ */
 export async function aerodataboxLookup(
   requestedFlightNumber: string,
   requestedTravelDate: string,
@@ -913,8 +945,8 @@ export async function aerodataboxLookup(
   previousSnapshot: unknown = null,
   selectedProviderFlightId: string | null = null,
 ) {
-  const flightNumber = normalizedFlightNumber(requestedFlightNumber)
-  const travelDate = calendarDate(requestedTravelDate)
+  const flightNumber = normalizeAirlineFlightNumber(requestedFlightNumber)
+  const travelDate = normalizedCalendarDate(requestedTravelDate)
   if (!flightNumber || !travelDate) {
     throw new AeroDataBoxProviderError(
       'The flight lookup identity is invalid.',
@@ -931,7 +963,9 @@ export async function aerodataboxLookup(
       'incomplete',
     )
   }
-  const previousProviderFlightId = text(object(previousSnapshot)?.providerFlightId)
+  const previousProviderFlightId = normalizedText(
+    asJsonObject(previousSnapshot)?.providerFlightId,
+  )
   const cacheIdentity = selectedIdentity
     ?? previousProviderFlightId
     ?? 'unselected'
@@ -950,15 +984,15 @@ export async function aerodataboxLookup(
   )
   inFlightLookups.set(cacheKey, lookup)
   try {
-    const value = await lookup
+    const lookupResult = await lookup
     boundedCacheSet(
       responseCache,
       cacheKey,
-      value,
-      responseCacheTtl,
+      lookupResult,
+      responseCacheTtlMs,
       maximumResponseCacheEntries,
     )
-    return value
+    return lookupResult
   } finally {
     if (inFlightLookups.get(cacheKey) === lookup) {
       inFlightLookups.delete(cacheKey)
@@ -966,6 +1000,7 @@ export async function aerodataboxLookup(
   }
 }
 
+/** Returns one normalized snapshot; ambiguous unselected results stay null. */
 export async function aerodataboxStatus(
   requestedFlightNumber: string,
   requestedTravelDate: string,

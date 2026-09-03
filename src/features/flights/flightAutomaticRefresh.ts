@@ -14,10 +14,12 @@ type AutomaticRefreshState = {
   budget: number[]
 }
 
+/** Encodes the account/family subject into its provider-budget key. */
 function policyStorageKey(subject: string) {
   return `${policyStoragePrefix}${encodeURIComponent(subject)}`
 }
 
+/** Rejects malformed and implausibly future timestamps from persisted policy. */
 function safeTimestamp(value: unknown, now: number) {
   return typeof value === 'number'
     && Number.isFinite(value)
@@ -25,6 +27,7 @@ function safeTimestamp(value: unknown, now: number) {
     && value <= now + 60_000
 }
 
+/** Reads and prunes one subject's rolling refresh reservations. */
 function readPolicy(subject: string, now: number): AutomaticRefreshState {
   const key = policyStorageKey(subject)
   let parsed: unknown
@@ -51,6 +54,7 @@ function readPolicy(subject: string, now: number): AutomaticRefreshState {
   return { attempts, budget }
 }
 
+/** Persists policy with a subject-isolated memory fallback. */
 function writePolicy(subject: string, state: AutomaticRefreshState) {
   const key = policyStorageKey(subject)
   try {
@@ -61,6 +65,7 @@ function writePolicy(subject: string, state: AutomaticRefreshState) {
   }
 }
 
+/** Chooses the refresh interval from temporal proximity to departure. */
 function refreshAge(flight: TrackedFlight, nowMs: number) {
   const departure = flightDepartureTime(flight.snapshot)
   const departureMs = departure ? new Date(departure).getTime() : Number.NaN
@@ -122,6 +127,7 @@ export function takeAutomaticRefreshCandidates(
   return candidates
 }
 
+/** Clears one subject's rate-limit reservations during account cleanup. */
 export function clearAutomaticRefreshPolicy(subject: string) {
   const key = policyStorageKey(subject)
   policyMemoryStorage.delete(key)

@@ -1,35 +1,32 @@
 import { useState, type FormEvent } from 'react'
 import { Navigate, useLocation, useNavigate } from 'react-router-dom'
 import { useAuth } from '../auth'
-import { useFamilyOnboarding } from './FamilyOnboardingProvider'
+import { getSafeReturnPath } from '../auth/returnPath'
+import { useFamilyOnboarding } from './familyOnboardingContext'
 import type { FamilyMembership } from './types'
 import './OnboardingPage.css'
 
 type FamilyChoice = 'create' | 'join'
 
-function safeReturnTo(value: unknown) {
-  return typeof value === 'string' &&
-    value.startsWith('/') &&
-    !value.startsWith('//') &&
-    value !== '/login' &&
-    value !== '/onboarding'
-    ? value
-    : '/'
-}
+const ONBOARDING_BLOCKED_ROUTES = ['/login', '/onboarding'] as const
 
-function fallbackCopy(value: string) {
+/** Copies text on older web views and always removes its temporary control. */
+function copyWithTemporaryTextarea(textToCopy: string) {
   const textarea = document.createElement('textarea')
-  textarea.value = value
+  textarea.value = textToCopy
   textarea.setAttribute('readonly', '')
   textarea.style.position = 'fixed'
   textarea.style.opacity = '0'
   document.body.append(textarea)
   textarea.select()
-  const copied = document.execCommand?.('copy') ?? false
-  textarea.remove()
-  return copied
+  try {
+    return document.execCommand?.('copy') ?? false
+  } finally {
+    textarea.remove()
+  }
 }
 
+/** Lets an authenticated person create or join their required family space. */
 export function OnboardingPage() {
   const navigate = useNavigate()
   const location = useLocation()
@@ -43,8 +40,9 @@ export function OnboardingPage() {
     snapshot,
     status,
   } = useFamilyOnboarding()
-  const returnTo = safeReturnTo(
+  const returnTo = getSafeReturnPath(
     (location.state as { returnTo?: unknown } | null)?.returnTo,
+    ONBOARDING_BLOCKED_ROUTES,
   )
   const [choice, setChoice] = useState<FamilyChoice>('create')
   const [familyName, setFamilyName] = useState('')
@@ -54,29 +52,32 @@ export function OnboardingPage() {
   const [createdFamily, setCreatedFamily] =
     useState<FamilyMembership | null>(null)
   const [shareStatus, setShareStatus] = useState('')
-  const busy = status === 'loading' || refreshing || creatingFamily
-  const displayName = user?.displayName.split(' ')[0] || 'there'
+  const formPending = status === 'loading' || refreshing || creatingFamily
+  const firstName = user?.displayName.split(' ')[0] || 'there'
 
   if (status === 'member' && !creatingFamily && !createdFamily) {
     return <Navigate to={returnTo} replace />
   }
 
+  /** Runs the selected setup flow after applying choice-specific validation. */
   async function submitFamily(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     setFormError('')
     setShareStatus('')
 
     if (choice === 'create') {
-      const name = familyName.trim()
-      if (name.length < 2) {
+      const normalizedFamilyName = familyName.trim()
+      if (normalizedFamilyName.length < 2) {
         setFormError('Give your family a name everyone will recognize.')
         return
       }
 
       setCreatingFamily(true)
       try {
-        const next = await createFamily(name)
-        if (next?.kind === 'member') setCreatedFamily(next.membership)
+        const familyResult = await createFamily(normalizedFamilyName)
+        if (familyResult?.kind === 'member') {
+          setCreatedFamily(familyResult.membership)
+        }
       } catch {
         // The provider exposes a safe message beside the form.
       } finally {
@@ -85,39 +86,50 @@ export function OnboardingPage() {
       return
     }
 
-    const code = inviteCode.trim().toUpperCase()
-    if (code.length < 6) {
+    const normalizedInviteCode = inviteCode.trim().toUpperCase()
+    if (normalizedInviteCode.length < 6) {
       setFormError('Enter the complete code your family shared with you.')
       return
     }
 
     try {
-      const next = await joinFamily(code)
-      if (next?.kind === 'member') navigate(returnTo, { replace: true })
+      const familyResult = await joinFamily(normalizedInviteCode)
+      if (familyResult?.kind === 'member') {
+        navigate(returnTo, { replace: true })
+      }
     } catch {
       // The provider exposes a safe message beside the form.
     }
   }
 
+  /** Shares the owner's persistent code, with a clipboard fallback for WebViews. */
   async function shareFamilyCode() {
-    const code = createdFamily?.shareCode
-    if (!code) return
-    const text = `Join ${createdFamily.familyName} on Bubble with this private family code: ${code}`
+    const familyCode = createdFamily?.shareCode
+    if (!familyCode) return
+    const shareText = `Join ${createdFamily.familyName} on Bubble with this private family code: ${familyCode}`
 
     if (typeof navigator.share === 'function') {
       try {
-        await navigator.share({ title: 'Join my family on Bubble', text })
+        await navigator.share({
+          title: 'Join my family on Bubble',
+          text: shareText,
+        })
         setShareStatus('Family code shared.')
         return
-      } catch (reason) {
-        if (reason instanceof DOMException && reason.name === 'AbortError') return
+      } catch (shareError) {
+        if (
+          shareError instanceof DOMException &&
+          shareError.name === 'AbortError'
+        ) {
+          return
+        }
       }
     }
 
     try {
       if (navigator.clipboard?.writeText) {
-        await navigator.clipboard.writeText(code)
-      } else if (!fallbackCopy(code)) {
+        await navigator.clipboard.writeText(familyCode)
+      } else if (!copyWithTemporaryTextarea(familyCode)) {
         throw new Error('copy_failed')
       }
       setShareStatus('Family code copied.')
@@ -126,6 +138,7 @@ export function OnboardingPage() {
     }
   }
 
+  /** Signs out without allowing a rejected request to strand the onboarding UI. */
   async function handleSignOut() {
     await signOut()
     navigate('/login', { replace: true })
@@ -157,7 +170,9 @@ export function OnboardingPage() {
               <span>✓</span>
             </div>
             <p className="onboarding-eyebrow">Your family is ready</p>
-            <h1 id="onboarding-title">{createdFamily.familyName} is on Bubble.</h1>
+            <h1 id="onboarding-title">
+              {createdFamily.familyName} is on Bubble.
+            </h1>
             <p className="onboarding-copy">
               Share this private code with the people you want to invite. It
               will always be available in Settings.
@@ -199,7 +214,7 @@ export function OnboardingPage() {
         ) : (
           <article className="onboarding-family">
             <div className="onboarding-family__intro">
-              <p className="onboarding-eyebrow">Welcome, {displayName}</p>
+            <p className="onboarding-eyebrow">Welcome, {firstName}</p>
               <h1 id="onboarding-title">Find your family.</h1>
               <span>
                 Make a private family space, or enter the code someone shared
@@ -219,10 +234,10 @@ export function OnboardingPage() {
                 </div>
                 <button
                   type="button"
-                  disabled={busy}
+                  disabled={formPending}
                   onClick={() => void refresh()}
                 >
-                  {busy ? 'Checking' : 'Check again'}
+                  {formPending ? 'Checking' : 'Check again'}
                 </button>
               </div>
             ) : (
@@ -263,7 +278,7 @@ export function OnboardingPage() {
                         maxLength={80}
                         autoComplete="off"
                         enterKeyHint="go"
-                        disabled={busy || status === 'unavailable'}
+                        disabled={formPending || status === 'unavailable'}
                       />
                     </label>
                   ) : (
@@ -278,16 +293,16 @@ export function OnboardingPage() {
                         autoComplete="off"
                         enterKeyHint="go"
                         spellCheck={false}
-                        disabled={busy || status === 'unavailable'}
+                        disabled={formPending || status === 'unavailable'}
                       />
                     </label>
                   )}
                   <button
                     className="onboarding-family__submit"
                     type="submit"
-                    disabled={busy || status === 'unavailable'}
+                    disabled={formPending || status === 'unavailable'}
                   >
-                    {busy
+                    {formPending
                       ? 'Connecting'
                       : choice === 'create'
                         ? 'Create family'

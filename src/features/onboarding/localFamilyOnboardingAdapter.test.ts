@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { localFamilyOnboardingAdapter } from './localFamilyOnboardingAdapter'
 
 const actor = (userId: string) => ({
@@ -8,6 +8,11 @@ const actor = (userId: string) => ({
 
 beforeEach(() => {
   window.localStorage.clear()
+})
+
+afterEach(() => {
+  vi.restoreAllMocks()
+  vi.unstubAllGlobals()
 })
 
 describe('localFamilyOnboardingAdapter', () => {
@@ -41,6 +46,24 @@ describe('localFamilyOnboardingAdapter', () => {
         role: 'owner',
         memberCount: 2,
         shareCode: created.membership.shareCode,
+      }),
+    })
+  })
+
+  it('uses the random fallback when Web Crypto is unavailable', async () => {
+    vi.stubGlobal('crypto', undefined)
+    vi.spyOn(Math, 'random').mockReturnValue(0.5)
+
+    const createdFamily = await localFamilyOnboardingAdapter.createFamily(
+      actor('owner-1'),
+      'Ahmed family',
+    )
+
+    expect(createdFamily).toEqual({
+      kind: 'member',
+      membership: expect.objectContaining({
+        familyId: 'dev-family-8000800080008000',
+        shareCode: 'BUB-8000-8000-8000-8000-8000-8000',
       }),
     })
   })

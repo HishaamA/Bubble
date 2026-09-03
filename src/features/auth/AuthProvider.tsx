@@ -43,6 +43,7 @@ const missingClerkValue: AuthContextValue = {
   signOut: async () => undefined,
 }
 
+/** Hosts the explicit local-preview session used when Clerk is unavailable. */
 function DevelopmentPreviewAuthProvider({
   children,
   autoStart = false,
@@ -57,7 +58,9 @@ function DevelopmentPreviewAuthProvider({
     () => autoStart || readDevelopmentPreviewSession(),
   )
 
-  const value = useMemo<AuthContextValue>(() => {
+  // Build a complete auth contract for either preview availability or its active
+  // identity; consumers never need to understand the storage-backed transition.
+  const contextValue = useMemo<AuthContextValue>(() => {
     if (!previewActive) {
       return {
         ...missingClerkValue,
@@ -87,26 +90,36 @@ function DevelopmentPreviewAuthProvider({
     }
   }, [previewActive, startDemo, testAccess])
 
-  return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>
+  return (
+    <AuthContext.Provider value={contextValue}>
+      {children}
+    </AuthContext.Provider>
+  )
 }
 
+/** Publishes the explicit product demo identity and clears local side effects on exit. */
 function DemoLoginAuthProvider({
   children,
   onSignOut,
 }: PropsWithChildren<{ onSignOut: () => void }>) {
-  const value = useMemo<AuthContextValue>(() => ({
+  const contextValue = useMemo<AuthContextValue>(() => ({
     status: 'signed-in',
     user: developmentPreviewUser,
     getToken: async () => null,
     isDevelopmentPreview: true,
     signOut: async () => {
+      await cancelActiveSubjectFlightNotifications()
       clearDemoLoginSession()
       clearDevelopmentPreviewSession()
       onSignOut()
     },
   }), [onSignOut])
 
-  return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>
+  return (
+    <AuthContext.Provider value={contextValue}>
+      {children}
+    </AuthContext.Provider>
+  )
 }
 
 const checkingNativeAccessValue: AuthContextValue = {
@@ -116,6 +129,7 @@ const checkingNativeAccessValue: AuthContextValue = {
   signOut: async () => undefined,
 }
 
+/** Chooses the only authentication source permitted by the current runtime gates. */
 function RuntimeAuthProvider({ children }: PropsWithChildren) {
   const [testAccess, setTestAccess] = useState<boolean | null>(null)
   const [demoActive, setDemoActive] = useState(readDemoLoginSession)
@@ -125,13 +139,15 @@ function RuntimeAuthProvider({ children }: PropsWithChildren) {
   }, [])
   const leaveDemo = useCallback(() => setDemoActive(false), [])
 
+  // Native test access comes from an asynchronous, fail-closed plugin gate. Keep
+  // children in loading state until that decision is known, and ignore late results.
   useEffect(() => {
-    let mounted = true
+    let providerMounted = true
     void isNativeTestAccessEnabled().then((enabled) => {
-      if (mounted) setTestAccess(enabled)
+      if (providerMounted) setTestAccess(enabled)
     })
     return () => {
-      mounted = false
+      providerMounted = false
     }
   }, [])
 
@@ -178,6 +194,11 @@ function RuntimeAuthProvider({ children }: PropsWithChildren) {
   )
 }
 
+/**
+ * Adapts Clerk's session state to Bubble's stable authentication contract.
+ * A signed-in identity is published only after Supabase has been configured for
+ * the same Clerk session, preventing children from issuing requests as a stale user.
+ */
 export function ClerkAuthBridge({
   children,
   startDevelopmentPreview,
@@ -227,23 +248,27 @@ export function ClerkAuthBridge({
     }
   }, [user])
 
-  const expectedSession =
+  const expectedSessionIdentity =
     isLoaded && isSignedIn && sessionId && authUser
       ? `${sessionId}:${authUser.id}`
       : null
 
+  // Clerk can sign out outside this component (for example after token expiry).
+  // Cancel subject-scoped notifications once for that implicit transition too.
   useEffect(() => {
-    if (expectedSession) {
-      previousSignedInSessionRef.current = expectedSession
+    if (expectedSessionIdentity) {
+      previousSignedInSessionRef.current = expectedSessionIdentity
       return
     }
     if (!isLoaded || isSignedIn || !previousSignedInSessionRef.current) return
     previousSignedInSessionRef.current = null
     void cancelActiveSubjectFlightNotifications()
-  }, [expectedSession, isLoaded, isSignedIn])
+  }, [expectedSessionIdentity, isLoaded, isSignedIn])
 
+  // Supabase authentication is session-scoped. Do not publish the new user until
+  // its token and identity providers are installed, and disconnect them together.
   useEffect(() => {
-    if (!expectedSession || !authUser) {
+    if (!expectedSessionIdentity || !authUser) {
       const clearConnection = window.setTimeout(
         () => setConnectedSession(null),
         0,
@@ -260,19 +285,19 @@ export function ClerkAuthBridge({
       signOut,
     })
     const publishConnection = window.setTimeout(
-      () => setConnectedSession(expectedSession),
+      () => setConnectedSession(expectedSessionIdentity),
       0,
     )
     return () => {
       window.clearTimeout(publishConnection)
       disconnect()
     }
-  }, [authUser, expectedSession, getClerkToken, signOut])
+  }, [authUser, expectedSessionIdentity, getClerkToken, signOut])
 
-  const value = useMemo<AuthContextValue>(() => {
+  const contextValue = useMemo<AuthContextValue>(() => {
     if (
       !isLoaded ||
-      (isSignedIn && connectedSession !== expectedSession)
+      (isSignedIn && connectedSession !== expectedSessionIdentity)
     ) {
       return {
         status: 'loading',
@@ -302,7 +327,7 @@ export function ClerkAuthBridge({
   }, [
     authUser,
     connectedSession,
-    expectedSession,
+    expectedSessionIdentity,
     getToken,
     isLoaded,
     isSignedIn,
@@ -310,9 +335,17 @@ export function ClerkAuthBridge({
     startDevelopmentPreview,
   ])
 
-  return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>
+  return (
+    <AuthContext.Provider value={contextValue}>
+      {children}
+    </AuthContext.Provider>
+  )
 }
 
+/**
+ * Selects Bubble's runtime authentication source, or supplies an injected value
+ * for isolated screens and tests.
+ */
 export function AuthProvider({
   children,
   value,
@@ -324,6 +357,7 @@ export function AuthProvider({
   return <RuntimeAuthProvider>{children}</RuntimeAuthProvider>
 }
 
+/** Wraps injected auth so test and story sign-outs receive production cleanup. */
 function ProvidedAuthProvider({
   children,
   value,
@@ -332,13 +366,18 @@ function ProvidedAuthProvider({
     await cancelActiveSubjectFlightNotifications()
     await value.signOut()
   }, [value])
-  const safeValue = useMemo(
+  const providedContextValue = useMemo(
     () => ({ ...value, signOut }),
     [signOut, value],
   )
-  return <AuthContext.Provider value={safeValue}>{children}</AuthContext.Provider>
+  return (
+    <AuthContext.Provider value={providedContextValue}>
+      {children}
+    </AuthContext.Provider>
+  )
 }
 
+/** Protects nested routes until authentication resolves and preserves deep links. */
 export function RequireAuthentication() {
   const { status } = useAuth()
   const location = useLocation()

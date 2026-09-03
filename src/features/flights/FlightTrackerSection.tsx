@@ -74,12 +74,14 @@ type PendingFlightChoices = {
   choices: FlightLookupChoice[]
 }
 
+/** Maps provider quality codes to compact card labels. */
 function qualityLabel(quality: FlightStatusSnapshot['dataQuality']) {
   if (quality === 'live') return 'Live'
   if (quality === 'estimated') return 'Estimated'
   return 'Scheduled'
 }
 
+/** Formats the local travel date without UTC rollover. */
 function formatDayMonth(value: string) {
   return new Intl.DateTimeFormat('en', {
     day: 'numeric',
@@ -87,6 +89,7 @@ function formatDayMonth(value: string) {
   }).format(new Date(`${value}T12:00:00`))
 }
 
+/** Formats a provider timestamp in the relevant airport's time zone. */
 function formatTicketTime(value: string | null, timeZone: string) {
   if (!value) return null
   return new Intl.DateTimeFormat('en', {
@@ -97,6 +100,7 @@ function formatTicketTime(value: string | null, timeZone: string) {
   }).format(new Date(value))
 }
 
+/** Formats the last-refresh timestamp in the viewer's local time. */
 function formatUpdatedAt(value: string) {
   return new Intl.DateTimeFormat('en', {
     hour: 'numeric',
@@ -104,6 +108,7 @@ function formatUpdatedAt(value: string) {
   }).format(new Date(value))
 }
 
+/** Labels an ambiguous provider choice in its origin airport's time zone. */
 function formatChoiceDeparture(choice: FlightLookupChoice) {
   return new Intl.DateTimeFormat('en', {
     weekday: 'short',
@@ -115,6 +120,7 @@ function formatChoiceDeparture(choice: FlightLookupChoice) {
   }).format(new Date(choice.scheduledDeparture))
 }
 
+/** Derives a rounded route duration from provider timestamps. */
 function formatDuration(departure: string | null, arrival: string | null) {
   if (!departure || !arrival) return 'Duration unavailable'
   const minutes = Math.max(0, Math.round(
@@ -125,6 +131,7 @@ function formatDuration(departure: string | null, arrival: string | null) {
   return `${hours}h ${remainder}m`
 }
 
+/** Renders decorative travel artwork outside the accessibility tree. */
 function FlightDoodleHeader() {
   return (
     <div className="flight-doodle-header" aria-hidden="true">
@@ -143,11 +150,13 @@ function FlightDoodleHeader() {
   )
 }
 
+/** Prefers city, then airport name, while always retaining a code fallback. */
 function airportPlace(snapshot: FlightStatusSnapshot, side: 'origin' | 'destination') {
   const airport = snapshot[side]
   return airport.city ?? airport.name ?? airport.code
 }
 
+/** Renders the shared plane glyph with optional accessible naming. */
 function PlaneIcon({ title }: { title?: string }) {
   return (
     <svg
@@ -162,6 +171,7 @@ function PlaneIcon({ title }: { title?: string }) {
   )
 }
 
+/** Renders the alert-control glyph. */
 function BellIcon() {
   return (
     <svg viewBox="0 0 24 24" aria-hidden="true">
@@ -170,6 +180,7 @@ function BellIcon() {
   )
 }
 
+/** Renders the provider-refresh glyph. */
 function RefreshIcon() {
   return (
     <svg viewBox="0 0 24 24" aria-hidden="true">
@@ -178,6 +189,7 @@ function RefreshIcon() {
   )
 }
 
+/** Renders the stop-tracking glyph. */
 function CloseIcon() {
   return (
     <svg viewBox="0 0 24 24" aria-hidden="true">
@@ -186,6 +198,7 @@ function CloseIcon() {
   )
 }
 
+/** Renders the ticket-style route separator at regular or compact scale. */
 function FlightRouteMark({ compact = false }: { compact?: boolean }) {
   return (
     <svg
@@ -202,6 +215,7 @@ function FlightRouteMark({ compact = false }: { compact?: boolean }) {
   )
 }
 
+/** Presents bounded journey progress or an explicit cancelled state. */
 function FlightProgress({ flight, now }: { flight: TrackedFlight; now: Date }) {
   if (isFlightCancelled(flight.snapshot)) {
     return (
@@ -230,6 +244,7 @@ function FlightProgress({ flight, now }: { flight: TrackedFlight; now: Date }) {
   )
 }
 
+/** Projects latitude/longitude into the lightweight 360×176 route map. */
 function project({ latitude, longitude }: FlightCoordinates) {
   return {
     x: (longitude + 180) / 360 * 360,
@@ -237,6 +252,7 @@ function project({ latitude, longitude }: FlightCoordinates) {
   }
 }
 
+/** Evaluates the route's quadratic Bézier at a normalized progress value. */
 function pointOnQuadratic(
   start: { x: number; y: number },
   control: { x: number; y: number },
@@ -254,6 +270,7 @@ function pointOnQuadratic(
   }
 }
 
+/** Draws a wrapped world route with a live or time-derived aircraft marker. */
 function FlightRouteMap({ flight, now }: { flight: TrackedFlight; now: Date }) {
   const { snapshot } = flight
   if (isFlightCancelled(snapshot)) {
@@ -345,6 +362,10 @@ function FlightRouteMap({ flight, now }: { flight: TrackedFlight; now: Date }) {
   )
 }
 
+/**
+ * Coordinates family flight lookup, local caching, automatic refresh budgets,
+ * realtime updates, and device-local alert preferences.
+ */
 export function FlightTrackerSection(props: FlightTrackerSectionProps = {}) {
   const { user, isDevelopmentPreview } = useAuth()
   const { snapshot } = useFamilyOnboarding()
@@ -353,6 +374,8 @@ export function FlightTrackerSection(props: FlightTrackerSectionProps = {}) {
     : null
   const flightSubject = familyFlightStorageSubject(user?.id, familyId)
 
+  // Notification IDs are device-local, so switching subjects must cancel the
+  // previous account's schedules before the new body becomes authoritative.
   useEffect(() => {
     const previousSubject = readActiveFlightStorageSubject()
     writeActiveFlightStorageSubject(flightSubject)
@@ -374,6 +397,7 @@ export function FlightTrackerSection(props: FlightTrackerSectionProps = {}) {
   )
 }
 
+/** Owns mutable flight state for exactly one account/family cache namespace. */
 function FlightTrackerBody({
   now: suppliedNow,
   flightSubject,
@@ -414,6 +438,7 @@ function FlightTrackerBody({
   const portalTarget = document.querySelector<HTMLElement>('.app-viewport')
     ?? document.body
 
+  /** Applies a local mutation and atomically advances stale-fetch guards. */
   const updateFlights = useCallback((
     updater: (current: TrackedFlight[]) => TrackedFlight[],
   ) => {
@@ -430,6 +455,8 @@ function FlightTrackerBody({
     })
   }, [flightSubject])
 
+  // Abort every request owned by this account-scoped body before it can write
+  // into a replacement family's state after unmount.
   useEffect(() => {
     bodyActiveRef.current = true
     const automaticRequests = automaticRequestRefs.current
@@ -447,9 +474,12 @@ function FlightTrackerBody({
     }
   }, [])
 
+  // Initial and Realtime hydration share generation checks so only the newest
+  // server snapshot can merge over the device cache.
   useEffect(() => {
     let active = true
     let unsubscribe: () => void = () => undefined
+    /** Merges the latest family rows without overwriting newer local mutations. */
     async function refreshFamily() {
       // Realtime callbacks and initial hydration may overlap. A generation
       // identifies the newest fetch, while the mutation revision prevents an
@@ -531,12 +561,16 @@ function FlightTrackerBody({
     }
   }, [flightSubject, updateFlights])
 
+  // Production clocks tick once a minute and immediately on browser/native
+  // resume; supplied test clocks remain fixed and install no listeners.
   useEffect(() => {
     if (suppliedNow) return
+    /** Advances time-dependent progress and scheduling labels. */
     const tick = () => {
       setClock(new Date())
     }
     const timer = window.setInterval(tick, 60_000)
+    /** Refreshes immediately after a backgrounded browser becomes visible. */
     const onVisibility = () => {
       if (document.visibilityState === 'visible') tick()
     }
@@ -557,6 +591,7 @@ function FlightTrackerBody({
     }
   }, [suppliedNow])
 
+  // Cancel alerts as soon as any server refresh marks a flight terminal.
   useEffect(() => {
     const cancelledWithAlerts = flights.filter((flight) =>
       flight.notificationEnabled && isFlightCancelled(flight.snapshot),
@@ -572,6 +607,8 @@ function FlightTrackerBody({
     ))
   }, [flightSubject, flights, updateFlights])
 
+  // The add-flight sheet owns focus, scroll locking, Escape, Android Back, and
+  // keyboard containment for its entire modal lifecycle.
   useEffect(() => {
     if (!showAddFlight) return
     const focused = addCloseRef.current
@@ -583,9 +620,11 @@ function FlightTrackerBody({
     })
     const previousOverflow = document.body.style.overflow
     document.body.style.overflow = 'hidden'
+    /** Routes native and keyboard dismissal through request cancellation. */
     function closeModal() {
       closeAddFlight()
     }
+    /** Handles Escape and keeps Tab focus within the modal sheet. */
     function handleModalKey(event: KeyboardEvent) {
       if (event.key === 'Escape') {
         // Treat Escape like the visible Close control and stop it propagating
@@ -626,6 +665,8 @@ function FlightTrackerBody({
     }
   }, [showAddFlight])
 
+  // Launch only the candidates reserved by the persistent provider budget;
+  // each controller is retained until its request settles or the body unmounts.
   useEffect(() => {
     // Automatic refresh is deliberately budgeted before requests are launched
     // (see flightAutomaticRefresh). The controllers still belong here so a
@@ -687,6 +728,7 @@ function FlightTrackerBody({
     }
   }, [flightSubject, flights, now, updateFlights])
 
+  /** Runs one idempotent create/choice request and rejects stale completions. */
   async function requestFlightCreate(
     identity: FlightCreateIdentity,
     id: string,
@@ -780,6 +822,7 @@ function FlightTrackerBody({
     }
   }
 
+  /** Validates the sheet and reserves a durable create ID before networking. */
   async function addFlight(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     if (pendingFlightChoices || addRequestRef.current) return
@@ -812,6 +855,7 @@ function FlightTrackerBody({
     await requestFlightCreate(identity, id)
   }
 
+  /** Continues an ambiguous lookup with the original identity and create ID. */
   async function chooseFlight(choice: FlightLookupChoice) {
     if (!pendingFlightChoices || saving) return
     setFormError(null)
@@ -822,6 +866,7 @@ function FlightTrackerBody({
     )
   }
 
+  /** Refreshes one card and replaces its device alerts with the new ETA. */
   async function refreshFlight(flight: TrackedFlight) {
     // One user-driven flight mutation at a time keeps refresh, deletion, and
     // alert rescheduling from racing to write different notificationEnabled
@@ -890,6 +935,7 @@ function FlightTrackerBody({
     }
   }
 
+  /** Owns explicit alert consent and revokes schedules that finish after unmount. */
   async function toggleNotifications(flight: TrackedFlight) {
     if (
       notificationRequestRef.current
@@ -956,6 +1002,7 @@ function FlightTrackerBody({
     }
   }
 
+  /** Opens a clean lookup sheet and remembers the invoking control. */
   function openAddFlight() {
     returnFocusRef.current = document.activeElement as HTMLElement | null
     setPendingFlightChoices(null)
@@ -964,6 +1011,7 @@ function FlightTrackerBody({
     setShowAddFlight(true)
   }
 
+  /** Aborts any lookup, resets ambiguity state, and restores prior focus. */
   function closeAddFlight() {
     // Close, Escape, and native Back all intentionally own cancellation of the
     // modal request. A late response is also rejected by controller identity.
@@ -975,6 +1023,7 @@ function FlightTrackerBody({
     window.requestAnimationFrame(() => returnFocusRef.current?.focus())
   }
 
+  /** Expands one flight card while clearing any previous deletion prompt. */
   function toggleFlightActions(flightId: string) {
     if (deleteRequestRef.current) return
     setStatusMessage('')
@@ -982,6 +1031,7 @@ function FlightTrackerBody({
     setExpandedFlightId((current) => current === flightId ? null : flightId)
   }
 
+  /** Deletes an authorized shared row before removing its local card and alerts. */
   async function stopTracking(flight: TrackedFlight) {
     if (
       deleteRequestRef.current
@@ -1047,6 +1097,7 @@ function FlightTrackerBody({
     }
   }
 
+  /** Opens confirmation only when no conflicting flight mutation owns the UI. */
   function openDeleteConfirmation(flightId: string) {
     if (
       deleteRequestRef.current
@@ -1058,6 +1109,7 @@ function FlightTrackerBody({
     setConfirmDeleteId(flightId)
   }
 
+  /** Renders mutually exclusive alert, refresh, and removal controls. */
   function flightToolbar(flight: TrackedFlight, cancelled: boolean) {
     const changingAlerts = notificationPendingId === flight.id
     const refreshing = refreshingId === flight.id
@@ -1102,6 +1154,7 @@ function FlightTrackerBody({
     )
   }
 
+  /** Renders expanded route, time-zone, provider, and deletion details. */
   function flightDetails(
     flight: TrackedFlight,
     quality: FlightStatusSnapshot['dataQuality'],

@@ -125,52 +125,12 @@
   filter: brightness(0.75) saturate(0.78) sepia(0.08);
 }
 
-.auth-family-bubble--granddad {
-  top: 22%;
-  left: -1rem;
-  width: clamp(7rem, 31vw, 8.35rem);
-  height: clamp(7rem, 31vw, 8.35rem);
-  animation: auth-float-one 21s ease-in-out infinite;
-}
-
-.auth-family-bubble--maya {
-  top: 3%;
-  left: 27%;
-  width: clamp(2.75rem, 12vw, 3.45rem);
-  height: clamp(2.75rem, 12vw, 3.45rem);
-  animation: auth-float-two 24s ease-in-out -7.8s infinite;
-}
-
 .auth-family-bubble--sunday {
   top: 15%;
   left: 49%;
   width: clamp(4.5rem, 20vw, 5.6rem);
   height: clamp(4.5rem, 20vw, 5.6rem);
   animation: auth-float-three 27s ease-in-out -15.4s infinite;
-}
-
-.auth-family-bubble--mum {
-  top: 3%;
-  right: -1rem;
-  width: clamp(6.6rem, 29vw, 7.9rem);
-  height: clamp(6.6rem, 29vw, 7.9rem);
-  animation: auth-float-four 25s ease-in-out -11s infinite;
-}
-
-.auth-family-bubble--summer {
-  right: 10%;
-  bottom: 12%;
-  width: clamp(2.6rem, 11vw, 3.25rem);
-  height: clamp(2.6rem, 11vw, 3.25rem);
-  animation: auth-float-two 23s ease-in-out -14s infinite reverse;
-}
-
-.auth-family-bubble--travel {
-  bottom: 13%;
-  left: 18%;
-  width: clamp(4rem, 18vw, 5rem);
-  height: clamp(4rem, 18vw, 5rem);
-  animation: auth-float-four 26s ease-in-out -4.2s infinite reverse;
 }
 
 .auth-card {
@@ -771,28 +731,10 @@
   transform: translateY(1px);
 }
 
-@keyframes auth-float-one {
-  0%, 100% { transform: translate3d(-2vw, 0.35rem, 0) rotate(-1.2deg); }
-  32% { transform: translate3d(7vw, -0.8rem, 0) rotate(1.3deg); }
-  67% { transform: translate3d(2vw, 0.7rem, 0) rotate(-0.4deg); }
-}
-
-@keyframes auth-float-two {
-  0%, 100% { transform: translate3d(6vw, -0.45rem, 0) rotate(1deg); }
-  28% { transform: translate3d(-7vw, 0.75rem, 0) rotate(-1.4deg); }
-  66% { transform: translate3d(8vw, 0.2rem, 0) rotate(0.6deg); }
-}
-
 @keyframes auth-float-three {
   0%, 100% { transform: translate3d(-5vw, -0.45rem, 0) scale(0.985); }
   35% { transform: translate3d(6vw, 0.85rem, 0) scale(1.025); }
   72% { transform: translate3d(1vw, -0.2rem, 0) scale(1); }
-}
-
-@keyframes auth-float-four {
-  0%, 100% { transform: translate3d(2vw, 0.7rem, 0) rotate(-1deg); }
-  37% { transform: translate3d(-6vw, -0.65rem, 0) rotate(1.5deg); }
-  70% { transform: translate3d(5vw, -0.1rem, 0) rotate(0.2deg); }
 }
 
 @keyframes auth-halo-breathe {
@@ -812,21 +754,6 @@
       env(safe-area-inset-top),
       var(--native-safe-area-top, 0px)
     );
-  }
-
-  .auth-family-bubble--summer,
-  .auth-family-bubble--travel {
-    display: none;
-  }
-
-  .auth-family-bubble--granddad {
-    width: 5.6rem;
-    height: 5.6rem;
-  }
-
-  .auth-family-bubble--mum {
-    width: 6rem;
-    height: 6rem;
   }
 
   .auth-card { gap: 0.8rem; }

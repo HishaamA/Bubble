@@ -25,6 +25,7 @@ type NativeClientTokenPlugin = {
   deleteClientToken(): Promise<void>
 }
 
+/** Durable client-token operations supplied by the native Keychain plugin. */
 export type ClerkClientTokenStore = {
   get(): Promise<string | null>
   save(value: string): Promise<void>
@@ -33,6 +34,7 @@ export type ClerkClientTokenStore = {
 
 const NativeWebAuth = registerPlugin<NativeClientTokenPlugin>('NativeWebAuth')
 
+/** Adapts the native Keychain plugin to Clerk's client-token hook contract. */
 export function nativeClerkClientTokenStore(): ClerkClientTokenStore {
   return {
     async get() {
@@ -48,11 +50,16 @@ export function nativeClerkClientTokenStore(): ClerkClientTokenStore {
   }
 }
 
+/**
+ * Adds Clerk's native request markers and persists rotated client tokens.
+ * Native requests omit cookie credentials because the Keychain token is the
+ * authoritative session credential inside the Capacitor web view.
+ */
 export function attachNativeClerkRequestHooks(
-  clerk: ClerkRequestHookTarget,
+  clerkClient: ClerkRequestHookTarget,
   tokenStore: ClerkClientTokenStore,
 ) {
-  clerk.__internal_onBeforeRequest(async (request) => {
+  clerkClient.__internal_onBeforeRequest(async (request) => {
     request.credentials = 'omit'
 
     if (request.url) {
@@ -67,25 +74,29 @@ export function attachNativeClerkRequestHooks(
     request.headers = headers
   })
 
-  clerk.__internal_onAfterResponse(async (_request, response) => {
+  clerkClient.__internal_onAfterResponse(async (_request, response) => {
     const clientToken = response?.headers.get('authorization')?.trim()
     if (clientToken) await tokenStore.save(clientToken)
   })
 }
 
-let nativeClerk: Clerk | undefined
-let nativeClerkPublishableKey: string | undefined
+let cachedNativeClerk: Clerk | undefined
+let cachedPublishableKey: string | undefined
 
+/** Creates one cached, iOS-specific Clerk client for the active publishable key. */
 export function createNativeClerk(publishableKey?: string) {
   if (!publishableKey || Capacitor.getPlatform() !== 'ios') return undefined
 
-  if (nativeClerk && nativeClerkPublishableKey === publishableKey) {
-    return nativeClerk
+  if (cachedNativeClerk && cachedPublishableKey === publishableKey) {
+    return cachedNativeClerk
   }
 
-  const clerk = new Clerk(publishableKey)
-  attachNativeClerkRequestHooks(clerk, nativeClerkClientTokenStore())
-  nativeClerk = clerk
-  nativeClerkPublishableKey = publishableKey
-  return clerk
+  const clerkClient = new Clerk(publishableKey)
+  attachNativeClerkRequestHooks(
+    clerkClient,
+    nativeClerkClientTokenStore(),
+  )
+  cachedNativeClerk = clerkClient
+  cachedPublishableKey = publishableKey
+  return clerkClient
 }
