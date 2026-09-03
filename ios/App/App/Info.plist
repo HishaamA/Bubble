@@ -40,7 +40,7 @@
 	<key>NSMotionUsageDescription</key>
 	<string>Bubble uses device motion to let you look around panoramic memories and use Cardboard mode.</string>
 	<key>NSCameraUsageDescription</key>
-	<string>Bubble uses the camera to guide you through capturing overlapping frames for panoramic memories.</string>
+	<string>Bubble uses the camera to capture panoramic memories and scan your Cardboard headset’s QR code.</string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>Bubble uses the microphone when you add a private voice note to a panoramic family memory.</string>
 	<key>NSPhotoLibraryAddUsageDescription</key>

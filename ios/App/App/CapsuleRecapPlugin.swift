@@ -2,8 +2,10 @@ import AVFoundation
 import Capacitor
 import CoreMedia
 import CoreVideo
+import ImageIO
 import UIKit
 
+/// Native recap limits shared by validation, staging, and video encoding.
 private enum CapsuleRecapConstants {
     static let width = 1_080
     static let height = 1_920
@@ -11,11 +13,12 @@ private enum CapsuleRecapConstants {
     static let framesPerImage = 6
     static let millisecondsPerImage = 200
     static let maximumImageCount = 150
-    static let maximumDataURLCharacters = 36 * 1_024 * 1_024
+    static let maximumDataURLBytes = 36 * 1_024 * 1_024
     static let maximumDecodedPixels = 80_000_000
     static let maximumStagedLongEdge: CGFloat = 2_048
 }
 
+/// Stable native failures translated into user-safe Capacitor errors.
 private enum CapsuleRecapError: LocalizedError {
     case invalidDataURL
     case imageTooLarge
@@ -32,6 +35,7 @@ private enum CapsuleRecapError: LocalizedError {
     case writerFinishFailed(String)
     case invalidRecapFile
 
+    /// Converts internal media failures into stable user-facing copy.
     var errorDescription: String? {
         switch self {
         case .invalidDataURL:
@@ -66,6 +70,8 @@ private enum CapsuleRecapError: LocalizedError {
     }
 }
 
+/// Stages sanitized stills, renders the deterministic recap, and presents the
+/// native share sheet without exposing arbitrary device paths to JavaScript.
 @objc(CapsuleRecapPlugin)
 public final class CapsuleRecapPlugin: CAPPlugin, CAPBridgedPlugin {
     public let identifier = "CapsuleRecapPlugin"
@@ -85,6 +91,8 @@ public final class CapsuleRecapPlugin: CAPPlugin, CAPBridgedPlugin {
     private var renderInProgress = false
     private weak var activeShareController: UIActivityViewController?
 
+    /// Decodes one bounded data URL and writes a normalized JPEG to the private
+    /// staging directory. The selected original is never persisted by this API.
     @objc func stageImage(_ call: CAPPluginCall) {
         guard let dataURL = call.getString("dataUrl") else {
             call.reject(
@@ -109,6 +117,8 @@ public final class CapsuleRecapPlugin: CAPPlugin, CAPBridgedPlugin {
         }
     }
 
+    /// Creates one H.264 recap from validated staged files. Rendering is
+    /// serialized because concurrent 1080×1920 encoders can exhaust phone memory.
     @objc func renderRecap(_ call: CAPPluginCall) {
         guard let imagePaths = call.getArray("imagePaths", String.self),
               imagePaths.count >= 1,
@@ -168,6 +178,7 @@ public final class CapsuleRecapPlugin: CAPPlugin, CAPBridgedPlugin {
         }
     }
 
+    /// Shares only a UUID-named MP4 created inside Bubble's recap directory.
     @objc func shareRecap(_ call: CAPPluginCall) {
         guard let fileURI = call.getString("fileUri") else {
             call.reject(
@@ -239,6 +250,7 @@ public final class CapsuleRecapPlugin: CAPPlugin, CAPBridgedPlugin {
         }
     }
 
+    /// Best-effort, idempotent cleanup for artifacts created by this plugin.
     @objc func discardArtifacts(_ call: CAPPluginCall) {
         guard let fileURIs = call.getArray("fileUris", String.self),
               fileURIs.count <= CapsuleRecapConstants.maximumImageCount + 1 else {
@@ -264,10 +276,13 @@ public final class CapsuleRecapPlugin: CAPPlugin, CAPBridgedPlugin {
         }
     }
 
+    /// Validates, decodes, downsizes, re-encodes, and atomically stores one still.
     private func stageImageDataURL(_ dataURL: String) throws -> URL {
-        guard dataURL.count <= CapsuleRecapConstants.maximumDataURLCharacters,
-              let comma = dataURL.firstIndex(of: ",") else {
+        guard dataURL.utf8.count <= CapsuleRecapConstants.maximumDataURLBytes else {
             throw CapsuleRecapError.imageTooLarge
+        }
+        guard let comma = dataURL.firstIndex(of: ",") else {
+            throw CapsuleRecapError.invalidDataURL
         }
 
         let header = String(dataURL[..<comma]).lowercased()
@@ -279,16 +294,9 @@ public final class CapsuleRecapPlugin: CAPPlugin, CAPBridgedPlugin {
         guard let sourceData = Data(base64Encoded: encoded), !sourceData.isEmpty else {
             throw CapsuleRecapError.invalidDataURL
         }
+        try validateImageDimensions(in: sourceData)
         guard let sourceImage = UIImage(data: sourceData) else {
             throw CapsuleRecapError.imageDecodeFailed
-        }
-
-        let pixelWidth = sourceImage.cgImage?.width ?? Int(sourceImage.size.width * sourceImage.scale)
-        let pixelHeight = sourceImage.cgImage?.height ?? Int(sourceImage.size.height * sourceImage.scale)
-        guard pixelWidth > 0,
-              pixelHeight > 0,
-              pixelWidth <= CapsuleRecapConstants.maximumDecodedPixels / pixelHeight else {
-            throw CapsuleRecapError.imageTooLarge
         }
 
         let normalizedImage = normalizedStagedImage(sourceImage)
@@ -304,6 +312,28 @@ public final class CapsuleRecapPlugin: CAPPlugin, CAPBridgedPlugin {
         return outputURL
     }
 
+    /// Rejects malformed or decompression-bomb dimensions before UIKit decodes pixels.
+    private func validateImageDimensions(in data: Data) throws {
+        guard let source = CGImageSourceCreateWithData(data as CFData, nil),
+              CGImageSourceGetCount(source) > 0,
+              let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil)
+                as? [CFString: Any],
+              let widthNumber = properties[kCGImagePropertyPixelWidth] as? NSNumber,
+              let heightNumber = properties[kCGImagePropertyPixelHeight] as? NSNumber else {
+            throw CapsuleRecapError.imageDecodeFailed
+        }
+
+        let width = widthNumber.intValue
+        let height = heightNumber.intValue
+        guard width > 0,
+              height > 0,
+              width <= CapsuleRecapConstants.maximumDecodedPixels / height else {
+            throw CapsuleRecapError.imageTooLarge
+        }
+    }
+
+    /// Applies image orientation and bounds the long edge in one fresh opaque
+    /// render, which also strips source metadata before staging.
     private func normalizedStagedImage(_ image: UIImage) -> UIImage {
         let sourceSize = image.size
         let longEdge = max(sourceSize.width, sourceSize.height)
@@ -324,6 +354,7 @@ public final class CapsuleRecapPlugin: CAPPlugin, CAPBridgedPlugin {
         }
     }
 
+    /// Encodes every still for exactly six frames at 30 fps (0.2 seconds).
     private func renderVideo(from imageURLs: [URL]) throws -> URL {
         let outputRoot = try ensureDirectory(named: "CapsuleRecaps")
         let outputURL = outputRoot
@@ -414,7 +445,11 @@ public final class CapsuleRecapPlugin: CAPPlugin, CAPBridgedPlugin {
             writer.finishWriting {
                 completion.signal()
             }
-            completion.wait()
+            guard completion.wait(timeout: .now() + 30) == .success else {
+                throw CapsuleRecapError.writerFinishFailed(
+                    "The encoder did not finish within 30 seconds."
+                )
+            }
 
             guard writer.status == .completed else {
                 let detail = writer.error?.localizedDescription ?? "Unknown finalization error."
@@ -429,19 +464,28 @@ public final class CapsuleRecapPlugin: CAPPlugin, CAPBridgedPlugin {
         }
     }
 
+    /// Waits for encoder backpressure to clear, but never spins indefinitely if
+    /// AVFoundation stops making progress without publishing a failure state.
     private func waitUntilReady(
         input: AVAssetWriterInput,
         writer: AVAssetWriter
     ) throws {
+        let timeout = ProcessInfo.processInfo.systemUptime + 10
         while !input.isReadyForMoreMediaData {
             if writer.status == .failed || writer.status == .cancelled {
                 let detail = writer.error?.localizedDescription ?? "The encoder stopped."
                 throw CapsuleRecapError.frameAppendFailed(detail)
             }
+            if ProcessInfo.processInfo.systemUptime >= timeout {
+                throw CapsuleRecapError.frameAppendFailed(
+                    "The encoder did not accept another frame within 10 seconds."
+                )
+            }
             Thread.sleep(forTimeInterval: 0.002)
         }
     }
 
+    /// Aspect-fills one still into an sRGB video frame without stretching it.
     private func makePixelBuffer(containing image: CGImage) throws -> CVPixelBuffer {
         let attributes: [CFString: Any] = [
             kCVPixelBufferCGImageCompatibilityKey: true,
@@ -499,6 +543,7 @@ public final class CapsuleRecapPlugin: CAPPlugin, CAPBridgedPlugin {
         return pixelBuffer
     }
 
+    /// Creates and canonicalizes one plugin-owned temporary directory.
     private func ensureDirectory(named name: String) throws -> URL {
         let directory = FileManager.default.temporaryDirectory
             .appendingPathComponent(name, isDirectory: true)
@@ -509,6 +554,7 @@ public final class CapsuleRecapPlugin: CAPPlugin, CAPBridgedPlugin {
         return directory.standardizedFileURL.resolvingSymlinksInPath()
     }
 
+    /// Accepts only UUID JPEGs inside the staging directory.
     private func validatedStagedImageURL(_ value: String) throws -> URL {
         let root = try ensureDirectory(named: "CapsuleRecapStaging")
         guard let candidate = localFileURL(from: value),
@@ -528,6 +574,7 @@ public final class CapsuleRecapPlugin: CAPPlugin, CAPBridgedPlugin {
         return candidate
     }
 
+    /// Accepts only UUID MP4s inside the rendered-recap directory.
     private func validatedRecapFileURL(_ value: String) throws -> URL {
         let root = try ensureDirectory(named: "CapsuleRecaps")
         guard let candidate = localFileURL(from: value),
@@ -547,6 +594,7 @@ public final class CapsuleRecapPlugin: CAPPlugin, CAPBridgedPlugin {
         return candidate
     }
 
+    /// Converts a bridge path to a canonical local URL; remote schemes are denied.
     private func localFileURL(from value: String) -> URL? {
         let candidate: URL
         if let parsedURL = URL(string: value), parsedURL.isFileURL {
@@ -559,6 +607,7 @@ public final class CapsuleRecapPlugin: CAPPlugin, CAPBridgedPlugin {
         return candidate.standardizedFileURL.resolvingSymlinksInPath()
     }
 
+    /// Limits cleanup to recognized UUID artifacts in plugin-owned directories.
     private func removableArtifactURL(_ value: String) -> URL? {
         guard let candidate = localFileURL(from: value),
               UUID(uuidString: candidate.deletingPathExtension().lastPathComponent) != nil else {
@@ -580,6 +629,7 @@ public final class CapsuleRecapPlugin: CAPPlugin, CAPBridgedPlugin {
         return candidate
     }
 
+    /// Finds the visible presenter through modal, navigation, and tab containers.
     private func topPresenter(from root: UIViewController?) -> UIViewController? {
         guard let root else { return nil }
         if let presented = root.presentedViewController, !presented.isBeingDismissed {

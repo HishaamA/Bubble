@@ -1,6 +1,7 @@
 import UIKit
 import Capacitor
 
+/// Owns Capacitor plugins, orientation policy, and native safe-area delivery.
 final class AppBridgeViewController: CAPBridgeViewController {
     private var appOrientationMask: UIInterfaceOrientationMask = .portrait
     private var preferredAppOrientation: UIInterfaceOrientation = .portrait
@@ -15,6 +16,7 @@ final class AppBridgeViewController: CAPBridgeViewController {
         preferredAppOrientation
     }
 
+    /// Registers repository-owned native plugins after Capacitor is ready.
     override func capacitorDidLoad() {
         bridge?.registerPluginInstance(PanoramaCapturePlugin())
         bridge?.registerPluginInstance(CardboardOrientationPlugin())
@@ -23,16 +25,19 @@ final class AppBridgeViewController: CAPBridgeViewController {
         bridge?.registerPluginInstance(NativeWebAuthPlugin())
     }
 
+    /// Publishes the first settled safe-area geometry after presentation.
     override func viewDidAppear(_ animated: Bool) {
         super.viewDidAppear(animated)
         synchronizeViewportGeometry()
     }
 
+    /// Republishes native geometry whenever UIKit changes safe-area insets.
     override func viewSafeAreaInsetsDidChange() {
         super.viewSafeAreaInsetsDidChange()
         synchronizeViewportGeometry()
     }
 
+    /// Waits for rotation layout to finish before publishing its new viewport.
     override func viewWillTransition(
         to size: CGSize,
         with coordinator: UIViewControllerTransitionCoordinator
@@ -44,17 +49,23 @@ final class AppBridgeViewController: CAPBridgeViewController {
         }
     }
 
+    /// Selects the one landscape handedness used by Cardboard calibration.
     func requestCardboardLandscape() {
         updateAppOrientation(
-            mask: .landscape,
+            // Google Cardboard's iOS presentation is calibrated for one fixed
+            // landscape handedness. Allowing the phone to flip 180 degrees in
+            // the headset makes the tracker and optical mesh disagree.
+            mask: .landscapeRight,
             preferred: .landscapeRight
         )
     }
 
+    /// Restores the portrait orientation expected by all non-VR routes.
     func restoreAppPortraitOrientation() {
         updateAppOrientation(mask: .portrait, preferred: .portrait)
     }
 
+    /// Applies a controller mask and requests matching scene geometry.
     private func updateAppOrientation(
         mask: UIInterfaceOrientationMask,
         preferred: UIInterfaceOrientation
@@ -90,6 +101,7 @@ final class AppBridgeViewController: CAPBridgeViewController {
         synchronizeViewportGeometry()
     }
 
+    /// Coalesces immediate layout changes and publishes one settled follow-up.
     private func synchronizeViewportGeometry() {
         dispatchPrecondition(condition: .onQueue(.main))
 
@@ -113,6 +125,7 @@ final class AppBridgeViewController: CAPBridgeViewController {
         )
     }
 
+    /// Sends native safe-area and viewport measurements to the persistent WebView.
     private func publishViewportGeometry() {
         dispatchPrecondition(condition: .onQueue(.main))
 
@@ -150,9 +163,11 @@ final class AppBridgeViewController: CAPBridgeViewController {
     }
 }
 
-class SceneDelegate: UIResponder, UIWindowSceneDelegate {
+/// Creates the app window and forwards universal-link callbacks to Capacitor.
+final class SceneDelegate: UIResponder, UIWindowSceneDelegate {
     var window: UIWindow?
 
+    /// Installs the custom bridge controller for the connecting scene.
     func scene(_ scene: UIScene, willConnectTo session: UISceneSession, options connectionOptions: UIScene.ConnectionOptions) {
         guard let windowScene = scene as? UIWindowScene else { return }
 
@@ -163,10 +178,12 @@ class SceneDelegate: UIResponder, UIWindowSceneDelegate {
         SceneDelegateProxy.shared.scene(scene, willConnectTo: session, options: connectionOptions)
     }
 
-    func scene(_ scene: UIScene, openURLContexts URLContexts: Set<UIOpenURLContext>) {
-        SceneDelegateProxy.shared.scene(scene, openURLContexts: URLContexts)
+    /// Forwards custom-scheme callbacks to Capacitor's registered handlers.
+    func scene(_ scene: UIScene, openURLContexts urlContexts: Set<UIOpenURLContext>) {
+        SceneDelegateProxy.shared.scene(scene, openURLContexts: urlContexts)
     }
 
+    /// Forwards universal links and handoff activities to Capacitor.
     func scene(_ scene: UIScene, continue userActivity: NSUserActivity) {
         SceneDelegateProxy.shared.scene(scene, continue: userActivity)
     }

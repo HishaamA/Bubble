@@ -3,6 +3,9 @@ import Capacitor
 import Security
 import UIKit
 
+/// Presents Clerk's web authentication flow and stores its client token in the
+/// device-only keychain. All session state is owned by one plugin instance so a
+/// second sign-in cannot replace a callback that is already in flight.
 @objc(NativeWebAuthPlugin)
 public final class NativeWebAuthPlugin: CAPPlugin, CAPBridgedPlugin,
     ASWebAuthenticationPresentationContextProviding {
@@ -27,6 +30,8 @@ public final class NativeWebAuthPlugin: CAPPlugin, CAPBridgedPlugin,
     private var pendingCall: CAPPluginCall?
     private var presentationWindow: UIWindow?
 
+    /// Validates the browser and callback URLs before opening an iOS-managed
+    /// authentication session. Only HTTPS providers may enter the native flow.
     @objc func authenticate(_ call: CAPPluginCall) {
         guard let authURLString = call.getString("url"),
               let authComponents = URLComponents(string: authURLString),
@@ -112,6 +117,7 @@ public final class NativeWebAuthPlugin: CAPPlugin, CAPBridgedPlugin,
         }
     }
 
+    /// Cancels the active browser session, if one exists.
     @objc func cancel(_ call: CAPPluginCall) {
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
@@ -125,6 +131,8 @@ public final class NativeWebAuthPlugin: CAPPlugin, CAPBridgedPlugin,
         }
     }
 
+    /// Reads the persisted Clerk client token without exposing other keychain
+    /// records to JavaScript.
     @objc func readClientToken(_ call: CAPPluginCall) {
         var query = clientTokenQuery()
         query[kSecReturnData] = true
@@ -152,6 +160,7 @@ public final class NativeWebAuthPlugin: CAPPlugin, CAPBridgedPlugin,
         call.resolve(["value": value])
     }
 
+    /// Updates or creates the device-local Clerk client token.
     @objc func writeClientToken(_ call: CAPPluginCall) {
         guard let value = call.getString("value"),
               !value.isEmpty,
@@ -198,6 +207,8 @@ public final class NativeWebAuthPlugin: CAPPlugin, CAPBridgedPlugin,
         call.resolve()
     }
 
+    /// Removes the persisted Clerk client token. Deleting a missing item is a
+    /// successful, idempotent operation.
     @objc func deleteClientToken(_ call: CAPPluginCall) {
         let status = SecItemDelete(clientTokenQuery() as CFDictionary)
         guard status == errSecSuccess || status == errSecItemNotFound else {
@@ -211,13 +222,30 @@ public final class NativeWebAuthPlugin: CAPPlugin, CAPBridgedPlugin,
         call.resolve()
     }
 
+    /// Supplies the foreground window that owns the native authentication sheet.
     public func presentationAnchor(
         for session: ASWebAuthenticationSession
     ) -> ASPresentationAnchor {
-        // authenticate(_:) establishes this invariant immediately before start().
-        presentationWindow!
+        // authenticate(_:) normally establishes this value immediately before
+        // start(). The active-window fallback keeps an unexpected lifecycle race
+        // from crashing the application while iOS asks for its presentation host.
+        if let presentationWindow {
+            return presentationWindow
+        }
+
+        if let activeWindow = UIApplication.shared.connectedScenes
+            .compactMap({ $0 as? UIWindowScene })
+            .flatMap(\.windows)
+            .first(where: \.isKeyWindow) {
+            return activeWindow
+        }
+
+        assertionFailure("Native web authentication has no presentation window.")
+        return ASPresentationAnchor(frame: .zero)
     }
 
+    /// Resolves the pending Capacitor call once and clears native session state
+    /// before invoking JavaScript, preventing re-entrant completions.
     private func finishAuthentication(callbackURL: URL?, error: Error?) {
         dispatchPrecondition(condition: .onQueue(.main))
 
@@ -256,6 +284,8 @@ public final class NativeWebAuthPlugin: CAPPlugin, CAPBridgedPlugin,
         call.resolve(["callbackUrl": callbackURL.absoluteString])
     }
 
+    /// Accepts only the app-owned callback origin, with no alternate authority or
+    /// path that could bypass Clerk's state and nonce verification.
     private func isExpectedCallbackURL(_ url: URL) -> Bool {
         guard let components = URLComponents(
             url: url,
@@ -272,6 +302,7 @@ public final class NativeWebAuthPlugin: CAPPlugin, CAPBridgedPlugin,
             && components.port == nil
     }
 
+    /// Builds the narrow keychain selector shared by read, update, and delete.
     private func clientTokenQuery() -> [CFString: Any] {
         [
             kSecClass: kSecClassGenericPassword,
@@ -280,6 +311,7 @@ public final class NativeWebAuthPlugin: CAPPlugin, CAPBridgedPlugin,
         ]
     }
 
+    /// Releases all per-request state and returns the call that must be completed.
     @discardableResult
     private func clearAuthenticationState() -> CAPPluginCall? {
         dispatchPrecondition(condition: .onQueue(.main))

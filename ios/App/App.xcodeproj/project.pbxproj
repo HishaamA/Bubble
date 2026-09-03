@@ -23,6 +23,13 @@
 		A10000000000000000000005 /* NativeWebAuthPlugin.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000015 /* NativeWebAuthPlugin.swift */; };
 		A10000000000000000000006 /* CardboardPanoramaPlugin.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000016 /* CardboardPanoramaPlugin.swift */; };
 		A10000000000000000000007 /* CardboardPanoramaViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000017 /* CardboardPanoramaViewController.swift */; };
+		A20000000000000000000001 /* BubbleCardboardSession.mm in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000011 /* BubbleCardboardSession.mm */; };
+		A20000000000000000000002 /* GoogleCardboard.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = A20000000000000000000014 /* GoogleCardboard.xcframework */; };
+		A20000000000000000000003 /* sdk.bundle in Resources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000015 /* sdk.bundle */; };
+		A20000000000000000000004 /* AVFoundation.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = A20000000000000000000016 /* AVFoundation.framework */; };
+		A20000000000000000000005 /* CoreMotion.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = A20000000000000000000017 /* CoreMotion.framework */; };
+		A20000000000000000000006 /* Metal.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = A20000000000000000000018 /* Metal.framework */; };
+		A20000000000000000000007 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000019 /* PrivacyInfo.xcprivacy */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -44,6 +51,15 @@
 		A10000000000000000000015 /* NativeWebAuthPlugin.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeWebAuthPlugin.swift; sourceTree = "<group>"; };
 		A10000000000000000000016 /* CardboardPanoramaPlugin.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CardboardPanoramaPlugin.swift; sourceTree = "<group>"; };
 		A10000000000000000000017 /* CardboardPanoramaViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CardboardPanoramaViewController.swift; sourceTree = "<group>"; };
+		A20000000000000000000010 /* BubbleCardboardSession.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = BubbleCardboardSession.h; sourceTree = "<group>"; };
+		A20000000000000000000011 /* BubbleCardboardSession.mm */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.objcpp; path = BubbleCardboardSession.mm; sourceTree = "<group>"; };
+		A20000000000000000000012 /* App-Bridging-Header.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = "App-Bridging-Header.h"; sourceTree = "<group>"; };
+		A20000000000000000000014 /* GoogleCardboard.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; path = Vendor/GoogleCardboard/GoogleCardboard.xcframework; sourceTree = "<group>"; };
+		A20000000000000000000015 /* sdk.bundle */ = {isa = PBXFileReference; lastKnownFileType = wrapper.cfbundle; path = Resources/GoogleCardboard/sdk.bundle; sourceTree = "<group>"; };
+		A20000000000000000000016 /* AVFoundation.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = AVFoundation.framework; path = System/Library/Frameworks/AVFoundation.framework; sourceTree = SDKROOT; };
+		A20000000000000000000017 /* CoreMotion.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = CoreMotion.framework; path = System/Library/Frameworks/CoreMotion.framework; sourceTree = SDKROOT; };
+		A20000000000000000000018 /* Metal.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Metal.framework; path = System/Library/Frameworks/Metal.framework; sourceTree = SDKROOT; };
+		A20000000000000000000019 /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -51,7 +67,11 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				A20000000000000000000004 /* AVFoundation.framework in Frameworks */,
 				4D22ABE92AF431CB00220026 /* CapApp-SPM in Frameworks */,
+				A20000000000000000000005 /* CoreMotion.framework in Frameworks */,
+				A20000000000000000000002 /* GoogleCardboard.xcframework in Frameworks */,
+				A20000000000000000000006 /* Metal.framework in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -63,6 +83,10 @@
 			children = (
 				958DCC722DB07C7200EA8C5F /* debug.xcconfig */,
 				504EC3061FED79650016851F /* App */,
+				A20000000000000000000014 /* GoogleCardboard.xcframework */,
+				A20000000000000000000016 /* AVFoundation.framework */,
+				A20000000000000000000017 /* CoreMotion.framework */,
+				A20000000000000000000018 /* Metal.framework */,
 				504EC3051FED79650016851F /* Products */,
 			);
 			sourceTree = "<group>";
@@ -78,6 +102,10 @@
 		504EC3061FED79650016851F /* App */ = {
 			isa = PBXGroup;
 			children = (
+				A20000000000000000000012 /* App-Bridging-Header.h */,
+				A20000000000000000000010 /* BubbleCardboardSession.h */,
+				A20000000000000000000011 /* BubbleCardboardSession.mm */,
+				A20000000000000000000019 /* PrivacyInfo.xcprivacy */,
 				9582B6822FE993A50072D4E8 /* SceneDelegate.swift */,
 				A10000000000000000000013 /* CardboardOrientationPlugin.swift */,
 				A10000000000000000000016 /* CardboardPanoramaPlugin.swift */,
@@ -92,6 +120,7 @@
 				504EC30E1FED79650016851F /* Assets.xcassets */,
 				504EC3101FED79650016851F /* LaunchScreen.storyboard */,
 				504EC3131FED79650016851F /* Info.plist */,
+				A20000000000000000000015 /* sdk.bundle */,
 				2FAD9762203C412B000D30F8 /* config.xml */,
 				50B271D01FEDC1A000F3C39B /* public */,
 			);
@@ -164,6 +193,8 @@
 			buildActionMask = 2147483647;
 			files = (
 				504EC3121FED79650016851F /* LaunchScreen.storyboard in Resources */,
+				A20000000000000000000003 /* sdk.bundle in Resources */,
+				A20000000000000000000007 /* PrivacyInfo.xcprivacy in Resources */,
 				50B271D11FEDC1A000F3C39B /* public in Resources */,
 				504EC30F1FED79650016851F /* Assets.xcassets in Resources */,
 				50379B232058CBB4000EE86E /* capacitor.config.json in Resources */,
@@ -180,6 +211,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				504EC3081FED79650016851F /* AppDelegate.swift in Sources */,
+				A20000000000000000000001 /* BubbleCardboardSession.mm in Sources */,
 				9582B6832FE993A70072D4E8 /* SceneDelegate.swift in Sources */,
 				A10000000000000000000003 /* CardboardOrientationPlugin.swift in Sources */,
 				A10000000000000000000006 /* CardboardPanoramaPlugin.swift in Sources */,
@@ -331,6 +363,7 @@
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = WHLVT8Y56F;
 				INFOPLIST_FILE = App/Info.plist;
+				HEADER_SEARCH_PATHS = "$(PROJECT_DIR)/Vendor/GoogleCardboard/include";
 				IPHONEOS_DEPLOYMENT_TARGET = 15.0;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
@@ -338,9 +371,15 @@
 				);
 				MARKETING_VERSION = 1.0;
 				OTHER_SWIFT_FLAGS = "$(inherited) \"-D\" \"COCOAPODS\" \"-DDEBUG\"";
+				OTHER_LDFLAGS = (
+					"$(inherited)",
+					"-ObjC",
+					"-lc++",
+				);
 				PRODUCT_BUNDLE_IDENTIFIER = com.simerfamily.kinsphere;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+				SWIFT_OBJC_BRIDGING_HEADER = "App/App-Bridging-Header.h";
 				SWIFT_VERSION = 5.0;
 				TARGETED_DEVICE_FAMILY = "1,2";
 			};
@@ -354,15 +393,22 @@
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = WHLVT8Y56F;
 				INFOPLIST_FILE = App/Info.plist;
+				HEADER_SEARCH_PATHS = "$(PROJECT_DIR)/Vendor/GoogleCardboard/include";
 				IPHONEOS_DEPLOYMENT_TARGET = 15.0;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
 				MARKETING_VERSION = 1.0;
+				OTHER_LDFLAGS = (
+					"$(inherited)",
+					"-ObjC",
+					"-lc++",
+				);
 				PRODUCT_BUNDLE_IDENTIFIER = com.simerfamily.kinsphere;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "";
+				SWIFT_OBJC_BRIDGING_HEADER = "App/App-Bridging-Header.h";
 				SWIFT_VERSION = 5.0;
 				TARGETED_DEVICE_FAMILY = "1,2";
 			};

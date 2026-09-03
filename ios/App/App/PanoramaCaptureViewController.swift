@@ -5,10 +5,15 @@ import SceneKit
 import UIKit
 import simd
 
+/// Runs one guided ARKit panorama capture. Sensor processing stays on a serial
+/// queue, presentation stays on the main thread, and JPEG work stays off both.
 final class PanoramaCaptureViewController: UIViewController, ARSessionDelegate {
+    /// Called exactly once with the terminal result of this controller.
     var onCompletion: ((PanoramaCaptureOutcome) -> Void)?
+    /// Private UUID directory containing the completed pose-tagged frames.
     var captureDirectoryURL: URL { directoryURL }
 
+    /// One rendered guide direction and its mutable completion state.
     private struct CaptureTarget {
         let yaw: Float
         let pitch: Float
@@ -17,6 +22,7 @@ final class PanoramaCaptureViewController: UIViewController, ARSessionDelegate {
         var isCaptured = false
     }
 
+    /// Immutable camera data copied before expensive encoding leaves ARKit's queue.
     private struct FrameSnapshot {
         let captureIndex: Int
         let targetIndex: Int
@@ -35,9 +41,11 @@ final class PanoramaCaptureViewController: UIViewController, ARSessionDelegate {
         let sharpnessScore: Float
     }
 
+    /// Stable local encoding failures surfaced through the capture bridge.
     private enum CaptureFileError: LocalizedError {
         case jpegEncodingFailed
 
+        /// Supplies stable copy without exposing filesystem or codec internals.
         var errorDescription: String? {
             switch self {
             case .jpegEncodingFailed:
@@ -47,7 +55,7 @@ final class PanoramaCaptureViewController: UIViewController, ARSessionDelegate {
     }
 
     private let options: PanoramaCaptureOptions
-    private let sessionId: String
+    private let sessionID: String
     private let directoryURL: URL
     private let sceneView = ARSCNView(frame: .zero)
     private let targetFieldNode = SCNNode()
@@ -116,14 +124,15 @@ final class PanoramaCaptureViewController: UIViewController, ARSessionDelegate {
     override var shouldAutorotate: Bool { false }
     override var supportedInterfaceOrientations: UIInterfaceOrientationMask { .portrait }
 
+    /// Creates the session's private directory before presenting any capture UI.
     init(options: PanoramaCaptureOptions) throws {
         self.options = options
-        sessionId = UUID().uuidString.lowercased()
+        sessionID = UUID().uuidString.lowercased()
 
         let cacheRoot = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
         directoryURL = cacheRoot
             .appendingPathComponent("PanoramaCaptures", isDirectory: true)
-            .appendingPathComponent(sessionId, isDirectory: true)
+            .appendingPathComponent(sessionID, isDirectory: true)
         try FileManager.default.createDirectory(at: directoryURL, withIntermediateDirectories: true)
 
         super.init(nibName: nil, bundle: nil)
@@ -132,10 +141,12 @@ final class PanoramaCaptureViewController: UIViewController, ARSessionDelegate {
     }
 
     @available(*, unavailable)
+    /// Storyboard construction is intentionally unavailable for this controller.
     required init?(coder: NSCoder) {
         fatalError("init(coder:) has not been implemented")
     }
 
+    /// Builds the scene, overlay, and target field once.
     override func viewDidLoad() {
         super.viewDidLoad()
         configureScene()
@@ -143,6 +154,7 @@ final class PanoramaCaptureViewController: UIViewController, ARSessionDelegate {
         configureTargets()
     }
 
+    /// Starts tracking on first presentation and keeps the display awake.
     override func viewDidAppear(_ animated: Bool) {
         super.viewDidAppear(animated)
         guard !didStartSession else { return }
@@ -157,6 +169,7 @@ final class PanoramaCaptureViewController: UIViewController, ARSessionDelegate {
         runSession(resetTracking: true)
     }
 
+    /// Suspends the steady-hold window while UIKit changes orientation geometry.
     override func viewWillTransition(
         to size: CGSize,
         with coordinator: UIViewControllerTransitionCoordinator
@@ -174,11 +187,13 @@ final class PanoramaCaptureViewController: UIViewController, ARSessionDelegate {
         }
     }
 
+    /// Stops camera processing before the capture UI leaves the screen.
     override func viewWillDisappear(_ animated: Bool) {
         super.viewWillDisappear(animated)
         sceneView.session.pause()
     }
 
+    /// Treats an external dismissal as cancellation so the bridge call cannot hang.
     override func viewDidDisappear(_ animated: Bool) {
         super.viewDidDisappear(animated)
         if !hasEnded {
@@ -186,6 +201,7 @@ final class PanoramaCaptureViewController: UIViewController, ARSessionDelegate {
         }
     }
 
+    /// Rebuilds overlay geometry after safe-area or orientation changes.
     override func viewDidLayoutSubviews() {
         super.viewDidLayoutSubviews()
         let ringBounds = reticleView.bounds.insetBy(dx: 4, dy: 4)
@@ -197,10 +213,12 @@ final class PanoramaCaptureViewController: UIViewController, ARSessionDelegate {
         positionDirectionArrow()
     }
 
+    /// Stops any remaining sensor work if UIKit releases the controller early.
     deinit {
         sceneView.session.pause()
     }
 
+    /// Installs the full-screen AR preview and serial frame delegate.
     private func configureScene() {
         view.backgroundColor = .black
         sceneView.translatesAutoresizingMaskIntoConstraints = false
@@ -219,6 +237,7 @@ final class PanoramaCaptureViewController: UIViewController, ARSessionDelegate {
         ])
     }
 
+    /// Builds the accessible capture controls and guidance overlays.
     private func configureInterface() {
         headerMaterial.translatesAutoresizingMaskIntoConstraints = false
         headerMaterial.layer.cornerRadius = 18
@@ -371,6 +390,8 @@ final class PanoramaCaptureViewController: UIViewController, ARSessionDelegate {
         ])
     }
 
+    /// Creates a camera-centred spherical guide whose rendered and measured
+    /// directions share the same positions.
     private func configureTargets() {
         // Keep the guides on a large, user-centred shell so ordinary hand
         // translation produces little parallax. Alignment below still derives
@@ -426,12 +447,14 @@ final class PanoramaCaptureViewController: UIViewController, ARSessionDelegate {
         progressView.progress = 0
     }
 
+    /// Returns the deterministic yaw/pitch coverage pattern for a capture mode.
     private static func targetAngles(for mode: PanoramaCaptureOptions.Mode) -> [(Float, Float)] {
         // Rings are staggered so each frame owns a distinct spherical arc.
         // Standard intentionally totals 34 views and spans +82° through -82°:
         // one ceiling, 5/7/8/7/5 around the room, and one floor view.
         var degrees: [(yaw: Float, pitch: Float)] = [(0, 82)]
 
+        /// Adds one evenly spaced, optionally staggered horizontal guide ring.
         func appendRing(pitch: Float, count: Int, offset: Float) {
             let step = 360 / Float(count)
             for index in 0..<count {
@@ -462,10 +485,13 @@ final class PanoramaCaptureViewController: UIViewController, ARSessionDelegate {
         return degrees.map { (degreesToRadians($0.yaw), degreesToRadians($0.pitch)) }
     }
 
+    /// Converts guide authoring angles into SIMD-compatible radians.
     private static func degreesToRadians(_ degrees: Float) -> Float {
         degrees * .pi / 180
     }
 
+    /// Starts ARKit with the highest supported camera resolution; a caller may
+    /// preserve or explicitly reset the world origin.
     private func runSession(resetTracking: Bool) {
         let configuration = ARWorldTrackingConfiguration()
         configuration.worldAlignment = .gravity
@@ -489,6 +515,8 @@ final class PanoramaCaptureViewController: UIViewController, ARSessionDelegate {
 
     // MARK: - AR session processing
 
+    /// Selects the nearest uncaptured target, measures stability, and snapshots
+    /// only after alignment, tracking, autofocus, and pivot constraints pass.
     func session(_ session: ARSession, didUpdate frame: ARFrame) {
         guard !hasEnded else { return }
 
@@ -631,6 +659,7 @@ final class PanoramaCaptureViewController: UIViewController, ARSessionDelegate {
         )
     }
 
+    /// Converts an unrecoverable ARKit error into one terminal bridge failure.
     func session(_ session: ARSession, didFailWithError error: Error) {
         DispatchQueue.main.async { [weak self] in
             self?.complete(.failure(
@@ -640,6 +669,7 @@ final class PanoramaCaptureViewController: UIViewController, ARSessionDelegate {
         }
     }
 
+    /// Clears the active hold when another system surface interrupts ARKit.
     func sessionWasInterrupted(_ session: ARSession) {
         DispatchQueue.main.async { [weak self] in
             self?.guidanceLabel.text = "Capture paused"
@@ -648,6 +678,7 @@ final class PanoramaCaptureViewController: UIViewController, ARSessionDelegate {
         }
     }
 
+    /// Restarts tracking only when no accepted frame would cross the reset world origin.
     func sessionInterruptionEnded(_ session: ARSession) {
         // Resetting ARKit establishes a new world coordinate frame. Mixing
         // frames captured before and after that reset creates a torn sphere,
@@ -674,6 +705,7 @@ final class PanoramaCaptureViewController: UIViewController, ARSessionDelegate {
         }
     }
 
+    /// Places the guide shell at the user's first stable camera position.
     private func anchorTargetFieldIfNeeded(to cameraTransform: simd_float4x4) {
         guard !targetFieldIsAnchored else { return }
         targetFieldIsAnchored = true
@@ -689,6 +721,7 @@ final class PanoramaCaptureViewController: UIViewController, ARSessionDelegate {
         }
     }
 
+    /// Records the physical pivot used to warn about parallax-producing movement.
     private func anchorCaptureOriginIfNeeded(to cameraTransform: simd_float4x4) {
         guard captureOriginPosition == nil else { return }
         captureOriginPosition = SIMD3<Float>(
@@ -698,6 +731,7 @@ final class PanoramaCaptureViewController: UIViewController, ARSessionDelegate {
         )
     }
 
+    /// Finds the smallest rendered angular distance from the camera centre ray.
     private func closestUncapturedTarget(
         to cameraTransform: simd_float4x4
     ) -> (index: Int, angle: Float, direction: SIMD3<Float>)? {
@@ -729,6 +763,7 @@ final class PanoramaCaptureViewController: UIViewController, ARSessionDelegate {
         return (closestIndex, closestAngle, closestDirection)
     }
 
+    /// Resolves a guide's world-space direction from its actual scene position.
     private func renderedDirection(
         to target: CaptureTarget,
         from cameraTransform: simd_float4x4
@@ -744,6 +779,8 @@ final class PanoramaCaptureViewController: UIViewController, ARSessionDelegate {
         return simd_normalize(offset)
     }
 
+    /// Updates smoothed angular and linear velocity and reports whether the phone
+    /// is steady enough for the current hold window.
     private func updateMotion(transform: simd_float4x4, timestamp: TimeInterval) -> Bool {
         defer {
             previousCameraTransform = transform
@@ -804,6 +841,7 @@ final class PanoramaCaptureViewController: UIViewController, ARSessionDelegate {
             smoothedLinearSpeed < 0.12
     }
 
+    /// Measures camera translation from the original pivot in metres.
     private func distanceFromCaptureOrigin(to transform: simd_float4x4) -> Float {
         guard let captureOriginPosition else { return 0 }
         let currentPosition = SIMD3<Float>(
@@ -814,6 +852,7 @@ final class PanoramaCaptureViewController: UIViewController, ARSessionDelegate {
         return simd_distance(captureOriginPosition, currentPosition)
     }
 
+    /// Projects a target direction into screen space for the late-stage arrow.
     private func guidanceDirection(
         to targetDirection: SIMD3<Float>,
         cameraTransform: simd_float4x4
@@ -850,6 +889,7 @@ final class PanoramaCaptureViewController: UIViewController, ARSessionDelegate {
         return screenDirection
     }
 
+    /// Resets hold accumulation around one target and one anchor pose.
     private func startStableWindow(
         targetIndex: Int,
         transform: simd_float4x4,
@@ -865,6 +905,7 @@ final class PanoramaCaptureViewController: UIViewController, ARSessionDelegate {
         bestStableSharpness = -Float.greatestFiniteMagnitude
     }
 
+    /// Rejects gradual pose drift that frame-to-frame velocity alone can miss.
     private func steadyWindowIsWithinBounds(
         _ transform: simd_float4x4,
         targetIndex: Int
@@ -905,6 +946,7 @@ final class PanoramaCaptureViewController: UIViewController, ARSessionDelegate {
             targetAngle <= options.alignmentRadians + alignmentReleasePadding
     }
 
+    /// Retains the sharpest synchronized camera frame observed during the hold.
     private func considerStableFrame(
         frame: ARFrame,
         cameraTransform: simd_float4x4,
@@ -923,6 +965,7 @@ final class PanoramaCaptureViewController: UIViewController, ARSessionDelegate {
         )
     }
 
+    /// Copies the pose, calibration, and retained pixel buffer into immutable work.
     private func makeSnapshot(
         frame: ARFrame,
         cameraTransform: simd_float4x4,
@@ -963,6 +1006,7 @@ final class PanoramaCaptureViewController: UIViewController, ARSessionDelegate {
         )
     }
 
+    /// Estimates focus from sparse luma gradients without allocating a full image.
     private func lumaSharpnessScore(_ pixelBuffer: CVPixelBuffer) -> Float {
         guard CVPixelBufferLockBaseAddress(pixelBuffer, .readOnly) == kCVReturnSuccess else {
             return 0
@@ -1000,6 +1044,7 @@ final class PanoramaCaptureViewController: UIViewController, ARSessionDelegate {
         return Float(edgeEnergy) / Float(sampleCount)
     }
 
+    /// Moves one accepted snapshot to the image queue and closes its hold window.
     private func beginCapture(
         snapshot: FrameSnapshot,
         targetIndex: Int,
@@ -1040,6 +1085,8 @@ final class PanoramaCaptureViewController: UIViewController, ARSessionDelegate {
         }
     }
 
+    /// Commits one encoded frame on the state queue and completes the session when
+    /// every guide has a corresponding file.
     private func finishSaving(_ encodedFrame: [String: Any], targetIndex: Int) {
         guard !hasEnded else { return }
 
@@ -1067,7 +1114,7 @@ final class PanoramaCaptureViewController: UIViewController, ARSessionDelegate {
         guard capturedCount == targetCount else { return }
 
         let result: [String: Any] = [
-            "sessionId": sessionId,
+            "sessionId": sessionID,
             "mode": options.mode.rawValue,
             "directoryUrl": directoryURL.absoluteString,
             "targetCount": targetCount,
@@ -1082,6 +1129,7 @@ final class PanoramaCaptureViewController: UIViewController, ARSessionDelegate {
         }
     }
 
+    /// Orients, bounds, freshly encodes, and describes one AR camera snapshot.
     private func encode(snapshot: FrameSnapshot) throws -> [String: Any] {
         let sensorWidth = CVPixelBufferGetWidth(snapshot.pixelBuffer)
         let sensorHeight = CVPixelBufferGetHeight(snapshot.pixelBuffer)
@@ -1204,6 +1252,7 @@ final class PanoramaCaptureViewController: UIViewController, ARSessionDelegate {
         ]
     }
 
+    /// Throttles state-queue guidance updates before touching UIKit on main.
     private func publishGuidance(
         timestamp: TimeInterval,
         targetIndex: Int?,
@@ -1248,6 +1297,7 @@ final class PanoramaCaptureViewController: UIViewController, ARSessionDelegate {
         }
     }
 
+    /// Animates the directional hint only when a meaningful off-screen target exists.
     private func updateDirectionArrow(
         _ direction: SIMD2<Float>?,
         isVisible: Bool
@@ -1290,6 +1340,7 @@ final class PanoramaCaptureViewController: UIViewController, ARSessionDelegate {
         }
     }
 
+    /// Intersects the target vector with the available safe-area rectangle.
     private func positionDirectionArrow() {
         dispatchPrecondition(condition: .onQueue(.main))
         guard let direction = displayedGuidanceDirection,
@@ -1344,6 +1395,7 @@ final class PanoramaCaptureViewController: UIViewController, ARSessionDelegate {
         )
     }
 
+    /// Highlights only the current guide while preserving completed guide styling.
     private func updateDisplayedTarget(_ index: Int?, isAligned: Bool) {
         dispatchPrecondition(condition: .onQueue(.main))
 
@@ -1363,6 +1415,7 @@ final class PanoramaCaptureViewController: UIViewController, ARSessionDelegate {
         )
     }
 
+    /// Applies a short SceneKit transition to one uncaptured guide.
     private func styleTarget(at index: Int, color: UIColor, scale: Float, opacity: CGFloat) {
         guard targetNodes.indices.contains(index),
               let material = targetNodes[index].geometry?.firstMaterial else { return }
@@ -1376,6 +1429,7 @@ final class PanoramaCaptureViewController: UIViewController, ARSessionDelegate {
         SCNTransaction.commit()
     }
 
+    /// Hides a completed guide after its encoded frame is safely recorded.
     private func markTargetCaptured(_ index: Int) {
         dispatchPrecondition(condition: .onQueue(.main))
         capturedTargetIndices.insert(index)
@@ -1396,6 +1450,7 @@ final class PanoramaCaptureViewController: UIViewController, ARSessionDelegate {
         SCNTransaction.commit()
     }
 
+    /// Clears every derived hold/motion value while retaining completed frames.
     private func resetSteadiness() {
         previousCameraTransform = nil
         previousFrameTimestamp = nil
@@ -1414,6 +1469,7 @@ final class PanoramaCaptureViewController: UIViewController, ARSessionDelegate {
         lastGuidanceDirection = nil
     }
 
+    /// Publishes orientation state under a lock for the serial AR delegate queue.
     private func updateCaptureOrientation(
         _ orientation: UIInterfaceOrientation,
         isTransitioning: Bool
@@ -1434,6 +1490,7 @@ final class PanoramaCaptureViewController: UIViewController, ARSessionDelegate {
         orientationLock.unlock()
     }
 
+    /// Returns one consistent orientation/transition snapshot.
     private func currentOrientationState() -> (
         orientation: UIInterfaceOrientation,
         isTransitioning: Bool
@@ -1443,6 +1500,7 @@ final class PanoramaCaptureViewController: UIViewController, ARSessionDelegate {
         return (captureOrientation, isOrientationTransitioning)
     }
 
+    /// Maps the interface orientation onto ARKit's fixed sensor coordinates.
     private func imageOrientation(
         for interfaceOrientation: UIInterfaceOrientation
     ) -> CGImagePropertyOrientation {
@@ -1464,6 +1522,7 @@ final class PanoramaCaptureViewController: UIViewController, ARSessionDelegate {
         }
     }
 
+    /// Serializes UIKit orientation without leaking its integer raw value.
     private func interfaceOrientationName(_ orientation: UIInterfaceOrientation) -> String {
         switch orientation {
         case .portrait:
@@ -1481,6 +1540,7 @@ final class PanoramaCaptureViewController: UIViewController, ARSessionDelegate {
         }
     }
 
+    /// Rotates and scales camera intrinsics to match the freshly encoded JPEG.
     private func adjustedIntrinsics(
         _ intrinsics: simd_float3x3,
         calibrationResolution: CGSize,
@@ -1540,6 +1600,7 @@ final class PanoramaCaptureViewController: UIViewController, ARSessionDelegate {
         )
     }
 
+    /// Computes asymmetric field of view from focal length and principal point.
     private func fieldOfViewDegrees(
         focalLength: Double,
         principalPoint: Double,
@@ -1551,6 +1612,7 @@ final class PanoramaCaptureViewController: UIViewController, ARSessionDelegate {
         return (atan(negativeExtent / focalLength) + atan(positiveExtent / focalLength)) * 180 / .pi
     }
 
+    /// Measures roll around the view direction after removing yaw and pitch.
     private func cameraRoll(
         transform: simd_float4x4,
         yaw: Float,
@@ -1577,6 +1639,7 @@ final class PanoramaCaptureViewController: UIViewController, ARSessionDelegate {
         )
     }
 
+    /// Translates ARKit tracking states into short recovery guidance.
     private func trackingMessage(for state: ARCamera.TrackingState) -> String {
         switch state {
         case .normal:
@@ -1599,10 +1662,12 @@ final class PanoramaCaptureViewController: UIViewController, ARSessionDelegate {
         }
     }
 
+    /// Ends capture through the same one-shot completion path as native failures.
     @objc private func cancelTapped() {
         complete(.cancelled)
     }
 
+    /// Stops sensors, restores system state, and deletes partial work on failure.
     private func complete(_ outcome: PanoramaCaptureOutcome) {
         dispatchPrecondition(condition: .onQueue(.main))
         guard beginEnding() else { return }
@@ -1624,12 +1689,14 @@ final class PanoramaCaptureViewController: UIViewController, ARSessionDelegate {
         onCompletion?(outcome)
     }
 
+    /// Thread-safe view of the one-shot lifecycle flag.
     private var hasEnded: Bool {
         lifecycleLock.lock()
         defer { lifecycleLock.unlock() }
         return didEnd
     }
 
+    /// Atomically claims terminal ownership so only one callback can finish.
     private func beginEnding() -> Bool {
         lifecycleLock.lock()
         defer { lifecycleLock.unlock() }
@@ -1638,6 +1705,7 @@ final class PanoramaCaptureViewController: UIViewController, ARSessionDelegate {
         return true
     }
 
+    /// Extracts and normalizes the rotational component of a camera transform.
     private func rotationQuaternion(from transform: simd_float4x4) -> simd_quatf {
         let rotation = simd_float3x3(columns: (
             SIMD3<Float>(transform.columns.0.x, transform.columns.0.y, transform.columns.0.z),
@@ -1647,6 +1715,7 @@ final class PanoramaCaptureViewController: UIViewController, ARSessionDelegate {
         return simd_normalize(simd_quatf(rotation))
     }
 
+    /// Serializes a column-major transform for the JavaScript composition pipeline.
     private func flatten(_ transform: simd_float4x4) -> [Double] {
         [
             Double(transform.columns.0.x), Double(transform.columns.0.y),
@@ -1660,15 +1729,18 @@ final class PanoramaCaptureViewController: UIViewController, ARSessionDelegate {
         ]
     }
 
+    /// Converts pose radians to bridge-friendly degrees.
     private func radiansToDegrees(_ radians: Float) -> Float {
         radians * 180 / .pi
     }
 
+    /// Normalizes yaw into the half-open [0, 360) interval.
     private func normalizedDegrees(_ degrees: Float) -> Float {
         let remainder = degrees.truncatingRemainder(dividingBy: 360)
         return remainder >= 0 ? remainder : remainder + 360
     }
 
+    /// Produces stable millisecond ISO-8601 metadata for each captured frame.
     private static func isoTimestamp(from date: Date) -> String {
         let formatter = ISO8601DateFormatter()
         formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]

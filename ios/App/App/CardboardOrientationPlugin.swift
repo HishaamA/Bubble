@@ -1,6 +1,7 @@
 import Capacitor
 import UIKit
 
+/// Bridges web Cardboard screens to the app's native orientation controller.
 @objc(CardboardOrientationPlugin)
 public final class CardboardOrientationPlugin: CAPPlugin, CAPBridgedPlugin {
     public let identifier = "CardboardOrientationPlugin"
@@ -10,6 +11,7 @@ public final class CardboardOrientationPlugin: CAPPlugin, CAPBridgedPlugin {
         CAPPluginMethod(name: "restoreAppOrientation", returnType: CAPPluginReturnPromise)
     ]
 
+    /// Locks the host controller to the Cardboard-calibrated landscape side.
     @objc func requestLandscape(_ call: CAPPluginCall) {
         DispatchQueue.main.async { [weak self] in
             guard let controller = self?.bridge?.viewController as? AppBridgeViewController else {
@@ -25,6 +27,7 @@ public final class CardboardOrientationPlugin: CAPPlugin, CAPBridgedPlugin {
         }
     }
 
+    /// Restores the portrait-only orientation used by the rest of the app.
     @objc func restoreAppOrientation(_ call: CAPPluginCall) {
         DispatchQueue.main.async { [weak self] in
             guard let controller = self?.bridge?.viewController as? AppBridgeViewController else {

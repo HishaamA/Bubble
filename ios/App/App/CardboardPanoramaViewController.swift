@@ -1,20 +1,23 @@
-import CoreMotion
 import Metal
 import MetalKit
-import QuartzCore
 import UIKit
 import simd
 
+/// Stable failures produced while constructing or calibrating the Metal viewer.
 private enum CardboardNativeViewerError: LocalizedError {
     case metalUnavailable
+    case cardboardUnavailable
     case shaderUnavailable
     case pipelineCreationFailed(Error)
     case vertexBufferUnavailable
 
+    /// Converts internal setup errors into concise bridge-safe guidance.
     var errorDescription: String? {
         switch self {
         case .metalUnavailable:
             return "Metal is unavailable on this device."
+        case .cardboardUnavailable:
+            return "Google Cardboard could not start on this device."
         case .shaderUnavailable:
             return "The Cardboard panorama shaders are unavailable."
         case .pipelineCreationFailed:
@@ -25,264 +28,22 @@ private enum CardboardNativeViewerError: LocalizedError {
     }
 }
 
-private enum CardboardLensLayout {
-    static let widthFraction: CGFloat = 0.43
-    static let heightFraction: CGFloat = 0.88
-    static let horizontalFieldOfViewDegrees: Float = 88
-
-    static func frames(in size: CGSize) -> [CGRect] {
-        guard size.width > 1, size.height > 1 else { return [.zero, .zero] }
-
-        let halfWidth = size.width / 2
-        let horizontalInset = max(8, size.width * 0.018)
-        let eyeWidth = min(size.width * widthFraction, halfWidth - horizontalInset * 2)
-        let eyeHeight = min(size.height * heightFraction, size.height - 8)
-        let eyeY = (size.height - eyeHeight) / 2
-        let leftCenterX = size.width * 0.25
-        let rightCenterX = size.width * 0.75
-
-        return [
-            CGRect(
-                x: leftCenterX - eyeWidth / 2,
-                y: eyeY,
-                width: eyeWidth,
-                height: eyeHeight
-            ),
-            CGRect(
-                x: rightCenterX - eyeWidth / 2,
-                y: eyeY,
-                width: eyeWidth,
-                height: eyeHeight
-            )
-        ]
-    }
-}
-
-private final class CardboardMotionController {
-    private let motionManager = CMMotionManager()
-    private let motionQueue: OperationQueue = {
-        let queue = OperationQueue()
-        queue.name = "com.simerfamily.kinsphere.cardboard-motion"
-        queue.qualityOfService = .userInteractive
-        queue.maxConcurrentOperationCount = 1
-        return queue
-    }()
-    private let stateLock = NSLock()
-    private let initialView: simd_quatf
-
-    private var interfaceOrientation: UIInterfaceOrientation = .landscapeRight
-    private var anchorDevicePose: simd_quatf?
-    private var anchorView: simd_quatf
-    private var latestDevicePose: simd_quatf?
-    private var filteredView: simd_quatf
-    private var previousRawPose: simd_quatf?
-    private var previousTimestamp: TimeInterval?
-    private var rebaseOnNextSample = true
-    private var running = false
-
-    init(initialYawDegrees: Float, initialPitchDegrees: Float) {
-        let yaw = simd_quatf(
-            angle: -initialYawDegrees * .pi / 180,
-            axis: SIMD3<Float>(0, 1, 0)
-        )
-        let pitch = simd_quatf(
-            angle: initialPitchDegrees * .pi / 180,
-            axis: SIMD3<Float>(1, 0, 0)
-        )
-        initialView = Self.normalized(yaw * pitch)
-        anchorView = initialView
-        filteredView = initialView
-    }
-
-    var isAvailable: Bool {
-        motionManager.isDeviceMotionAvailable
-    }
-
-    @discardableResult
-    func start(interfaceOrientation: UIInterfaceOrientation) -> Bool {
-        guard motionManager.isDeviceMotionAvailable else { return false }
-
-        stateLock.lock()
-        self.interfaceOrientation = Self.usableOrientation(interfaceOrientation)
-        if running {
-            stateLock.unlock()
-            return true
-        }
-        running = true
-        anchorView = filteredView
-        anchorDevicePose = nil
-        latestDevicePose = nil
-        previousRawPose = nil
-        previousTimestamp = nil
-        rebaseOnNextSample = true
-        stateLock.unlock()
-
-        motionManager.deviceMotionUpdateInterval = 1.0 / 100.0
-        motionManager.showsDeviceMovementDisplay = true
-        motionManager.startDeviceMotionUpdates(
-            using: .xArbitraryZVertical,
-            to: motionQueue
-        ) { [weak self] motion, _ in
-            guard let self, let motion else { return }
-            self.ingest(motion)
-        }
-        return true
-    }
-
-    func pause() {
-        motionManager.stopDeviceMotionUpdates()
-        stateLock.lock()
-        running = false
-        anchorView = filteredView
-        anchorDevicePose = nil
-        latestDevicePose = nil
-        previousRawPose = nil
-        previousTimestamp = nil
-        rebaseOnNextSample = true
-        stateLock.unlock()
-    }
-
-    func updateInterfaceOrientation(_ orientation: UIInterfaceOrientation) {
-        stateLock.lock()
-        let nextOrientation = Self.usableOrientation(orientation)
-        if nextOrientation != interfaceOrientation {
-            interfaceOrientation = nextOrientation
-            anchorView = filteredView
-            rebaseOnNextSample = true
-        }
-        stateLock.unlock()
-    }
-
-    func recenter() {
-        stateLock.lock()
-        filteredView = initialView
-        anchorView = initialView
-        anchorDevicePose = latestDevicePose
-        previousRawPose = latestDevicePose
-        previousTimestamp = nil
-        rebaseOnNextSample = latestDevicePose == nil
-        stateLock.unlock()
-    }
-
-    func currentPose() -> simd_quatf {
-        stateLock.lock()
-        let pose = filteredView
-        stateLock.unlock()
-        return pose
-    }
-
-    private func ingest(_ motion: CMDeviceMotion) {
-        stateLock.lock()
-        defer { stateLock.unlock() }
-        guard running else { return }
-
-        let rawPose = Self.correctedPose(
-            motion.attitude.quaternion,
-            interfaceOrientation: interfaceOrientation
-        )
-        latestDevicePose = rawPose
-
-        if anchorDevicePose == nil || rebaseOnNextSample {
-            anchorDevicePose = rawPose
-            anchorView = filteredView
-            previousRawPose = rawPose
-            previousTimestamp = motion.timestamp
-            rebaseOnNextSample = false
-            return
-        }
-        guard let anchorDevicePose else { return }
-
-        let elapsed = previousTimestamp.map { motion.timestamp - $0 } ?? (1.0 / 60.0)
-        let deltaTime = Float(min(max(elapsed, 1.0 / 240.0), 1.0 / 20.0))
-        let worldDelta = Self.normalized(rawPose * anchorDevicePose.inverse)
-        var target = Self.normalized(worldDelta * anchorView)
-        if simd_dot(target.vector, filteredView.vector) < 0 {
-            target = simd_quatf(vector: -target.vector)
-        }
-
-        let previousRawPose = self.previousRawPose ?? rawPose
-        let rawDot = min(max(abs(simd_dot(previousRawPose.vector, rawPose.vector)), 0), 1)
-        let rawDistance = 2 * acos(rawDot)
-        let angularSpeed = rawDistance / max(deltaTime, 0.001)
-
-        // Use more smoothing while the phone is nearly still and become more
-        // responsive during a deliberate head turn. Both eyes consume this one
-        // filtered quaternion from the same display frame.
-        let motionWeight = min(max((angularSpeed - 0.03) / 0.55, 0), 1)
-        let timeConstant = 0.030 + (0.008 - 0.030) * motionWeight
-        let response = 1 - exp(-deltaTime / timeConstant)
-        let targetDot = min(max(abs(simd_dot(filteredView.vector, target.vector)), 0), 1)
-        let targetDistance = 2 * acos(targetDot)
-        if targetDistance > 0.0012 {
-            filteredView = Self.normalized(simd_slerp(filteredView, target, response))
-        }
-
-        self.previousRawPose = rawPose
-        previousTimestamp = motion.timestamp
-    }
-
-    private static func correctedPose(
-        _ quaternion: CMQuaternion,
-        interfaceOrientation: UIInterfaceOrientation
-    ) -> simd_quatf {
-        let device = normalized(
-            simd_quatf(
-                ix: Float(quaternion.x),
-                iy: Float(quaternion.y),
-                iz: Float(quaternion.z),
-                r: Float(quaternion.w)
-            )
-        )
-        let cameraCorrection = simd_quatf(
-            angle: -.pi / 2,
-            axis: SIMD3<Float>(1, 0, 0)
-        )
-        let screenAngle: Float
-        switch interfaceOrientation {
-        case .landscapeLeft:
-            screenAngle = .pi / 2
-        case .landscapeRight:
-            screenAngle = -.pi / 2
-        case .portraitUpsideDown:
-            screenAngle = .pi
-        default:
-            screenAngle = 0
-        }
-        let screenCorrection = simd_quatf(
-            angle: -screenAngle,
-            axis: SIMD3<Float>(0, 0, 1)
-        )
-        return normalized(device * cameraCorrection * screenCorrection)
-    }
-
-    private static func usableOrientation(
-        _ orientation: UIInterfaceOrientation
-    ) -> UIInterfaceOrientation {
-        switch orientation {
-        case .landscapeLeft, .landscapeRight, .portrait, .portraitUpsideDown:
-            return orientation
-        default:
-            return .landscapeRight
-        }
-    }
-
-    private static func normalized(_ quaternion: simd_quatf) -> simd_quatf {
-        let length = simd_length(quaternion.vector)
-        guard length.isFinite, length > 0.000_001 else {
-            return simd_quatf(angle: 0, axis: SIMD3<Float>(0, 1, 0))
-        }
-        return simd_quatf(vector: quaternion.vector / length)
-    }
-}
-
+/** Matrices consumed once for each eye in the off-screen panorama pass. */
 private struct CardboardMetalUniforms {
-    var cameraRotation: simd_float3x3
-    var tanHalfHorizontalFieldOfView: Float
-    var eyeAspect: Float
-    var opticalCenter: Float
-    var padding: Float = 0
+    var inverseProjection: simd_float4x4
+    var inverseModelView: simd_float4x4
 }
 
+/**
+ Draws a monoscopic equirectangular photo through Google's calibrated pipeline.
+
+ There are intentionally two render passes:
+ 1. Reconstruct a panorama ray for each eye into a shared side-by-side texture.
+ 2. Ask Cardboard to warp that texture for the scanned phone/headset profile.
+
+ The old iOS viewer skipped step two and used one hard-coded FOV for every
+ headset. That is why straight lines and faces stretched at the lens edges.
+ */
 private final class CardboardMetalPanoramaRenderer: NSObject, MTKViewDelegate {
     private static let shaderSource = """
     #include <metal_stdlib>
@@ -290,15 +51,12 @@ private final class CardboardMetalPanoramaRenderer: NSObject, MTKViewDelegate {
 
     struct VertexOutput {
         float4 position [[position]];
-        float2 localPosition;
+        float2 clipPosition;
     };
 
     struct CardboardUniforms {
-        float3x3 cameraRotation;
-        float tanHalfHorizontalFieldOfView;
-        float eyeAspect;
-        float opticalCenter;
-        float padding;
+        float4x4 inverseProjection;
+        float4x4 inverseModelView;
     };
 
     vertex VertexOutput cardboardVertex(
@@ -306,9 +64,9 @@ private final class CardboardMetalPanoramaRenderer: NSObject, MTKViewDelegate {
         const device float2 *positions [[buffer(0)]]
     ) {
         VertexOutput output;
-        float2 position = positions[vertexID];
+        const float2 position = positions[vertexID];
         output.position = float4(position, 0.0, 1.0);
-        output.localPosition = position;
+        output.clipPosition = position;
         return output;
     }
 
@@ -319,57 +77,56 @@ private final class CardboardMetalPanoramaRenderer: NSObject, MTKViewDelegate {
     ) {
         constexpr sampler panoramaSampler(
             filter::linear,
-            s_address::repeat,
+            s_address::clamp_to_edge,
             t_address::clamp_to_edge
         );
         constexpr float pi = 3.14159265358979323846;
 
-        // A rounded rectangle is used as a neutral Cardboard lens silhouette.
-        // It deliberately avoids pretending to be a viewer-specific distortion
-        // profile while still keeping the image away from the physical lens edge.
-        float cornerRadius = 0.19;
-        float2 rounded = abs(input.localPosition) - float2(1.0 - cornerRadius);
-        float lensDistance = length(max(rounded, float2(0.0)))
-            + min(max(rounded.x, rounded.y), 0.0)
-            - cornerRadius;
-        float lensMask = 1.0 - smoothstep(-0.012, 0.008, lensDistance);
-
-        float2 centered = float2(
-            input.localPosition.x - uniforms.opticalCenter,
-            input.localPosition.y
-        );
-        float3 cameraRay = normalize(float3(
-            centered.x * uniforms.tanHalfHorizontalFieldOfView,
-            centered.y * uniforms.tanHalfHorizontalFieldOfView
-                / max(uniforms.eyeAspect, 0.001),
-            -1.0
-        ));
-        float3 worldRay = normalize(uniforms.cameraRotation * cameraRay);
-        float yaw = atan2(worldRay.x, -worldRay.z);
-        float pitch = asin(clamp(worldRay.y, -1.0, 1.0));
+        // This is the same ray reconstruction used by the Android renderer.
+        // Projection asymmetry is preserved per eye, while translation is
+        // removed on the CPU because a single 360 photo has no stereo depth.
+        float4 eyeRay = uniforms.inverseProjection
+            * float4(input.clipPosition, 1.0, 1.0);
+        float3 panoramaRay = normalize((uniforms.inverseModelView
+            * float4(normalize(eyeRay.xyz), 0.0)).xyz);
+        float yaw = atan2(panoramaRay.x, -panoramaRay.z);
+        float pitch = asin(clamp(panoramaRay.y, -1.0, 1.0));
         float2 panoramaUV = float2(
             fract(0.5 + yaw / (2.0 * pi)),
             0.5 - pitch / pi
         );
-        float3 color = panorama.sample(panoramaSampler, panoramaUV).rgb;
-        float edgeShade = 1.0 - 0.22 * smoothstep(-0.16, 0.0, lensDistance);
-        return float4(color * edgeShade * lensMask, 1.0);
+        return panorama.sample(panoramaSampler, panoramaUV);
     }
     """
 
+    var onFailure: ((String) -> Void)?
+
+    private let device: MTLDevice
     private let commandQueue: MTLCommandQueue
     private let pipelineState: MTLRenderPipelineState
     private let vertexBuffer: MTLBuffer
     private let textureLoader: MTKTextureLoader
-    private let poseProvider: () -> simd_quatf
-    private let textureLock = NSLock()
-    private var panoramaTexture: MTLTexture?
-    private var released = false
+    private let cardboardSession: BubbleCardboardSession
+    private let initialModelMatrix: simd_float4x4
+    private let resourceLock = NSLock()
+    // Google Cardboard's C handles are not documented as thread-safe. Drawing,
+    // tracking changes, and teardown therefore share one serialized owner.
+    private let sessionLock = NSLock()
 
+    private var panoramaTexture: MTLTexture?
+    private var eyeTexture: MTLTexture?
+    private var eyeTextureWidth = 0
+    private var eyeTextureHeight = 0
+    private var released = false
+    private var reportedCalibrationFailure = false
+
+    /// Creates the immutable Metal pipeline and calibrated Cardboard owner.
     init(
         device: MTLDevice,
         colorPixelFormat: MTLPixelFormat,
-        poseProvider: @escaping () -> simd_quatf
+        cardboardSession: BubbleCardboardSession,
+        initialYawDegrees: Float,
+        initialPitchDegrees: Float
     ) throws {
         guard let commandQueue = device.makeCommandQueue() else {
             throw CardboardNativeViewerError.metalUnavailable
@@ -379,14 +136,17 @@ private final class CardboardMetalPanoramaRenderer: NSObject, MTKViewDelegate {
               let fragmentFunction = library.makeFunction(name: "cardboardFragment") else {
             throw CardboardNativeViewerError.shaderUnavailable
         }
+
         let pipelineDescriptor = MTLRenderPipelineDescriptor()
-        pipelineDescriptor.label = "Bubble Cardboard panorama"
+        pipelineDescriptor.label = "Bubble calibrated Cardboard panorama"
         pipelineDescriptor.vertexFunction = vertexFunction
         pipelineDescriptor.fragmentFunction = fragmentFunction
         pipelineDescriptor.colorAttachments[0].pixelFormat = colorPixelFormat
 
         do {
-            pipelineState = try device.makeRenderPipelineState(descriptor: pipelineDescriptor)
+            pipelineState = try device.makeRenderPipelineState(
+                descriptor: pipelineDescriptor
+            )
         } catch {
             throw CardboardNativeViewerError.pipelineCreationFailed(error)
         }
@@ -409,13 +169,22 @@ private final class CardboardMetalPanoramaRenderer: NSObject, MTKViewDelegate {
             throw CardboardNativeViewerError.vertexBufferUnavailable
         }
 
+        self.device = device
         self.commandQueue = commandQueue
         self.vertexBuffer = vertexBuffer
+        self.cardboardSession = cardboardSession
         textureLoader = MTKTextureLoader(device: device)
-        self.poseProvider = poseProvider
+
+        // Android builds Rx(-pitch) * Ry(+yaw). The shader later applies the
+        // inverse model-view matrix, keeping the supplied scene center intact.
+        let pitch = Self.rotationX(-initialPitchDegrees * .pi / 180)
+        let yaw = Self.rotationY(initialYawDegrees * .pi / 180)
+        initialModelMatrix = pitch * yaw
         super.init()
     }
 
+    /// Loads the staged panorama asynchronously and ignores a late result after
+    /// the renderer has been released.
     func loadPanorama(
         at url: URL,
         completion: @escaping (Result<Void, Error>) -> Void
@@ -429,239 +198,423 @@ private final class CardboardMetalPanoramaRenderer: NSObject, MTKViewDelegate {
         textureLoader.newTexture(URL: url, options: options) { [weak self] texture, error in
             guard let self else { return }
             if let texture {
-                self.textureLock.lock()
+                self.resourceLock.lock()
                 if !self.released {
                     self.panoramaTexture = texture
                 }
                 let accepted = !self.released
-                self.textureLock.unlock()
-                if accepted {
-                    completion(.success(()))
-                }
+                self.resourceLock.unlock()
+                if accepted { completion(.success(())) }
                 return
             }
             completion(.failure(error ?? CardboardNativeViewerError.shaderUnavailable))
         }
     }
 
+    /// Stops future frames, releases Metal textures, and then invalidates the
+    /// Cardboard C handles after any in-flight draw completes.
     func releaseResources() {
-        textureLock.lock()
+        resourceLock.lock()
+        guard !released else {
+            resourceLock.unlock()
+            return
+        }
         released = true
         panoramaTexture = nil
-        textureLock.unlock()
+        eyeTexture = nil
+        resourceLock.unlock()
+        sessionLock.lock()
+        cardboardSession.invalidate()
+        sessionLock.unlock()
     }
 
-    func mtkView(_ view: MTKView, drawableSizeWillChange size: CGSize) {}
+    /// Resumes head tracking unless teardown has already claimed the renderer.
+    func resumeTracking() {
+        sessionLock.lock()
+        defer { sessionLock.unlock() }
+        resourceLock.lock()
+        let isReleased = released
+        resourceLock.unlock()
+        guard !isReleased else { return }
+        cardboardSession.resumeTracking()
+    }
 
+    /// Pauses head tracking without racing the Metal draw callback.
+    func pauseTracking() {
+        sessionLock.lock()
+        defer { sessionLock.unlock() }
+        cardboardSession.pauseTracking()
+    }
+
+    /// Drops the eye atlas after drawable geometry changes.
+    func mtkView(_ view: MTKView, drawableSizeWillChange size: CGSize) {
+        // The next frame recreates the atlas and the Cardboard calibration
+        // together, so they can never disagree about the physical pixel size.
+        resourceLock.lock()
+        eyeTexture = nil
+        eyeTextureWidth = 0
+        eyeTextureHeight = 0
+        resourceLock.unlock()
+    }
+
+    /// Draws both panorama eyes and submits Google's lens-distortion pass as one
+    /// serialized interaction with the native Cardboard session.
     func draw(in view: MTKView) {
-        guard !released,
-              let renderPassDescriptor = view.currentRenderPassDescriptor,
+        sessionLock.lock()
+        defer { sessionLock.unlock() }
+
+        resourceLock.lock()
+        let isReleased = released
+        let panorama = panoramaTexture
+        resourceLock.unlock()
+
+        guard !isReleased,
               let drawable = view.currentDrawable,
-              let commandBuffer = commandQueue.makeCommandBuffer(),
-              let encoder = commandBuffer.makeRenderCommandEncoder(
-                descriptor: renderPassDescriptor
-              ) else {
+              let finalPassDescriptor = view.currentRenderPassDescriptor,
+              let commandBuffer = commandQueue.makeCommandBuffer() else {
             return
         }
 
-        textureLock.lock()
-        let texture = panoramaTexture
-        textureLock.unlock()
+        let width = max(Int(view.drawableSize.width.rounded()), 2)
+        let height = max(Int(view.drawableSize.height.rounded()), 2)
+        // UIKit may hand MTKView one portrait-sized frame while the full-screen
+        // presentation rotates. Never calibrate Cardboard against that
+        // transient geometry; its optical model expects the final landscape
+        // display dimensions.
+        guard width > height else {
+            encodeBlackFrame(
+                descriptor: finalPassDescriptor,
+                commandBuffer: commandBuffer
+            )
+            commandBuffer.present(drawable)
+            commandBuffer.commit()
+            return
+        }
 
-        if let texture {
-            // Read the pose exactly once. Both eye draws below therefore use the
-            // same sensor sample and the same command buffer.
-            let sharedHeadPose = poseProvider()
-            let sharedCameraRotation = simd_float3x3(sharedHeadPose)
-            let eyeFrames = CardboardLensLayout.frames(in: view.drawableSize)
-            let tangent = tan(
-                CardboardLensLayout.horizontalFieldOfViewDegrees * .pi / 360
+        // Texture loading is asynchronous. A blank loading frame is normal and
+        // must not be reported as a failed Cardboard calibration.
+        guard let panorama else {
+            encodeBlackFrame(
+                descriptor: finalPassDescriptor,
+                commandBuffer: commandBuffer
+            )
+            commandBuffer.present(drawable)
+            commandBuffer.commit()
+            return
+        }
+
+        guard cardboardSession.prepare(forDisplayWidth: width, height: height),
+              let eyeAtlas = makeOrReuseEyeTexture(width: width, height: height),
+              renderPanoramaEyes(
+                panorama: panorama,
+                eyeAtlas: eyeAtlas,
+                commandBuffer: commandBuffer,
+                width: width,
+                height: height
+              ) else {
+            encodeBlackFrame(
+                descriptor: finalPassDescriptor,
+                commandBuffer: commandBuffer
+            )
+            commandBuffer.present(drawable)
+            commandBuffer.commit()
+            reportCalibrationFailureOnce()
+            return
+        }
+
+        // The second encoder is the missing step from the previous iOS build:
+        // Cardboard bends each eye using the selected headset's real mesh.
+        finalPassDescriptor.colorAttachments[0].loadAction = .clear
+        finalPassDescriptor.colorAttachments[0].storeAction = .store
+        finalPassDescriptor.colorAttachments[0].clearColor = MTLClearColorMake(0, 0, 0, 1)
+        guard let distortionEncoder = commandBuffer.makeRenderCommandEncoder(
+            descriptor: finalPassDescriptor
+        ) else {
+            // Do not strand the drawable if Metal declines the final encoder.
+            // Committing the otherwise valid off-screen work lets MTKView
+            // recover normally on the following frame.
+            commandBuffer.present(drawable)
+            commandBuffer.commit()
+            reportCalibrationFailureOnce()
+            return
+        }
+        cardboardSession.renderEyeTexture(
+            eyeAtlas,
+            commandEncoder: distortionEncoder,
+            screenWidth: width,
+            screenHeight: height
+        )
+        distortionEncoder.endEncoding()
+        commandBuffer.present(drawable)
+        commandBuffer.commit()
+        reportedCalibrationFailure = false
+    }
+
+    /// Reuses the side-by-side eye atlas until the physical drawable size changes.
+    private func makeOrReuseEyeTexture(width: Int, height: Int) -> MTLTexture? {
+        resourceLock.lock()
+        defer { resourceLock.unlock() }
+        if let eyeTexture,
+           eyeTextureWidth == width,
+           eyeTextureHeight == height {
+            return eyeTexture
+        }
+
+        let descriptor = MTLTextureDescriptor.texture2DDescriptor(
+            pixelFormat: .bgra8Unorm,
+            width: width,
+            height: height,
+            mipmapped: false
+        )
+        descriptor.usage = [.renderTarget, .shaderRead]
+        descriptor.storageMode = .private
+        descriptor.resourceOptions = .storageModePrivate
+        let texture = device.makeTexture(descriptor: descriptor)
+        texture?.label = "Bubble Cardboard side-by-side eye atlas"
+        eyeTexture = texture
+        eyeTextureWidth = width
+        eyeTextureHeight = height
+        return texture
+    }
+
+    /// Reconstructs one calibrated ray field per eye into the shared atlas.
+    private func renderPanoramaEyes(
+        panorama: MTLTexture,
+        eyeAtlas: MTLTexture,
+        commandBuffer: MTLCommandBuffer,
+        width: Int,
+        height: Int
+    ) -> Bool {
+        let descriptor = MTLRenderPassDescriptor()
+        descriptor.colorAttachments[0].texture = eyeAtlas
+        descriptor.colorAttachments[0].loadAction = .clear
+        descriptor.colorAttachments[0].storeAction = .store
+        descriptor.colorAttachments[0].clearColor = MTLClearColorMake(0, 0, 0, 1)
+        guard let encoder = commandBuffer.makeRenderCommandEncoder(descriptor: descriptor) else {
+            return false
+        }
+
+        encoder.setRenderPipelineState(pipelineState)
+        encoder.setVertexBuffer(vertexBuffer, offset: 0, index: 0)
+        encoder.setFragmentTexture(panorama, index: 0)
+
+        // One predicted pose is shared by both eye draws, matching Android's
+        // onNewFrame/onDrawEye contract and avoiding a tiny temporal mismatch.
+        let headPose = cardboardSession.predictedHeadPose()
+        let leftWidth = width / 2
+        let eyeWidths = [leftWidth, width - leftWidth]
+        let eyeOrigins = [0, leftWidth]
+        let eyes: [BubbleCardboardEye] = [.left, .right]
+
+        for index in 0..<2 {
+            var eyeView = cardboardSession.eyeFromHeadMatrix(for: eyes[index]) * headPose
+            // The two eye projections remain calibrated and asymmetric. Only
+            // translation is removed, because this input is one mono photo.
+            eyeView.columns.3.x = 0
+            eyeView.columns.3.y = 0
+            eyeView.columns.3.z = 0
+            eyeView.columns.3.w = 1
+
+            let modelView = eyeView * initialModelMatrix
+            let projection = cardboardSession.projectionMatrix(for: eyes[index])
+            guard Self.isInvertible(modelView), Self.isInvertible(projection) else {
+                encoder.endEncoding()
+                return false
+            }
+            var uniforms = CardboardMetalUniforms(
+                inverseProjection: simd_inverse(projection),
+                inverseModelView: simd_inverse(modelView)
             )
 
-            encoder.setRenderPipelineState(pipelineState)
-            encoder.setVertexBuffer(vertexBuffer, offset: 0, index: 0)
-            encoder.setFragmentTexture(texture, index: 0)
-
-            for frame in eyeFrames where frame.width > 0 && frame.height > 0 {
-                encoder.setViewport(
-                    MTLViewport(
-                        originX: Double(frame.minX),
-                        originY: Double(frame.minY),
-                        width: Double(frame.width),
-                        height: Double(frame.height),
-                        znear: 0,
-                        zfar: 1
-                    )
+            encoder.setViewport(
+                MTLViewport(
+                    originX: Double(eyeOrigins[index]),
+                    originY: 0,
+                    width: Double(eyeWidths[index]),
+                    height: Double(height),
+                    znear: 0,
+                    zfar: 1
                 )
-                var uniforms = CardboardMetalUniforms(
-                    cameraRotation: sharedCameraRotation,
-                    tanHalfHorizontalFieldOfView: tangent,
-                    eyeAspect: Float(frame.width / max(frame.height, 1)),
-                    // The panorama is monoscopic. Matching optical centers keep
-                    // both eyes on the same ray and avoid artificial disparity.
-                    opticalCenter: 0
+            )
+            encoder.setScissorRect(
+                MTLScissorRect(
+                    x: eyeOrigins[index],
+                    y: 0,
+                    width: eyeWidths[index],
+                    height: height
                 )
-                encoder.setFragmentBytes(
-                    &uniforms,
-                    length: MemoryLayout<CardboardMetalUniforms>.stride,
-                    index: 0
-                )
-                encoder.drawPrimitives(
-                    type: .triangleStrip,
-                    vertexStart: 0,
-                    vertexCount: 4
-                )
-            }
+            )
+            encoder.setFragmentBytes(
+                &uniforms,
+                length: MemoryLayout<CardboardMetalUniforms>.stride,
+                index: 0
+            )
+            encoder.drawPrimitives(
+                type: .triangleStrip,
+                vertexStart: 0,
+                vertexCount: 4
+            )
         }
 
         encoder.endEncoding()
-        commandBuffer.present(drawable)
-        commandBuffer.commit()
+        return true
+    }
+
+    /// Clears transitional or failed frames while preserving MTKView cadence.
+    private func encodeBlackFrame(
+        descriptor: MTLRenderPassDescriptor,
+        commandBuffer: MTLCommandBuffer
+    ) {
+        descriptor.colorAttachments[0].loadAction = .clear
+        descriptor.colorAttachments[0].storeAction = .store
+        descriptor.colorAttachments[0].clearColor = MTLClearColorMake(0, 0, 0, 1)
+        let encoder = commandBuffer.makeRenderCommandEncoder(descriptor: descriptor)
+        encoder?.endEncoding()
+    }
+
+    /// Coalesces repeated renderer failures into one UI dismissal request.
+    private func reportCalibrationFailureOnce() {
+        guard !reportedCalibrationFailure else { return }
+        reportedCalibrationFailure = true
+        DispatchQueue.main.async { [weak self] in
+            self?.onFailure?("This phone could not prepare the calibrated VR view.")
+        }
+    }
+
+    /// Rejects non-finite or singular Cardboard matrices before inversion.
+    private static func isInvertible(_ matrix: simd_float4x4) -> Bool {
+        let values = [matrix.columns.0, matrix.columns.1, matrix.columns.2, matrix.columns.3]
+        guard values.allSatisfy({ column in
+            column.x.isFinite && column.y.isFinite &&
+                column.z.isFinite && column.w.isFinite
+        }) else {
+            return false
+        }
+        let determinant = simd_determinant(matrix)
+        return determinant.isFinite && abs(determinant) > 0.000_000_1
+    }
+
+    /// Builds the initial panorama pitch transform.
+    private static func rotationX(_ radians: Float) -> simd_float4x4 {
+        let cosine = cos(radians)
+        let sine = sin(radians)
+        return simd_float4x4(columns: (
+            SIMD4<Float>(1, 0, 0, 0),
+            SIMD4<Float>(0, cosine, sine, 0),
+            SIMD4<Float>(0, -sine, cosine, 0),
+            SIMD4<Float>(0, 0, 0, 1)
+        ))
+    }
+
+    /// Builds the initial panorama yaw transform.
+    private static func rotationY(_ radians: Float) -> simd_float4x4 {
+        let cosine = cos(radians)
+        let sine = sin(radians)
+        return simd_float4x4(columns: (
+            SIMD4<Float>(cosine, 0, -sine, 0),
+            SIMD4<Float>(0, 1, 0, 0),
+            SIMD4<Float>(sine, 0, cosine, 0),
+            SIMD4<Float>(0, 0, 0, 1)
+        ))
     }
 }
 
-private final class CardboardLensGuideView: UIView {
-    override class var layerClass: AnyClass { CAShapeLayer.self }
-
-    override init(frame: CGRect) {
-        super.init(frame: frame)
-        isUserInteractionEnabled = false
-        backgroundColor = .clear
-        let shapeLayer = layer as? CAShapeLayer
-        shapeLayer?.fillColor = UIColor.clear.cgColor
-        shapeLayer?.strokeColor = UIColor(white: 1, alpha: 0.16).cgColor
-        shapeLayer?.lineWidth = 1
-    }
-
-    required init?(coder: NSCoder) {
-        fatalError("init(coder:) has not been implemented")
-    }
-
-    override func layoutSubviews() {
-        super.layoutSubviews()
-        let radius = min(bounds.width, bounds.height) * 0.095
-        (layer as? CAShapeLayer)?.path = UIBezierPath(
-            roundedRect: bounds.insetBy(dx: 0.5, dy: 0.5),
-            cornerRadius: radius
-        ).cgPath
-    }
-}
-
-private final class CardboardReticleView: UIView {
-    override init(frame: CGRect) {
-        super.init(frame: frame)
-        isOpaque = false
-        isUserInteractionEnabled = false
-        backgroundColor = .clear
-    }
-
-    required init?(coder: NSCoder) {
-        fatalError("init(coder:) has not been implemented")
-    }
-
-    override func draw(_ rect: CGRect) {
-        guard let context = UIGraphicsGetCurrentContext() else { return }
-        let center = CGPoint(x: bounds.midX, y: bounds.midY)
-        context.setStrokeColor(UIColor(white: 1, alpha: 0.84).cgColor)
-        context.setLineWidth(1.2)
-        context.strokeEllipse(
-            in: CGRect(x: center.x - 5, y: center.y - 5, width: 10, height: 10)
-        )
-        context.move(to: CGPoint(x: center.x - 10, y: center.y))
-        context.addLine(to: CGPoint(x: center.x - 7, y: center.y))
-        context.move(to: CGPoint(x: center.x + 7, y: center.y))
-        context.addLine(to: CGPoint(x: center.x + 10, y: center.y))
-        context.move(to: CGPoint(x: center.x, y: center.y - 10))
-        context.addLine(to: CGPoint(x: center.x, y: center.y - 7))
-        context.move(to: CGPoint(x: center.x, y: center.y + 7))
-        context.addLine(to: CGPoint(x: center.x, y: center.y + 10))
-        context.strokePath()
-    }
-}
-
-/** Native, monoscopic two-eye Cardboard panorama viewer for iOS. */
+/** Native Google Cardboard panorama viewer for iOS. */
 final class CardboardPanoramaViewController: UIViewController {
+    /// Requests host orientation restoration before the native screen closes.
     var onWillDismiss: (() -> Void)?
+    /// Releases plugin ownership after every native resource is gone.
     var onDismiss: (() -> Void)?
 
     private let panoramaURL: URL
     private let panoramaTitle: String
     private let metalView: MTKView
-    private let motionController: CardboardMotionController
     private let panoramaRenderer: CardboardMetalPanoramaRenderer
-    private let lensGuides = [CardboardLensGuideView(), CardboardLensGuideView()]
-    private let reticles = [CardboardReticleView(), CardboardReticleView()]
-    private let centerDivider = UIView()
+    private let alignmentMarker = UIView()
     private let statusLabel = UILabel()
     private var notificationTokens: [NSObjectProtocol] = []
     private var previousIdleTimerDisabled: Bool?
     private var previousScreenBrightness: CGFloat?
-    private weak var presentationScene: UIWindowScene?
+    private var orientationRetryWorkItem: DispatchWorkItem?
     private var closing = false
     private var willDismissNotified = false
     private var lifecycleFinished = false
+    private var setupPromptScheduled = false
+    private var fatalFailureScheduled = false
 
     private lazy var closeButton: UIButton = makeControlButton(
         systemName: "xmark",
         accessibilityLabel: "Close Cardboard view",
         action: #selector(closeViewer)
     )
-    private lazy var recenterButton: UIButton = makeControlButton(
-        systemName: "scope",
-        accessibilityLabel: "Recenter Cardboard view",
-        action: #selector(recenterViewer)
+    private lazy var settingsButton: UIButton = makeControlButton(
+        systemName: "gearshape",
+        accessibilityLabel: "Scan Cardboard headset QR code",
+        action: #selector(scanViewerProfile)
     )
 
+    /// Creates the calibrated Metal pipeline before presentation can begin.
     init(
         panoramaURL: URL,
         title: String,
         initialYawDegrees: Float,
         initialPitchDegrees: Float
     ) throws {
+        // Cardboard's bundled physical-screen table is calibrated for iPhone.
+        // On iPad the SDK falls back to an incorrect phone DPI, so native VR is
+        // unavailable there instead of presenting a distorted optical view.
+        guard UIDevice.current.userInterfaceIdiom == .phone else {
+            throw CardboardNativeViewerError.cardboardUnavailable
+        }
         guard let device = MTLCreateSystemDefaultDevice() else {
             throw CardboardNativeViewerError.metalUnavailable
         }
-        let motionController = CardboardMotionController(
-            initialYawDegrees: initialYawDegrees,
-            initialPitchDegrees: initialPitchDegrees
-        )
         let pixelFormat = MTLPixelFormat.bgra8Unorm
+        guard let session = BubbleCardboardSession(
+            device: device,
+            colorPixelFormat: pixelFormat
+        ) else {
+            throw CardboardNativeViewerError.cardboardUnavailable
+        }
         let renderer = try CardboardMetalPanoramaRenderer(
             device: device,
             colorPixelFormat: pixelFormat,
-            poseProvider: { [weak motionController] in
-                motionController?.currentPose()
-                    ?? simd_quatf(angle: 0, axis: SIMD3<Float>(0, 1, 0))
-            }
+            cardboardSession: session,
+            initialYawDegrees: initialYawDegrees,
+            initialPitchDegrees: initialPitchDegrees
         )
 
         self.panoramaURL = panoramaURL
         panoramaTitle = title
-        self.motionController = motionController
         panoramaRenderer = renderer
         metalView = MTKView(frame: .zero, device: device)
         metalView.colorPixelFormat = pixelFormat
         super.init(nibName: nil, bundle: nil)
     }
 
+    @available(*, unavailable)
+    /// Storyboard construction is intentionally unavailable for this controller.
     required init?(coder: NSCoder) {
         fatalError("init(coder:) has not been implemented")
     }
 
     override var supportedInterfaceOrientations: UIInterfaceOrientationMask {
-        closing ? .portrait : .landscape
+        closing ? .portrait : .landscapeRight
     }
 
     override var preferredInterfaceOrientationForPresentation: UIInterfaceOrientation {
         closing ? .portrait : .landscapeRight
     }
 
+    // The one-item supported mask still locks the headset handedness, while
+    // allowing UIKit to complete the requested portrait-to-landscape turn.
     override var shouldAutorotate: Bool { true }
     override var prefersStatusBarHidden: Bool { true }
     override var preferredStatusBarUpdateAnimation: UIStatusBarAnimation { .fade }
     override var prefersHomeIndicatorAutoHidden: Bool { true }
     override var preferredScreenEdgesDeferringSystemGestures: UIRectEdge { .all }
 
+    /// Installs rendering, controls, lifecycle observers, and texture loading.
     override func viewDidLoad() {
         super.viewDidLoad()
         view.backgroundColor = .black
@@ -671,9 +624,13 @@ final class CardboardPanoramaViewController: UIViewController {
         configureMetalView()
         configureOverlay()
         observeApplicationLifecycle()
+        panoramaRenderer.onFailure = { [weak self] message in
+            self?.dismissAfterFatalFailure(message)
+        }
         loadPanoramaTexture()
     }
 
+    /// Preserves system display settings before applying headset-friendly values.
     override func viewWillAppear(_ animated: Bool) {
         super.viewWillAppear(animated)
         if previousIdleTimerDisabled == nil {
@@ -686,60 +643,43 @@ final class CardboardPanoramaViewController: UIViewController {
         UIScreen.main.brightness = 1
     }
 
+    /// Defers optical calibration until the final landscape pixels are available.
     override func viewDidAppear(_ animated: Bool) {
         super.viewDidAppear(animated)
-        presentationScene = view.window?.windowScene
-        resumeRendering()
+        resumeRenderingWhenLandscapeIsReady()
+        scheduleViewerSetupIfNeeded()
     }
 
+    /// Pauses sensors and display refresh for dismissal or QR-scanner coverage.
     override func viewWillDisappear(_ animated: Bool) {
         pauseRendering()
         super.viewWillDisappear(animated)
     }
 
+    /// Finishes ownership only for a real dismissal, not the SDK's QR scanner.
     override func viewDidDisappear(_ animated: Bool) {
         super.viewDidDisappear(animated)
-        finishLifecycle()
-    }
-
-    override func viewDidLayoutSubviews() {
-        super.viewDidLayoutSubviews()
-        let frames = CardboardLensLayout.frames(in: view.bounds.size)
-        for index in 0..<min(frames.count, lensGuides.count) {
-            lensGuides[index].frame = frames[index]
-            let reticleSize = CGSize(width: 28, height: 28)
-            reticles[index].frame = CGRect(
-                x: frames[index].midX - reticleSize.width / 2,
-                y: frames[index].midY - reticleSize.height / 2,
-                width: reticleSize.width,
-                height: reticleSize.height
-            )
-            reticles[index].setNeedsDisplay()
+        // Google's QR scanner temporarily covers this controller. Do not tear
+        // down the staged panorama merely because that scanner is on screen.
+        if closing || isBeingDismissed || presentingViewController == nil {
+            finishLifecycle()
         }
     }
 
-    override func viewWillTransition(
-        to size: CGSize,
-        with coordinator: UIViewControllerTransitionCoordinator
-    ) {
-        super.viewWillTransition(to: size, with: coordinator)
-        coordinator.animate(alongsideTransition: nil) { [weak self] _ in
-            guard let self else { return }
-            self.motionController.updateInterfaceOrientation(
-                self.currentInterfaceOrientation()
-            )
-        }
-    }
-
+    /// Removes the staged panorama if lifecycle teardown could not run first.
     deinit {
         try? FileManager.default.removeItem(at: panoramaURL)
     }
 
+    /// Pins a native-resolution Metal surface across the full controller.
     private func configureMetalView() {
         metalView.translatesAutoresizingMaskIntoConstraints = false
         metalView.backgroundColor = .black
         metalView.clearColor = MTLClearColorMake(0, 0, 0, 1)
         metalView.framebufferOnly = true
+        metalView.autoResizeDrawable = true
+        // Lens calibration is based on physical pixels, not UIKit points.
+        metalView.contentScaleFactor = UIScreen.main.nativeScale
         metalView.enableSetNeedsDisplay = false
         metalView.isPaused = true
         metalView.preferredFramesPerSecond = min(
@@ -756,23 +696,25 @@ final class CardboardPanoramaViewController: UIViewController {
         ])
     }
 
+    /// Adds only controls that remain useful before the phone enters the headset.
     private func configureOverlay() {
-        for guide in lensGuides { view.addSubview(guide) }
-        for reticle in reticles { view.addSubview(reticle) }
-
-        centerDivider.translatesAutoresizingMaskIntoConstraints = false
-        centerDivider.backgroundColor = UIColor(white: 1, alpha: 0.45)
-        centerDivider.isUserInteractionEnabled = false
-        view.addSubview(centerDivider)
-
         closeButton.translatesAutoresizingMaskIntoConstraints = false
-        recenterButton.translatesAutoresizingMaskIntoConstraints = false
+        settingsButton.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(closeButton)
-        view.addSubview(recenterButton)
+        view.addSubview(settingsButton)
+
+        // This small physical-centre cue mirrors Cardboard's Android overlay.
+        // It helps the user align the phone in the headset without drawing
+        // fake, unwarped reticles over either eye.
+        alignmentMarker.translatesAutoresizingMaskIntoConstraints = false
+        alignmentMarker.backgroundColor = UIColor(white: 1, alpha: 0.84)
+        alignmentMarker.layer.cornerRadius = 1
+        alignmentMarker.isUserInteractionEnabled = false
+        view.addSubview(alignmentMarker)
 
         statusLabel.translatesAutoresizingMaskIntoConstraints = false
-        statusLabel.textColor = UIColor(white: 1, alpha: 0.76)
-        statusLabel.font = .systemFont(ofSize: 13, weight: .medium)
+        statusLabel.textColor = UIColor(white: 1, alpha: 0.9)
+        statusLabel.font = .systemFont(ofSize: 13, weight: .semibold)
         statusLabel.textAlignment = .center
         statusLabel.numberOfLines = 2
         statusLabel.alpha = 0
@@ -782,40 +724,44 @@ final class CardboardPanoramaViewController: UIViewController {
         NSLayoutConstraint.activate([
             closeButton.leadingAnchor.constraint(
                 equalTo: view.safeAreaLayoutGuide.leadingAnchor,
-                constant: 18
+                constant: 16
             ),
             closeButton.topAnchor.constraint(
                 equalTo: view.safeAreaLayoutGuide.topAnchor,
-                constant: 12
+                constant: 10
             ),
             closeButton.widthAnchor.constraint(equalToConstant: 48),
             closeButton.heightAnchor.constraint(equalToConstant: 48),
 
-            recenterButton.trailingAnchor.constraint(
+            settingsButton.trailingAnchor.constraint(
                 equalTo: view.safeAreaLayoutGuide.trailingAnchor,
-                constant: -18
+                constant: -16
             ),
-            recenterButton.topAnchor.constraint(
+            settingsButton.topAnchor.constraint(
                 equalTo: view.safeAreaLayoutGuide.topAnchor,
-                constant: 12
+                constant: 10
             ),
-            recenterButton.widthAnchor.constraint(equalToConstant: 48),
-            recenterButton.heightAnchor.constraint(equalToConstant: 48),
+            settingsButton.widthAnchor.constraint(equalToConstant: 48),
+            settingsButton.heightAnchor.constraint(equalToConstant: 48),
 
-            centerDivider.centerXAnchor.constraint(equalTo: view.centerXAnchor),
-            centerDivider.centerYAnchor.constraint(equalTo: view.centerYAnchor),
-            centerDivider.widthAnchor.constraint(equalToConstant: 1),
-            centerDivider.heightAnchor.constraint(equalTo: view.heightAnchor, multiplier: 0.78),
+            alignmentMarker.centerXAnchor.constraint(equalTo: view.centerXAnchor),
+            alignmentMarker.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor),
+            alignmentMarker.widthAnchor.constraint(equalToConstant: 2),
+            alignmentMarker.heightAnchor.constraint(equalToConstant: 68),
 
             statusLabel.centerXAnchor.constraint(equalTo: view.centerXAnchor),
             statusLabel.bottomAnchor.constraint(
                 equalTo: view.safeAreaLayoutGuide.bottomAnchor,
                 constant: -8
             ),
-            statusLabel.widthAnchor.constraint(lessThanOrEqualTo: view.widthAnchor, multiplier: 0.42)
+            statusLabel.widthAnchor.constraint(
+                lessThanOrEqualTo: view.widthAnchor,
+                multiplier: 0.42
+            )
         ])
     }
 
+    /// Builds one consistently styled and VoiceOver-labelled overlay control.
     private func makeControlButton(
         systemName: String,
         accessibilityLabel: String,
@@ -838,9 +784,9 @@ final class CardboardPanoramaViewController: UIViewController {
         return button
     }
 
+    /// Loads the staged image and converts a decode failure into a clean dismissal.
     private func loadPanoramaTexture() {
-        statusLabel.text = "Preparing \(panoramaTitle)"
-        statusLabel.alpha = 1
+        showStatus("Preparing \(panoramaTitle)")
         panoramaRenderer.loadPanorama(at: panoramaURL) { [weak self] result in
             DispatchQueue.main.async {
                 guard let self, !self.lifecycleFinished else { return }
@@ -850,19 +796,53 @@ final class CardboardPanoramaViewController: UIViewController {
                         self.statusLabel.alpha = 0
                     }
                 case .failure:
-                    self.statusLabel.text = "This 360 image could not be opened."
-                    self.statusLabel.alpha = 1
-                    self.pauseRendering()
+                    self.dismissAfterFatalFailure("This 360 image could not be opened.")
                 }
             }
         }
     }
 
+    /// Offers one headset-profile prompt when no saved QR calibration exists.
+    private func scheduleViewerSetupIfNeeded() {
+        guard !setupPromptScheduled,
+              !fatalFailureScheduled,
+              !BubbleCardboardSession.hasSavedViewerProfile() else {
+            return
+        }
+        setupPromptScheduled = true
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
+            guard let self,
+                  self.viewIfLoaded?.window != nil,
+                  !self.closing,
+                  !self.fatalFailureScheduled,
+                  self.presentedViewController == nil else {
+                return
+            }
+            let alert = UIAlertController(
+                title: "Set up your VR headset",
+                message: "Scan the QR code printed on your headset to match its lenses and prevent double vision. You only need to do this once.",
+                preferredStyle: .alert
+            )
+            alert.addAction(
+                UIAlertAction(title: "Scan headset QR", style: .default) { [weak self] _ in
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
+                        self?.openViewerScanner()
+                    }
+                }
+            )
+            alert.addAction(UIAlertAction(title: "Use standard viewer", style: .cancel))
+            self.present(alert, animated: true)
+        }
+    }
+
+    /// Mirrors Android's pause/resume behavior for app interruptions.
     private func observeApplicationLifecycle() {
         let center = NotificationCenter.default
         notificationTokens.append(
             center.addObserver(
-                forName: UIApplication.didEnterBackgroundNotification,
+                // Mirrors Android Activity.onPause for interruptions that make
+                // the app inactive without necessarily backgrounding it.
+                forName: UIApplication.willResignActiveNotification,
                 object: nil,
                 queue: .main
             ) { [weak self] _ in
@@ -875,34 +855,94 @@ final class CardboardPanoramaViewController: UIViewController {
                 object: nil,
                 queue: .main
             ) { [weak self] _ in
-                guard let self, self.viewIfLoaded?.window != nil, !self.closing else { return }
-                self.resumeRendering()
+                guard let self,
+                      self.viewIfLoaded?.window != nil,
+                      self.presentedViewController == nil,
+                      !self.closing else {
+                    return
+                }
+                self.resumeRenderingWhenLandscapeIsReady()
             }
         )
     }
 
-    private func resumeRendering() {
+    /// Waits for stable landscape geometry with a bounded retry window before
+    /// starting sensors and the display link.
+    private func resumeRenderingWhenLandscapeIsReady(attempt: Int = 0) {
         guard !closing, !lifecycleFinished else { return }
-        let motionStarted = motionController.start(
-            interfaceOrientation: currentInterfaceOrientation()
-        )
+        orientationRetryWorkItem?.cancel()
+        orientationRetryWorkItem = nil
+
+        view.layoutIfNeeded()
+        let interfaceOrientation = view.window?.windowScene?.interfaceOrientation
+        let hasLandscapeGeometry = view.bounds.width > view.bounds.height
+        guard interfaceOrientation == .landscapeRight, hasLandscapeGeometry else {
+            // Scene geometry updates are asynchronous on modern iOS. Wait for
+            // the fixed Cardboard orientation rather than calibrating optics
+            // against a transient portrait drawable.
+            guard attempt < 40 else {
+                dismissAfterFatalFailure("Cardboard could not enter landscape on this phone.")
+                return
+            }
+            let retry = DispatchWorkItem { [weak self] in
+                self?.resumeRenderingWhenLandscapeIsReady(attempt: attempt + 1)
+            }
+            orientationRetryWorkItem = retry
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.05, execute: retry)
+            return
+        }
+
+        panoramaRenderer.resumeTracking()
         metalView.isPaused = false
-        if !motionStarted {
-            statusLabel.text = "Motion tracking is unavailable on this phone."
-            statusLabel.alpha = 1
+    }
+
+    /// Cancels orientation retries and pauses both display and sensor work.
+    private func pauseRendering() {
+        orientationRetryWorkItem?.cancel()
+        orientationRetryWorkItem = nil
+        metalView.isPaused = true
+        panoramaRenderer.pauseTracking()
+    }
+
+    /// Displays and announces short setup or failure guidance.
+    private func showStatus(_ message: String) {
+        statusLabel.text = message
+        statusLabel.alpha = 1
+        statusLabel.accessibilityValue = message
+    }
+
+    /// Opens Google's scanner from the explicit settings control.
+    @objc private func scanViewerProfile() {
+        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+        openViewerScanner()
+    }
+
+    /// Starts the SDK-owned QR flow only while this controller is visible.
+    private func openViewerScanner() {
+        guard !closing, viewIfLoaded?.window != nil else { return }
+        // The SDK presents its scanner asynchronously. UIKit's disappearance
+        // callbacks pause a real scanner presentation; staying active here
+        // prevents a denied or cancelled permission alert from freezing VR.
+        BubbleCardboardSession.scanViewerProfile()
+    }
+
+    /// Announces one fatal renderer error and then returns to the unchanged app.
+    private func dismissAfterFatalFailure(_ message: String) {
+        guard !closing, !lifecycleFinished, !fatalFailureScheduled else { return }
+        fatalFailureScheduled = true
+        showStatus(message)
+        UIAccessibility.post(notification: .announcement, argument: message)
+        pauseRendering()
+
+        // Android closes its VR Activity on a fatal renderer error. Briefly
+        // expose the reason, then reveal the unchanged screen below on iOS too.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) { [weak self] in
+            guard let self, !self.closing, !self.lifecycleFinished else { return }
+            self.closeViewer()
         }
     }
 
-    private func pauseRendering() {
-        metalView.isPaused = true
-        motionController.pause()
-    }
-
-    @objc private func recenterViewer() {
-        motionController.recenter()
-        UIImpactFeedbackGenerator(style: .light).impactOccurred()
-    }
-
+    /// Coordinates portrait restoration, a black cover, and one-shot dismissal.
     @objc private func closeViewer() {
         guard !closing else { return }
         closing = true
@@ -918,14 +958,12 @@ final class CardboardPanoramaViewController: UIViewController {
             guard let self else { return }
             self.metalView.alpha = 0
             self.closeButton.alpha = 0
-            self.recenterButton.alpha = 0
-            self.centerDivider.alpha = 0
-            self.lensGuides.forEach { $0.alpha = 0 }
-            self.reticles.forEach { $0.alpha = 0 }
+            self.settingsButton.alpha = 0
+            self.alignmentMarker.alpha = 0
+            self.statusLabel.alpha = 0
         }
 
-        // Let React return to the bubbles and UIKit restore portrait behind
-        // this black cover before revealing the app again.
+        // Keep the black cover up while the Capacitor host restores portrait.
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.24) { [weak self] in
             guard let self else { return }
             if self.presentingViewController != nil {
@@ -936,6 +974,7 @@ final class CardboardPanoramaViewController: UIViewController {
         }
     }
 
+    /// Sends the host-orientation callback at most once.
     private func notifyWillDismiss() {
         guard !willDismissNotified else { return }
         willDismissNotified = true
@@ -944,6 +983,7 @@ final class CardboardPanoramaViewController: UIViewController {
         completion?()
     }
 
+    /// Releases observers, renderer state, display overrides, and the staged file.
     private func finishLifecycle() {
         guard !lifecycleFinished else { return }
         lifecycleFinished = true
@@ -968,11 +1008,4 @@ final class CardboardPanoramaViewController: UIViewController {
         onDismiss = nil
         completion?()
     }
-
-    private func currentInterfaceOrientation() -> UIInterfaceOrientation {
-        view.window?.windowScene?.interfaceOrientation
-            ?? presentationScene?.interfaceOrientation
-            ?? .landscapeRight
-    }
-
 }

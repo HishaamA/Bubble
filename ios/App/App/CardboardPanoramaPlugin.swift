@@ -2,6 +2,7 @@ import Capacitor
 import ImageIO
 import UIKit
 
+/// Stable bridge failures surfaced to the React layer without native details.
 private enum CardboardPanoramaBridgeError: LocalizedError {
     case missingImage
     case invalidBase64
@@ -13,6 +14,7 @@ private enum CardboardPanoramaBridgeError: LocalizedError {
     case presenterTransitioning
     case presentationInProgress
 
+    /// Maps native staging failures to stable user-facing copy.
     var errorDescription: String? {
         switch self {
         case .missingImage:
@@ -36,6 +38,7 @@ private enum CardboardPanoramaBridgeError: LocalizedError {
         }
     }
 
+    /// Maps related native failures to the JavaScript bridge's public codes.
     var code: String {
         switch self {
         case .missingImage: return "PANORAMA_MISSING"
@@ -48,6 +51,7 @@ private enum CardboardPanoramaBridgeError: LocalizedError {
     }
 }
 
+/// Validated, bounded input for one native Cardboard presentation.
 private struct CardboardPanoramaRequest {
     let encodedImage: String
     let mimeType: String
@@ -55,6 +59,7 @@ private struct CardboardPanoramaRequest {
     let initialYaw: Float
     let initialPitch: Float
 
+    /// Parses untrusted Capacitor values before any allocation or presentation.
     init(call: CAPPluginCall) throws {
         guard let encodedImage = call.getString("dataBase64"), !encodedImage.isEmpty else {
             throw CardboardPanoramaBridgeError.missingImage
@@ -106,6 +111,7 @@ public final class CardboardPanoramaPlugin: CAPPlugin, CAPBridgedPlugin {
     )
     private var activeController: CardboardPanoramaViewController?
 
+    /// Stages one panorama off-main, then presents exactly one native viewer.
     @objc public func open(_ call: CAPPluginCall) {
         let request: CardboardPanoramaRequest
         do {
@@ -154,6 +160,7 @@ public final class CardboardPanoramaPlugin: CAPPlugin, CAPBridgedPlugin {
         }
     }
 
+    /// Decodes and bounds the image before atomically writing a protected cache file.
     private func stagePanorama(_ request: CardboardPanoramaRequest) throws -> URL {
         try autoreleasepool {
             guard let data = Data(base64Encoded: request.encodedImage) else {
@@ -199,6 +206,7 @@ public final class CardboardPanoramaPlugin: CAPPlugin, CAPBridgedPlugin {
         }
     }
 
+    /// Reads image dimensions without eagerly decoding its full pixel buffer.
     private func imageDimensions(in data: Data) throws -> (width: Int, height: Int) {
         guard let source = CGImageSourceCreateWithData(data as CFData, nil),
               CGImageSourceGetCount(source) > 0,
@@ -217,6 +225,7 @@ public final class CardboardPanoramaPlugin: CAPPlugin, CAPBridgedPlugin {
         return (width, height)
     }
 
+    /// Constrains both texture edge and total pixels in one metadata-free JPEG.
     private func downsampledJPEG(
         _ data: Data,
         dimensions: (width: Int, height: Int)
@@ -265,6 +274,7 @@ public final class CardboardPanoramaPlugin: CAPPlugin, CAPBridgedPlugin {
         return output as Data
     }
 
+    /// Creates the private, backup-excluded Cardboard staging directory.
     private func stagingDirectory() throws -> URL {
         let directory = FileManager.default.urls(
             for: .cachesDirectory,
@@ -281,6 +291,7 @@ public final class CardboardPanoramaPlugin: CAPPlugin, CAPBridgedPlugin {
         return directory
     }
 
+    /// Removes abandoned regular files after a bounded retention window.
     private func removeStaleArtifacts(in directory: URL) {
         let cutoff = Date().addingTimeInterval(-Self.staleArtifactAge)
         let keys: Set<URLResourceKey> = [.contentModificationDateKey, .isRegularFileKey]
@@ -303,6 +314,8 @@ public final class CardboardPanoramaPlugin: CAPPlugin, CAPBridgedPlugin {
         }
     }
 
+    /// Claims presentation ownership, rotates the app, and releases every staged
+    /// artifact through the controller's dismissal callbacks.
     private func presentViewer(
         stagedURL: URL,
         request: CardboardPanoramaRequest,
@@ -354,7 +367,6 @@ public final class CardboardPanoramaPlugin: CAPPlugin, CAPBridgedPlugin {
             guard let self else { return }
             (self.bridge?.viewController as? AppBridgeViewController)?
                 .restoreAppPortraitOrientation()
-            self.notifyListeners("closed", data: ["reason": "user"])
         }
         controller.onDismiss = { [weak self, weak controller] in
             Self.removeArtifact(at: stagedURL)
@@ -373,6 +385,7 @@ public final class CardboardPanoramaPlugin: CAPPlugin, CAPBridgedPlugin {
         }
     }
 
+    /// Finds the visible presenter through modal, navigation, and tab containers.
     private func topPresenter(from root: UIViewController?) -> UIViewController? {
         guard let root else { return nil }
         if let presented = root.presentedViewController, !presented.isBeingDismissed {
@@ -387,6 +400,7 @@ public final class CardboardPanoramaPlugin: CAPPlugin, CAPBridgedPlugin {
         return root
     }
 
+    /// Maps supported image MIME hints to a non-executable cache suffix.
     private func fileExtension(for mimeType: String) -> String {
         let normalized = mimeType.lowercased()
         if normalized.contains("png") { return "png" }
@@ -395,6 +409,7 @@ public final class CardboardPanoramaPlugin: CAPPlugin, CAPBridgedPlugin {
         return "jpg"
     }
 
+    /// Best-effort cleanup shared by every presentation outcome.
     private static func removeArtifact(at url: URL) {
         try? FileManager.default.removeItem(at: url)
     }

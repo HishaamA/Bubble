@@ -3,18 +3,22 @@ import AVFoundation
 import Capacitor
 import UIKit
 
+/// The single terminal result produced by a native guided-capture session.
 enum PanoramaCaptureOutcome {
     case success([String: Any])
     case cancelled
     case failure(message: String, code: String)
 }
 
+/// Bounded capture settings accepted from the web layer.
 struct PanoramaCaptureOptions {
+    /// Controls the number and arrangement of guide targets.
     enum Mode: String {
         case quick
         case standard
         case detailed
 
+        /// Human-readable mode name used by the native capture overlay.
         var displayName: String {
             switch self {
             case .quick: return "Quick"
@@ -30,24 +34,35 @@ struct PanoramaCaptureOptions {
     let alignmentRadians: Float
     let steadyDuration: TimeInterval
 
+    /// Parses untrusted bridge values and clamps them to safe native limits.
     init(call: CAPPluginCall) {
         mode = Mode(rawValue: call.getString("mode") ?? "standard") ?? .standard
 
         let requestedWidth = call.getInt("outputWidth") ?? 0
         outputWidth = requestedWidth > 0 ? min(max(requestedWidth, 640), 4_096) : 0
 
-        jpegQuality = min(max(call.getDouble("jpegQuality") ?? 0.92, 0.5), 1.0)
+        let requestedQuality = call.getDouble("jpegQuality") ?? 0.92
+        jpegQuality = requestedQuality.isFinite
+            ? min(max(requestedQuality, 0.5), 1.0)
+            : 0.92
 
-        let alignmentDegrees = min(max(call.getDouble("alignmentDegrees") ?? 4.5, 2.0), 12.0)
+        let rawAlignmentDegrees = call.getDouble("alignmentDegrees") ?? 4.5
+        let alignmentDegrees = rawAlignmentDegrees.isFinite
+            ? min(max(rawAlignmentDegrees, 2.0), 12.0)
+            : 4.5
         alignmentRadians = Float(alignmentDegrees * .pi / 180.0)
 
-        let steadyMilliseconds = min(max(call.getDouble("steadyDurationMs") ?? 650.0, 300.0), 2_000.0)
+        let rawSteadyMilliseconds = call.getDouble("steadyDurationMs") ?? 650.0
+        let steadyMilliseconds = rawSteadyMilliseconds.isFinite
+            ? min(max(rawSteadyMilliseconds, 300.0), 2_000.0)
+            : 650.0
         steadyDuration = steadyMilliseconds / 1_000.0
     }
 }
 
+/// Owns the Capacitor boundary for ARKit capture and temporary-frame cleanup.
 @objc(PanoramaCapturePlugin)
-public class PanoramaCapturePlugin: CAPPlugin, CAPBridgedPlugin {
+public final class PanoramaCapturePlugin: CAPPlugin, CAPBridgedPlugin {
     public let identifier = "PanoramaCapturePlugin"
     public let jsName = "PanoramaCapture"
     public let pluginMethods: [CAPPluginMethod] = [
@@ -57,6 +72,7 @@ public class PanoramaCapturePlugin: CAPPlugin, CAPBridgedPlugin {
 
     private var activeController: PanoramaCaptureViewController?
 
+    /// Opens one full-screen ARKit capture after capability and permission checks.
     @objc func startCapture(_ call: CAPPluginCall) {
         let options = PanoramaCaptureOptions(call: call)
 
@@ -82,6 +98,8 @@ public class PanoramaCapturePlugin: CAPPlugin, CAPBridgedPlugin {
         }
     }
 
+    /// Removes a completed or cancelled capture directory after proving that it
+    /// is a UUID-named child of Bubble's private cache root.
     @objc func discardCapture(_ call: CAPPluginCall) {
         guard let directoryValue = call.getString("directoryUrl"),
               let candidateURL = validatedCaptureDirectory(from: directoryValue) else {
@@ -136,6 +154,7 @@ public class PanoramaCapturePlugin: CAPPlugin, CAPBridgedPlugin {
         }
     }
 
+    /// Normalizes all camera authorization outcomes onto the main queue.
     private func ensureCameraPermission(completion: @escaping (Bool) -> Void) {
         switch AVCaptureDevice.authorizationStatus(for: .video) {
         case .authorized:
@@ -153,6 +172,8 @@ public class PanoramaCapturePlugin: CAPPlugin, CAPBridgedPlugin {
         }
     }
 
+    /// Creates and presents the native controller while retaining exclusive
+    /// ownership of the active bridge call.
     private func presentCapture(options: PanoramaCaptureOptions, call: CAPPluginCall) {
         dispatchPrecondition(condition: .onQueue(.main))
 
@@ -182,6 +203,7 @@ public class PanoramaCapturePlugin: CAPPlugin, CAPBridgedPlugin {
         presenter.present(controller, animated: true)
     }
 
+    /// Dismisses the owning controller before completing the bridge promise.
     private func finishCapture(
         controller: PanoramaCaptureViewController,
         outcome: PanoramaCaptureOutcome,
@@ -204,6 +226,7 @@ public class PanoramaCapturePlugin: CAPPlugin, CAPBridgedPlugin {
         }
     }
 
+    /// Finds the visible presenter through modal, navigation, and tab containers.
     private func topPresenter(from root: UIViewController?) -> UIViewController? {
         guard let root else { return nil }
 
@@ -219,6 +242,8 @@ public class PanoramaCapturePlugin: CAPPlugin, CAPBridgedPlugin {
         return root
     }
 
+    /// Resolves and confines a bridge-supplied directory to the capture cache.
+    /// Both lexical and symlink-resolved parents are checked to prevent traversal.
     private func validatedCaptureDirectory(from value: String) -> URL? {
         let candidate: URL
         if let parsedURL = URL(string: value),
