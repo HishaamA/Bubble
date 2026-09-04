@@ -1,0 +1,7 @@
+# pnpm 11 fails CI when a dependency's install script has not been reviewed.
+# Keep approvals version-specific so dependency upgrades require a fresh review.
+allowBuilds:
+  'browser-tabs-lock@1.3.0': false # Its postinstall script only prints a project message.
+  'bufferutil@4.1.0': false # The browser app uses the WebSocket JavaScript fallback.
+  'core-js@3.47.0': false # Its postinstall script only prints a funding message.
+  'utf-8-validate@6.0.6': false # The browser app uses the WebSocket JavaScript fallback.
