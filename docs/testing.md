@@ -17,6 +17,18 @@ pnpm build
 
 Changes to database behavior must additionally rebuild a clean local Supabase instance and run the database/RLS suite. Native changes must build the affected platform. A failing required check blocks merge; do not waive it with manual database edits or an admin shortcut.
 
+After Docker Desktop and Deno are installed, the complete disposable backend
+gate is one command:
+
+```bash
+pnpm test:supabase:local
+```
+
+It rebuilds every migration, runs the database/RLS/auth pgTAP suite, exercises
+the Edge Function runtime boundary, and discards the stack it created. See
+[`supabase/README.md`](../supabase/README.md#disposable-local-integration-tests)
+for prerequisites and safe reuse/debugging options.
+
 ## Automated test layers
 
 ### Unit tests
@@ -134,6 +146,11 @@ Each scenario must converge without a duplicate Storage object, media row, contr
 ## Panorama and native device matrix
 
 Run the current supported Android and iOS targets on physical devices. Verify:
+
+Use the detailed [physical-device acceptance checklist](physical-device-testing.md)
+for the required device record, case-by-case pass criteria, and sanitized
+evidence. The summary below remains the minimum scope, not a substitute for
+that signed-off checklist.
 
 - touch drag and zoom
 - orientation permission accepted and denied

@@ -169,6 +169,11 @@ pnpm build
 
 Database-affecting work must also rebuild a clean local Supabase instance and pass the RLS/database suite. Native, viewer, upload, media, notification, and accessibility work must pass the relevant physical-device gates in [`docs/testing.md`](./docs/testing.md).
 
+With Docker Desktop and Deno available, run the complete disposable backend
+gate with `pnpm test:supabase:local`. It verifies migrations, pgTAP database and
+authentication policies, plus the local Edge Function boundary; setup details
+are in [`supabase/README.md`](./supabase/README.md#disposable-local-integration-tests).
+
 ## Delivery sequence
 
 Work is gated, not merely grouped. A phase is complete only when its acceptance check passes; otherwise the next phase stays out of scope. Follow [`docs/roadmap.md`](./docs/roadmap.md).

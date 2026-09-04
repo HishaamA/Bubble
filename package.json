@@ -23,6 +23,8 @@
     "supabase:start": "supabase start",
     "supabase:stop": "supabase stop",
     "supabase:reset": "supabase db reset",
+    "test:supabase:edge": "deno test supabase/functions/flight-status/providerHelpers_test.ts",
+    "test:supabase:local": "node scripts/test-supabase-local.mjs",
     "supabase:functions:serve:demo": "supabase functions serve flight-status --env-file supabase/.env.demo --no-verify-jwt",
     "supabase:secrets:demo": "supabase secrets set --env-file supabase/.env.demo",
     "preview": "vite preview"

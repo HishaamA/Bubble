@@ -317,24 +317,39 @@ cannot accumulate an unbounded private upload queue. Approved members can read
 only finalized photos in their current circle; short-lived signed URLs are used
 by the client.
 
-## Local commands
+## Disposable local integration tests
 
-With Docker and the Supabase CLI installed:
+Install and start [Docker Desktop](https://docs.docker.com/desktop/), install
+[Deno](https://docs.deno.com/runtime/getting_started/installation/), then run
+`pnpm install`. The repository already pins the Supabase CLI as a development
+dependency; a separate global CLI installation is neither required nor
+recommended.
+
+Run the complete backend gate with:
 
 ```sh
-supabase start
-supabase db reset
-supabase test db supabase/tests/rls_membership.sql
-supabase test db supabase/tests/360_moment_mvp.sql
-supabase test db supabase/tests/replace_moment_annotations.sql
-supabase test db supabase/tests/moment_comments.sql
-supabase test db supabase/tests/events_notifications.sql
-supabase test db supabase/tests/clerk_third_party_auth.sql
-supabase test db supabase/tests/family_capsules.sql
-supabase test db supabase/tests/family_journal_photos.sql
-supabase test db supabase/tests/family_flights.sql
-supabase test db supabase/tests/persistent_family_groups.sql
+pnpm test:supabase:local
 ```
+
+That one command verifies the Docker daemon and tool versions, starts a local
+stack, rebuilds the database from every migration and the seed file, runs every
+pgTAP file in `supabase/tests`, runs dependency-free Deno tests against the
+Edge Function helpers, starts the real local Edge worker, and probes its CORS,
+JSON-validation, and authentication boundaries. A stack created by the command
+is stopped with `--no-backup` even when a test fails, so the next run starts
+cleanly and no database snapshot is retained.
+
+The command refuses to reset a stack that was already running. To deliberately
+test against and reset an existing local stack, acknowledge that destructive
+step explicitly:
+
+```sh
+pnpm test:supabase:local -- --reuse-running-stack
+```
+
+Use `--keep-running` only while debugging a failed local run. Stop and discard
+that stack afterward with `pnpm exec supabase stop --no-backup`. Run the focused
+Edge helper suite with `pnpm test:supabase:edge`; it does not require Docker.
 
 ## Backend maintenance rules
 
