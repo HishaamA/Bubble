@@ -21,12 +21,12 @@ const OVERLAP_HISTOGRAM_BINS = 81
 const OVERLAP_MAX_LOG_RATIO = Math.log(2)
 const OVERLAP_MIN_SAMPLES = 48
 
-type Vec3 = readonly [number, number, number]
+type Vector3 = readonly [number, number, number]
 
 export type GuidedCameraBasis = {
-  forward: Vec3
-  right: Vec3
-  up: Vec3
+  forward: Vector3
+  right: Vector3
+  up: Vector3
 }
 
 export type GuidedFrameOrientation = {
@@ -53,29 +53,33 @@ type DecodedFrame = {
   close: () => void
 }
 
-function firstFinite(...values: Array<number | undefined>) {
+/** Selects the first usable measurement from current and legacy capture fields. */
+function firstFiniteValue(
+  ...values: Array<number | undefined>
+): number | undefined {
   return values.find((value): value is number => Number.isFinite(value))
 }
 
+/** Uses the measured shutter pose, falling back to legacy guide metadata. */
 export function resolveFrameOrientation(
   frame: NativePanoramaFrame,
 ): GuidedFrameOrientation {
   // The actual camera pose is authoritative. Target angles describe where the
   // guide dot was placed, not the exact optical axis at shutter time. Using the
   // target first can stamp many nearly identical frames around a fake sphere.
-  const yawDegrees = firstFinite(
+  const yawDegrees = firstFiniteValue(
     frame.yawDegrees,
     frame.yaw,
     frame.targetYawDegrees,
     frame.targetYaw,
   )
-  const pitchDegrees = firstFinite(
+  const pitchDegrees = firstFiniteValue(
     frame.pitchDegrees,
     frame.pitch,
     frame.targetPitchDegrees,
     frame.targetPitch,
   )
-  const rollDegrees = firstFinite(
+  const rollDegrees = firstFiniteValue(
     frame.rollDegrees,
     frame.roll,
     0,
@@ -88,25 +92,28 @@ export function resolveFrameOrientation(
   return { yawDegrees, pitchDegrees, rollDegrees: rollDegrees ?? 0 }
 }
 
-function normalize(vector: Vec3): Vec3 {
+/** Normalizes an axis while keeping degenerate inputs finite. */
+function normalizeVector(vector: Vector3): Vector3 {
   const length = Math.hypot(vector[0], vector[1], vector[2]) || 1
   return [vector[0] / length, vector[1] / length, vector[2] / length]
 }
 
-function addScaled(
-  forward: Vec3,
-  right: Vec3,
-  up: Vec3,
+/** Converts normalized camera-plane coordinates into a unit world-space ray. */
+function calculateCameraRayDirection(
+  forward: Vector3,
+  right: Vector3,
+  up: Vector3,
   x: number,
   y: number,
-): Vec3 {
-  return normalize([
+): Vector3 {
+  return normalizeVector([
     forward[0] + right[0] * x + up[0] * y,
     forward[1] + right[1] * x + up[1] * y,
     forward[2] + right[2] * x + up[2] * y,
   ])
 }
 
+/** Builds orthonormal camera axes from yaw, pitch, and roll angles. */
 export function createCameraBasis(
   orientation: GuidedFrameOrientation,
 ): GuidedCameraBasis {
@@ -118,13 +125,13 @@ export function createCameraBasis(
   const sinPitch = Math.sin(pitch)
   const cosPitch = Math.cos(pitch)
 
-  const forward: Vec3 = [
+  const forward: Vector3 = [
     cosPitch * sinYaw,
     sinPitch,
     cosPitch * cosYaw,
   ]
-  const levelRight: Vec3 = [cosYaw, 0, -sinYaw]
-  const levelUp: Vec3 = [
+  const levelRight: Vector3 = [cosYaw, 0, -sinYaw]
+  const levelUp: Vector3 = [
     -sinPitch * sinYaw,
     cosPitch,
     -sinPitch * cosYaw,
@@ -132,12 +139,12 @@ export function createCameraBasis(
 
   return {
     forward,
-    right: normalize([
+    right: normalizeVector([
       levelRight[0] * Math.cos(roll) + levelUp[0] * Math.sin(roll),
       levelRight[1] * Math.cos(roll) + levelUp[1] * Math.sin(roll),
       levelRight[2] * Math.cos(roll) + levelUp[2] * Math.sin(roll),
     ]),
-    up: normalize([
+    up: normalizeVector([
       levelUp[0] * Math.cos(roll) - levelRight[0] * Math.sin(roll),
       levelUp[1] * Math.cos(roll) - levelRight[1] * Math.sin(roll),
       levelUp[2] * Math.cos(roll) - levelRight[2] * Math.sin(roll),
@@ -145,7 +152,8 @@ export function createCameraBasis(
   }
 }
 
-function finiteTransform(transform: number[] | undefined) {
+/** Accepts only complete finite 4×4 transforms from the native bridge. */
+function readFiniteTransform(transform: number[] | undefined) {
   return transform?.length === 16 && transform.every(Number.isFinite)
     ? transform
     : undefined
@@ -159,21 +167,22 @@ function finiteTransform(transform: number[] | undefined) {
 export function resolveFrameCameraBasis(
   frame: NativePanoramaFrame,
 ): GuidedCameraBasis {
-  const transform = finiteTransform(frame.transform)
+  const transform = readFiniteTransform(frame.transform)
   if (!transform) return createCameraBasis(resolveFrameOrientation(frame))
 
   return {
-    right: normalize([transform[0], transform[1], -transform[2]]),
-    up: normalize([transform[4], transform[5], -transform[6]]),
-    forward: normalize([-transform[8], -transform[9], transform[10]]),
+    right: normalizeVector([transform[0], transform[1], -transform[2]]),
+    up: normalizeVector([transform[4], transform[5], -transform[6]]),
+    forward: normalizeVector([-transform[8], -transform[9], transform[10]]),
   }
 }
 
+/** Maps a unit world-space direction onto a wrapping 2:1 panorama. */
 export function directionToEquirectangular(
-  direction: Vec3,
+  direction: Vector3,
   outputWidth: number,
   outputHeight: number,
-) {
+): { x: number; y: number } {
   const yaw = Math.atan2(direction[0], direction[2])
   const pitch = Math.asin(Math.max(-1, Math.min(1, direction[1])))
   return {
@@ -182,6 +191,7 @@ export function directionToEquirectangular(
   }
 }
 
+/** Decodes one native frame and exposes an explicit memory-release callback. */
 async function decodeFrame(source: string): Promise<DecodedFrame> {
   const image = new Image()
   image.decoding = 'async'
@@ -190,6 +200,7 @@ async function decodeFrame(source: string): Promise<DecodedFrame> {
   return { image, close: () => { image.src = '' } }
 }
 
+/** Requires a readable 2D context for projection and encoding work. */
 function getCanvasContext(canvas: HTMLCanvasElement) {
   const context = canvas.getContext('2d', {
     alpha: false,
@@ -206,6 +217,7 @@ export type GuidedFrameCalibration = {
   cy: number
 }
 
+/** Scales native camera intrinsics to the compositor's sampled frame size. */
 export function resolveFrameCalibration(
   frame: NativePanoramaFrame,
   sampleWidth: number,
@@ -288,14 +300,16 @@ export function resolveFrameCalibration(
  * highlights dictate the result. Sampling keeps this inexpensive on the full
  * camera frame; trimming the histogram makes it steadier than a plain mean.
  */
-export function calculateRobustFrameLuma(data: Uint8ClampedArray) {
+export function calculateRobustFrameLuma(
+  rgbaPixels: Uint8ClampedArray,
+): number {
   const histogram = new Uint32Array(256)
   let sampleCount = 0
-  for (let index = 0; index + 2 < data.length; index += 64) {
+  for (let index = 0; index + 2 < rgbaPixels.length; index += 64) {
     const luma = Math.max(0, Math.min(255, Math.round(
-      data[index] * 0.2126 +
-      data[index + 1] * 0.7152 +
-      data[index + 2] * 0.0722,
+      rgbaPixels[index] * 0.2126 +
+      rgbaPixels[index + 1] * 0.7152 +
+      rgbaPixels[index + 2] * 0.0722,
     )))
     histogram[luma] += 1
     sampleCount += 1
@@ -322,7 +336,8 @@ export function calculateRobustFrameLuma(data: Uint8ClampedArray) {
   return included ? total / included : 128
 }
 
-function median(values: number[]) {
+/** Returns a copy-sorted median, leaving caller-owned samples untouched. */
+function calculateMedian(values: number[]): number {
   if (!values.length) return 128
   const ordered = [...values].sort((left, right) => left - right)
   const middle = Math.floor(ordered.length / 2)
@@ -336,11 +351,11 @@ function median(values: number[]) {
  * partial, bounded correction avoids turning genuinely dark or bright parts of
  * the room into exposure errors while still reducing camera exposure jumps.
  */
-export function resolveExposureScales(frameLumas: number[]) {
+export function resolveExposureScales(frameLumas: number[]): number[] {
   const safeLumas = frameLumas.map((luma) =>
     Number.isFinite(luma) && luma > 0 ? luma : 128,
   )
-  const referenceLuma = median(safeLumas)
+  const referenceLuma = calculateMedian(safeLumas)
   return safeLumas.map((luma) => Math.max(
     MIN_EXPOSURE_SCALE,
     Math.min(
@@ -360,12 +375,13 @@ export function resolveExposureScales(frameLumas: number[]) {
 export function solveOverlapExposureScales(
   frameLumas: number[],
   constraints: GuidedExposureConstraint[],
-) {
+): number[] {
   const frameCount = frameLumas.length
   const fallbackScales = resolveExposureScales(frameLumas)
   if (!frameCount || !constraints.length) return fallbackScales
 
   const parent = Array.from({ length: frameCount }, (_, index) => index)
+  /** Finds and compresses the overlap component containing a frame. */
   const find = (frameIndex: number): number => {
     let root = frameIndex
     while (parent[root] !== root) root = parent[root]
@@ -376,6 +392,7 @@ export function solveOverlapExposureScales(
     }
     return root
   }
+  /** Joins frames connected by a valid exposure-overlap constraint. */
   const union = (left: number, right: number) => {
     const leftRoot = find(left)
     const rightRoot = find(right)
@@ -444,7 +461,7 @@ export function solveOverlapExposureScales(
     }
     const componentCentres = new Map<number, number>()
     componentValues.forEach((values, root) => {
-      componentCentres.set(root, median(values))
+      componentCentres.set(root, calculateMedian(values))
     })
     for (let frameIndex = 0; frameIndex < frameCount; frameIndex += 1) {
       if (!connected[frameIndex]) continue
@@ -472,10 +489,12 @@ type ExposurePairHistogram = {
   sampleCount: number
 }
 
-function rawLuma(red: number, green: number, blue: number) {
+/** Converts an sRGB triplet to perceptual luminance for relative comparison. */
+function calculateLuma(red: number, green: number, blue: number): number {
   return red * 0.2126 + green * 0.7152 + blue * 0.0722
 }
 
+/** Reduces reliable shared pixels into robust per-frame gain constraints. */
 function collectOverlapExposureConstraints(
   bestColors: Uint32Array,
   secondColors: Uint32Array,
@@ -484,7 +503,9 @@ function collectOverlapExposureConstraints(
   bestFrameIndices: Uint8Array,
   secondFrameIndices: Uint8Array,
 ) {
-  const pairs = new Map<number, ExposurePairHistogram>()
+  // A histogram median makes each pair robust to isolated moving subjects and
+  // avoids retaining millions of per-pixel ratios on memory-constrained phones.
+  const pairHistograms = new Map<number, ExposurePairHistogram>()
 
   for (
     let pixelIndex = 0;
@@ -515,8 +536,8 @@ function collectOverlapExposureConstraints(
     const secondRed = redFromRgb(secondColor)
     const secondGreen = greenFromRgb(secondColor)
     const secondBlue = blueFromRgb(secondColor)
-    const bestLuma = rawLuma(bestRed, bestGreen, bestBlue)
-    const secondLuma = rawLuma(secondRed, secondGreen, secondBlue)
+    const bestLuma = calculateLuma(bestRed, bestGreen, bestBlue)
+    const secondLuma = calculateLuma(secondRed, secondGreen, secondBlue)
     if (
       bestLuma < 10 ||
       secondLuma < 10 ||
@@ -535,15 +556,15 @@ function collectOverlapExposureConstraints(
     const firstFrameIndex = Math.min(bestFrameIndex, secondFrameIndex)
     const secondSortedFrameIndex = Math.max(bestFrameIndex, secondFrameIndex)
     const pairKey = firstFrameIndex * NO_FRAME + secondSortedFrameIndex
-    let pair = pairs.get(pairKey)
-    if (!pair) {
-      pair = {
+    let pairHistogram = pairHistograms.get(pairKey)
+    if (!pairHistogram) {
+      pairHistogram = {
         firstFrameIndex,
         secondFrameIndex: secondSortedFrameIndex,
         bins: new Uint32Array(OVERLAP_HISTOGRAM_BINS),
         sampleCount: 0,
       }
-      pairs.set(pairKey, pair)
+      pairHistograms.set(pairKey, pairHistogram)
     }
 
     const firstLuma = bestFrameIndex === firstFrameIndex
@@ -566,32 +587,33 @@ function collectOverlapExposureConstraints(
       OVERLAP_HISTOGRAM_BINS - 1,
       Math.round(normalized * (OVERLAP_HISTOGRAM_BINS - 1)),
     ))
-    pair.bins[binIndex] += 1
-    pair.sampleCount += 1
+    pairHistogram.bins[binIndex] += 1
+    pairHistogram.sampleCount += 1
   }
 
   const constraints: GuidedExposureConstraint[] = []
-  pairs.forEach((pair) => {
-    if (pair.sampleCount < OVERLAP_MIN_SAMPLES) return
-    const medianSample = Math.floor((pair.sampleCount - 1) / 2)
+  pairHistograms.forEach((pairHistogram) => {
+    if (pairHistogram.sampleCount < OVERLAP_MIN_SAMPLES) return
+    const medianSample = Math.floor((pairHistogram.sampleCount - 1) / 2)
     let visited = 0
     let medianBin = 0
-    for (; medianBin < pair.bins.length; medianBin += 1) {
-      visited += pair.bins[medianBin]
+    for (; medianBin < pairHistogram.bins.length; medianBin += 1) {
+      visited += pairHistogram.bins[medianBin]
       if (visited > medianSample) break
     }
     const normalized = medianBin / (OVERLAP_HISTOGRAM_BINS - 1)
     constraints.push({
-      firstFrameIndex: pair.firstFrameIndex,
-      secondFrameIndex: pair.secondFrameIndex,
+      firstFrameIndex: pairHistogram.firstFrameIndex,
+      secondFrameIndex: pairHistogram.secondFrameIndex,
       logGainDifference:
         normalized * OVERLAP_MAX_LOG_RATIO * 2 - OVERLAP_MAX_LOG_RATIO,
-      sampleCount: pair.sampleCount,
+      sampleCount: pairHistogram.sampleCount,
     })
   })
   return constraints
 }
 
+/** Produces a clamped cubic transition with zero slope at each boundary. */
 function smoothstep(start: number, end: number, value: number) {
   const progress = Math.max(0, Math.min(1, (value - start) / (end - start)))
   return progress * progress * (3 - 2 * progress)
@@ -612,7 +634,7 @@ export function calculateAdaptiveSeamMix(
   secondRed: number,
   secondGreen: number,
   secondBlue: number,
-) {
+): number {
   if (bestDominance <= 0 || secondDominance <= 0) return 0
   const dominanceRatio = secondDominance / bestDominance
   if (dominanceRatio <= SEAM_BLEND_START) return 0
@@ -650,27 +672,33 @@ export function calculateAdaptiveSeamMix(
   return Math.min(0.5, seamProximity * agreement * weightedSecondShare)
 }
 
+/** Packs three byte channels into a compact 24-bit working value. */
 function packRgb(red: number, green: number, blue: number) {
   return (red << 16) | (green << 8) | blue
 }
 
+/** Extracts the red byte from a packed working color. */
 function redFromRgb(color: number) {
   return (color >>> 16) & 0xff
 }
 
+/** Extracts the green byte from a packed working color. */
 function greenFromRgb(color: number) {
   return (color >>> 8) & 0xff
 }
 
+/** Extracts the blue byte from a packed working color. */
 function blueFromRgb(color: number) {
   return color & 0xff
 }
 
+/** Applies relative exposure while preventing negative output channels. */
 function exposedChannel(channel: number, exposureScale: number) {
   return Math.max(0, channel * exposureScale)
 }
 
-function canvasToJpeg(
+/** Converts callback-based canvas encoding into a rejecting promise. */
+function encodeCanvasAsJpeg(
   canvas: HTMLCanvasElement,
   quality: number,
 ): Promise<Blob> {
@@ -686,12 +714,13 @@ function canvasToJpeg(
   })
 }
 
+/** Diffuses neighboring colors into small projection gaps without a hard seam. */
 function fillUncoveredPixels(
   pixels: Uint8ClampedArray,
   coverage: Uint8Array,
   width: number,
   height: number,
-) {
+): void {
   for (let pass = 0; pass < 10; pass += 1) {
     let filled = 0
     const nextCoverage = coverage.slice()
@@ -739,7 +768,8 @@ function fillUncoveredPixels(
   }
 }
 
-function nextPaint() {
+/** Gives the browser one paint opportunity between expensive source frames. */
+function yieldToBrowserPaint(): Promise<void> {
   return new Promise<void>((resolve) => {
     if (typeof requestAnimationFrame === 'function') {
       requestAnimationFrame(() => resolve())
@@ -761,17 +791,17 @@ function nextPaint() {
  * capture contract without changing the Moments upload flow.
  */
 export async function composeGuidedPanorama(
-  result: NativePanoramaCaptureResult,
+  captureResult: NativePanoramaCaptureResult,
   onProgress?: (progress: GuidedPanoramaProgress) => void,
   outputWidth = DEFAULT_OUTPUT_WIDTH,
 ): Promise<ProcessedPanorama> {
   if (typeof document === 'undefined') {
     throw new Error('Panorama assembly requires an installed app or browser canvas.')
   }
-  if (result.frames.length < MIN_CAPTURED_FRAMES) {
+  if (captureResult.frames.length < MIN_CAPTURED_FRAMES) {
     throw new Error('Capture more of the surrounding dots before finishing.')
   }
-  if (result.frames.length >= NO_FRAME) {
+  if (captureResult.frames.length >= NO_FRAME) {
     throw new Error('This capture contains too many source pictures to assemble.')
   }
   if (!Number.isFinite(outputWidth) || outputWidth < 1024) {
@@ -789,17 +819,23 @@ export async function composeGuidedPanorama(
   const secondFrameIndices = new Uint8Array(outputPixels)
   bestFrameIndices.fill(NO_FRAME)
   secondFrameIndices.fill(NO_FRAME)
-  const frameLumas = new Array<number>(result.frames.length)
+  const frameLumas = new Array<number>(captureResult.frames.length)
   const sampleCanvas = document.createElement('canvas')
   const sampleContext = getCanvasContext(sampleCanvas)
 
-  for (let frameIndex = 0; frameIndex < result.frames.length; frameIndex += 1) {
-    const frame = result.frames[frameIndex]
+  for (
+    let frameIndex = 0;
+    frameIndex < captureResult.frames.length;
+    frameIndex += 1
+  ) {
+    const frame = captureResult.frames[frameIndex]
     onProgress?.({
       phase: 'reading',
       completed: frameIndex,
-      total: result.frames.length,
+      total: captureResult.frames.length,
     })
+    // Decode one high-resolution frame at a time. Parallel decoding has a much
+    // higher peak-memory cost and can terminate a mobile WebView mid-capture.
     const decoded = await decodeFrame(nativeFrameSource(frame))
     try {
       const sourceWidth = decoded.image.naturalWidth || frame.width
@@ -826,7 +862,7 @@ export async function composeGuidedPanorama(
       onProgress?.({
         phase: 'projecting',
         completed: frameIndex,
-        total: result.frames.length,
+        total: captureResult.frames.length,
       })
 
       for (let y = 0; y < sampleHeight; y += 1) {
@@ -841,7 +877,7 @@ export async function composeGuidedPanorama(
           )
           const edgeDistance = Math.max(normalizedX, normalizedY)
           if (edgeDistance > 0.985) continue
-          const direction = addScaled(
+          const direction = calculateCameraRayDirection(
             basis.forward,
             basis.right,
             basis.up,
@@ -907,9 +943,12 @@ export async function composeGuidedPanorama(
     } finally {
       decoded.close()
     }
-    await nextPaint()
+    await yieldToBrowserPaint()
   }
 
+  // Projection records two candidate owners per destination pixel. Exposure is
+  // solved after every source has contributed, then only compatible seam
+  // neighbors are mixed into the final RGBA image.
   const outputCanvas = document.createElement('canvas')
   outputCanvas.width = safeOutputWidth
   outputCanvas.height = outputHeight
@@ -1005,8 +1044,8 @@ export async function composeGuidedPanorama(
   )
 
   const [viewer, thumbnail] = await Promise.all([
-    canvasToJpeg(outputCanvas, 0.9),
-    canvasToJpeg(thumbnailCanvas, 0.82),
+    encodeCanvasAsJpeg(outputCanvas, 0.9),
+    encodeCanvasAsJpeg(thumbnailCanvas, 0.82),
   ])
   onProgress?.({ phase: 'encoding', completed: 1, total: 1 })
 

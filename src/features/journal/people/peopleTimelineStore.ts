@@ -20,6 +20,7 @@ const MAX_FACES_PER_PHOTO = 20
 const MAX_REFERENCES_PER_PERSON = 12
 const MAX_STORED_PHOTOS = 20_000
 
+/** Creates the current, schema-complete people timeline state. */
 export function emptyPeopleTimelineState(): PeopleTimelineState {
   return {
     version: 4,
@@ -34,10 +35,12 @@ export function emptyPeopleTimelineState(): PeopleTimelineState {
   }
 }
 
+/** Narrows untrusted persisted values before schema validation. */
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
+/** Accepts the minimum durable identity fields required by the people rail. */
 function validPerson(value: unknown): value is TimelinePerson {
   return isRecord(value) &&
     typeof value.id === 'string' &&
@@ -46,6 +49,7 @@ function validPerson(value: unknown): value is TimelinePerson {
     typeof value.createdAt === 'string'
 }
 
+/** Validates a manual or suggested person-to-photo confirmation. */
 function validAssignment(value: unknown): value is TimelinePhotoAssignment {
   return isRecord(value) &&
     typeof value.photoKey === 'string' &&
@@ -57,12 +61,14 @@ function validAssignment(value: unknown): value is TimelinePhotoAssignment {
     typeof value.confirmedAt === 'string'
 }
 
+/** Restricts corrected dates to supported day and approximate-year formats. */
 function validDateOverride(value: unknown): value is TimelineDateOverride {
   return isRecord(value) &&
     typeof value.value === 'string' &&
     (value.precision === 'day' || value.precision === 'year')
 }
 
+/** Validates the key fields used to suppress a rejected suggestion. */
 function validDismissal(value: unknown): value is DismissedFaceSuggestion {
   return isRecord(value) &&
     typeof value.photoKey === 'string' &&
@@ -73,6 +79,7 @@ function validDismissal(value: unknown): value is DismissedFaceSuggestion {
     typeof value.dismissedAt === 'string'
 }
 
+/** Bounds biometric vectors and rejects non-finite model output. */
 function validEmbedding(value: unknown): value is number[] {
   return Array.isArray(value) &&
     value.length > 0 &&
@@ -80,6 +87,7 @@ function validEmbedding(value: unknown): value is number[] {
     value.every((entry) => typeof entry === 'number' && Number.isFinite(entry))
 }
 
+/** Accepts normalized confidence values in the closed unit interval. */
 function validUnitScore(value: unknown): value is number {
   return typeof value === 'number' &&
     Number.isFinite(value) &&
@@ -87,6 +95,7 @@ function validUnitScore(value: unknown): value is number {
     value <= 1
 }
 
+/** Validates one normalized face box, descriptor, and confidence bundle. */
 function validStoredFaceDetection(value: unknown): value is StoredFaceDetection {
   if (!isRecord(value) || !Array.isArray(value.box) || value.box.length !== 4) {
     return false
@@ -109,6 +118,7 @@ function validStoredFaceDetection(value: unknown): value is StoredFaceDetection 
     validUnitScore(value.quality)
 }
 
+/** Validates an enrollment or user-confirmed reference descriptor. */
 function validFaceReference(value: unknown): value is FaceReference {
   return isRecord(value) &&
     typeof value.id === 'string' &&
@@ -123,6 +133,7 @@ function validFaceReference(value: unknown): value is FaceReference {
     ))
 }
 
+/** Clones a validated detection so persisted arrays cannot be mutated by callers. */
 function normalizedDetection(detection: StoredFaceDetection): StoredFaceDetection {
   return {
     id: detection.id,
@@ -139,6 +150,7 @@ function normalizedDetection(detection: StoredFaceDetection): StoredFaceDetectio
   }
 }
 
+/** Removes dangling face links while cloning a validated reference. */
 function normalizedReference(
   reference: FaceReference,
   faceScans: PeopleTimelineState['faceScans'],
@@ -160,6 +172,7 @@ function normalizedReference(
   }
 }
 
+/** Preserves an optional face link only when that face still exists. */
 function normalizedAssignment(
   assignment: TimelinePhotoAssignment,
   faceScans: PeopleTimelineState['faceScans'],
@@ -177,6 +190,7 @@ function normalizedAssignment(
   }
 }
 
+/** Downgrades stale face-specific dismissals to person/photo dismissals. */
 function normalizedDismissal(
   dismissal: DismissedFaceSuggestion,
   faceScans: PeopleTimelineState['faceScans'],
@@ -193,6 +207,7 @@ function normalizedDismissal(
   }
 }
 
+/** Validates, bounds, and migrates untrusted persisted timeline state. */
 export function parsePeopleTimelineState(value: unknown): PeopleTimelineState {
   if (!isRecord(value)) return emptyPeopleTimelineState()
   const people = Array.isArray(value.people)
@@ -297,10 +312,12 @@ export function parsePeopleTimelineState(value: unknown): PeopleTimelineState {
   }
 }
 
+/** Names the metadata-only fallback by account and family namespace. */
 function fallbackKey(cacheNamespace: string) {
   return `${FALLBACK_PREFIX}${encodeURIComponent(cacheNamespace || 'local')}`
 }
 
+/** Strips private descriptors before any state enters localStorage. */
 function withoutBiometricVectors(state: PeopleTimelineState): PeopleTimelineState {
   return {
     ...state,
@@ -309,11 +326,13 @@ function withoutBiometricVectors(state: PeopleTimelineState): PeopleTimelineStat
   }
 }
 
+/** Reports whether a save requires IndexedDB's biometric-capable boundary. */
 function hasBiometricVectors(state: PeopleTimelineState) {
   return Object.keys(state.faceScans).length > 0 ||
     Object.keys(state.faceProfiles).length > 0
 }
 
+/** Detects current and legacy vector fields in an untrusted fallback record. */
 function storedValueHasBiometricVectors(value: unknown) {
   if (!isRecord(value)) return false
   return (
@@ -328,6 +347,7 @@ function storedValueHasBiometricVectors(value: unknown) {
   )
 }
 
+/** Reads metadata-only fallback state and scrubs vectors left by old versions. */
 function readFallback(cacheNamespace: string) {
   const key = fallbackKey(cacheNamespace)
   try {
@@ -357,6 +377,7 @@ function readFallback(cacheNamespace: string) {
   }
 }
 
+/** Persists non-biometric state when IndexedDB is unavailable. */
 function saveFallback(cacheNamespace: string, state: PeopleTimelineState) {
   try {
     window.localStorage.setItem(
@@ -370,6 +391,7 @@ function saveFallback(cacheNamespace: string, state: PeopleTimelineState) {
   }
 }
 
+/** Removes stale fallback state after IndexedDB becomes authoritative. */
 function removeFallback(cacheNamespace: string) {
   try {
     window.localStorage.removeItem(fallbackKey(cacheNamespace))
@@ -379,6 +401,7 @@ function removeFallback(cacheNamespace: string) {
   }
 }
 
+/** Opens the single IndexedDB database whose keys provide account isolation. */
 function openDatabase() {
   return new Promise<IDBDatabase>((resolve, reject) => {
     const request = window.indexedDB.open(DATABASE_NAME, DATABASE_VERSION)
@@ -393,6 +416,7 @@ function openDatabase() {
   })
 }
 
+/** Reads one account/family snapshot and always closes its database handle. */
 async function readIndexedDatabase(cacheNamespace: string) {
   const database = await openDatabase()
   try {
@@ -408,6 +432,7 @@ async function readIndexedDatabase(cacheNamespace: string) {
   }
 }
 
+/** Commits one complete snapshot in a single read-write transaction. */
 async function saveIndexedDatabase(
   cacheNamespace: string,
   state: PeopleTimelineState,
@@ -426,6 +451,7 @@ async function saveIndexedDatabase(
   }
 }
 
+/** Loads one account/family timeline from IndexedDB with localStorage fallback. */
 export async function loadPeopleTimelineState(cacheNamespace: string) {
   if (typeof window === 'undefined') return emptyPeopleTimelineState()
   // A fallback exists only when IndexedDB was unavailable or its cleanup
@@ -444,6 +470,7 @@ export async function loadPeopleTimelineState(cacheNamespace: string) {
   return emptyPeopleTimelineState()
 }
 
+/** Persists a validated timeline snapshot to durable and fallback storage. */
 export async function savePeopleTimelineState(
   cacheNamespace: string,
   state: PeopleTimelineState,

@@ -8,6 +8,7 @@ import type { CapsuleImageSource, CapsulePhoto } from '../types'
 const OUTPUT_WIDTH = 720
 const OUTPUT_HEIGHT = 1280
 
+/** Chooses the first MediaRecorder format this browser can actually encode. */
 function supportedMimeType() {
   if (typeof MediaRecorder === 'undefined') return null
   const candidates = [
@@ -20,6 +21,7 @@ function supportedMimeType() {
   return candidates.find((type) => MediaRecorder.isTypeSupported(type)) ?? null
 }
 
+/** Reports whether this browser can record a canvas-backed recap video. */
 export function canRenderBrowserCapsuleRecap() {
   return Boolean(
     supportedMimeType() &&
@@ -33,6 +35,7 @@ type LoadedImage = {
   release: () => void
 }
 
+/** Resolves remote/object sources to bytes before creating a controlled URL. */
 async function sourceToBlob(source: CapsuleImageSource) {
   if (typeof source !== 'string') return source
 
@@ -43,6 +46,7 @@ async function sourceToBlob(source: CapsuleImageSource) {
   return response.blob()
 }
 
+/** Decodes one source and returns its mandatory object-URL cleanup handle. */
 async function loadImage(source: CapsuleImageSource): Promise<LoadedImage> {
   const blob = await sourceToBlob(source)
   const url = URL.createObjectURL(blob)
@@ -65,6 +69,7 @@ async function loadImage(source: CapsuleImageSource): Promise<LoadedImage> {
   }
 }
 
+/** Loads all frames atomically, releasing successful decodes if any frame fails. */
 async function loadImages(sources: CapsuleImageSource[]) {
   const results = await Promise.allSettled(sources.map(loadImage))
   const loaded: LoadedImage[] = []
@@ -82,6 +87,7 @@ async function loadImages(sources: CapsuleImageSource[]) {
   return loaded
 }
 
+/** Crops an image to a portrait frame without stretching its aspect ratio. */
 function drawCover(context: CanvasRenderingContext2D, image: HTMLImageElement) {
   const scale = Math.max(OUTPUT_WIDTH / image.naturalWidth, OUTPUT_HEIGHT / image.naturalHeight)
   const width = image.naturalWidth * scale
@@ -97,10 +103,12 @@ function drawCover(context: CanvasRenderingContext2D, image: HTMLImageElement) {
   )
 }
 
+/** Keeps each rendered photo visible for its frame-plan duration. */
 function wait(milliseconds: number) {
   return new Promise((resolve) => window.setTimeout(resolve, milliseconds))
 }
 
+/** Renders ordered Capsule photos into a short, shareable browser video. */
 export async function renderBrowserCapsuleRecap(photos: CapsulePhoto[]) {
   const mimeType = supportedMimeType()
   if (!mimeType || !canRenderBrowserCapsuleRecap()) {
@@ -153,6 +161,7 @@ export async function renderBrowserCapsuleRecap(photos: CapsulePhoto[]) {
   }
 }
 
+/** Maps the recorder MIME type to a safe download filename extension. */
 export function capsuleRecapFileExtension(blob: Blob) {
   return blob.type.includes('mp4') ? 'mp4' : 'webm'
 }

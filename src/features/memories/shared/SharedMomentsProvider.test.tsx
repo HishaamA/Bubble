@@ -198,4 +198,29 @@ describe('SharedMomentsProvider', () => {
     expect(unavailableStore.save).not.toHaveBeenCalled()
     expect(unavailableStore.remove).not.toHaveBeenCalled()
   })
+
+  it('keeps successful primary operations when the fallback cache fails', async () => {
+    const primary = createMemoryMomentStore([firstMoment])
+    const unavailableFallback: MomentStore = {
+      list: vi.fn(async () => []),
+      save: vi.fn(async () => {
+        throw new Error('Fallback cache denied')
+      }),
+      remove: vi.fn(async () => {
+        throw new Error('Fallback cache denied')
+      }),
+    }
+    const store = createResilientMomentStore(primary, unavailableFallback)
+    const secondMoment = {
+      ...firstMoment,
+      id: 'second-panorama',
+      createdAt: '2026-08-26T17:00:00.000Z',
+    }
+
+    await expect(store.list()).resolves.toEqual([firstMoment])
+    await expect(store.save(secondMoment)).resolves.toBeUndefined()
+    await expect(store.remove([firstMoment.id])).resolves.toBeUndefined()
+    await expect(primary.list()).resolves.toEqual([secondMoment])
+    expect(unavailableFallback.list).not.toHaveBeenCalled()
+  })
 })

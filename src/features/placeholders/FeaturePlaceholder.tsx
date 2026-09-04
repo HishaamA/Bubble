@@ -7,6 +7,7 @@ type FeaturePlaceholderProps = {
   icon: IconName
 }
 
+/** Renders a consistent status page for a named feature that is not yet available. */
 export function FeaturePlaceholder({
   eyebrow,
   title,

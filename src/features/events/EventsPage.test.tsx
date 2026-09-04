@@ -100,6 +100,7 @@ function storeCreatedPlans(
 }
 
 afterEach(() => {
+  vi.useRealTimers()
   vi.restoreAllMocks()
   localStorage.clear()
   vi.unstubAllGlobals()
@@ -390,21 +391,25 @@ describe('JournalEventsSection', () => {
   })
 
   it('changes weeks and filters locally saved plans by the selected date', async () => {
+    // Pin this calendar-navigation scenario to midweek. On a real Sunday there
+    // is no later day in the current Monday-based week, which made the fixture
+    // silently turn into a past event and fail according to the wall clock.
+    vi.setSystemTime(new Date(2026, 8, 2, 12, 0, 0, 0))
     const user = userEvent.setup()
     const today = dateFromToday(0, 20)
-    const tomorrow = dateFromToday(1, 20)
+    const nearbyDay = dateFromToday(1, 20)
     const nextWeek = dateFromToday(7, 20)
     storeCreatedPlans([
       { id: 'today', title: 'Today plan', startsAt: today, location: 'Home', category: 'other' },
-      { id: 'tomorrow', title: 'Tomorrow plan', startsAt: tomorrow, location: 'Park', category: 'other' },
+      { id: 'nearby', title: 'Nearby plan', startsAt: nearbyDay, location: 'Park', category: 'other' },
       { id: 'next-week', title: 'Next week plan', startsAt: nextWeek, location: 'Beach', category: 'other' },
     ])
     renderJournalEventsSection()
 
     expect(screen.getByRole('heading', { name: 'Today plan' })).toBeInTheDocument()
-    expect(screen.queryByRole('heading', { name: 'Tomorrow plan' })).not.toBeInTheDocument()
-    await user.click(screen.getByRole('button', { name: new RegExp(`^${formatDayButton(tomorrow)}`) }))
-    expect(screen.getByRole('heading', { name: 'Tomorrow plan' })).toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: 'Nearby plan' })).not.toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: new RegExp(`^${formatDayButton(nearbyDay)}`) }))
+    expect(screen.getByRole('heading', { name: 'Nearby plan' })).toBeInTheDocument()
     expect(screen.queryByRole('heading', { name: 'Today plan' })).not.toBeInTheDocument()
 
     await user.click(screen.getByRole('button', { name: 'Next week' }))

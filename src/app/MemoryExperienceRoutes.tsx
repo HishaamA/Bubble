@@ -26,6 +26,7 @@ import {
 } from '../features/memories/shared'
 import { useAuth } from '../features/auth'
 
+/** Compares calendar dates in the device's local timezone. */
 function isSameLocalDay(first: string | Date, second: Date) {
   const date = first instanceof Date ? first : new Date(first)
   return (
@@ -35,6 +36,7 @@ function isSameLocalDay(first: string | Date, second: Date) {
   )
 }
 
+/** Connects the Moments constellation to shared-memory synchronization. */
 export function MemoriesRoute() {
   const { moments } = useSharedMoments()
   const { deleteMoment } = useFamilyMomentSync()
@@ -56,6 +58,52 @@ type JournalArchiveRouteProps = {
   journalPhotoStore?: JournalPhotoStore
 }
 
+/**
+ * Loads the capsule archive and photo library shared by both Journal routes.
+ * Keeping this wiring in one hook prevents the list and full-screen viewer
+ * from drifting into different cache, demo, or contributor behavior.
+ */
+function useJournalRouteData({
+  now,
+  capsules: suppliedCapsules,
+  capsuleStore,
+  capsuleCacheNamespace = 'signed-out:no-family',
+  journalPhotos: suppliedJournalPhotos,
+  journalPhotoStore,
+}: JournalArchiveRouteProps) {
+  const { isDevelopmentPreview, user } = useAuth()
+  const archive = useJournalCapsuleArchive({
+    cacheNamespace: capsuleCacheNamespace,
+    enabled: suppliedCapsules === undefined,
+    store: capsuleStore,
+  })
+  const photoLibrary = useJournalPhotoLibrary({
+    cacheNamespace: capsuleCacheNamespace,
+    contributorName: user?.displayName?.trim() || 'You',
+    enabled: suppliedJournalPhotos === undefined,
+    store: journalPhotoStore,
+  })
+  const journalPhotos = useMemo(
+    () => withDemoJournalPhotos(
+      suppliedJournalPhotos ?? photoLibrary.photos,
+      isDevelopmentPreview === true,
+    ),
+    [isDevelopmentPreview, photoLibrary.photos, suppliedJournalPhotos],
+  )
+
+  return {
+    capsules: suppliedCapsules ?? archive.capsules,
+    journalPhotos,
+    loading:
+      (suppliedCapsules === undefined && archive.loading) ||
+      (suppliedJournalPhotos === undefined && photoLibrary.loading),
+    now: now ?? archive.clock,
+    openAllPhotosByDefault: isDevelopmentPreview === true,
+    photoLibrary,
+  }
+}
+
+/** Displays the combined photo timeline, plans, and flights Journal page. */
 export function JournalRoute({
   now,
   capsules: suppliedCapsules,
@@ -64,40 +112,30 @@ export function JournalRoute({
   journalPhotos: suppliedJournalPhotos,
   journalPhotoStore,
 }: JournalArchiveRouteProps = {}) {
-  const { isDevelopmentPreview, user } = useAuth()
-  const archive = useJournalCapsuleArchive({
-    cacheNamespace: capsuleCacheNamespace,
-    enabled: suppliedCapsules === undefined,
-    store: capsuleStore,
+  const routeData = useJournalRouteData({
+    now,
+    capsules: suppliedCapsules,
+    capsuleStore,
+    capsuleCacheNamespace,
+    journalPhotos: suppliedJournalPhotos,
+    journalPhotoStore,
   })
-  const photoLibrary = useJournalPhotoLibrary({
-    cacheNamespace: capsuleCacheNamespace,
-    contributorName: user?.displayName?.trim() || 'You',
-    enabled: suppliedJournalPhotos === undefined,
-    store: journalPhotoStore,
-  })
-  const journalPhotos = useMemo(
-    () => withDemoJournalPhotos(
-      suppliedJournalPhotos ?? photoLibrary.photos,
-      isDevelopmentPreview === true,
-    ),
-    [isDevelopmentPreview, photoLibrary.photos, suppliedJournalPhotos],
-  )
 
   return (
     <JournalPage
       now={now}
-      capsules={suppliedCapsules ?? archive.capsules}
-      capsuleNow={now ?? archive.clock}
+      capsules={routeData.capsules}
+      capsuleNow={routeData.now}
       capsuleCacheNamespace={capsuleCacheNamespace}
-      journalPhotos={journalPhotos}
-      onUploadJournalPhotos={photoLibrary.importPhotos}
-      journalPhotoImportProgress={photoLibrary.importProgress}
-      openAllPhotosByDefault={isDevelopmentPreview === true}
+      journalPhotos={routeData.journalPhotos}
+      onUploadJournalPhotos={routeData.photoLibrary.importPhotos}
+      journalPhotoImportProgress={routeData.photoLibrary.importProgress}
+      openAllPhotosByDefault={routeData.openAllPhotosByDefault}
     />
   )
 }
 
+/** Displays one capsule or library image without duplicating Journal loading. */
 export function CapsulePhotoRoute({
   now,
   capsules: suppliedCapsules,
@@ -106,39 +144,26 @@ export function CapsulePhotoRoute({
   journalPhotos: suppliedJournalPhotos,
   journalPhotoStore,
 }: JournalArchiveRouteProps = {}) {
-  const { isDevelopmentPreview, user } = useAuth()
-  const archive = useJournalCapsuleArchive({
-    cacheNamespace: capsuleCacheNamespace,
-    enabled: suppliedCapsules === undefined,
-    store: capsuleStore,
+  const routeData = useJournalRouteData({
+    now,
+    capsules: suppliedCapsules,
+    capsuleStore,
+    capsuleCacheNamespace,
+    journalPhotos: suppliedJournalPhotos,
+    journalPhotoStore,
   })
-  const photoLibrary = useJournalPhotoLibrary({
-    cacheNamespace: capsuleCacheNamespace,
-    contributorName: user?.displayName?.trim() || 'You',
-    enabled: suppliedJournalPhotos === undefined,
-    store: journalPhotoStore,
-  })
-  const journalPhotos = useMemo(
-    () => withDemoJournalPhotos(
-      suppliedJournalPhotos ?? photoLibrary.photos,
-      isDevelopmentPreview === true,
-    ),
-    [isDevelopmentPreview, photoLibrary.photos, suppliedJournalPhotos],
-  )
 
   return (
     <CapsulePhotoViewer
-      capsules={suppliedCapsules ?? archive.capsules}
-      loading={
-        (suppliedCapsules === undefined && archive.loading) ||
-        (suppliedJournalPhotos === undefined && photoLibrary.loading)
-      }
-      now={now ?? archive.clock}
-      journalPhotos={journalPhotos}
+      capsules={routeData.capsules}
+      loading={routeData.loading}
+      now={routeData.now}
+      journalPhotos={routeData.journalPhotos}
     />
   )
 }
 
+/** Connects a selected 360 memory to the panorama viewer and annotations. */
 export function PanoramaRoute() {
   const { loading, moments } = useSharedMoments()
   const { updateMomentAnnotations } = useFamilyMomentSync()
@@ -153,6 +178,7 @@ export function PanoramaRoute() {
   )
 }
 
+/** Owns the native/web capture workflow and its save or share destinations. */
 export function CaptureRoute() {
   const location = useLocation()
   const navigate = useNavigate()
@@ -171,11 +197,13 @@ export function CaptureRoute() {
       isSameLocalDay(moment.createdAt, today),
   )
 
+  /** Shares a completed capture and records where it was delivered. */
   async function saveCapture(submission: Capture360Submission) {
     const result = await shareMoment(submission)
     setDelivery(result.delivery)
   }
 
+  /** Persists an unfinished capture locally without starting family sync. */
   async function saveCaptureDraft(submission: Capture360Submission) {
     await saveMoment({
       id: submission.id,

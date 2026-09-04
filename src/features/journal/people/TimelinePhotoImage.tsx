@@ -9,6 +9,7 @@ type TimelinePhotoImageProps = {
   lazy?: boolean
 }
 
+/** Supplies an accessible fallback when a timeline preview cannot load. */
 function UnavailablePhoto({ alt }: { alt: string }) {
   return (
     <span className="people-timeline__photo-unavailable" role="img" aria-label={`${alt}. Preview unavailable.`}>
@@ -20,6 +21,7 @@ function UnavailablePhoto({ alt }: { alt: string }) {
   )
 }
 
+/** Tracks failures per URL so a newly refreshed signed URL can retry. */
 function StringPhoto({
   source,
   alt,
@@ -50,6 +52,7 @@ function StringPhoto({
   )
 }
 
+/** Bridges a durable Blob to an image element without persisting its object URL. */
 function BlobPhoto({
   source,
   alt,
@@ -93,6 +96,7 @@ function BlobPhoto({
   )
 }
 
+/** Renders a timeline thumbnail while owning temporary Blob object URLs. */
 export function TimelinePhotoImage({
   source,
   alt,

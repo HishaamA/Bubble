@@ -9,6 +9,7 @@ const DATABASE_PREFIX = 'kinsphere-family-moments'
 const DATABASE_VERSION = 1
 const STORE_NAME = 'panoramas'
 
+/** Provides deterministic newest-first ordering for capture timestamps. */
 function compareNewestFirst(
   first: StoredPanoramaMoment,
   second: StoredPanoramaMoment,
@@ -16,12 +17,14 @@ function compareNewestFirst(
   return second.createdAt.localeCompare(first.createdAt)
 }
 
+/** Clones mutable annotation metadata at the store boundary. */
 function cloneAnnotation(
   annotation: StoredPanoramaAnnotation,
 ): StoredPanoramaAnnotation {
   return { ...annotation }
 }
 
+/** Returns an isolated moment record, including nested annotation copies. */
 function cloneMoment(moment: StoredPanoramaMoment): StoredPanoramaMoment {
   return {
     ...moment,
@@ -29,6 +32,7 @@ function cloneMoment(moment: StoredPanoramaMoment): StoredPanoramaMoment {
   }
 }
 
+/** Generates a collision-resistant identifier for locally captured panoramas. */
 function createMomentId() {
   if (
     typeof globalThis.crypto !== 'undefined' &&
@@ -40,6 +44,7 @@ function createMomentId() {
   return `moment-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`
 }
 
+/** Converts optional capture dates to valid ISO timestamps. */
 function normalizeCreatedAt(value: string | Date | undefined) {
   const date = value instanceof Date ? value : new Date(value ?? Date.now())
 
@@ -50,6 +55,7 @@ function normalizeCreatedAt(value: string | Date | undefined) {
   return date.toISOString()
 }
 
+/** Enforces non-empty text fields before a capture is persisted. */
 function requiredText(value: string, field: string) {
   const normalized = value.trim()
   if (!normalized) {
@@ -58,6 +64,7 @@ function requiredText(value: string, field: string) {
   return normalized
 }
 
+/** Rejects non-finite or non-positive panorama dimensions. */
 function positiveDimension(value: number, field: string) {
   if (!Number.isFinite(value) || value <= 0) {
     throw new TypeError(`${field} must be a positive number`)
@@ -65,6 +72,7 @@ function positiveDimension(value: number, field: string) {
   return Math.round(value)
 }
 
+/** Validates and normalizes capture input before any store persists it. */
 export function preparePanoramaMoment(
   input: SavePanoramaMomentInput,
 ): StoredPanoramaMoment {
@@ -90,6 +98,7 @@ export function preparePanoramaMoment(
   }
 }
 
+/** Creates an isolated in-memory store suitable for previews and fallbacks. */
 export function createMemoryMomentStore(
   seed: StoredPanoramaMoment[] = [],
 ): MomentStore {
@@ -110,11 +119,13 @@ export function createMemoryMomentStore(
   }
 }
 
+/** Names the IndexedDB database by account to prevent cross-account leakage. */
 export function momentDatabaseNameForSubject(subject: string) {
   const namespace = subject.trim() || 'signed-out'
   return `${DATABASE_PREFIX}:${encodeURIComponent(namespace)}`
 }
 
+/** Opens and upgrades an account-scoped moment database. */
 function openDatabase(
   indexedDb: IDBFactory,
   databaseName: string,
@@ -137,6 +148,7 @@ function openDatabase(
   })
 }
 
+/** Creates an account-scoped IndexedDB implementation of the moment store. */
 export function createIndexedDbMomentStore(
   indexedDb: IDBFactory,
   subject = 'local-preview',
@@ -211,6 +223,11 @@ export function createIndexedDbMomentStore(
   }
 }
 
+/**
+ * Uses the fallback only after the primary store fails. Mirroring into the
+ * fallback is best effort: a cache failure must not invalidate a successful
+ * durable operation or hide records returned by the primary store.
+ */
 export function createResilientMomentStore(
   primary: MomentStore,
   fallback: MomentStore = createMemoryMomentStore(),
@@ -221,46 +238,57 @@ export function createResilientMomentStore(
     async list() {
       if (fallbackOnly) return fallback.list()
 
+      let moments: StoredPanoramaMoment[]
       try {
-        const moments = await primary.list()
-        await Promise.all(moments.map((moment) => fallback.save(moment)))
-        return moments
+        moments = await primary.list()
       } catch {
         fallbackOnly = true
         return fallback.list()
       }
+
+      await Promise.allSettled(
+        moments.map((moment) => fallback.save(moment)),
+      )
+      return moments
     },
 
     async save(moment) {
-      if (!fallbackOnly) {
-        try {
-          await primary.save(moment)
-          await fallback.save(moment)
-          return
-        } catch {
-          fallbackOnly = true
-        }
+      if (fallbackOnly) return fallback.save(moment)
+
+      try {
+        await primary.save(moment)
+      } catch {
+        fallbackOnly = true
+        return fallback.save(moment)
       }
 
-      await fallback.save(moment)
+      try {
+        await fallback.save(moment)
+      } catch {
+        // The primary save is already durable; the fallback is only a cache.
+      }
     },
 
     async remove(ids) {
-      if (!fallbackOnly) {
-        try {
-          await primary.remove(ids)
-          await fallback.remove(ids)
-          return
-        } catch {
-          fallbackOnly = true
-        }
+      if (fallbackOnly) return fallback.remove(ids)
+
+      try {
+        await primary.remove(ids)
+      } catch {
+        fallbackOnly = true
+        return fallback.remove(ids)
       }
 
-      await fallback.remove(ids)
+      try {
+        await fallback.remove(ids)
+      } catch {
+        // A cache cleanup failure cannot undo a successful durable deletion.
+      }
     },
   }
 }
 
+/** Selects the durable browser store, or memory storage during SSR. */
 export function createDefaultMomentStore(
   subject = 'local-preview',
 ): MomentStore {

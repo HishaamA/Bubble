@@ -4,6 +4,9 @@ import {
 } from '../../lib/supabase'
 import { getFamilyMomentConnection } from './familyMomentService'
 
+// Synced comments are server-authored. Unsynced demo comments stay local and
+// are marked explicitly so callers never mistake them for family-shared data.
+/** Limits shared and local comments before they reach storage. */
 export const FAMILY_MOMENT_COMMENT_MAX_LENGTH = 500
 export const FAMILY_MOMENT_COMMENT_AUTHOR_MAX_LENGTH = 80
 
@@ -46,7 +49,7 @@ type NormalizedCommentInput = {
   authorDisplayName: string
 }
 
-const LOCAL_STORAGE_KEY = 'kinsphere:family-moment-comments:v1'
+const LOCAL_STORAGE_KEY_PREFIX = 'kinsphere:family-moment-comments:v2'
 const LOCAL_CHANGE_EVENT = 'kinsphere:family-moment-comment-change'
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
@@ -54,9 +57,19 @@ const LOCAL_MOMENT_ID_PATTERN = /^[a-z0-9][a-z0-9_-]{0,119}$/i
 const ANNOTATION_ID_PATTERN = /^[a-z0-9][a-z0-9_-]{0,79}$/
 const MAX_LOCAL_COMMENTS = 500
 
-let memoryFallback: FamilyMomentComment[] = []
-let localStorageWriteUnavailable = false
+const memoryFallbackByStorageKey = new Map<string, FamilyMomentComment[]>()
+const localStorageWriteUnavailableKeys = new Set<string>()
 
+/** Separates unsynced preview comments when a device changes accounts. */
+function localCommentsStorageKey(): string {
+  const accountSubject = getClerkSupabaseIdentity()?.subject?.trim()
+  const accountScope = accountSubject
+    ? encodeURIComponent(accountSubject)
+    : 'anonymous-preview'
+  return `${LOCAL_STORAGE_KEY_PREFIX}:${accountScope}`
+}
+
+/** Trims a preview author name and enforces the server-compatible limit. */
 function normalizeAuthorDisplayName(value: string | null | undefined) {
   const displayName = value?.trim() || 'You'
   if (displayName.length > FAMILY_MOMENT_COMMENT_AUTHOR_MAX_LENGTH) {
@@ -67,6 +80,7 @@ function normalizeAuthorDisplayName(value: string | null | undefined) {
   return displayName
 }
 
+/** Canonicalizes user input before selecting remote or local persistence. */
 function normalizeCommentInput(
   input: AddFamilyMomentCommentInput,
 ): NormalizedCommentInput {
@@ -97,6 +111,7 @@ function normalizeCommentInput(
   }
 }
 
+/** Accepts only complete server-authored rows for the requested moment. */
 function parseCommentRow(
   row: FamilyMomentCommentRow,
   expectedMomentId?: string,
@@ -147,6 +162,7 @@ function parseCommentRow(
   }
 }
 
+/** Recognizes the stricter shape reserved for unsynced local comments. */
 function isLocalComment(value: unknown): value is FamilyMomentComment {
   if (!value || typeof value !== 'object') return false
   const comment = value as Partial<FamilyMomentComment>
@@ -172,48 +188,58 @@ function isLocalComment(value: unknown): value is FamilyMomentComment {
   )
 }
 
+/** Reads validated preview comments while tolerating blocked local storage. */
 function readLocalComments() {
+  const storageKey = localCommentsStorageKey()
+  const memoryFallback = memoryFallbackByStorageKey.get(storageKey) ?? []
   if (typeof localStorage === 'undefined') return memoryFallback
   try {
-    const raw = localStorage.getItem(LOCAL_STORAGE_KEY)
-    if (!raw) {
-      if (localStorageWriteUnavailable) return memoryFallback
-      memoryFallback = []
-      return memoryFallback
+    const serializedComments = localStorage.getItem(storageKey)
+    if (!serializedComments) {
+      if (localStorageWriteUnavailableKeys.has(storageKey)) {
+        return memoryFallback
+      }
+      memoryFallbackByStorageKey.set(storageKey, [])
+      return []
     }
-    const parsed: unknown = JSON.parse(raw)
-    if (!Array.isArray(parsed)) return memoryFallback
-    const comments = parsed.filter(isLocalComment).map((comment) => ({
+    const parsedComments: unknown = JSON.parse(serializedComments)
+    if (!Array.isArray(parsedComments)) return memoryFallback
+    const comments = parsedComments.filter(isLocalComment).map((comment) => ({
       ...comment,
       authorDisplayName: comment.authorDisplayName.trim(),
       body: comment.body.trim(),
       createdAt: new Date(comment.createdAt).toISOString(),
     }))
-    memoryFallback = comments
+    memoryFallbackByStorageKey.set(storageKey, comments)
     return comments
   } catch {
     return memoryFallback
   }
 }
 
+/** Keeps a bounded memory mirror even when persistent browser storage fails. */
 function writeLocalComments(comments: FamilyMomentComment[]) {
-  memoryFallback = comments.slice(-MAX_LOCAL_COMMENTS)
+  const storageKey = localCommentsStorageKey()
+  const memoryFallback = comments.slice(-MAX_LOCAL_COMMENTS)
+  memoryFallbackByStorageKey.set(storageKey, memoryFallback)
   if (typeof localStorage === 'undefined') return
   try {
-    localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(memoryFallback))
-    localStorageWriteUnavailable = false
+    localStorage.setItem(storageKey, JSON.stringify(memoryFallback))
+    localStorageWriteUnavailableKeys.delete(storageKey)
   } catch {
-    localStorageWriteUnavailable = true
+    localStorageWriteUnavailableKeys.add(storageKey)
     // The in-memory fallback still keeps preview comments working when a
     // browser blocks or exhausts localStorage.
   }
 }
 
+/** Creates a collision-resistant identifier in browsers with or without UUIDs. */
 function localCommentId() {
   const randomId = globalThis.crypto?.randomUUID?.()
   return randomId ? `local-${randomId}` : `local-${Date.now()}-${Math.random().toString(16).slice(2)}`
 }
 
+/** Notifies same-document subscribers after a local or remote write. */
 function announceCommentChange(momentId: string) {
   if (typeof window === 'undefined') return
   window.dispatchEvent(
@@ -221,19 +247,22 @@ function announceCommentChange(momentId: string) {
   )
 }
 
+/** Selects preview comments for one validated moment identifier. */
 function localCommentsForMoment(momentId: string) {
   return readLocalComments().filter((comment) => comment.momentId === momentId)
 }
 
+/** Merges local and remote results by ID in chronological order. */
 function sortAndDedupeComments(comments: FamilyMomentComment[]) {
-  const byId = new Map<string, FamilyMomentComment>()
-  for (const comment of comments) byId.set(comment.id, comment)
-  return [...byId.values()].sort(
+  const commentsById = new Map<string, FamilyMomentComment>()
+  for (const comment of comments) commentsById.set(comment.id, comment)
+  return [...commentsById.values()].sort(
     (left, right) =>
       new Date(left.createdAt).getTime() - new Date(right.createdAt).getTime(),
   )
 }
 
+/** Resolves remote access only for synced UUID moments and signed-in members. */
 async function remoteContextForMoment(momentId: string) {
   if (!UUID_PATTERN.test(momentId)) return null
   const client = getSupabaseClient()
@@ -250,21 +279,21 @@ export async function fetchFamilyMomentComments(
   if (!LOCAL_MOMENT_ID_PATTERN.test(momentId)) return []
 
   const localComments = localCommentsForMoment(momentId)
-  const remote = await remoteContextForMoment(momentId)
-  if (!remote) return sortAndDedupeComments(localComments)
+  const remoteContext = await remoteContextForMoment(momentId)
+  if (!remoteContext) return sortAndDedupeComments(localComments)
 
-  const { data, error } = await remote.client
+  const { data: commentRows, error } = await remoteContext.client
     .from('family_moment_comments')
     .select(
       'id,moment_id,annotation_id,author_id,author_display_name,body,created_at',
     )
-    .eq('circle_id', remote.connection.circleId)
+    .eq('circle_id', remoteContext.connection.circleId)
     .eq('moment_id', momentId)
     .order('created_at', { ascending: true })
     .limit(250)
   if (error) throw error
 
-  const syncedComments = ((data ?? []) as FamilyMomentCommentRow[])
+  const syncedComments = ((commentRows ?? []) as FamilyMomentCommentRow[])
     .map((row) => parseCommentRow(row, momentId))
     .filter((comment): comment is FamilyMomentComment => comment !== null)
 
@@ -279,29 +308,37 @@ export async function addFamilyMomentComment(
   input: AddFamilyMomentCommentInput,
 ): Promise<FamilyMomentComment> {
   const normalized = normalizeCommentInput(input)
-  const remote = await remoteContextForMoment(normalized.momentId)
+  const remoteContext = await remoteContextForMoment(normalized.momentId)
 
-  if (remote) {
-    const { data, error } = await remote.client.rpc('add_family_moment_comment', {
-      p_circle_id: remote.connection.circleId,
-      p_moment_id: normalized.momentId,
-      p_annotation_id: normalized.annotationId,
-      p_body: normalized.body,
-    })
+  if (remoteContext) {
+    const { data: savedRows, error } = await remoteContext.client.rpc(
+      'add_family_moment_comment',
+      {
+        p_circle_id: remoteContext.connection.circleId,
+        p_moment_id: normalized.momentId,
+        p_annotation_id: normalized.annotationId,
+        p_body: normalized.body,
+      },
+    )
     if (error) throw error
 
-    const rows = Array.isArray(data) ? data : [data]
-    const saved = rows
-      .map((row) => parseCommentRow((row ?? {}) as FamilyMomentCommentRow, normalized.momentId))
+    const rpcRows = Array.isArray(savedRows) ? savedRows : [savedRows]
+    const savedComment = rpcRows
+      .map((row) =>
+        parseCommentRow(
+          (row ?? {}) as FamilyMomentCommentRow,
+          normalized.momentId,
+        ),
+      )
       .find((comment): comment is FamilyMomentComment => comment !== null)
-    if (!saved) {
+    if (!savedComment) {
       throw new Error('The family comment could not be saved securely.')
     }
     announceCommentChange(normalized.momentId)
-    return saved
+    return savedComment
   }
 
-  const saved: FamilyMomentComment = {
+  const savedComment: FamilyMomentComment = {
     id: localCommentId(),
     momentId: normalized.momentId,
     annotationId: normalized.annotationId,
@@ -311,9 +348,9 @@ export async function addFamilyMomentComment(
     createdAt: new Date().toISOString(),
     synced: false,
   }
-  writeLocalComments([...readLocalComments(), saved])
+  writeLocalComments([...readLocalComments(), savedComment])
   announceCommentChange(normalized.momentId)
-  return saved
+  return savedComment
 }
 
 /**
@@ -327,12 +364,20 @@ export async function subscribeToFamilyMomentComments(
   const momentId = momentIdInput.trim()
   if (!LOCAL_MOMENT_ID_PATTERN.test(momentId)) return () => undefined
 
+  // Resolve the remote channel before installing browser listeners. If the
+  // membership lookup fails, the caller receives the error without leaked
+  // local listeners that can no longer be cleaned up.
+  const remoteContext = await remoteContextForMoment(momentId)
+  const storageKey = localCommentsStorageKey()
+
+  /** Filters same-document notifications to this subscribed moment. */
   const onLocalChange = (event: Event) => {
     const detail = (event as CustomEvent<{ momentId?: unknown }>).detail
     if (detail?.momentId === momentId) onChange()
   }
+  /** Filters cross-tab storage notifications to the active account namespace. */
   const onStorageChange = (event: StorageEvent) => {
-    if (event.key === LOCAL_STORAGE_KEY) onChange()
+    if (event.key === storageKey) onChange()
   }
 
   if (typeof window !== 'undefined') {
@@ -340,9 +385,8 @@ export async function subscribeToFamilyMomentComments(
     window.addEventListener('storage', onStorageChange)
   }
 
-  const remote = await remoteContextForMoment(momentId)
-  const channel = remote
-    ? remote.client
+  const channel = remoteContext
+    ? remoteContext.client
         .channel(`family-moment-comments:${momentId}`)
         .on(
           'postgres_changes',
@@ -362,6 +406,8 @@ export async function subscribeToFamilyMomentComments(
       window.removeEventListener(LOCAL_CHANGE_EVENT, onLocalChange)
       window.removeEventListener('storage', onStorageChange)
     }
-    if (remote && channel) void remote.client.removeChannel(channel)
+    if (remoteContext && channel) {
+      void remoteContext.client.removeChannel(channel)
+    }
   }
 }

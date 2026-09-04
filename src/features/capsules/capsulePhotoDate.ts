@@ -34,6 +34,7 @@ const EXIF_DATE_OPTIONS = {
   chunked: true,
 } as const
 
+/** Sets a tolerant upper bound for camera clocks that are slightly ahead. */
 function endOfTomorrow(now: Date) {
   const limit = new Date(now)
   limit.setDate(limit.getDate() + 1)
@@ -51,6 +52,7 @@ type WallClockParts = {
   millisecond: number
 }
 
+/** Parses a standards-compliant EXIF UTC offset and rejects impossible zones. */
 function parseExifOffset(value: unknown) {
   if (typeof value !== 'string') return null
   const match = /^([+-])(\d{2}):(\d{2})$/.exec(value.trim())
@@ -64,6 +66,7 @@ function parseExifOffset(value: unknown) {
   return match[1] === '-' ? -totalMinutes : totalMinutes
 }
 
+/** Confirms that Date normalization did not silently roll an invalid field. */
 function validWallClock(parts: WallClockParts) {
   const check = new Date(Date.UTC(
     parts.year,
@@ -85,6 +88,7 @@ function validWallClock(parts: WallClockParts) {
   )
 }
 
+/** Converts EXIF wall-clock fields using their zone, or the device zone if absent. */
 function dateFromWallClock(
   parts: WallClockParts,
   offsetMinutes: number | null,
@@ -116,6 +120,7 @@ function dateFromWallClock(
   return Number.isFinite(localDate.getTime()) ? localDate : null
 }
 
+/** Preserves local calendar fields when exifr has already returned a Date object. */
 function localWallClockParts(date: Date): WallClockParts {
   return {
     year: date.getFullYear(),
@@ -128,6 +133,7 @@ function localWallClockParts(date: Date): WallClockParts {
   }
 }
 
+/** Accepts common EXIF/ISO date representations without applying offsets twice. */
 function parseExifDate(value: unknown, offsetValue?: unknown) {
   const offsetMinutes = parseExifOffset(offsetValue)
   if (value instanceof Date) {
@@ -159,6 +165,7 @@ function parseExifDate(value: unknown, offsetValue?: unknown) {
   return Number.isFinite(parsed.getTime()) ? parsed : null
 }
 
+/** Rejects corrupt, implausibly old, or future capture timestamps. */
 function plausiblePhotoDate(
   value: unknown,
   now: Date,

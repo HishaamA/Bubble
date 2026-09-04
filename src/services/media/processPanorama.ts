@@ -31,11 +31,20 @@ const MAX_VIEWER_HEIGHT = 2048
 const THUMBNAIL_HEIGHT = 320
 const MAX_PANORAMA_RATIO = 12
 
+/**
+ * Crops a near-2:1 equirectangular source to exact viewer dimensions without
+ * stretching it. Use `calculatePanoramaRenderPlan` for wider phone panoramas.
+ */
 export function calculatePanoramaCrop(
   width: number,
   height: number,
 ): PanoramaCrop {
-  if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) {
+  if (
+    !Number.isFinite(width) ||
+    !Number.isFinite(height) ||
+    width <= 0 ||
+    height <= 0
+  ) {
     throw new TypeError('Panorama dimensions must be positive numbers.')
   }
 
@@ -44,7 +53,9 @@ export function calculatePanoramaCrop(
     throw new TypeError('Choose a 2:1 equirectangular panorama.')
   }
   if (width * height > MAX_INPUT_PIXELS) {
-    throw new TypeError('This panorama is too large to process safely on this device.')
+    throw new TypeError(
+      'This panorama is too large to process safely on this device.',
+    )
   }
 
   const sourceWidth = ratio >= 2 ? height * 2 : width
@@ -77,11 +88,18 @@ export function calculatePanoramaRenderPlan(
   width: number,
   height: number,
 ): PanoramaRenderPlan {
-  if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) {
+  if (
+    !Number.isFinite(width) ||
+    !Number.isFinite(height) ||
+    width <= 0 ||
+    height <= 0
+  ) {
     throw new TypeError('Panorama dimensions must be positive numbers.')
   }
   if (width * height > MAX_INPUT_PIXELS) {
-    throw new TypeError('This panorama is too large to process safely on this device.')
+    throw new TypeError(
+      'This panorama is too large to process safely on this device.',
+    )
   }
 
   const ratio = width / height
@@ -127,6 +145,7 @@ type DecodedImage = {
   close: () => void
 }
 
+/** Uses ImageBitmap when available and revokes fallback object URLs on close. */
 async function decodeImage(file: Blob): Promise<DecodedImage> {
   if (typeof createImageBitmap === 'function') {
     const bitmap = await createImageBitmap(file)
@@ -162,8 +181,9 @@ async function decodeImage(file: Blob): Promise<DecodedImage> {
   }
 }
 
+/** Draws one metadata-free JPEG derivative according to the shared plan. */
 function renderJpeg(
-  image: CanvasImageSource,
+  imageSource: CanvasImageSource,
   plan: PanoramaRenderPlan,
   outputWidth: number,
   outputHeight: number,
@@ -187,7 +207,7 @@ function renderJpeg(
     // the whole horizontal sweep without inventing unrelated imagery or color.
     if (contentTop > 0) {
       context.drawImage(
-        image,
+        imageSource,
         0,
         0,
         plan.sourceWidth,
@@ -200,7 +220,7 @@ function renderJpeg(
     }
     if (bottomStart < outputHeight) {
       context.drawImage(
-        image,
+        imageSource,
         0,
         Math.max(0, plan.sourceHeight - 1),
         plan.sourceWidth,
@@ -212,7 +232,7 @@ function renderJpeg(
       )
     }
     context.drawImage(
-      image,
+      imageSource,
       0,
       0,
       plan.sourceWidth,
@@ -224,7 +244,7 @@ function renderJpeg(
     )
   } else {
     context.drawImage(
-      image,
+      imageSource,
       plan.sourceX,
       plan.sourceY,
       plan.sourceWidth,
@@ -265,35 +285,38 @@ export async function processPanoramaForSharing(
     throw new Error('Panorama processing requires a browser canvas.')
   }
 
-  const decoded = await decodeImage(file)
+  const decodedImage = await decodeImage(file)
   try {
-    const plan = calculatePanoramaRenderPlan(decoded.width, decoded.height)
-    const [viewer, thumbnail] = await Promise.all([
+    const renderPlan = calculatePanoramaRenderPlan(
+      decodedImage.width,
+      decodedImage.height,
+    )
+    const [viewerImage, thumbnailImage] = await Promise.all([
       renderJpeg(
-        decoded.source,
-        plan,
-        plan.viewerWidth,
-        plan.viewerHeight,
+        decodedImage.source,
+        renderPlan,
+        renderPlan.viewerWidth,
+        renderPlan.viewerHeight,
         0.88,
       ),
       renderJpeg(
-        decoded.source,
-        plan,
-        plan.thumbnailWidth,
-        plan.thumbnailHeight,
+        decodedImage.source,
+        renderPlan,
+        renderPlan.thumbnailWidth,
+        renderPlan.thumbnailHeight,
         0.8,
       ),
     ])
 
     return {
-      viewer,
-      thumbnail,
-      viewerWidth: plan.viewerWidth,
-      viewerHeight: plan.viewerHeight,
-      thumbnailWidth: plan.thumbnailWidth,
-      thumbnailHeight: plan.thumbnailHeight,
+      viewer: viewerImage,
+      thumbnail: thumbnailImage,
+      viewerWidth: renderPlan.viewerWidth,
+      viewerHeight: renderPlan.viewerHeight,
+      thumbnailWidth: renderPlan.thumbnailWidth,
+      thumbnailHeight: renderPlan.thumbnailHeight,
     }
   } finally {
-    decoded.close()
+    decodedImage.close()
   }
 }

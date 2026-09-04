@@ -23,6 +23,7 @@ import type {
 } from './types'
 import './PanoramaViewer.css'
 
+/** Imperative controls used by the synchronized Cardboard presentation. */
 export interface PanoramaViewerHandle {
   changeScene: (sceneId: string, view?: PanoramaView) => boolean
   getView: () => PanoramaViewState | null
@@ -35,6 +36,7 @@ export interface PanoramaViewerHandle {
   destroy: () => void
 }
 
+/** Declarative panorama scenes plus optional interaction callbacks and tools. */
 export interface PanoramaViewerProps {
   scenes: readonly PanoramaScene[]
   initialSceneId?: string
@@ -58,6 +60,7 @@ type ViewerStatus = 'loading' | 'ready' | 'error'
 
 const KEYBOARD_PAN_STEP = 8
 
+/** Draws the control-rail zoom-in glyph. */
 function IconZoomIn() {
   return (
     <svg viewBox="0 0 24 24" aria-hidden="true">
@@ -66,6 +69,7 @@ function IconZoomIn() {
   )
 }
 
+/** Draws the control-rail zoom-out glyph. */
 function IconZoomOut() {
   return (
     <svg viewBox="0 0 24 24" aria-hidden="true">
@@ -74,6 +78,7 @@ function IconZoomOut() {
   )
 }
 
+/** Draws the phone-motion control glyph. */
 function IconMotion() {
   return (
     <svg viewBox="0 0 24 24" aria-hidden="true">
@@ -83,6 +88,7 @@ function IconMotion() {
   )
 }
 
+/** Draws the accessible flat-panorama control glyph. */
 function IconPanorama() {
   return (
     <svg viewBox="0 0 24 24" aria-hidden="true">
@@ -92,10 +98,15 @@ function IconPanorama() {
   )
 }
 
+/** Joins optional modifier classes without rendering false-like values. */
 function joinClassNames(...values: Array<string | undefined | false>): string {
   return values.filter(Boolean).join(' ')
 }
 
+/**
+ * Owns one Pannellum adapter while providing accessible keyboard, flat-image,
+ * hotspot, point-selection, zoom, and motion-control alternatives.
+ */
 export const PanoramaViewer = forwardRef<
   PanoramaViewerHandle,
   PanoramaViewerProps
@@ -132,7 +143,10 @@ export const PanoramaViewer = forwardRef<
   } | null>(null)
   const hotspotListHeadingId = useId()
 
-  const firstSceneId = initialSceneId ?? scenes[0]?.id
+  const firstSceneId =
+    initialSceneId && scenes.some(({ id }) => id === initialSceneId)
+      ? initialSceneId
+      : scenes[0]?.id
   const [currentSceneId, setCurrentSceneId] = useState(
     sceneId ?? firstSceneId ?? '',
   )
@@ -146,10 +160,14 @@ export const PanoramaViewer = forwardRef<
   const currentScene =
     scenes.find(({ id }) => id === currentSceneId) ?? scenes[0]
 
+  // Keep event callbacks fresh without remounting the imperative viewer when a
+  // parent recreates callback functions during an otherwise identical render.
   useEffect(() => {
     callbacksRef.current = { onReady, onSceneChange, onError }
   }, [onError, onReady, onSceneChange])
 
+  // Async permission requests cannot be aborted, so completion must also
+  // confirm that React still owns this component instance.
   useEffect(() => {
     componentActiveRef.current = true
     return () => {
@@ -157,10 +175,12 @@ export const PanoramaViewer = forwardRef<
     }
   }, [])
 
+  // Preserve the latest controlled scene request across a runtime remount.
   useEffect(() => {
     requestedSceneIdRef.current = sceneId
   }, [sceneId])
 
+  /** Invalidates any permission prompt before stopping sensor ownership. */
   const stopMotion = useCallback(() => {
     motionRequestVersionRef.current += 1
     adapterRef.current?.stopOrientation()
@@ -168,6 +188,7 @@ export const PanoramaViewer = forwardRef<
     setMotionPending(false)
   }, [])
 
+  /** Reflects adapter motion state only when this request still owns the view. */
   const startMotion = useCallback(async (
     options?: PanoramaOrientationStartOptions,
   ): Promise<boolean> => {
@@ -204,6 +225,7 @@ export const PanoramaViewer = forwardRef<
     return actuallyActive
   }, [])
 
+  // Expose only lifecycle-safe adapter operations to Cardboard synchronization.
   useImperativeHandle(
     forwardedRef,
     () => ({
@@ -224,6 +246,8 @@ export const PanoramaViewer = forwardRef<
     [startMotion, stopMotion],
   )
 
+  // One effect owns the adapter, vendor DOM, vendor listeners and ResizeObserver
+  // as a single teardown unit. Scene-array identity intentionally remounts it.
   useEffect(() => {
     const container = containerRef.current
     if (!container || scenes.length === 0) return
@@ -231,7 +255,14 @@ export const PanoramaViewer = forwardRef<
     const adapter = createPannellumAdapter()
     adapterRef.current = adapter
     let effectActive = true
+    const requestedInitialSceneId = requestedSceneIdRef.current
+    const resolvedInitialSceneId =
+      requestedInitialSceneId &&
+      scenes.some(({ id }) => id === requestedInitialSceneId)
+        ? requestedInitialSceneId
+        : firstSceneId
     motionRequestVersionRef.current += 1
+    setCurrentSceneId(resolvedInitialSceneId ?? '')
     setStatus('loading')
     setMotionSupported(false)
     setMotionActive(false)
@@ -241,7 +272,7 @@ export const PanoramaViewer = forwardRef<
     void adapter
       .mount(container, {
         scenes,
-        initialSceneId: requestedSceneIdRef.current ?? firstSceneId,
+        initialSceneId: resolvedInitialSceneId,
         initialView,
         onLoad: () => {
           if (!effectActive) return
@@ -292,11 +323,13 @@ export const PanoramaViewer = forwardRef<
     }
   }, [firstSceneId, initialView, scenes])
 
+  // Apply controlled scene changes after the runtime has accepted its first scene.
   useEffect(() => {
     if (status !== 'ready' || !sceneId || sceneId === currentSceneId) return
     if (adapterRef.current?.changeScene(sceneId)) setCurrentSceneId(sceneId)
   }, [currentSceneId, sceneId, status])
 
+  /** Keeps the fallback picker and interactive viewer on the same scene. */
   const selectFlatScene = (nextSceneId: string) => {
     setCurrentSceneId(nextSceneId)
     const interactiveSceneChanged =
@@ -306,6 +339,7 @@ export const PanoramaViewer = forwardRef<
     }
   }
 
+  /** Routes the motion button through the guarded async start/stop paths. */
   const toggleMotion = () => {
     if (motionActive) {
       stopMotion()
@@ -315,6 +349,7 @@ export const PanoramaViewer = forwardRef<
     void startMotion()
   }
 
+  /** Provides scoped keyboard camera controls and point-selection shortcuts. */
   const handleViewerKeyDown = (
     event: ReactKeyboardEvent<HTMLDivElement>,
   ) => {
@@ -332,6 +367,7 @@ export const PanoramaViewer = forwardRef<
     const adapter = adapterRef.current
     if (!adapter) return
 
+    /** Transfers control from a pending or active sensor request to the keyboard. */
     const panManually = (pitchDelta: number, yawDelta: number) => {
       // The permission prompt is not abortable. Invalidate its React-side
       // completion before adapter.panBy stops the runtime listener, otherwise a
@@ -387,6 +423,7 @@ export const PanoramaViewer = forwardRef<
     event.preventDefault()
   }
 
+  /** Records the origin of a primary pointer that may place a memory point. */
   const beginPointSelection = (
     event: ReactPointerEvent<HTMLDivElement>,
   ) => {
@@ -408,6 +445,7 @@ export const PanoramaViewer = forwardRef<
     }
   }
 
+  /** Places a point only when the gesture ended as a tap rather than a drag. */
   const finishPointSelection = (
     event: ReactPointerEvent<HTMLDivElement>,
   ) => {
@@ -430,6 +468,7 @@ export const PanoramaViewer = forwardRef<
     if (point) onPointSelect?.(point)
   }
 
+  /** Mirrors hotspot actions and linked-scene navigation in the flat fallback. */
   const activateFlatHotSpot = (
     hotSpot: PanoramaHotSpot,
     event: ReactMouseEvent<HTMLButtonElement>,
@@ -444,6 +483,7 @@ export const PanoramaViewer = forwardRef<
     }
   }
 
+  /** Transfers focus and camera ownership between WebGL and the flat fallback. */
   const toggleFlatMode = () => {
     if (!flatMode) {
       stopMotion()

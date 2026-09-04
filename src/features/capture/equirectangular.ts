@@ -32,6 +32,7 @@ export type PanoramaCaptureValidation =
       message: string
     }
 
+/** Applies shared finite-dimension, resolution, and decoded-pixel safeguards. */
 function validateImageBounds(
   dimensions: ImageDimensions,
 ): { ratio: number } | { error: Extract<PanoramaCaptureValidation, { valid: false }> } {
@@ -108,6 +109,7 @@ export function validatePanoramaCaptureDimensions(
   }
 }
 
+/** Applies strict 2:1 validation to an already normalized panorama. */
 export function validateEquirectangularDimensions(
   dimensions: ImageDimensions,
 ): EquirectangularValidation {
@@ -156,11 +158,13 @@ export function validateEquirectangularDimensions(
   }
 }
 
+/** Decodes only enough of an image file to read its intrinsic dimensions. */
 export function readImageDimensions(file: File): Promise<ImageDimensions> {
   return new Promise((resolve, reject) => {
     const objectUrl = URL.createObjectURL(file)
     const image = new Image()
 
+    /** Releases the temporary URL on both image load and decode failure. */
     function finish() {
       URL.revokeObjectURL(objectUrl)
     }

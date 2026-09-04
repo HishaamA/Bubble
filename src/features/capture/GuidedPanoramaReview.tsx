@@ -47,6 +47,7 @@ export type GuidedPanoramaReviewProps = {
   modal?: boolean
 }
 
+/** Creates a stable annotation identity before persistence owns the point. */
 function makePointId() {
   return (
     globalThis.crypto?.randomUUID?.() ??
@@ -54,21 +55,25 @@ function makePointId() {
   )
 }
 
+/** Formats bounded recorder time as a compact minute-and-second label. */
 function formatDuration(durationMs: number) {
   const seconds = Math.min(60, Math.max(0, Math.floor(durationMs / 1000)))
   return `0:${seconds.toString().padStart(2, '0')}`
 }
 
+/** Removes legacy placeholder copy that is not a useful audio description. */
 function meaningfulVoiceDescription(value: string) {
   const description = value.trim()
   if (/^(?:a )?voice note\.?$/i.test(description)) return ''
   return description
 }
 
+/** Keeps hotspot labels short enough to remain legible inside the panorama. */
 function shortenedPointMessage(message: string) {
   return message.length > 32 ? `${message.slice(0, 31)}…` : message
 }
 
+/** Builds an accessible hotspot label for text and voice annotation kinds. */
 function pointLabel(annotation: StoredPanoramaAnnotation) {
   const message = annotation.message.trim()
   if (annotation.kind === 'voice') {
@@ -80,6 +85,7 @@ function pointLabel(annotation: StoredPanoramaAnnotation) {
   return shortenedPointMessage(message) || 'Message'
 }
 
+/** Renders the compact icon set used by point-editor controls. */
 function ReviewIcon({ name }: { name: 'plus' | 'message' | 'voice' | 'stop' }) {
   const common = {
     'aria-hidden': true,
@@ -103,6 +109,10 @@ function ReviewIcon({ name }: { name: 'plus' | 'message' | 'voice' | 'stop' }) {
   return <svg {...common}><path d="M12 5v14M5 12h14" /></svg>
 }
 
+/**
+ * Reviews a stitched panorama and lets its owner place, edit, or record memory
+ * points before the capture is finalized.
+ */
 export function GuidedPanoramaReview({
   panoramaUrl,
   annotations,
@@ -139,6 +149,7 @@ export function GuidedPanoramaReview({
   const editorWasOpenRef = useRef(false)
   const previousFocusRef = useRef<HTMLElement | null>(null)
 
+  /** Revokes the editor-owned audio URL without touching the persisted Blob. */
   const releaseVoicePreview = useCallback(() => {
     if (voicePreviewUrlRef.current) {
       URL.revokeObjectURL(voicePreviewUrlRef.current)
@@ -147,6 +158,7 @@ export function GuidedPanoramaReview({
     setVoicePreviewUrl(null)
   }, [])
 
+  /** Replaces the current playable URL and transfers ownership to this editor. */
   const installVoicePreview = useCallback((blob: Blob) => {
     if (voicePreviewUrlRef.current) {
       URL.revokeObjectURL(voicePreviewUrlRef.current)
@@ -156,12 +168,14 @@ export function GuidedPanoramaReview({
     setVoicePreviewUrl(nextUrl)
   }, [])
 
+  /** Stops the UI elapsed-time ticker independently of MediaRecorder cleanup. */
   const stopRecordingClock = useCallback(() => {
     if (recordingClockRef.current === null) return
     window.clearInterval(recordingClockRef.current)
     recordingClockRef.current = null
   }, [])
 
+  /** Invalidates callbacks from the active microphone request and resets its UI. */
   const discardActiveRecording = useCallback(() => {
     recordingRequestRef.current += 1
     recordingSessionRef.current?.cancel()
@@ -172,6 +186,7 @@ export function GuidedPanoramaReview({
     setRecordingElapsed(0)
   }, [stopRecordingClock])
 
+  /** Closes the point editor and releases all temporary recording resources. */
   const resetEditor = useCallback(() => {
     discardActiveRecording()
     releaseVoicePreview()
@@ -183,6 +198,8 @@ export function GuidedPanoramaReview({
     setVoiceError('')
   }, [discardActiveRecording, releaseVoicePreview])
 
+  // Unmount cleanup is deliberately independent of state-setting helpers: React
+  // state no longer matters here, but recorder tracks and object URLs still do.
   useEffect(() => () => {
     recordingRequestRef.current += 1
     recordingSessionRef.current?.cancel()
@@ -197,6 +214,8 @@ export function GuidedPanoramaReview({
     }
   }, [])
 
+  // When the whole review is presented as a modal, move focus inside after paint
+  // and return it to the invoking control on teardown.
   useEffect(() => {
     if (!modal) return
     const previousFocus = document.activeElement instanceof HTMLElement
@@ -210,6 +229,8 @@ export function GuidedPanoramaReview({
     }
   }, [modal])
 
+  // Voice input must not continue while the app is hidden or frozen. The request
+  // identity prevents a late permission result from restarting the discarded clip.
   useEffect(() => {
     const interruptRecording = () => {
       if (
@@ -245,6 +266,8 @@ export function GuidedPanoramaReview({
     requestingMicrophone,
   ])
 
+  // The point editor is a nested modal surface. Capture and restore focus only
+  // across its closed-to-open boundary, not on every editor step transition.
   useEffect(() => {
     const editorOpen = editorStep !== null
     if (editorOpen && !editorWasOpenRef.current) {
@@ -264,6 +287,7 @@ export function GuidedPanoramaReview({
     editorWasOpenRef.current = editorOpen
   }, [editorStep])
 
+  /** Loads one persisted point into the matching text or voice editor. */
   const openAnnotation = useCallback((annotation: StoredPanoramaAnnotation) => {
     if (busy) return
     discardActiveRecording()
@@ -296,6 +320,8 @@ export function GuidedPanoramaReview({
     }
   }, [busy, discardActiveRecording, installVoicePreview, releaseVoicePreview])
 
+  // Viewer hotspots remain a projection of parent-owned annotations; activation
+  // edits the source record instead of creating a second annotation state.
   const hotSpots = useMemo<PanoramaHotSpot[]>(() =>
     annotations.map((annotation) => ({
       id: annotation.id,
@@ -309,6 +335,8 @@ export function GuidedPanoramaReview({
       },
     })), [annotations, openAnnotation])
 
+  // The review viewer has one scene, but it uses the shared multi-scene contract
+  // so point selection behaves exactly like saved Memories.
   const scenes = useMemo<PanoramaScene[]>(() => [{
     id: 'capture-review',
     panorama: panoramaUrl,
@@ -319,6 +347,7 @@ export function GuidedPanoramaReview({
     hfov: 104,
   }], [hotSpots, panoramaUrl])
 
+  /** Starts a new point only for an armed, under-limit panorama selection. */
   const handlePointSelect = useCallback((point: SelectedPoint) => {
     if (!placingPoint || annotations.length >= MAX_POINTS) return
     setPlacingPoint(false)
@@ -331,11 +360,13 @@ export function GuidedPanoramaReview({
     releaseVoicePreview()
   }, [annotations.length, placingPoint, releaseVoicePreview])
 
+  /** Arms or cancels point placement while no editor is covering the viewer. */
   const togglePointPlacement = () => {
     if (editorStep || annotations.length >= MAX_POINTS) return
     setPlacingPoint((current) => !current)
   }
 
+  /** Requests one bounded recorder session and installs only its current callbacks. */
   const beginVoiceRecording = async () => {
     if (requestingMicrophone || recording) return
     setVoiceError('')
@@ -393,10 +424,12 @@ export function GuidedPanoramaReview({
     }
   }
 
+  /** Ends the active recorder and lets its completion event validate the clip. */
   const stopVoiceRecording = () => {
     recordingSessionRef.current?.stop()
   }
 
+  /** Validates and inserts or replaces the selected annotation kind atomically. */
   const saveAnnotation = (kind: StoredPanoramaAnnotation['kind']) => {
     if (!selectedPoint) return
     const existing = editingId
@@ -431,14 +464,15 @@ export function GuidedPanoramaReview({
       }
     }
 
-    const next = existing
+    const updatedAnnotations = existing
       ? annotations.map((annotation) =>
         annotation.id === existing.id ? nextAnnotation : annotation)
       : [...annotations, nextAnnotation]
-    onAnnotationsChange(next)
+    onAnnotationsChange(updatedAnnotations)
     resetEditor()
   }
 
+  /** Deletes only the annotation currently loaded into the editor. */
   const deleteAnnotation = () => {
     if (!editingId) return
     onAnnotationsChange(
@@ -447,6 +481,7 @@ export function GuidedPanoramaReview({
     resetEditor()
   }
 
+  /** Releases editor resources before returning to capture. */
   const handleRetake = () => {
     if (busy) return
     resetEditor()
@@ -454,6 +489,7 @@ export function GuidedPanoramaReview({
     onRetake()
   }
 
+  /** Releases editor resources before handing the reviewed draft to its parent. */
   const handleContinue = () => {
     if (busy) return
     resetEditor()

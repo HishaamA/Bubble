@@ -14,6 +14,7 @@ const MAX_RELATION_LENGTH = 60
 const MAX_FAVORITE_THINGS_LENGTH = 240
 const MAX_NOTES_LENGTH = 1_200
 
+/** Creates a blank, schema-complete scrapbook profile. */
 export function emptyPersonScrapbookProfile(): PersonScrapbookProfile {
   return {
     birthday: '',
@@ -23,6 +24,7 @@ export function emptyPersonScrapbookProfile(): PersonScrapbookProfile {
   }
 }
 
+/** Names a scrapbook record by account/family namespace and person. */
 export function personScrapbookStorageKey(
   cacheNamespace: string,
   personId: string,
@@ -30,14 +32,17 @@ export function personScrapbookStorageKey(
   return `${STORAGE_PREFIX}${encodeURIComponent(cacheNamespace || 'local')}:${encodeURIComponent(personId)}`
 }
 
+/** Narrows parsed JSON to a field-addressable record. */
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value)
 }
 
+/** Converts optional text fields to bounded strings for local persistence. */
 function boundedString(value: unknown, maximumLength: number) {
   return typeof value === 'string' ? value.slice(0, maximumLength) : ''
 }
 
+/** Accepts only real calendar dates in the date-input YYYY-MM-DD format. */
 function validBirthday(value: unknown) {
   if (typeof value !== 'string') return ''
   const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value)
@@ -54,6 +59,7 @@ function validBirthday(value: unknown) {
     : ''
 }
 
+/** Rebuilds an untrusted profile with only current, bounded fields. */
 function normalizeProfile(value: unknown): PersonScrapbookProfile {
   if (!isRecord(value)) return emptyPersonScrapbookProfile()
   return {
@@ -67,6 +73,7 @@ function normalizeProfile(value: unknown): PersonScrapbookProfile {
   }
 }
 
+/** Loads and validates one person's device-local scrapbook fields. */
 export function loadPersonScrapbookProfile(
   cacheNamespace: string,
   personId: string,
@@ -88,6 +95,7 @@ export function loadPersonScrapbookProfile(
   }
 }
 
+/** Bounds and persists one scrapbook profile without throwing on storage denial. */
 export function savePersonScrapbookProfile(
   cacheNamespace: string,
   personId: string,
@@ -110,6 +118,7 @@ export function savePersonScrapbookProfile(
   }
 }
 
+/** Removes one person's local scrapbook record. */
 export function removePersonScrapbookProfile(
   cacheNamespace: string,
   personId: string,

@@ -20,6 +20,8 @@ export function EventReminderCoordinator() {
     : null
   const activeAccountRef = useRef<string | null>(null)
 
+  // Wait for both identities to settle before cleaning the outgoing account;
+  // transient loading states must not be interpreted as a sign-out.
   useEffect(() => {
     if (
       status === 'loading'
@@ -30,6 +32,8 @@ export function EventReminderCoordinator() {
     void transitionEventReminderAccount(activeAccount)
   }, [activeAccount, familyStatus, status])
 
+  // Native resume can happen from any route, so restoration lives at the app
+  // level and reads the latest account through a ref instead of a stale closure.
   useEffect(() => {
     let disposed = false
     let removeListener: (() => Promise<void>) | undefined

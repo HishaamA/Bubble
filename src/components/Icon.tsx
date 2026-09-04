@@ -14,6 +14,7 @@ type IconProps = {
   size?: number
 }
 
+/** Renders one consistent, current-color line icon from the app icon set. */
 export function Icon({ name, size = 24 }: IconProps) {
   const common = {
     width: size,

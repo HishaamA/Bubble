@@ -32,10 +32,12 @@ export const DEFAULT_APP_THEME: AppTheme = 'plum'
 
 const listeners = new Set<() => void>()
 
+/** Narrows persisted or cross-window data to a supported theme identifier. */
 function isAppTheme(value: unknown): value is AppTheme {
   return APP_THEMES.some((theme) => theme.id === value)
 }
 
+/** Reads a valid saved theme and falls back safely when storage is blocked. */
 export function readStoredAppTheme(): AppTheme {
   if (typeof window === 'undefined') return DEFAULT_APP_THEME
 
@@ -50,6 +52,7 @@ export function readStoredAppTheme(): AppTheme {
 let activeTheme = readStoredAppTheme()
 let storageListenerInstalled = false
 
+/** Keeps browser and native chrome visually aligned with the active theme. */
 function updateThemeColour(theme: AppTheme) {
   if (typeof document === 'undefined') return
 
@@ -58,6 +61,7 @@ function updateThemeColour(theme: AppTheme) {
   if (meta && themeColour) meta.content = themeColour
 }
 
+/** Applies the theme token consumed by the CSS variable system. */
 function applyThemeToDocument(theme: AppTheme) {
   if (typeof document === 'undefined') return
 
@@ -65,10 +69,12 @@ function applyThemeToDocument(theme: AppTheme) {
   updateThemeColour(theme)
 }
 
+/** Publishes theme changes to React's external-store subscribers. */
 function emitThemeChange() {
   listeners.forEach((listener) => listener())
 }
 
+/** Synchronizes theme changes made in another browser tab. */
 function handleStoredThemeChange(event: StorageEvent) {
   if (event.key !== APP_THEME_STORAGE_KEY) return
 
@@ -82,6 +88,7 @@ function handleStoredThemeChange(event: StorageEvent) {
   emitThemeChange()
 }
 
+/** Applies the initial theme and installs the cross-tab listener once. */
 export function initializeAppTheme(): AppTheme {
   activeTheme = readStoredAppTheme()
   applyThemeToDocument(activeTheme)
@@ -94,6 +101,7 @@ export function initializeAppTheme(): AppTheme {
   return activeTheme
 }
 
+/** Persists and immediately applies a supported appearance theme. */
 export function setAppTheme(theme: AppTheme) {
   activeTheme = isAppTheme(theme) ? theme : DEFAULT_APP_THEME
 
@@ -109,15 +117,18 @@ export function setAppTheme(theme: AppTheme) {
   emitThemeChange()
 }
 
+/** Registers a React external-store listener. */
 function subscribe(listener: () => void) {
   listeners.add(listener)
   return () => listeners.delete(listener)
 }
 
+/** Returns the in-memory theme snapshot for useSyncExternalStore. */
 function getActiveTheme() {
   return activeTheme
 }
 
+/** Exposes the active theme and the complete list of selectable themes. */
 export function useAppTheme() {
   const theme = useSyncExternalStore(
     subscribe,

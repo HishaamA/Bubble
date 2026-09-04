@@ -35,6 +35,7 @@ type CapsulePhotoViewerProps = {
   journalPhotos?: readonly JournalPhoto[]
 }
 
+/** Derives a short, stable avatar label from a contributor display name. */
 function initials(name: string) {
   const value = name
     .split(/\s+/)
@@ -45,6 +46,7 @@ function initials(name: string) {
   return value || 'F'
 }
 
+/** Formats a valid capture timestamp and supplies safe copy for corrupt data. */
 function capturedDate(value: string) {
   const date = new Date(value)
   if (Number.isNaN(date.getTime())) return 'Family memory'
@@ -55,6 +57,7 @@ function capturedDate(value: string) {
   }).format(date)
 }
 
+/** Compares local calendar days without allowing invalid timestamps to match. */
 function sameCapturedDay(left: string, right: string) {
   const first = new Date(left)
   const second = new Date(right)
@@ -64,6 +67,10 @@ function sameCapturedDay(left: string, right: string) {
     first.getDate() === second.getDate()
 }
 
+/**
+ * Presents one unlocked photo with keyboard navigation, focus containment, and
+ * an optional jump into the matching panorama memory.
+ */
 export function CapsulePhotoViewer({
   capsules,
   loading = false,
@@ -111,6 +118,7 @@ export function CapsulePhotoViewer({
     return () => window.cancelAnimationFrame(frame)
   }, [photo?.id])
 
+  /** Leaves the modal viewer while preserving the originating timeline context. */
   function returnToJournal() {
     navigate('/journal', {
       replace: true,
@@ -119,6 +127,7 @@ export function CapsulePhotoViewer({
     })
   }
 
+  /** Replaces the current route with an adjacent photo from the same day. */
   function openAdjacentPhoto(nextIndex: number) {
     const nextPhoto = photos[nextIndex]
     if (!nextPhoto) return

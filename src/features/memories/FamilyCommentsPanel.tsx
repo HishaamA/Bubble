@@ -33,6 +33,7 @@ type FamilyCommentsPanelProps = {
   onSubmit: (body: string, annotationId: string | null) => void | Promise<void>
 }
 
+/** Draws the comments glyph without introducing a separate icon dependency. */
 function CommentsIcon() {
   return (
     <svg viewBox="0 0 24 24" aria-hidden="true">
@@ -42,6 +43,7 @@ function CommentsIcon() {
   )
 }
 
+/** Gives point replies stable, human-readable labels even without authored text. */
 function annotationLabel(annotation: PanoramaAnnotation, index: number) {
   const message = annotation.message.trim()
   if (!message) {
@@ -53,6 +55,7 @@ function annotationLabel(annotation: PanoramaAnnotation, index: number) {
   return annotation.kind === 'voice' ? `Voice: ${shortened}` : shortened
 }
 
+/** Formats valid timestamps and avoids exposing invalid-date output in the panel. */
 function formatCommentTime(value: string) {
   const date = new Date(value)
   if (Number.isNaN(date.getTime())) return ''
@@ -62,6 +65,11 @@ function formatCommentTime(value: string) {
   }).format(date)
 }
 
+/**
+ * Presents the modal family conversation for a panorama or one memory point.
+ * Submission ownership remains with the parent so local and synced transports
+ * share the same accessible composer.
+ */
 export function FamilyCommentsPanel({
   open,
   comments,
@@ -104,6 +112,7 @@ export function FamilyCommentsPanel({
 
   if (!open) return null
 
+  /** Traps Tab focus inside the modal comments sheet. */
   const keepFocusInside = (event: ReactKeyboardEvent<HTMLElement>) => {
     if (event.key === 'Escape') {
       event.preventDefault()
@@ -130,6 +139,7 @@ export function FamilyCommentsPanel({
     }
   }
 
+  /** Validates and synchronously latches one comment submission. */
   const submit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
     const cleanBody = body.trim()

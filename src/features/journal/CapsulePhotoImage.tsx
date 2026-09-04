@@ -7,6 +7,7 @@ type CapsulePhotoImageProps = {
   className?: string
 }
 
+/** Renders a URL-backed image and replaces failed loads with accessible copy. */
 function ImageElement({
   src,
   alt,
@@ -40,6 +41,7 @@ function ImageElement({
   )
 }
 
+/** Owns the temporary object URL required to display one Blob source. */
 function BlobImage({
   source,
   alt,
@@ -57,6 +59,7 @@ function BlobImage({
   )
 }
 
+/** Renders Blob or URL photo sources while owning temporary object-URL cleanup. */
 export function CapsulePhotoImage({
   source,
   alt,

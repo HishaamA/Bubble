@@ -1,3 +1,4 @@
+/** Appends an encoded account/family subject to an event storage key. */
 export function eventStorageKey(baseKey: string, subject: string) {
   return `${baseKey}:${encodeURIComponent(subject.trim() || 'signed-out')}`
 }

@@ -99,6 +99,7 @@ export function JournalEventsSection() {
   )
 }
 
+/** Remounts all mutable plan state whenever the account/family subject changes. */
 function JournalEventsSectionForFamily({
   showDemoPlans,
   storageSubject,
@@ -192,6 +193,8 @@ function JournalEventsSectionForFamily({
   )
   const pendingDeleteRetryRef = useRef<Promise<void> | null>(null)
 
+  // Merge demo, device, and family sources by ID. Completed plans remain
+  // hidden even when a stale Realtime fetch still contains their server row.
   const allUpcomingEvents = useMemo(() => {
     const eventsById = new Map<string, FamilyEvent>()
     for (const event of [
@@ -227,46 +230,51 @@ function JournalEventsSectionForFamily({
   const displayedWeekRange = formatPlanWeekRange(displayedWeek)
   const selectedDayLabel = formatPlanDay(selectedPlanDay)
 
+  /** Rehydrates server-backed plans after a successful local create. */
   const refreshFamilyEvents = useCallback(async () => {
     const records = await fetchFamilyEvents()
     setSharedFamilyEvents(toImportantFamilyEvents(records))
     setSharedEventsUnavailable(false)
   }, [])
 
-  const retryPendingSharedDeletes = useCallback(() => {
-    // A completed plan disappears locally immediately, but a failed server
-    // delete must remain durable across reloads. Serialize retries so initial
-    // fetch and Realtime reconnects cannot send the same batch twice.
-    if (pendingDeleteRetryRef.current) return pendingDeleteRetryRef.current
-    const retry = (async () => {
-      let changed = false
-      for (const eventId of [...pendingDeleteIdsRef.current]) {
-        try {
-          if (await deleteFamilyEventRecord(eventId)) {
-            pendingDeleteIdsRef.current.delete(eventId)
-            changed = true
-          }
-        } catch {
-          // Keep the id queued for the next mount or successful reconnect.
-        }
-      }
-      if (changed) {
-        writeJson(
-          pendingPlanDeleteIdsStorageKey,
-          [...pendingDeleteIdsRef.current],
-        )
-      }
-    })().finally(() => {
-      pendingDeleteRetryRef.current = null
-    })
-    pendingDeleteRetryRef.current = retry
-    return retry
-  }, [pendingPlanDeleteIdsStorageKey])
-
+  // Initial fetch and Realtime notifications share one active-guarded refresh
+  // path; the cleanup callback also prevents a late subscription from leaking.
   useEffect(() => {
     let active = true
     let unsubscribe: () => void = () => undefined
 
+    /** Replays durable optimistic deletions one batch at a time. */
+    function retryPendingSharedDeletes() {
+      // A completed plan disappears locally immediately, but a failed server
+      // delete must remain durable across reloads. Serialize retries so initial
+      // fetch and Realtime reconnects cannot send the same batch twice.
+      if (pendingDeleteRetryRef.current) return pendingDeleteRetryRef.current
+      const retry = (async () => {
+        let changed = false
+        for (const eventId of [...pendingDeleteIdsRef.current]) {
+          try {
+            if (await deleteFamilyEventRecord(eventId)) {
+              pendingDeleteIdsRef.current.delete(eventId)
+              changed = true
+            }
+          } catch {
+            // Keep the id queued for the next mount or successful reconnect.
+          }
+        }
+        if (changed) {
+          writeJson(
+            pendingPlanDeleteIdsStorageKey,
+            [...pendingDeleteIdsRef.current],
+          )
+        }
+      })().finally(() => {
+        pendingDeleteRetryRef.current = null
+      })
+      pendingDeleteRetryRef.current = retry
+      return retry
+    }
+
+    /** Applies a family refresh only while this account-scoped body is mounted. */
     async function refreshWhileActive() {
       try {
         const records = await fetchFamilyEvents()
@@ -297,8 +305,9 @@ function JournalEventsSectionForFamily({
       active = false
       unsubscribe()
     }
-  }, [retryPendingSharedDeletes, storageSubject])
+  }, [pendingPlanDeleteIdsStorageKey, storageSubject])
 
+  // Promote legacy ID-only reminder selections into restorable event snapshots.
   useEffect(() => {
     const selectedEvents = allUpcomingEvents.filter((event) =>
       reminderIds.has(event.id),
@@ -306,6 +315,8 @@ function JournalEventsSectionForFamily({
     void adoptDesiredEventReminders(selectedEvents, storageSubject)
   }, [allUpcomingEvents, reminderIds, storageSubject])
 
+  // The add-plan sheet owns scroll locking, initial focus, Escape, and a
+  // contained Tab cycle for the full duration of its modal lifecycle.
   useEffect(() => {
     if (!showEventSheet) return
     const frame = window.requestAnimationFrame(() => {
@@ -314,6 +325,7 @@ function JournalEventsSectionForFamily({
     const previousOverflow = document.body.style.overflow
     document.body.style.overflow = 'hidden'
 
+    /** Implements Escape handling and keyboard focus containment for the sheet. */
     function handleModalKey(event: KeyboardEvent) {
       if (event.key === 'Escape') {
         if (!eventSaving) {
@@ -348,6 +360,7 @@ function JournalEventsSectionForFamily({
     }
   }, [eventSaving, showEventSheet])
 
+  // Focus the inline task field after the selected card has rendered it.
   useEffect(() => {
     if (!taskComposerPlanId) return
     const frame = window.requestAnimationFrame(() => {
@@ -356,6 +369,7 @@ function JournalEventsSectionForFamily({
     return () => window.cancelAnimationFrame(frame)
   }, [taskComposerPlanId])
 
+  /** Opens a fresh add-plan draft and remembers where focus should return. */
   function openEventSheet() {
     eventSheetOpenerRef.current = document.activeElement as HTMLElement | null
     setEventFormError('')
@@ -363,17 +377,20 @@ function JournalEventsSectionForFamily({
     setShowEventSheet(true)
   }
 
+  /** Selects a calendar day and resets its compact plan list. */
   function choosePlanDay(date: string) {
     setSelectedPlanDay(date)
     setIsUpcomingExpanded(false)
   }
 
+  /** Closes the sheet unless a save owns it; successful saves may force close. */
   function closeEventSheet(force = false) {
     if (eventSaving && !force) return
     setShowEventSheet(false)
     window.requestAnimationFrame(() => eventSheetOpenerRef.current?.focus())
   }
 
+  /** Validates, saves, and locally persists a new shared-or-offline plan. */
   async function createFamilyEvent(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     if (eventSavingRef.current) return
@@ -441,6 +458,7 @@ function JournalEventsSectionForFamily({
     }
   }
 
+  /** Updates durable device intent before best-effort family reminder sync. */
   async function toggleReminder(event: FamilyEvent) {
     if (reminderBusyIdsRef.current.has(event.id)) return
     reminderBusyIdsRef.current.add(event.id)
@@ -481,6 +499,7 @@ function JournalEventsSectionForFamily({
     }
   }
 
+  /** Persists one card's device-local checklist completion set. */
   function toggleChecklistItem(
     event: FamilyEvent,
     item: PlanTask,
@@ -503,6 +522,7 @@ function JournalEventsSectionForFamily({
     })
   }
 
+  /** Resolves editable overrides before encoded or demo task definitions. */
   function tasksForPlan(event: FamilyEvent) {
     return taskDefinitions[event.id]
       ?? event.tasks
@@ -510,11 +530,13 @@ function JournalEventsSectionForFamily({
       ?? []
   }
 
+  /** Toggles the inline task composer for exactly one plan card. */
   function openTaskComposer(eventId: string) {
     setTaskComposerValue('')
     setTaskComposerPlanId((current) => current === eventId ? '' : eventId)
   }
 
+  /** Adds a task optimistically, then shares the encoded definition if possible. */
   async function addTaskToPlan(
     submitEvent: FormEvent<HTMLFormElement>,
     event: FamilyEvent,
@@ -567,6 +589,7 @@ function JournalEventsSectionForFamily({
     }
   }
 
+  /** Hides a completed plan immediately and queues recoverable server deletion. */
   async function completePlan(event: FamilyEvent) {
     if (completionBusyIdsRef.current.has(event.id)) return
     completionBusyIdsRef.current.add(event.id)
@@ -1157,18 +1180,21 @@ function JournalEventsSectionForFamily({
   )
 }
 
+/** Reads only structurally valid device-created plans from JSON storage. */
 function readCreatedEvents(storageKey: string): FamilyEvent[] {
   const value = readJson(storageKey)
   if (!Array.isArray(value)) return []
   return value.filter(isFamilyEvent)
 }
 
+/** Migrates the former ID-only reminder selection into a bounded set. */
 function readReminderIds(storageKey: string) {
   const value = readJson(storageKey)
   if (!Array.isArray(value)) return new Set<string>()
   return new Set(value.filter((item): item is string => typeof item === 'string'))
 }
 
+/** Reads a bounded string set used by completion and retry registries. */
 function readStringSet(storageKey: string) {
   const value = readJson(storageKey)
   if (!Array.isArray(value)) return new Set<string>()
@@ -1179,6 +1205,7 @@ function readStringSet(storageKey: string) {
   )
 }
 
+/** Validates device-local task overrides at their persistence boundary. */
 function readPlanTaskDefinitions(storageKey: string): PlanTaskDefinitions {
   const value = readJson(storageKey)
   if (!value || typeof value !== 'object' || Array.isArray(value)) return {}
@@ -1198,6 +1225,7 @@ function readPlanTaskDefinitions(storageKey: string): PlanTaskDefinitions {
   )
 }
 
+/** Parses optional local JSON without letting storage failures break Journal. */
 function readJson(key: string): unknown {
   try {
     const value = localStorage.getItem(key)
@@ -1207,6 +1235,7 @@ function readJson(key: string): unknown {
   }
 }
 
+/** Reports whether a value became durable so callers can surface degraded mode. */
 function writeJson(key: string, value: unknown) {
   try {
     localStorage.setItem(key, JSON.stringify(value))
@@ -1217,6 +1246,7 @@ function writeJson(key: string, value: unknown) {
   }
 }
 
+/** Validates the persisted subset of a family plan, including nested tasks. */
 function isFamilyEvent(value: unknown): value is FamilyEvent {
   if (!value || typeof value !== 'object') return false
   const event = value as Partial<FamilyEvent>
@@ -1240,6 +1270,7 @@ function isFamilyEvent(value: unknown): value is FamilyEvent {
   )
 }
 
+/** Decodes a shared event and derives device-local calendar fields. */
 function toFamilyEvent(record: FamilyEventRecord): FamilyEvent | null {
   const details = decodePlanDetails(record.details)
   if (!details) return null
@@ -1263,21 +1294,25 @@ function toFamilyEvent(record: FamilyEventRecord): FamilyEvent | null {
   }
 }
 
+/** Keeps only shared events that carry valid structured plan details. */
 function toImportantFamilyEvents(records: FamilyEventRecord[]) {
   return records
     .map(toFamilyEvent)
     .filter((event): event is FamilyEvent => event !== null)
 }
 
+/** Narrows persisted category values against the UI's supported choices. */
 function parsePlanCategory(value: unknown): PlanCategory | undefined {
   if (typeof value !== 'string') return undefined
   return planCategories.find((category) => category.value === value)?.value
 }
 
+/** Validates decorative names before they select an SVG branch. */
 function isPlanDoodleName(value: unknown): value is PlanDoodleName {
   return value === 'heart' || value === 'star' || value === 'sun' || value === 'fish'
 }
 
+/** Bounds untrusted task IDs and labels before rendering or re-encoding them. */
 function isPlanTask(value: unknown): value is PlanTask {
   if (!value || typeof value !== 'object') return false
   const task = value as Partial<PlanTask>
@@ -1291,12 +1326,14 @@ function isPlanTask(value: unknown): value is PlanTask {
   )
 }
 
+/** Reads the demo-only initial completion marker without widening PlanTask. */
 function taskStartsCompleted(
   task: PlanTask,
 ): task is PlanTask & { initiallyDone: true } {
   return 'initiallyDone' in task && task.initiallyDone === true
 }
 
+/** Creates a collision-resistant task ID and enforces the shared label limit. */
 function createPlanTask(label: string): PlanTask {
   const randomSuffix = typeof crypto !== 'undefined' && crypto.randomUUID
     ? crypto.randomUUID()
@@ -1304,11 +1341,13 @@ function createPlanTask(label: string): PlanTask {
   return { id: `task-${randomSuffix}`, label: label.trim().slice(0, 80) }
 }
 
+/** Reuses production task ID generation for an initially empty form row. */
 function createDraftPlanTask(): DraftPlanTask {
   const task = createPlanTask('New task')
   return { id: task.id, value: '' }
 }
 
+/** Selects stable artwork so a plan does not change decoration between renders. */
 function planDoodleForSeed(seed: string): PlanDoodleName {
   const doodles: PlanDoodleName[] = ['star', 'sun', 'fish', 'heart']
   const hash = [...seed].reduce(
@@ -1318,6 +1357,7 @@ function planDoodleForSeed(seed: string): PlanDoodleName {
   return doodles[hash % doodles.length]
 }
 
+/** Maps stored category codes to human-readable card labels. */
 function planCategoryLabel(category: PlanCategory) {
   return (
     planCategories.find((item) => item.value === category)?.label
@@ -1325,6 +1365,7 @@ function planCategoryLabel(category: PlanCategory) {
   )
 }
 
+/** Renders one decorative plan motif outside the accessibility tree. */
 function PlanDoodle({ doodle }: { doodle: PlanDoodleName }) {
   if (doodle === 'heart') {
     return (
@@ -1365,6 +1406,7 @@ function PlanDoodle({ doodle }: { doodle: PlanDoodleName }) {
   )
 }
 
+/** Renders the shared reminder-control glyph. */
 function ReminderBellDoodle() {
   return (
     <svg viewBox="0 0 32 32" aria-hidden="true">
@@ -1374,6 +1416,7 @@ function ReminderBellDoodle() {
   )
 }
 
+/** Builds stable preview plans near the mount date without entering persistence. */
 function createDemoFamilyPlans(anchorTimestamp: number): FamilyEvent[] {
   const anchor = new Date(anchorTimestamp)
   const dayInWeek = (anchor.getDay() + 6) % 7
@@ -1491,6 +1534,7 @@ function createDemoFamilyPlans(anchorTimestamp: number): FamilyEvent[] {
   })
 }
 
+/** Validates per-plan completed task IDs loaded from device storage. */
 function readChecklistProgress(storageKey: string): PlanChecklistProgress {
   const value = readJson(storageKey)
   if (!value || typeof value !== 'object' || Array.isArray(value)) return {}
@@ -1509,6 +1553,7 @@ function readChecklistProgress(storageKey: string): PlanChecklistProgress {
   )
 }
 
+/** Returns the Monday-through-Sunday local week containing an input date. */
 function planWeekForDate(value: string) {
   const selected = new Date(`${value}T12:00:00`)
   const mondayOffset = (selected.getDay() + 6) % 7
@@ -1526,6 +1571,7 @@ function planWeekForDate(value: string) {
   ))
 }
 
+/** Produces the compact heading for a complete displayed week. */
 function formatPlanWeekRange(week: Date[]) {
   const first = week[0]
   const last = week.at(-1)
@@ -1537,6 +1583,7 @@ function formatPlanWeekRange(week: Date[]) {
   return `${format(first)} – ${format(last)}`
 }
 
+/** Formats a local input date without UTC day rollover. */
 function formatPlanDay(value: string) {
   const date = new Date(`${value}T12:00:00`)
   if (Number.isNaN(date.getTime())) return value
@@ -1547,6 +1594,7 @@ function formatPlanDay(value: string) {
   }).format(date)
 }
 
+/** Moves calendar selection by whole local days, with a safe invalid fallback. */
 function shiftPlanDay(value: string, days: number) {
   const date = new Date(`${value}T12:00:00`)
   if (Number.isNaN(date.getTime())) return todayInputValue()
@@ -1554,6 +1602,7 @@ function shiftPlanDay(value: string, days: number) {
   return localDateInputValue(date)
 }
 
+/** Serializes a Date for an HTML date field in device-local time. */
 function localDateInputValue(date: Date) {
   const year = date.getFullYear()
   const month = String(date.getMonth() + 1).padStart(2, '0')
@@ -1561,6 +1610,7 @@ function localDateInputValue(date: Date) {
   return `${year}-${month}-${day}`
 }
 
+/** Returns today's HTML date value in device-local time. */
 function todayInputValue() {
   return localDateInputValue(new Date())
 }

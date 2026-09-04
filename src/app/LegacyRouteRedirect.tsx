@@ -7,6 +7,7 @@ type LegacyRouteRedirectProps = {
   mapState?: (state: unknown) => unknown
 }
 
+/** Redirects retired routes while preserving query, hash, and optional state. */
 export function LegacyRouteRedirect({
   fromBase,
   toBase,

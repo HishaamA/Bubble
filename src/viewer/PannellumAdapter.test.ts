@@ -213,6 +213,34 @@ describe('createPannellumAdapter', () => {
     expect(viewer).not.toHaveBeenCalled()
   })
 
+  it('rejects malformed scene data before creating an imperative viewer', async () => {
+    const fakeViewer = createFakeViewer()
+    const { runtime, viewer } = createFakeRuntime(fakeViewer)
+    const adapter = createPannellumAdapter({ loadRuntime: async () => runtime })
+
+    await expect(
+      adapter.mount(document.createElement('div'), {
+        scenes: [
+          {
+            ...scenes[0],
+            hotSpots: [
+              {
+                id: 'missing-scene',
+                kind: 'scene',
+                pitch: 0,
+                yaw: 0,
+                label: 'Missing room',
+                sceneId: 'not-in-this-tour',
+              },
+            ],
+          },
+        ],
+      }),
+    ).rejects.toThrow('links to an unknown scene')
+
+    expect(viewer).not.toHaveBeenCalled()
+  })
+
   it('changes known scenes and exposes zoom, orientation, and resize controls', async () => {
     const fakeViewer = createFakeViewer({ orientationSupported: true })
     const { runtime } = createFakeRuntime(fakeViewer)
@@ -225,6 +253,7 @@ describe('createPannellumAdapter', () => {
     expect(
       adapter.changeScene('garden', { pitch: 4, yaw: 20, hfov: 85 }),
     ).toBe(true)
+    expect(adapter.changeScene('garden', { yaw: Number.NaN })).toBe(false)
     expect(fakeViewer.instance.loadScene).toHaveBeenCalledWith(
       'garden',
       4,
@@ -254,6 +283,19 @@ describe('createPannellumAdapter', () => {
     expect(adapter.isOrientationActive()).toBe(false)
     adapter.resize()
     expect(fakeViewer.instance.resize).toHaveBeenCalledOnce()
+  })
+
+  it('continues viewer teardown when sensor cleanup throws', async () => {
+    const fakeViewer = createFakeViewer()
+    const { runtime } = createFakeRuntime(fakeViewer)
+    const adapter = createPannellumAdapter({ loadRuntime: async () => runtime })
+    await adapter.mount(document.createElement('div'), { scenes })
+    vi.mocked(fakeViewer.instance.stopOrientation).mockImplementationOnce(() => {
+      throw new Error('sensor cleanup failed')
+    })
+
+    expect(() => adapter.destroy()).not.toThrow()
+    expect(fakeViewer.instance.destroy).toHaveBeenCalledOnce()
   })
 
   it('handles denied permission and a stop during an orientation request', async () => {

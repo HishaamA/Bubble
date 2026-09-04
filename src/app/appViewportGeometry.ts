@@ -8,14 +8,21 @@ const KEYBOARD_MINIMUM_DIFFERENCE = 120
 const KEYBOARD_MINIMUM_RATIO = 0.16
 const UNZOOMED_SCALE_TOLERANCE = 1.05
 
+/** Accepts only usable viewport dimensions from browser APIs. */
 function positiveDimension(value: unknown): value is number {
   return typeof value === 'number' && Number.isFinite(value) && value > 0
 }
 
+/** Accepts zero-based viewport offsets while rejecting invalid numbers. */
 function nonNegativeDimension(value: unknown): value is number {
   return typeof value === 'number' && Number.isFinite(value) && value >= 0
 }
 
+/**
+ * Normalizes the layout and visual viewports into the dimensions used by the
+ * persistent app shell. Pinch zoom deliberately uses the layout height so it
+ * is not mistaken for the software keyboard.
+ */
 export function readAppViewportGeometry(
   target: Window = window,
 ): AppViewportGeometry {
@@ -49,6 +56,7 @@ export function readAppViewportGeometry(
   }
 }
 
+/** Writes normalized viewport state to CSS variables and a semantic data flag. */
 export function applyAppViewportGeometry(
   element: HTMLElement,
   geometry: AppViewportGeometry,
@@ -58,6 +66,7 @@ export function applyAppViewportGeometry(
   element.dataset.keyboardOpen = geometry.keyboardOpen ? 'true' : 'false'
 }
 
+/** Reads and applies the current browser viewport in one operation. */
 export function synchronizeAppViewportGeometry(
   element: HTMLElement,
   target: Window = window,
@@ -65,6 +74,10 @@ export function synchronizeAppViewportGeometry(
   applyAppViewportGeometry(element, readAppViewportGeometry(target))
 }
 
+/**
+ * Keeps the app shell synchronized with browser resize, rotation, keyboard,
+ * and visual-viewport scroll events until the returned cleanup runs.
+ */
 export function installAppViewportGeometrySync(
   element: HTMLElement,
   target: Window = window,
@@ -89,6 +102,7 @@ export function installAppViewportGeometrySync(
   }
 }
 
+/** Releases keyboard-producing focus before a route changes dimensions. */
 export function blurActiveTextControl(root: Document = document): void {
   const activeElement = root.activeElement
   if (!(activeElement instanceof HTMLElement)) return

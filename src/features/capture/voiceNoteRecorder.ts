@@ -52,11 +52,13 @@ const BACKEND_AUDIO_MIME_TYPES = new Set([
   'audio/webm',
 ])
 
+/** Removes codec parameters and admits only formats accepted by persistence. */
 function normalizedBackendAudioMimeType(value: string | undefined) {
   const normalized = value?.split(';', 1)[0]?.trim().toLowerCase() ?? ''
   return BACKEND_AUDIO_MIME_TYPES.has(normalized) ? normalized : null
 }
 
+/** Chooses the first encoder format supported by the active MediaRecorder. */
 function preferredVoiceNoteMimeType(
   MediaRecorderClass: MediaRecorderConstructor | undefined,
 ) {
@@ -65,6 +67,7 @@ function preferredVoiceNoteMimeType(
     MediaRecorderClass.isTypeSupported?.(mimeType)) ?? null
 }
 
+/** Reads browser recording dependencies without failing during SSR or tests. */
 function browserRecordingApis() {
   const browserNavigator = typeof navigator === 'undefined'
     ? undefined
@@ -85,6 +88,7 @@ function browserRecordingApis() {
   }
 }
 
+/** Reports whether this browser can record a backend-compatible audio format. */
 export function isVoiceNoteRecordingSupported() {
   const { getUserMedia, MediaRecorderClass } = browserRecordingApis()
   const canSelectCompatibleFormat =
@@ -97,6 +101,10 @@ export function isVoiceNoteRecordingSupported() {
   )
 }
 
+/**
+ * Starts one bounded microphone session and owns its tracks, lifecycle hooks,
+ * format validation, completion, cancellation, and cleanup.
+ */
 export async function startVoiceNoteRecording(
   callbacks: VoiceNoteRecorderCallbacks,
   dependencies: VoiceNoteRecorderDependencies = {},
@@ -146,27 +154,33 @@ export async function startVoiceNoteRecording(
   let finished = false
   let timer: ReturnType<typeof globalThis.setTimeout> | undefined
 
+  /** Releases every microphone track even when the recorder never starts. */
   const stopTracks = () => {
     stream.getTracks().forEach((track) => track.stop())
   }
 
   const stopForBackground = () => stop()
+
+  /** Stops before suspension when the document becomes non-visible. */
   const stopWhenHidden = () => {
     if (visibilityTarget?.visibilityState === 'hidden') stop()
   }
 
+  /** Removes listeners owned by this recording session only. */
   const removeLifecycleListeners = () => {
     visibilityTarget?.removeEventListener('visibilitychange', stopWhenHidden)
     pageLifecycleTarget?.removeEventListener('pagehide', stopForBackground)
     pageLifecycleTarget?.removeEventListener('freeze', stopForBackground)
   }
 
+  /** Cancels the hard duration limit once any terminal path begins. */
   const clearLimitTimer = () => {
     if (timer === undefined) return
     cancelTimeout(timer)
     timer = undefined
   }
 
+  /** Settles one failure, suppressing callbacks after explicit cancellation. */
   const settleFailure = (message: string) => {
     if (finished) return
     finished = true
@@ -176,6 +190,7 @@ export async function startVoiceNoteRecording(
     if (!cancelled) callbacks.onError(message)
   }
 
+  /** Validates captured chunks and publishes one backend-compatible Blob. */
   const finish = () => {
     if (finished) return
     clearLimitTimer()
@@ -228,6 +243,7 @@ export async function startVoiceNoteRecording(
     })
   }
 
+  /** Maps MediaRecorder's generic error event to stable user-facing copy. */
   const fail = () => {
     settleFailure('The voice note could not be recorded. Please try again.')
   }
@@ -238,6 +254,7 @@ export async function startVoiceNoteRecording(
   recorder.addEventListener('stop', finish, { once: true })
   recorder.addEventListener('error', fail, { once: true })
 
+  /** Requests recorder completion once, handling an already-inactive recorder. */
   function stop() {
     if (finished) return
     clearLimitTimer()
@@ -253,6 +270,7 @@ export async function startVoiceNoteRecording(
     }
   }
 
+  /** Marks the session silent before sharing the normal stop/cleanup path. */
   function cancel() {
     if (finished) return
     cancelled = true

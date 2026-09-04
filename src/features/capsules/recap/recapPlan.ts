@@ -21,6 +21,7 @@ export type CapsuleRecapPlan = {
   durationMs: number
 }
 
+/** Builds a deterministic, chronologically ordered frame plan for a recap. */
 export function buildCapsuleRecapPlan(
   photos: CapsulePhoto[],
 ): CapsuleRecapPlan {

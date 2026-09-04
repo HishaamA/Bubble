@@ -6,7 +6,7 @@ import {
   hydrateCapsuleFromIndexedDb,
   serializeCapsuleForIndexedDb,
 } from './capsuleStore'
-import type { FamilyCapsule } from './types'
+import type { CapsuleStore, FamilyCapsule } from './types'
 
 function capsuleWithSources(image: Blob | string, thumbnail: Blob | string): FamilyCapsule {
   return {
@@ -131,6 +131,29 @@ describe('Capsule image persistence', () => {
 })
 
 describe('Resilient Capsule storage', () => {
+  it('keeps an authoritative primary read when fallback reconciliation fails', async () => {
+    const capsule = capsuleWithSources(
+      new Blob(['full'], { type: 'image/jpeg' }),
+      new Blob(['thumb'], { type: 'image/jpeg' }),
+    )
+    const primaryStore = createMemoryCapsuleStore([capsule])
+    const unavailableFallback: CapsuleStore = {
+      list: vi.fn(async () => []),
+      save: vi.fn(async () => {
+        throw new Error('Fallback cache denied')
+      }),
+      remove: vi.fn(async () => {
+        throw new Error('Fallback cache denied')
+      }),
+    }
+    const store = createResilientCapsuleStore(
+      primaryStore,
+      unavailableFallback,
+    )
+
+    await expect(store.list()).resolves.toEqual([capsule])
+  })
+
   it('reopens and retries the durable store after a transient save failure', async () => {
     const primaryStore = createMemoryCapsuleStore()
     const primarySave = vi.spyOn(primaryStore, 'save')

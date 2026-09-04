@@ -17,6 +17,7 @@ type LocalListener = {
 
 const localListeners = new Set<LocalListener>()
 
+/** Validates cross-context messages before notifying local subscribers. */
 function isNotification(value: unknown): value is Notification {
   if (!value || typeof value !== 'object') return false
   return (
@@ -27,9 +28,14 @@ function isNotification(value: unknown): value is Notification {
   )
 }
 
+/**
+ * Broadcasts store changes within this page and across same-origin tabs.
+ * Browser communication failures never interfere with local persistence.
+ */
 export function createMomentChangeNotifier(): MomentChangeNotifier {
   const listeners = new Set<() => void>()
   const notifierId = Math.random().toString(36).slice(2)
+  /** Fans one validated change out to subscribers in this JavaScript context. */
   const emit = () => listeners.forEach((listener) => listener())
   const localListener = { notifierId, emit }
   localListeners.add(localListener)
@@ -44,6 +50,7 @@ export function createMomentChangeNotifier(): MomentChangeNotifier {
     })
   }
 
+  /** Uses storage events as the fallback when BroadcastChannel is unavailable. */
   const handleStorage = (event: StorageEvent) => {
     if (event.key === STORAGE_KEY && event.newValue) emit()
   }

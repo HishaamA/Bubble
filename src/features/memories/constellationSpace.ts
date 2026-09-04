@@ -24,9 +24,11 @@ export type BubbleCenterDepth = {
   distance: number
 }
 
+/** Keeps pan and depth calculations inside their physical limits. */
 const clamp = (value: number, minimum: number, maximum: number) =>
   Math.min(maximum, Math.max(minimum, value))
 
+/** Produces stable transform values without visible precision loss. */
 const round = (value: number) => Math.round(value * 100) / 100
 
 /**
@@ -59,6 +61,7 @@ export function calculateConstellationPan({
   }
 }
 
+/** Centers an oversized constellation before a specific bubble is selected. */
 export function calculateInitialConstellationPan({
   field,
   world,

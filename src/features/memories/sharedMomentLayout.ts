@@ -21,16 +21,19 @@ const ODD_ROW_LEFTS = [12.5, 31.5, 50.5, 69.5] as const
 
 type NumericPosition = { top: number; left: number; slot: number }
 
+/** Wraps a deterministic seed into the normalized 0–1 range. */
 function fractionalPart(value: number) {
   return value - Math.floor(value)
 }
 
+/** Counts only rows required beyond positions reserved for bundled memories. */
 function layoutRowCount(sharedCount: number) {
   if (sharedCount <= 0) return 8
   // Extra slots replace any that are reserved by the built-in memories.
   return Math.max(8, Math.ceil((sharedCount + 20) / 4.5) + 2)
 }
 
+/** Returns the world height required to place every shared moment safely. */
 export function getSharedMomentWorldHeightPercent(sharedCount: number) {
   const rows = layoutRowCount(Math.max(0, Math.floor(sharedCount)))
   const height = Math.max(
@@ -40,6 +43,7 @@ export function getSharedMomentWorldHeightPercent(sharedCount: number) {
   return Math.round(height * 100) / 100
 }
 
+/** Measures clearance in reference-field pixels rather than distorted percentages. */
 function renderedDistance(
   first: Pick<NumericPosition, 'top' | 'left'>,
   second: { top: number; left: number },
@@ -112,6 +116,7 @@ export function getSharedMomentPositions(sharedCount: number) {
   )
 }
 
+/** Returns one stable shared-moment slot, expanding the layout when necessary. */
 export function getSharedMomentPosition(
   sharedIndex: number,
   sharedCount = sharedIndex + 1,

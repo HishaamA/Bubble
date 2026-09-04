@@ -27,6 +27,98 @@ type PermissionCapableEvent = typeof DeviceOrientationEvent & {
   requestPermission?: () => Promise<'denied' | 'granted'>
 }
 
+/** Allows omitted view fields but rejects non-finite values at the vendor edge. */
+function isFiniteWhenDefined(value: number | undefined): boolean {
+  return value === undefined || Number.isFinite(value)
+}
+
+/** Validates the subset of camera state callers may override. */
+function isValidPartialView(view: PanoramaView): boolean {
+  return (
+    isFiniteWhenDefined(view.pitch) &&
+    isFiniteWhenDefined(view.yaw) &&
+    isFiniteWhenDefined(view.hfov) &&
+    (view.hfov === undefined || view.hfov > 0)
+  )
+}
+
+/** Rejects malformed runtime data before Pannellum mutates the document. */
+function validateScenes(scenes: readonly PanoramaScene[]): Set<string> {
+  if (scenes.length === 0) {
+    throw new Error('At least one panorama scene is required.')
+  }
+
+  if (scenes.some(({ id }) => typeof id !== 'string' || !id.trim())) {
+    throw new Error('Panorama scene IDs must be non-empty and unique.')
+  }
+  const sceneIds = new Set(scenes.map(({ id }) => id))
+  if (sceneIds.size !== scenes.length) {
+    throw new Error('Panorama scene IDs must be non-empty and unique.')
+  }
+
+  for (const scene of scenes) {
+    if (
+      typeof scene.panorama !== 'string' ||
+      !scene.panorama.trim() ||
+      typeof scene.alt !== 'string' ||
+      !scene.alt.trim()
+    ) {
+      throw new Error(`Panorama scene ${scene.id} needs an image and alt text.`)
+    }
+    if (
+      !isValidPartialView(scene) ||
+      !isFiniteWhenDefined(scene.minHfov) ||
+      !isFiniteWhenDefined(scene.maxHfov) ||
+      (scene.minHfov !== undefined && scene.minHfov <= 0) ||
+      (scene.maxHfov !== undefined && scene.maxHfov <= 0) ||
+      (scene.minHfov !== undefined &&
+        scene.maxHfov !== undefined &&
+        scene.minHfov > scene.maxHfov)
+    ) {
+      throw new Error(`Panorama scene ${scene.id} has an invalid view.`)
+    }
+
+    const hotSpotIds = new Set<string>()
+    for (const hotSpot of scene.hotSpots ?? []) {
+      if (
+        typeof hotSpot.id !== 'string' ||
+        !hotSpot.id.trim() ||
+        hotSpotIds.has(hotSpot.id)
+      ) {
+        throw new Error(
+          `Panorama scene ${scene.id} has a missing or duplicate hotspot ID.`,
+        )
+      }
+      hotSpotIds.add(hotSpot.id)
+      if (
+        typeof hotSpot.label !== 'string' ||
+        !hotSpot.label.trim() ||
+        !Number.isFinite(hotSpot.pitch) ||
+        !Number.isFinite(hotSpot.yaw) ||
+        !isFiniteWhenDefined(hotSpot.targetPitch) ||
+        !isFiniteWhenDefined(hotSpot.targetYaw) ||
+        !isFiniteWhenDefined(hotSpot.targetHfov) ||
+        (hotSpot.targetHfov !== undefined && hotSpot.targetHfov <= 0)
+      ) {
+        throw new Error(
+          `Panorama hotspot ${hotSpot.id} has invalid display data.`,
+        )
+      }
+      if (
+        hotSpot.kind === 'scene' &&
+        (!hotSpot.sceneId || !sceneIds.has(hotSpot.sceneId))
+      ) {
+        throw new Error(
+          `Panorama hotspot ${hotSpot.id} links to an unknown scene.`,
+        )
+      }
+    }
+  }
+
+  return sceneIds
+}
+
+/** Requests iOS motion permission only when the browser exposes that gate. */
 async function requestBrowserOrientationPermission(): Promise<boolean> {
   const orientationEvent = globalThis.DeviceOrientationEvent as
     | PermissionCapableEvent
@@ -42,12 +134,14 @@ async function requestBrowserOrientationPermission(): Promise<boolean> {
   }
 }
 
+/** Normalizes thrown runtime values to the adapter's public Error contract. */
 function toError(value: unknown): Error {
   if (value instanceof Error) return value
   if (typeof value === 'string') return new Error(value)
   return new Error('The panorama could not be displayed.')
 }
 
+/** Gives Pannellum's generated div hotspots native button key behavior. */
 function addKeyboardActivation(element: HTMLElement): void {
   if (element.dataset.keyboardActivation === 'true') return
   element.dataset.keyboardActivation = 'true'
@@ -61,6 +155,7 @@ function addKeyboardActivation(element: HTMLElement): void {
   })
 }
 
+/** Adds semantics and a visible label to Pannellum's generated hotspot node. */
 function createAccessibleHotSpot(
   element: HTMLElement,
   hotSpot: PanoramaHotSpot,
@@ -80,6 +175,7 @@ function createAccessibleHotSpot(
   addKeyboardActivation(element)
 }
 
+/** Converts one app hotspot without exposing vendor-specific fields upstream. */
 function mapHotSpot(hotSpot: PanoramaHotSpot): PannellumHotSpotConfig {
   const config: PannellumHotSpotConfig = {
     id: hotSpot.id,
@@ -102,6 +198,7 @@ function mapHotSpot(hotSpot: PanoramaHotSpot): PannellumHotSpotConfig {
   return config
 }
 
+/** Converts one validated scene while leaving its panorama URL caller-owned. */
 function mapScene(scene: PanoramaScene) {
   return {
     type: 'equirectangular' as const,
@@ -120,14 +217,11 @@ function mapScene(scene: PanoramaScene) {
   }
 }
 
+/** Maps validated app scenes to the deliberately narrow vendor configuration. */
 function buildConfig(options: PanoramaMountOptions): PannellumConfig {
-  if (options.scenes.length === 0) {
-    throw new Error('At least one panorama scene is required.')
-  }
-
-  const sceneIds = new Set(options.scenes.map(({ id }) => id))
-  if (sceneIds.size !== options.scenes.length) {
-    throw new Error('Panorama scene IDs must be unique.')
+  const sceneIds = validateScenes(options.scenes)
+  if (options.initialView && !isValidPartialView(options.initialView)) {
+    throw new Error('The initial panorama view is invalid.')
   }
 
   const firstScene = options.initialSceneId ?? options.scenes[0].id
@@ -172,6 +266,11 @@ function buildConfig(options: PanoramaMountOptions): PannellumConfig {
   }
 }
 
+/**
+ * Wraps Pannellum's imperative viewer in a lifecycle-safe, testable adapter.
+ * One adapter owns at most one viewer and invalidates non-abortable async work
+ * whenever that viewer is replaced or destroyed.
+ */
 export function createPannellumAdapter(
   dependencies: PannellumAdapterDependencies = {},
 ): PanoramaAdapter {
@@ -183,27 +282,46 @@ export function createPannellumAdapter(
   let mountVersion = 0
   let orientationRequestVersion = 0
   let availableSceneIds = new Set<string>()
-  let listeners: Array<{
+  let eventListeners: Array<{
     eventName: PannellumEventName
     listener: (...args: unknown[]) => void
   }> = []
 
-  const removeListeners = () => {
-    if (!viewer) return
-    listeners.forEach(({ eventName, listener }) => {
-      viewer?.off(eventName, listener)
-    })
-    listeners = []
+  /** Detaches every listener registered by the current adapter mount. */
+  const removeListeners = (ownedViewer: PannellumViewerInstance) => {
+    for (const { eventName, listener } of eventListeners) {
+      try {
+        ownedViewer.off(eventName, listener)
+      } catch {
+        // Continue detaching the remaining global listeners even if a damaged
+        // runtime fails to remove one of them.
+      }
+    }
+    eventListeners = []
   }
 
+  /** Tears down the currently owned runtime instance without throwing on exit. */
   const destroyViewer = () => {
     if (!viewer) return
-    removeListeners()
-    viewer.stopOrientation()
-    viewer.destroy()
+    const ownedViewer = viewer
+    // Clear ownership first so callbacks fired during Pannellum teardown can
+    // never act on a viewer that is already leaving the document.
     viewer = undefined
+    removeListeners(ownedViewer)
+    try {
+      ownedViewer.stopOrientation()
+    } catch {
+      // Destruction below must still run if a browser sensor API is damaged.
+    }
+    try {
+      ownedViewer.destroy()
+    } catch {
+      // Pannellum cleanup is best-effort during route teardown. Version guards
+      // already prevent any late callback from reclaiming adapter ownership.
+    }
   }
 
+  /** Invalidates pending imports and permission requests before teardown. */
   const destroy = () => {
     // Version counters invalidate both kinds of async work: a runtime import
     // resolving after unmount and an iOS permission promise resolving after
@@ -214,6 +332,7 @@ export function createPannellumAdapter(
     availableSceneIds = new Set()
   }
 
+  /** Replaces the owned viewer after the bundled runtime is available. */
   const mount = async (
     container: HTMLElement,
     options: PanoramaMountOptions,
@@ -230,12 +349,13 @@ export function createPannellumAdapter(
     availableSceneIds = new Set(options.scenes.map(({ id }) => id))
     viewer = runtime.viewer(container, config)
 
+    /** Records each vendor listener so remount and destroy can detach it. */
     const bind = (
       eventName: PannellumEventName,
       listener: (...args: unknown[]) => void,
     ) => {
       viewer?.on(eventName, listener)
-      listeners.push({ eventName, listener })
+      eventListeners.push({ eventName, listener })
     }
 
     bind('load', () => options.onLoad?.())
@@ -245,12 +365,20 @@ export function createPannellumAdapter(
     bind('error', (error) => options.onError?.(toError(error)))
   }
 
+  /** Loads a known scene only when its optional camera override is valid. */
   const changeScene = (sceneId: string, view: PanoramaView = {}): boolean => {
-    if (!viewer || !availableSceneIds.has(sceneId)) return false
+    if (
+      !viewer ||
+      !availableSceneIds.has(sceneId) ||
+      !isValidPartialView(view)
+    ) {
+      return false
+    }
     viewer.loadScene(sceneId, view.pitch, view.yaw, view.hfov)
     return true
   }
 
+  /** Starts sensor control only for the viewer that requested permission. */
   const startOrientation = async (
     options: PanoramaOrientationStartOptions = {},
   ): Promise<boolean> => {
@@ -300,11 +428,18 @@ export function createPannellumAdapter(
     )
   }
 
+  /** Cancels pending permission ownership and detaches the active sensor. */
   const stopOrientation = () => {
     orientationRequestVersion += 1
-    viewer?.stopOrientation()
+    try {
+      viewer?.stopOrientation()
+    } catch {
+      // Manual drag remains available even if the platform sensor listener has
+      // already disappeared underneath Pannellum.
+    }
   }
 
+  /** Returns a complete camera snapshot or null for corrupt runtime values. */
   const getView = (): PanoramaViewState | null => {
     if (!viewer) return null
     const view = {
@@ -315,6 +450,7 @@ export function createPannellumAdapter(
     return Object.values(view).every(Number.isFinite) ? view : null
   }
 
+  /** Converts a pointer event to spherical coordinates without leaking errors. */
   const getCoordinatesFromEvent = (
     event: MouseEvent,
   ): Pick<PanoramaViewState, 'pitch' | 'yaw'> | null => {
@@ -330,8 +466,9 @@ export function createPannellumAdapter(
     }
   }
 
+  /** Synchronizes a complete finite camera view without transition animation. */
   const setView = (view: PanoramaViewState): boolean => {
-    if (!viewer || !Object.values(view).every(Number.isFinite)) return false
+    if (!viewer || !isValidPartialView(view)) return false
 
     if (Math.abs(viewer.getPitch() - view.pitch) > 0.001) {
       viewer.setPitch(view.pitch, false)
@@ -345,11 +482,13 @@ export function createPannellumAdapter(
     return true
   }
 
+  /** Adjusts horizontal field of view using Pannellum's animated setter. */
   const zoom = (delta: number) => {
     if (!viewer) return
     viewer.setHfov(viewer.getHfov() + delta, 180)
   }
 
+  /** Hands camera ownership from device motion to explicit keyboard panning. */
   const panBy = (pitchDelta: number, yawDelta: number) => {
     if (!viewer) return
     stopOrientation()

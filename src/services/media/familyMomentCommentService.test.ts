@@ -55,6 +55,8 @@ const momentId = '40000000-0000-4000-8000-000000000001'
 const annotationId = 'table-note'
 const commentId = '60000000-0000-4000-8000-000000000001'
 const authorId = '10000000-0000-4000-8000-000000000001'
+const localCommentStorageKey =
+  'kinsphere:family-moment-comments:v2:user_clerk_simreen'
 
 const remoteRow = {
   id: commentId,
@@ -69,7 +71,7 @@ const remoteRow = {
 beforeEach(() => {
   vi.clearAllMocks()
   localStorage.clear()
-  localStorage.setItem('kinsphere:family-moment-comments:v1', '[]')
+  localStorage.setItem(localCommentStorageKey, '[]')
   mocks.commentsQuery.select.mockReturnValue(mocks.commentsQuery)
   mocks.commentsQuery.eq.mockReturnValue(mocks.commentsQuery)
   mocks.commentsQuery.order.mockReturnValue(mocks.commentsQuery)
@@ -114,7 +116,22 @@ describe('family moment comment persistence', () => {
       wholePhoto,
       reply,
     ])
-    expect(JSON.parse(localStorage.getItem('kinsphere:family-moment-comments:v1') ?? '[]')).toHaveLength(2)
+    expect(
+      JSON.parse(localStorage.getItem(localCommentStorageKey) ?? '[]'),
+    ).toHaveLength(2)
+  })
+
+  it('keeps local preview comments isolated when the signed-in account changes', async () => {
+    await addFamilyMomentComment({
+      momentId: 'sunday-dinner',
+      body: 'Only Simreen should see this draft.',
+    })
+    mocks.getClerkSupabaseIdentity.mockReturnValue({
+      subject: 'user_clerk_someone_else',
+      displayName: 'Someone else',
+    })
+
+    await expect(fetchFamilyMomentComments('sunday-dinner')).resolves.toEqual([])
   })
 
   it('validates body, author name, and annotation target before any backend write', async () => {
@@ -224,6 +241,22 @@ describe('family moment comment persistence', () => {
     unsubscribe()
     expect(mocks.client.removeChannel).toHaveBeenCalledWith(
       mocks.realtimeChannel,
+    )
+  })
+
+  it('does not leak browser listeners when the remote membership lookup fails', async () => {
+    const addEventListener = vi.spyOn(window, 'addEventListener')
+    mocks.getFamilyMomentConnection.mockRejectedValueOnce(
+      new Error('membership unavailable'),
+    )
+
+    await expect(
+      subscribeToFamilyMomentComments(momentId, vi.fn()),
+    ).rejects.toThrow('membership unavailable')
+
+    expect(addEventListener).not.toHaveBeenCalledWith(
+      'kinsphere:family-moment-comment-change',
+      expect.any(Function),
     )
   })
 

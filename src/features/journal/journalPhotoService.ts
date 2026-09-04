@@ -20,10 +20,12 @@ type JournalPhotoRow = {
   uploader?: unknown
 }
 
+/** Restricts client-selected IDs to canonical UUIDs accepted by persistence. */
 function isUuid(value: string) {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value)
 }
 
+/** Produces a UUID v4 when the convenience browser API is unavailable. */
 function createUuid() {
   if (typeof crypto.randomUUID === 'function') return crypto.randomUUID()
   const bytes = crypto.getRandomValues(new Uint8Array(16))
@@ -35,6 +37,7 @@ function createUuid() {
   return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`
 }
 
+/** Normalizes Supabase's one-to-one relation shape into safe contributor copy. */
 function displayNameFromRelation(value: unknown, fallback: string) {
   const relation = Array.isArray(value) ? value[0] : value
   if (!relation || typeof relation !== 'object') return fallback
@@ -44,6 +47,7 @@ function displayNameFromRelation(value: unknown, fallback: string) {
     : fallback
 }
 
+/** Resolves the approved family and rejects stale callers from another namespace. */
 async function currentFamilyContext(expectedCacheNamespace?: string) {
   const client = getSupabaseClient()
   const identity = getClerkSupabaseIdentity()
@@ -70,6 +74,7 @@ async function currentFamilyContext(expectedCacheNamespace?: string) {
   }
 }
 
+/** Converts one untrusted row into UI data only when every media URL is usable. */
 function normalizePhoto(
   row: JournalPhotoRow,
   signedUrls: Map<string, string>,
@@ -109,12 +114,15 @@ function normalizePhoto(
   }
 }
 
+/** Fetches validated family-library metadata with fresh signed media URLs. */
 export async function fetchFamilyJournalPhotos(
   expectedCacheNamespace?: string,
 ): Promise<JournalPhoto[] | null> {
   const context = await currentFamilyContext(expectedCacheNamespace)
   if (!context) return null
 
+  // Read in bounded pages because a long-running family can exceed the server's
+  // default result limit without any one response becoming excessively large.
   const rows: JournalPhotoRow[] = []
   const pageSize = 500
   for (let offset = 0; ; offset += pageSize) {
@@ -140,6 +148,8 @@ export async function fetchFamilyJournalPhotos(
     .flatMap((row) => [row.image_path, row.thumbnail_path])
     .filter((path): path is string => typeof path === 'string')
   const signedUrls = new Map<string, string>()
+  // Storage signs at most a bounded batch at once; the map reconnects results
+  // to their original database paths without depending on row order later.
   for (let offset = 0; offset < paths.length; offset += 100) {
     const pathBatch = paths.slice(offset, offset + 100)
     const { data, error } = await context.client.storage
@@ -157,6 +167,7 @@ export async function fetchFamilyJournalPhotos(
     .filter((photo): photo is JournalPhoto => photo !== null)
 }
 
+/** Uploads processed photo variants and records one idempotent library row. */
 export async function uploadFamilyJournalPhoto(input: {
   photoId?: string
   photo: ProcessedCapsulePhoto
@@ -173,6 +184,8 @@ export async function uploadFamilyJournalPhoto(input: {
   const thumbnailPath = `${context.circleId}/journal-thumbnails/${context.userId}/${photoId}.jpg`
   const bucket = context.client.storage.from('family-media')
 
+  // Retry-safe uploads return early when the same owner already finalized this
+  // ID, avoiding a second pair of immutable storage objects.
   const existingResult = await context.client
     .from('family_journal_photos')
     .select('id')
@@ -197,6 +210,8 @@ export async function uploadFamilyJournalPhoto(input: {
     }),
   ])
   if (imageUpload.error || thumbnailUpload.error) {
+    // Remove only the variant that succeeded so a partial upload cannot become
+    // an unreferenced private-media object.
     const completedPaths = [
       imageUpload.error ? null : imagePath,
       thumbnailUpload.error ? null : thumbnailPath,
@@ -226,6 +241,7 @@ export async function uploadFamilyJournalPhoto(input: {
   return photoId
 }
 
+/** Subscribes to family-library changes and returns a cleanup callback. */
 export async function subscribeToFamilyJournalPhotos(
   onChange: () => void,
   expectedCacheNamespace?: string,

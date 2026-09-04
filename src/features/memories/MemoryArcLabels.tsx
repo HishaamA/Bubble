@@ -8,6 +8,7 @@ type MemoryArcLabelsProps = {
 const MAX_TITLE_LENGTH = 24
 const MAX_SENDER_LENGTH = 18
 
+/** Truncates display copy on a word boundary while preserving the full title elsewhere. */
 function compactLabel(value: string, maxLength: number) {
   const label = value.trim().replace(/\s+/g, ' ')
   if (label.length <= maxLength) return label
@@ -15,6 +16,7 @@ function compactLabel(value: string, maxLength: number) {
   return `${label.slice(0, maxLength - 1).trimEnd()}…`
 }
 
+/** Draws compact decorative labels around a memory bubble's circular edge. */
 export function MemoryArcLabels({ title, sender }: MemoryArcLabelsProps) {
   const pathPrefix = `memory-arc-${useId().replace(/:/g, '')}`
   const titlePathId = `${pathPrefix}-title`

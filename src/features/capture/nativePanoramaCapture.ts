@@ -55,6 +55,7 @@ const pluginRegistry = globalThis as PanoramaCaptureRegistry
 const PanoramaCapture = pluginRegistry.__kinspherePanoramaCapture ??=
   registerPlugin<PanoramaCapturePlugin>('PanoramaCapture')
 
+/** Reports whether the installed native shell exposes guided panorama capture. */
 export function isNativePanoramaCaptureAvailable() {
   return (
     Capacitor.isNativePlatform() &&
@@ -62,6 +63,7 @@ export function isNativePanoramaCaptureAvailable() {
   )
 }
 
+/** Starts native capture with production-safe defaults that callers may refine. */
 export function startNativePanoramaCapture(
   options: NativePanoramaCaptureOptions = {},
 ) {
@@ -72,11 +74,13 @@ export function startNativePanoramaCapture(
   })
 }
 
+/** Releases temporary native frames after save, cancellation, or replacement. */
 export function discardNativePanoramaCapture(result: NativePanoramaCaptureResult) {
   if (!result.directoryUrl) return Promise.resolve()
   return PanoramaCapture.discardCapture({ directoryUrl: result.directoryUrl })
 }
 
+/** Converts a native frame URI into a WebView-safe image source. */
 export function nativeFrameSource(frame: NativePanoramaFrame) {
   const source = frame.uri ?? frame.fileUrl ?? frame.path
   if (!source) {
@@ -85,6 +89,7 @@ export function nativeFrameSource(frame: NativePanoramaFrame) {
   return Capacitor.convertFileSrc(source)
 }
 
+/** Distinguishes an intentional native dismissal from an actual capture error. */
 export function isNativeCaptureCancellation(error: unknown) {
   if (!error || typeof error !== 'object') return false
   const candidate = error as { code?: unknown; message?: unknown }

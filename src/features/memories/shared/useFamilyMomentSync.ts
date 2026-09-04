@@ -23,6 +23,7 @@ export type FamilyMomentSyncContextValue = {
 export const FamilyMomentSyncContext =
   createContext<FamilyMomentSyncContextValue | null>(null)
 
+/** Returns the active family sync contract and rejects missing providers early. */
 export function useFamilyMomentSync() {
   const context = useContext(FamilyMomentSyncContext)
   if (!context) {

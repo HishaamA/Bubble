@@ -94,6 +94,7 @@ const timeFormatter = new Intl.DateTimeFormat('en', {
   minute: '2-digit',
 })
 
+/** Renders the small line icon set shared by capture states and actions. */
 function CaptureIcon({ name }: { name: 'close' | 'lock' | 'camera' | 'check' | 'image' }) {
   const common = {
     'aria-hidden': true,
@@ -114,6 +115,7 @@ function CaptureIcon({ name }: { name: 'close' | 'lock' | 'camera' | 'check' | '
   return <svg {...common}><rect x="5" y="10" width="14" height="10" rx="3" /><path d="M8 10V7a4 4 0 0 1 8 0v3" /></svg>
 }
 
+/** Maps the daily-window state to stable, non-interactive explanatory copy. */
 function getPhaseCopy(phase: DailyCapturePhase) {
   if (phase === 'open') {
     return {
@@ -142,6 +144,7 @@ function getPhaseCopy(phase: DailyCapturePhase) {
   }
 }
 
+/** Creates a UUID for drafts before either local or family persistence begins. */
 function makeSubmissionId() {
   return (
     globalThis.crypto?.randomUUID?.() ??
@@ -153,6 +156,10 @@ function makeSubmissionId() {
   )
 }
 
+/**
+ * Coordinates daily/manual panorama intake, native guided capture, browser
+ * validation, draft recovery, annotation review, and final family delivery.
+ */
 export function Capture360Page({
   now,
   dailyWindow,
@@ -209,6 +216,8 @@ export function Capture360Page({
   const restoreGuideFocusRef = useRef(false)
   const guidedCaptureButtonRef = useRef<HTMLButtonElement>(null)
 
+  // A supplied clock freezes time for tests; production checks frequently enough
+  // for a 15-minute capture window to open and close without user navigation.
   useEffect(() => {
     if (now) return
 
@@ -216,6 +225,8 @@ export function Capture360Page({
     return () => window.clearInterval(timer)
   }, [now])
 
+  // Request counters invalidate unresolved native/browser work on unmount. Only
+  // the installed draft owns the persistent preview URL released here.
   useEffect(() => {
     mountedRef.current = true
     return () => {
@@ -233,6 +244,8 @@ export function Capture360Page({
     }
   }, [])
 
+  // The visual viewport follows the mobile keyboard more accurately than the
+  // layout viewport. Keep the caption action visible while that keyboard moves.
   useEffect(() => {
     if (!draft || reviewingPanorama || shared) return
 
@@ -243,6 +256,7 @@ export function Capture360Page({
 
     let animationFrame = 0
     const uninstallViewportSync = installCaptureEditorViewportSync(capturePage)
+    /** Scrolls the focused caption composer into the currently visible viewport. */
     const revealCaptionControls = () => {
       if (document.activeElement !== captionInput) return
       window.cancelAnimationFrame(animationFrame)
@@ -282,6 +296,7 @@ export function Capture360Page({
   const isSuccess = shared
   const interactionBusy = checking || guidedCaptureRunning || savingDraft || sharing
 
+  /** Reads synchronous mutexes that close React's pre-render double-action window. */
   function hasBlockingInteraction() {
     return (
       guidedCaptureInFlightRef.current ||
@@ -291,6 +306,7 @@ export function Capture360Page({
     )
   }
 
+  /** Releases one draft's browser/native resources and resets its editor state. */
   function clearDraft({ invalidateFileSelection = true } = {}) {
     if (invalidateFileSelection) {
       fileSelectionRequestRef.current += 1
@@ -314,6 +330,7 @@ export function Capture360Page({
     }
   }
 
+  /** Opens the requested system picker only when its capture mode is currently valid. */
   function openPicker(
     nextSource: CaptureSource,
     picker: 'camera' | 'library' = 'library',
@@ -329,6 +346,7 @@ export function Capture360Page({
     input.current?.click()
   }
 
+  /** Transfers ownership of a validated File and its new object URL into editor state. */
   function installDraft(
     file: File,
     dimensions: ImageDimensions,
@@ -363,7 +381,8 @@ export function Capture360Page({
     return nextDraft
   }
 
-  function draftSubmission(
+  /** Converts editor state to the persistence callback's immutable value object. */
+  function createDraftSubmission(
     selectedDraft: CaptureDraft,
     nextCaption = '',
     nextAnnotations: StoredPanoramaAnnotation[] = [],
@@ -380,6 +399,7 @@ export function Capture360Page({
     }
   }
 
+  /** Queues local saves so older callbacks cannot overwrite a newer editor version. */
   async function saveDraftLocally(
     selectedDraft: CaptureDraft,
     nextCaption = '',
@@ -388,7 +408,7 @@ export function Capture360Page({
     if (!onSaveDraft) return
 
     const saveVersion = ++draftSaveVersionRef.current
-    const submission = draftSubmission(
+    const submission = createDraftSubmission(
       selectedDraft,
       nextCaption,
       nextAnnotations,
@@ -432,6 +452,7 @@ export function Capture360Page({
     }
   }
 
+  /** Replays the current draft after a user-visible local persistence failure. */
   async function retryDraftSave() {
     if (!draft || !onSaveDraft || draftSaveInFlightRef.current) return
 
@@ -454,6 +475,7 @@ export function Capture360Page({
     }
   }
 
+  /** Applies review edits immediately and serializes their background persistence. */
   function updateAnnotations(nextAnnotations: StoredPanoramaAnnotation[]) {
     setAnnotations(nextAnnotations)
     if (!draft || !onSaveDraft) return
@@ -482,6 +504,7 @@ export function Capture360Page({
       })
   }
 
+  /** Leaves review only after the latest queued annotation save has settled. */
   async function finishPanoramaReview() {
     if (onSaveDraft) {
       const uiRequest = ++draftSaveUiRequestRef.current
@@ -513,6 +536,7 @@ export function Capture360Page({
     )
   }
 
+  /** Runs one native capture/composition session or opens the browser concept preview. */
   async function beginGuidedCapture(nextSource: CaptureSource) {
     // React state disables the button visually; this ref closes the same-tick
     // window before a render so the native bridge can only own one session.
@@ -532,6 +556,8 @@ export function Capture360Page({
 
     guidedCaptureInFlightRef.current = true
     const requestId = ++guidedCaptureRequestRef.current
+    // Async native callbacks are allowed to finish after navigation. Every state
+    // mutation below is gated to the mounted request that originally started it.
     const requestIsCurrent = () => (
       mountedRef.current && guidedCaptureRequestRef.current === requestId
     )
@@ -621,6 +647,7 @@ export function Capture360Page({
     }
   }
 
+  /** Validates and normalizes the latest picker result before installing a draft. */
   async function selectFile(event: ChangeEvent<HTMLInputElement>) {
     const input = event.currentTarget
     const file = input.files?.[0]
@@ -722,6 +749,7 @@ export function Capture360Page({
     }
   }
 
+  /** Waits for autosaves, then sends one complete draft through the delivery callback. */
   async function shareCapture(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     if (!draft || shareInFlightRef.current) return
@@ -780,11 +808,14 @@ export function Capture360Page({
     }
   }
 
+  /** Closes the concept preview while recording where keyboard focus must return. */
   function closeGuidePreview() {
     restoreGuideFocusRef.current = true
     setGuidePreview(false)
   }
 
+  // Restore focus after the preview unmounts rather than while its close button
+  // still owns focus in the old tree.
   useEffect(() => {
     if (guidePreview || !restoreGuideFocusRef.current) return
     const frame = window.requestAnimationFrame(() => {

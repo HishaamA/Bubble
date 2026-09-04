@@ -35,6 +35,7 @@ const tabs: Tab[] = [
   },
 ]
 
+/** Renders route-aware primary navigation and preserves Journal return state. */
 export function AppTabBar() {
   const location = useLocation()
   const routeState = location.state as {

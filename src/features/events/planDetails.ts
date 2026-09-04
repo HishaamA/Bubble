@@ -104,6 +104,7 @@ export function encodePlanDetails(input: PlanDetailsInput) {
   return encoded
 }
 
+/** Treats a missing task list as empty while rejecting malformed encoded data. */
 function decodeTasks(value: unknown): PlanTask[] | null {
   if (value === undefined) return []
   if (!Array.isArray(value)) return null
@@ -114,6 +115,7 @@ function decodeTasks(value: unknown): PlanTask[] | null {
   }
 }
 
+/** Validates task bounds and uniqueness for both encode and decode paths. */
 function normalizeTasks(value: readonly unknown[]): PlanTask[] {
   if (value.length > maxTasks) {
     throw new Error(`A family plan can have up to ${maxTasks} tasks.`)
@@ -132,12 +134,14 @@ function normalizeTasks(value: readonly unknown[]): PlanTask[] {
   })
 }
 
+/** Returns a trimmed string only when it fits the supplied persistence limit. */
 function normalizeBoundedString(value: unknown, maxLength: number) {
   if (typeof value !== 'string') return null
   const normalized = value.trim()
   return normalized && normalized.length <= maxLength ? normalized : null
 }
 
+/** Narrows an untrusted value to a supported plan category. */
 function parsePlanCategory(value: unknown): PlanCategory | null {
   return typeof value === 'string'
     && (planCategories as readonly string[]).includes(value)
@@ -145,6 +149,7 @@ function parsePlanCategory(value: unknown): PlanCategory | null {
     : null
 }
 
+/** Narrows an untrusted value to a supported decorative motif. */
 function parsePlanDoodle(value: unknown): PlanDoodleName | null {
   return typeof value === 'string'
     && (planDoodles as readonly string[]).includes(value)
@@ -152,6 +157,7 @@ function parsePlanDoodle(value: unknown): PlanDoodleName | null {
     : null
 }
 
+/** Excludes arrays and null before reading JSON object properties. */
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
 }

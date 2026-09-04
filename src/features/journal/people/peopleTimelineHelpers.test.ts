@@ -487,4 +487,26 @@ describe('people timeline helpers', () => {
     expect(migrated.dateOverrides['photo:portrait']?.value).toBe('2001')
     expect(migrated.dismissedSuggestions[0]?.photoKey).toBe('photo:portrait')
   })
+
+  it('does not migrate a legacy Capsule key onto a Journal photo with the same id', () => {
+    const state = emptyPeopleTimelineState()
+    state.people = [person('maya')]
+    state.assignments = [{
+      photoKey: 'capsule:removed-capsule:portrait',
+      personId: 'maya',
+      source: 'manual',
+      confirmedAt: '2026-01-01T00:00:00.000Z',
+    }]
+    const journalPhoto = {
+      ...timelinePhoto('journal-photo:portrait', '2025-04-02T12:00:00.000Z'),
+      id: 'portrait',
+      kind: 'journal-photo' as const,
+    }
+
+    const migrated = migrateLegacyPeopleTimelineState(state, [journalPhoto])
+
+    expect(migrated.assignments[0]?.photoKey).toBe(
+      'capsule:removed-capsule:portrait',
+    )
+  })
 })

@@ -48,18 +48,22 @@ const pendingCleanupKey = 'kinsphere-event-reminder-pending-cleanup:v1'
 
 export const reminderLeadTime = 60 * 60 * 1000
 
+/** Converts an event start into its one-hour-before alert timestamp. */
 function reminderTime(startsAt: string) {
   return new Date(startsAt).getTime() - reminderLeadTime
 }
 
+/** Delimits account and event IDs so browser timers cannot collide. */
 function timerKey(eventId: string, accountNamespace: string) {
   return `${accountNamespace}\u0000${eventId}`
 }
 
+/** Identifies every browser timer owned by one account namespace. */
 function timerPrefix(accountNamespace: string) {
   return `${accountNamespace}\u0000`
 }
 
+/** Computes the deterministic unsigned hash used by native notification IDs. */
 function hashText(input: string) {
   let hash = 2_166_136_261
   for (let index = 0; index < input.length; index += 1) {
@@ -78,10 +82,12 @@ export function eventReminderNotificationId(
     % (maximumNotificationId - 1) + 1
 }
 
+/** Produces a privacy-preserving tag for discovering one account's alerts. */
 function notificationAccountTag(accountNamespace: string) {
   return hashText(`account\u0000${accountNamespace}`).toString(36)
 }
 
+/** Recreates IDs used before reminders became account-scoped. */
 function legacyNotificationId(eventId: string) {
   let hash = 0
   for (const character of eventId) {
@@ -91,27 +97,32 @@ function legacyNotificationId(eventId: string) {
   return id <= maximumNotificationId ? id : null
 }
 
+/** Returns current and legacy IDs so upgrades can cancel both safely. */
 function notificationIds(eventId: string, accountNamespace: string) {
   const current = eventReminderNotificationId(eventId, accountNamespace)
   const legacy = legacyNotificationId(eventId)
   return legacy !== null && legacy !== current ? [current, legacy] : [current]
 }
 
+/** Checks both the runtime and plugin before calling native notification APIs. */
 function canUseNativeNotifications() {
   return Capacitor.isNativePlatform()
     && Capacitor.isPluginAvailable('LocalNotifications')
 }
 
+/** Encodes the account namespace into its durable reminder registry key. */
 function registryStorageKey(accountNamespace: string) {
   return `${registryKeyPrefix}${encodeURIComponent(accountNamespace)}`
 }
 
+/** Locates the ID-only registry used by pre-v1 reminder storage. */
 function legacyReminderStorageKey(accountNamespace: string) {
   return `${legacyReminderIdsKey}:${encodeURIComponent(
     accountNamespace.trim() || 'signed-out',
   )}`
 }
 
+/** Reads valid IDs from legacy storage without making startup depend on it. */
 function readLegacyReminderIds(accountNamespace: string) {
   try {
     const value = JSON.parse(
@@ -124,6 +135,7 @@ function readLegacyReminderIds(accountNamespace: string) {
   }
 }
 
+/** Removes migrated legacy state and reports whether persistence succeeded. */
 function removeLegacyReminderIds(accountNamespace: string) {
   try {
     localStorage.removeItem(legacyReminderStorageKey(accountNamespace))
@@ -133,10 +145,12 @@ function removeLegacyReminderIds(accountNamespace: string) {
   }
 }
 
+/** Creates the initial durable reminder registry. */
 function emptyRegistry(): ReminderRegistry {
   return { schema: 1, revision: 0, desired: [], managedEventIds: [] }
 }
 
+/** Validates the minimal event snapshot needed to rebuild an alert. */
 function isReminderEvent(value: unknown): value is ReminderEvent {
   if (!value || typeof value !== 'object') return false
   const event = value as Partial<ReminderEvent>
@@ -145,6 +159,7 @@ function isReminderEvent(value: unknown): value is ReminderEvent {
     && typeof event.startsAt === 'string'
 }
 
+/** Parses persisted state while dropping malformed events and managed IDs. */
 function parseRegistry(value: string | null): ReminderRegistry | null {
   if (!value) return null
   try {
@@ -169,6 +184,7 @@ function parseRegistry(value: string | null): ReminderRegistry | null {
   }
 }
 
+/** Reads durable state, falling back to an account-isolated memory registry. */
 function readRegistry(accountNamespace: string) {
   const key = registryStorageKey(accountNamespace)
   try {
@@ -180,6 +196,7 @@ function readRegistry(accountNamespace: string) {
   return memoryRegistries.get(key) ?? emptyRegistry()
 }
 
+/** Persists a registry or retains it in memory when web storage is unavailable. */
 function writeRegistry(accountNamespace: string, registry: ReminderRegistry) {
   const key = registryStorageKey(accountNamespace)
   try {
@@ -190,6 +207,7 @@ function writeRegistry(accountNamespace: string, registry: ReminderRegistry) {
   }
 }
 
+/** Advances the registry revision and de-duplicates both desired and managed sets. */
 function nextRegistry(
   registry: ReminderRegistry,
   patch: Pick<ReminderRegistry, 'desired' | 'managedEventIds'>,
@@ -202,10 +220,12 @@ function nextRegistry(
   }
 }
 
+/** Reads the validated, account-scoped reminder intent registry. */
 export function readDesiredEventReminders(accountNamespace: string) {
   return readRegistry(accountNamespace).desired
 }
 
+/** Serializes side effects per account so schedule and cleanup cannot interleave. */
 function serializeAccountOperation<T>(
   accountNamespace: string,
   operation: () => Promise<T>,
@@ -222,14 +242,17 @@ function serializeAccountOperation<T>(
   return result
 }
 
+/** Returns the cancellation generation for in-flight account work. */
 function accountEpoch(accountNamespace: string) {
   return accountEpochs.get(accountNamespace) ?? 0
 }
 
+/** Invalidates permission work started before an account cleanup. */
 function invalidateAccountOperations(accountNamespace: string) {
   accountEpochs.set(accountNamespace, accountEpoch(accountNamespace) + 1)
 }
 
+/** Builds a private, restorable native notification payload for one event. */
 function notificationFor(
   event: ReminderEvent,
   accountNamespace: string,
@@ -258,6 +281,7 @@ function notificationFor(
   }
 }
 
+/** Clears pending and delivered copies of deterministic notification IDs. */
 async function clearNativeIds(ids: number[]) {
   const uniqueIds = [...new Set(ids)]
   if (uniqueIds.length === 0) return true
@@ -270,6 +294,7 @@ async function clearNativeIds(ids: number[]) {
   return pending.status === 'fulfilled' && delivered.status === 'fulfilled'
 }
 
+/** Cancels one browser timer and releases its in-memory ownership entry. */
 function clearBrowserTimer(eventId: string, accountNamespace: string) {
   const key = timerKey(eventId, accountNamespace)
   const timer = browserTimers.get(key)
@@ -278,6 +303,7 @@ function clearBrowserTimer(eventId: string, accountNamespace: string) {
   browserTimers.delete(key)
 }
 
+/** Cancels every browser timer owned by an account during transition cleanup. */
 function clearBrowserAccount(accountNamespace: string) {
   const prefix = timerPrefix(accountNamespace)
   for (const [key, timer] of browserTimers) {
@@ -287,6 +313,7 @@ function clearBrowserAccount(accountNamespace: string) {
   }
 }
 
+/** Schedules a best-effort, tab-lifetime browser alert when timing permits. */
 function scheduleBrowserReminder(
   event: ReminderEvent,
   accountNamespace: string,
@@ -352,6 +379,7 @@ type PreparedPermission =
   | 'browser-denied'
   | 'browser-unavailable'
 
+/** Requests notification permission only from the direct user-enable path. */
 async function preparePermissionFromUser(): Promise<PreparedPermission> {
   if (canUseNativeNotifications()) {
     try {
@@ -472,12 +500,14 @@ export async function enableEventReminder(
   })
 }
 
+/** Normalizes Capacitor's flexible schedule value to a comparable timestamp. */
 function pendingScheduleTime(notification: PendingLocalNotificationSchema) {
   const at = notification.schedule?.at
   if (!at) return Number.NaN
   return new Date(at as Date | string | number).getTime()
 }
 
+/** Reads only the metadata fields used to identify app-owned notifications. */
 function pendingExtra(notification: { extra?: unknown }) {
   return notification.extra as
     | {
@@ -489,6 +519,7 @@ function pendingExtra(notification: { extra?: unknown }) {
     | undefined
 }
 
+/** Verifies that a pending native alert still matches durable event intent. */
 function matchesPendingEvent(
   notification: PendingLocalNotificationSchema,
   event: ReminderEvent,
@@ -506,6 +537,7 @@ function matchesPendingEvent(
       < 1_000
 }
 
+/** Checks whether Android can restore exact alarms without prompting the user. */
 async function canRestoreExactAndroidReminder() {
   if (Capacitor.getPlatform() !== 'android') return true
   try {
@@ -516,6 +548,7 @@ async function canRestoreExactAndroidReminder() {
   }
 }
 
+/** Makes native or browser schedules converge on one account's durable intent. */
 async function reconcileRegistry(accountNamespace: string) {
   let registry = readRegistry(accountNamespace)
   const futureDesired = registry.desired.filter(
@@ -711,6 +744,7 @@ export function adoptDesiredEventReminders(
   })
 }
 
+/** Removes one reminder from durable intent and scheduled notifications. */
 export function cancelEventReminder(
   eventId: string,
   accountNamespace = 'signed-out',
@@ -757,6 +791,7 @@ export function cancelEventReminder(
   })
 }
 
+/** Reads lifecycle metadata without making storage availability a requirement. */
 function readString(key: string) {
   try {
     return localStorage.getItem(key)
@@ -765,6 +800,7 @@ function readString(key: string) {
   }
 }
 
+/** Writes optional lifecycle metadata on a best-effort basis. */
 function writeString(key: string, value: string | null) {
   try {
     if (value === null) localStorage.removeItem(key)
@@ -774,6 +810,7 @@ function writeString(key: string, value: string | null) {
   }
 }
 
+/** Loads accounts whose native notification cleanup still needs a retry. */
 function readPendingCleanupAccounts() {
   try {
     const value = JSON.parse(localStorage.getItem(pendingCleanupKey) ?? '[]')
@@ -784,10 +821,12 @@ function readPendingCleanupAccounts() {
   }
 }
 
+/** Persists a de-duplicated cleanup retry queue. */
 function writePendingCleanupAccounts(accounts: string[]) {
   writeString(pendingCleanupKey, JSON.stringify([...new Set(accounts)]))
 }
 
+/** Queues an account before cleanup begins so interruption remains recoverable. */
 function addPendingCleanupAccount(accountNamespace: string) {
   writePendingCleanupAccounts([
     ...readPendingCleanupAccounts(),
@@ -795,6 +834,7 @@ function addPendingCleanupAccount(accountNamespace: string) {
   ])
 }
 
+/** Removes an account only after all known cleanup work succeeds. */
 function removePendingCleanupAccount(accountNamespace: string) {
   writePendingCleanupAccounts(
     readPendingCleanupAccounts().filter((account) =>
@@ -803,6 +843,7 @@ function removePendingCleanupAccount(accountNamespace: string) {
   )
 }
 
+/** Discovers app-owned native notifications when the registry lacks their IDs. */
 async function discoverTaggedNotificationIds(accountNamespace: string) {
   const tag = notificationAccountTag(accountNamespace)
   const { notifications } = await LocalNotifications.getAll()
@@ -814,6 +855,7 @@ async function discoverTaggedNotificationIds(accountNamespace: string) {
     .map((notification) => notification.id)
 }
 
+/** Clears one account's reminder intent, timers, and native notifications. */
 export function cleanupEventReminderAccount(accountNamespace: string) {
   invalidateAccountOperations(accountNamespace)
   addPendingCleanupAccount(accountNamespace)
@@ -864,6 +906,7 @@ export function cleanupEventReminderAccount(accountNamespace: string) {
   })
 }
 
+/** Cleans the outgoing account before restoring alerts for the incoming one. */
 async function transitionReminderAccount(nextAccount: string | null) {
   const outgoingAccount = readString(activeAccountKey)
   if (outgoingAccount && outgoingAccount !== nextAccount) {

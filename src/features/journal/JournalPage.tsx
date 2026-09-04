@@ -59,12 +59,14 @@ type JournalPageProps = {
   openAllPhotosByDefault?: boolean
 }
 
+/** Accepts only section identifiers backed by a rendered journal tab. */
 function readJournalSection(value: unknown): JournalSection | null {
   return journalSections.some(({ id }) => id === value)
     ? value as JournalSection
     : null
 }
 
+/** Combines family photos, revealed Capsules, people, and plans in one journal. */
 export function JournalPage({
   now,
   capsules = [],
@@ -105,6 +107,7 @@ export function JournalPage({
     [capsules, effectiveCapsuleNow],
   )
 
+  /** Switches content and optionally restores keyboard focus to the chosen tab. */
   function chooseSection(section: JournalSection, focus = false) {
     setActiveSection(section)
     if (focus) {
@@ -113,6 +116,7 @@ export function JournalPage({
     }
   }
 
+  /** Implements wrapping arrow/Home/End navigation for the tab list. */
   function handleTabKeyDown(
     event: KeyboardEvent<HTMLButtonElement>,
     index: number,

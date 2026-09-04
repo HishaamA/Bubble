@@ -18,6 +18,7 @@ export type UnlockedCapsulePhoto = CapsulePhoto & {
   capsuleOpensAt: string
 }
 
+/** Matches synced capsules by ID, with week start as the legacy weekly identity. */
 function sameCapsule(left: FamilyCapsule, right: FamilyCapsule) {
   return left.id === right.id || (
     left.kind === 'weekly' &&
@@ -27,6 +28,7 @@ function sameCapsule(left: FamilyCapsule, right: FamilyCapsule) {
   )
 }
 
+/** Preserves durable local media while accepting authoritative family metadata. */
 function mergePhotos(
   localCapsule: FamilyCapsule,
   familyCapsule: FamilyCapsule,
@@ -91,6 +93,7 @@ export function mergeJournalCapsules(
   ].sort((left, right) => right.createdAt.localeCompare(left.createdAt))
 }
 
+/** Flattens revealed Capsule photos into chronologically sortable journal rows. */
 export function unlockedCapsulePhotos(
   capsules: FamilyCapsule[],
   now: Date,
@@ -111,6 +114,7 @@ export function unlockedCapsulePhotos(
   }).sort((left, right) => left.capturedAt.localeCompare(right.capturedAt))
 }
 
+/** Loads local data first, then opportunistically refreshes and caches family data. */
 async function loadArchive(store: CapsuleStore) {
   let localCapsules: FamilyCapsule[] = []
   try {
@@ -138,6 +142,7 @@ type JournalCapsuleArchiveOptions = {
   store?: CapsuleStore
 }
 
+/** Hydrates local and family Capsules, exposing only photos whose reveal passed. */
 export function useJournalCapsuleArchive({
   cacheNamespace,
   enabled = true,
@@ -155,6 +160,7 @@ export function useJournalCapsuleArchive({
   const [loading, setLoading] = useState(enabled)
   const [clock, setClock] = useState(() => new Date())
 
+  /** Reconciles both sources and advances the reveal clock used by the journal. */
   const refresh = useCallback(async () => {
     const next = await loadArchive(store)
     setCapsules(next)
@@ -167,6 +173,8 @@ export function useJournalCapsuleArchive({
 
     let active = true
     let unsubscribe: () => void = () => undefined
+    // Realtime callbacks may outlive this hook by one task; the active flag
+    // prevents those late responses from writing into an unmounted consumer.
     const refreshWhileActive = async () => {
       const next = await loadArchive(store)
       if (active) {
@@ -184,7 +192,9 @@ export function useJournalCapsuleArchive({
       })
       .catch(() => undefined)
 
+    /** Reconciles immediately when browser connectivity returns. */
     const refreshWhenOnline = () => void refreshWhileActive()
+    /** Avoids network work until a background document becomes visible. */
     const refreshWhenVisible = () => {
       if (document.visibilityState === 'visible') void refreshWhileActive()
     }

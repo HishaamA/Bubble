@@ -4,6 +4,8 @@ type Capture360ShortcutProps = {
   onClick: () => void
   className?: string
 }
+
+/** Draws the compact camera mark used by the floating 360 entry point. */
 function Camera360Icon() {
   return (
     <svg aria-hidden="true" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">

@@ -114,6 +114,19 @@ describe('PanoramaViewer accessibility controls', () => {
     expect(viewerMocks.destroy).not.toHaveBeenCalled()
   })
 
+  it('falls back to the first available scene when a requested scene is stale', async () => {
+    render(
+      <PanoramaViewer
+        scenes={scenes}
+        initialSceneId="removed-memory"
+        sceneId="removed-memory"
+      />,
+    )
+
+    await waitFor(() => expect(viewerMocks.mount).toHaveBeenCalledOnce())
+    expect(viewerMocks.mount.mock.calls[0][1].initialSceneId).toBe('dinner')
+  })
+
   beforeEach(() => {
     vi.clearAllMocks()
     viewerMocks.mount.mockImplementation(async (_container, options) => {

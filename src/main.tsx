@@ -20,6 +20,15 @@ import { initializeAppTheme } from './theme/AppTheme'
 initializeAppTheme()
 installNativeViewportGeometrySync()
 
+/** Fails early with a useful message when the HTML entry point is incomplete. */
+function requireApplicationRoot(): HTMLElement {
+  const rootElement = document.getElementById('root')
+  if (!rootElement) {
+    throw new Error('Bubble could not start because the root element is missing.')
+  }
+  return rootElement
+}
+
 const clerkPublishableKey = import.meta.env.VITE_CLERK_PUBLISHABLE_KEY?.trim()
 const nativeClerk = createNativeClerk(clerkPublishableKey)
 
@@ -52,7 +61,7 @@ const app = clerkConfigured ? (
   <App />
 )
 
-createRoot(document.getElementById('root')!).render(
+createRoot(requireApplicationRoot()).render(
   <StrictMode>
     {app}
   </StrictMode>,

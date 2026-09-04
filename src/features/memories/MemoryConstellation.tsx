@@ -56,6 +56,11 @@ type PickedBubbleInteraction = {
   currentPosition: { top: number; left: number }
 }
 
+/**
+ * Displays built-in and shared memories in one pannable, persistent layout.
+ * High-frequency pointer effects write CSS properties directly so dragging does
+ * not trigger a React render for every animation frame.
+ */
 export function MemoryConstellation({
   sharedMoments = [],
   onUpload360,
@@ -66,6 +71,8 @@ export function MemoryConstellation({
   const location = useLocation()
   const restoreMemoryId = (location.state as { restoreMemoryId?: string } | null)
     ?.restoreMemoryId
+  const restoreMemoryIdRef = useRef(restoreMemoryId)
+  restoreMemoryIdRef.current = restoreMemoryId
   const visibleSharedMoments = sharedMoments.filter(
     (moment): moment is PanoramaMoment & { objectUrl: string } =>
       Boolean(moment.objectUrl),
@@ -181,6 +188,7 @@ export function MemoryConstellation({
   useEffect(() => {
     if (typeof window.matchMedia !== 'function') return
     const preference = window.matchMedia('(prefers-reduced-motion: reduce)')
+    /** Applies motion preference changes and cancels gestures using old rules. */
     const handlePreferenceChange = (event: MediaQueryListEvent) => {
       reducedMotionRef.current = event.matches
       clearPointerInteraction()
@@ -208,6 +216,7 @@ export function MemoryConstellation({
     return () => observer.disconnect()
   }, [])
 
+  /** Coalesces geometry and transform writes into the next animation frame. */
   function scheduleRender() {
     // Pointer, resize, and focus events can all fire in one frame. Coalescing
     // their DOM writes avoids layout thrashing on older phones.
@@ -216,6 +225,7 @@ export function MemoryConstellation({
     }
   }
 
+  /** Clears every mutable field owned by the current pointer gesture. */
   function clearPointerInteraction() {
     const field = fieldRef.current
     if (!field) return
@@ -228,6 +238,7 @@ export function MemoryConstellation({
     scheduleRender()
   }
 
+  /** Applies pan, drift, drag, and depth transforms directly to measured bubbles. */
   function renderBubbleMotion() {
     animationFrameRef.current = null
     const field = fieldRef.current
@@ -257,11 +268,17 @@ export function MemoryConstellation({
               bubble.dataset.memoryId === entryMemoryIdRef.current,
           )
         : undefined
+      const awaitingRestoredBubble = Boolean(
+        restoreMemoryIdRef.current &&
+          entryMemoryIdRef.current === restoreMemoryIdRef.current &&
+          !entryBubble,
+      )
 
       // A restored/shared item can arrive one render later, and test/browser
-      // layout engines can briefly report a chosen item as 0px. Keep the entry
-      // experience alive by centering the first measurable bubble for this pass.
-      if (!entryBubble) {
+      // layout engines can briefly report a chosen item as 0px. Preserve an
+      // explicit route target until it is measurable; only random entries may
+      // fall back to the first bubble without changing navigation intent.
+      if (!entryBubble && !awaitingRestoredBubble) {
         entryBubble = centerableBubbles[0]
         entryMemoryIdRef.current = entryBubble?.dataset.memoryId ?? null
       }
@@ -290,7 +307,7 @@ export function MemoryConstellation({
 
       panStartRef.current = { ...panRef.current }
       initialPanRef.current = { ...panRef.current }
-      panInitializedRef.current = true
+      panInitializedRef.current = !awaitingRestoredBubble
     }
     const clampedPan = calculateConstellationPan({
       origin: { x: 0, y: 0 },
@@ -422,6 +439,7 @@ export function MemoryConstellation({
     field.dataset.layoutReady = 'true'
   }
 
+  /** Stores the latest pan target and schedules one visual update. */
   function scheduleBubbleMotion(
     event: ReactPointerEvent<HTMLDivElement>,
     pressed: boolean,
@@ -444,12 +462,14 @@ export function MemoryConstellation({
     scheduleRender()
   }
 
+  /** Cancels a pending long-press pickup without changing the current gesture. */
   function clearHoldTimer() {
     if (holdTimerRef.current === null) return
     window.clearTimeout(holdTimerRef.current)
     holdTimerRef.current = null
   }
 
+  /** Enters drag mode and records the bubble's world-space starting position. */
   function beginBubblePickup(
     bubble: HTMLElement,
     memoryId: string,
@@ -484,6 +504,7 @@ export function MemoryConstellation({
     scheduleRender()
   }
 
+  /** Persists a dropped bubble in normalized coordinates and exits drag mode. */
   function finishBubblePickup() {
     const picked = pickedBubbleRef.current
     if (!picked) return false
@@ -511,6 +532,7 @@ export function MemoryConstellation({
     return true
   }
 
+  /** Classifies a press as potential pan, click, hold-to-move, or remove action. */
   function handlePointerDown(event: ReactPointerEvent<HTMLDivElement>) {
     if (!event.isPrimary || event.button !== 0) return
     if (activePointerRef.current !== null) return
@@ -566,6 +588,7 @@ export function MemoryConstellation({
     scheduleBubbleMotion(event, true)
   }
 
+  /** Updates a held bubble or pans the constellation once movement clears the threshold. */
   function handlePointerMove(event: ReactPointerEvent<HTMLDivElement>) {
     const isActive = activePointerRef.current === event.pointerId
     if (event.pointerType !== 'mouse' && !isActive) return
@@ -636,6 +659,7 @@ export function MemoryConstellation({
     scheduleBubbleMotion(event, isActive)
   }
 
+  /** Commits the active drag/pan and safely releases pointer capture. */
   function finishPointerInteraction(event: ReactPointerEvent<HTMLDivElement>) {
     if (activePointerRef.current !== event.pointerId) return
     clearHoldTimer()
@@ -660,6 +684,7 @@ export function MemoryConstellation({
     else clearPointerInteraction()
   }
 
+  /** Finalizes a gesture if the browser revokes pointer capture unexpectedly. */
   function handleLostPointerCapture(event: ReactPointerEvent<HTMLDivElement>) {
     if (activePointerRef.current !== event.pointerId) return
     clearHoldTimer()
@@ -673,6 +698,7 @@ export function MemoryConstellation({
     clearPointerInteraction()
   }
 
+  /** Pans a keyboard-focused bubble into the constellation's safe center. */
   function centerFocusedBubble(event: ReactFocusEvent<HTMLDivElement>) {
     if (activePointerRef.current !== null) return
     const target = event.target as HTMLElement
@@ -717,6 +743,7 @@ export function MemoryConstellation({
     scheduleRender()
   }
 
+  /** Suppresses the synthetic click emitted immediately after a drag ends. */
   function armPointerClickSuppression() {
     // Mobile browsers synthesize a click after pointerup. Without this short
     // guard, dropping a bubble would also navigate into that memory.
@@ -730,6 +757,7 @@ export function MemoryConstellation({
     }, 450)
   }
 
+  /** Opens a bundled memory unless its activation completed a move gesture. */
   function openMemory(memory: Memory, event: ReactMouseEvent<HTMLButtonElement>) {
     if (suppressNextPointerClickRef.current && event.detail > 0) {
       suppressNextPointerClickRef.current = false
@@ -746,6 +774,7 @@ export function MemoryConstellation({
     })
   }
 
+  /** Opens a family moment while preserving its constellation return position. */
   function openSharedMoment(
     moment: PanoramaMoment,
     event: ReactMouseEvent<HTMLButtonElement>,
@@ -767,6 +796,7 @@ export function MemoryConstellation({
     })
   }
 
+  /** Serializes deletion requests and reports failures without hiding the moment. */
   function requestRemoveSharedMoment(moment: PanoramaMoment) {
     if (
       moment.ownedByCurrentUser !== true ||

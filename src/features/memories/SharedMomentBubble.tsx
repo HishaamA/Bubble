@@ -23,6 +23,10 @@ type SharedMomentBubbleProps = {
 
 const BUBBLE_ACCENTS = ['coral', 'sage', 'sky', 'sun', 'lavender'] as const
 
+/**
+ * Renders an uploaded panorama with ownership-aware removal controls.
+ * Moments without a usable object URL stay out of the interactive layout.
+ */
 export function SharedMomentBubble({
   moment,
   order,

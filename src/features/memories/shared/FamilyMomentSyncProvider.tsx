@@ -33,6 +33,7 @@ import type {
   StoredPanoramaMoment,
 } from './types'
 
+/** Confirms that every voice annotation still has restart-safe Blob media. */
 function annotationsAreDurablyCached(
   existing: StoredPanoramaMoment,
   incoming: Pick<StoredPanoramaMoment, 'annotations'>,
@@ -56,6 +57,7 @@ function annotationsAreDurablyCached(
   })
 }
 
+/** Compares server-visible annotation fields while ignoring local playback URLs. */
 function annotationMetadataMatches(
   cached: StoredPanoramaAnnotation,
   incoming: StoredPanoramaAnnotation,
@@ -70,6 +72,7 @@ function annotationMetadataMatches(
   )
 }
 
+/** Detects a remote refresh that would replace durable local audio with metadata. */
 function incomingMomentWouldDiscardCachedVoice(
   existing: StoredPanoramaMoment,
   incoming: Pick<StoredPanoramaMoment, 'annotations'>,
@@ -91,6 +94,11 @@ function incomingMomentWouldDiscardCachedVoice(
   })
 }
 
+/**
+ * Reconciles the local panorama cache with the signed-in family's backend.
+ * Durable deletion markers and serialized refreshes prevent stale downloads
+ * from resurrecting a moment that another device removed mid-sync.
+ */
 export function FamilyMomentSyncProvider({ children }: PropsWithChildren) {
   const {
     loading: momentsLoading,
@@ -104,7 +112,6 @@ export function FamilyMomentSyncProvider({ children }: PropsWithChildren) {
     useState<FamilyDailyCaptureWindow | null>(null)
   const [error, setError] = useState<Error | null>(null)
   const connectionRef = useRef<FamilyMomentConnection | null>(null)
-  const momentIdsRef = useRef(new Set<string>())
   const momentsRef = useRef(moments)
   const deletedIdsRef = useRef(new Set<string>())
   const refreshRequestedRef = useRef(false)
@@ -121,7 +128,6 @@ export function FamilyMomentSyncProvider({ children }: PropsWithChildren) {
 
   useEffect(() => {
     momentsRef.current = moments
-    momentIdsRef.current = new Set(moments.map(({ id }) => id))
   }, [moments])
 
   useEffect(() => {
@@ -164,6 +170,7 @@ export function FamilyMomentSyncProvider({ children }: PropsWithChildren) {
     })
   }, [moments, saveMoment, status])
 
+  /** Reconciles remote moments and deletion tombstones into the durable local cache. */
   const performFamilyMomentRefresh = useCallback(async (
     connection: FamilyMomentConnection,
   ) => {
@@ -180,7 +187,6 @@ export function FamilyMomentSyncProvider({ children }: PropsWithChildren) {
       deletionIds.forEach((id) => deletedIdsRef.current.add(id))
       if (deletionIds.length > 0) {
         await removeMoments(deletionIds)
-        deletionIds.forEach((id) => momentIdsRef.current.delete(id))
       }
 
       for (const moment of incoming) {
@@ -214,10 +220,8 @@ export function FamilyMomentSyncProvider({ children }: PropsWithChildren) {
           connectionRef.current !== connection
         ) {
           await removeMoments([saved.id])
-          momentIdsRef.current.delete(saved.id)
           continue
         }
-        momentIdsRef.current.add(saved.id)
       }
       setError(null)
     } catch (reason) {
@@ -229,10 +233,12 @@ export function FamilyMomentSyncProvider({ children }: PropsWithChildren) {
     }
   }, [removeMoments, saveMoment])
 
+  /** Coalesces refresh requests while guaranteeing one final pass after changes. */
   const refreshFamilyMoments = useCallback(async () => {
     refreshRequestedRef.current = true
     if (refreshRunRef.current) return refreshRunRef.current
 
+    /** Drains refresh demand without allowing concurrent reconciliation passes. */
     const run = (async () => {
       while (refreshRequestedRef.current) {
         refreshRequestedRef.current = false
@@ -256,9 +262,13 @@ export function FamilyMomentSyncProvider({ children }: PropsWithChildren) {
     let connectionVersion = 0
     let familySubscription: FamilyMomentSubscription | null = null
 
+    // Establishes one versioned sync session so stale asynchronous work cannot
+    // replace a newer account or family connection.
+    /** Establishes the current identity's connection, subscription, and daily window. */
     async function connect() {
       const requestedConnection = ++connectionVersion
       let requestedSubscription: FamilyMomentSubscription | null = null
+      /** Releases only the subscription created by this connection attempt. */
       const releaseRequestedSubscription = () => {
         requestedSubscription?.unsubscribe()
         if (familySubscription === requestedSubscription) {
@@ -292,7 +302,6 @@ export function FamilyMomentSyncProvider({ children }: PropsWithChildren) {
           (deletedMomentId) => {
             if (deletedMomentId) {
               deletedIdsRef.current.add(deletedMomentId)
-              momentIdsRef.current.delete(deletedMomentId)
               void removeMoments([deletedMomentId])
             }
             void refreshFamilyMoments()
@@ -334,6 +343,8 @@ export function FamilyMomentSyncProvider({ children }: PropsWithChildren) {
       }
     }
 
+    // Invalidates the current session before starting a fresh connection.
+    /** Invalidates active family state before resolving a fresh identity/session. */
     function reconnect() {
       familySubscription?.unsubscribe()
       familySubscription = null
@@ -342,6 +353,9 @@ export function FamilyMomentSyncProvider({ children }: PropsWithChildren) {
       void connect()
     }
 
+    // Reconnects on foregrounding, when mobile browsers may have suspended the
+    // realtime transport while the document was hidden.
+    /** Avoids reconnecting a backgrounded WebView until it becomes visible. */
     function reconnectWhenVisible() {
       if (document.visibilityState === 'visible') reconnect()
     }
@@ -366,6 +380,7 @@ export function FamilyMomentSyncProvider({ children }: PropsWithChildren) {
     }
   }, [cacheHydrated, refreshFamilyMoments, removeMoments])
 
+  /** Saves locally when offline, or publishes then caches the processed family copy. */
   const shareMoment = useCallback(
     async (
       submission: Capture360Submission,
@@ -411,6 +426,7 @@ export function FamilyMomentSyncProvider({ children }: PropsWithChildren) {
     [saveMoment],
   )
 
+  /** Enforces ownership and remote deletion before removing the local cache entry. */
   const deleteMoment = useCallback(
     async (momentId: string) => {
       const moment = momentsRef.current.find(({ id }) => id === momentId)
@@ -429,11 +445,11 @@ export function FamilyMomentSyncProvider({ children }: PropsWithChildren) {
       }
 
       await removeMoments([momentId])
-      momentIdsRef.current.delete(momentId)
     },
     [removeMoments],
   )
 
+  /** Replaces owner-authored annotations remotely before updating the local copy. */
   const updateMomentAnnotations = useCallback(
     async (
       momentId: string,

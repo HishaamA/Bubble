@@ -1,5 +1,6 @@
 export type PanoramaHotSpotKind = 'info' | 'scene' | 'audio'
 
+/** A keyboard-accessible action anchored to spherical coordinates. */
 export interface PanoramaHotSpot {
   id: string
   kind: PanoramaHotSpotKind
@@ -13,6 +14,7 @@ export interface PanoramaHotSpot {
   onActivate?: (event: Event) => void
 }
 
+/** One equirectangular image and its optional starting view and actions. */
 export interface PanoramaScene {
   id: string
   panorama: string
@@ -29,12 +31,14 @@ export interface PanoramaScene {
   hotSpots?: readonly PanoramaHotSpot[]
 }
 
+/** Optional view fields accepted while loading or changing a scene. */
 export interface PanoramaView {
   pitch?: number
   yaw?: number
   hfov?: number
 }
 
+/** Complete camera state returned by a mounted viewer. */
 export interface PanoramaViewState {
   pitch: number
   yaw: number
@@ -49,6 +53,7 @@ export interface PanoramaOrientationStartOptions {
   permissionAlreadyGranted?: boolean
 }
 
+/** Data and callbacks required to mount one imperative viewer instance. */
 export interface PanoramaMountOptions {
   scenes: readonly PanoramaScene[]
   initialSceneId?: string
@@ -58,6 +63,7 @@ export interface PanoramaMountOptions {
   onError?: (error: Error) => void
 }
 
+/** Stable boundary between React screens and the imperative viewer runtime. */
 export interface PanoramaAdapter {
   mount: (
     container: HTMLElement,
@@ -82,6 +88,8 @@ export interface PanoramaAdapter {
   destroy: () => void
 }
 
+// The remaining declarations model the small subset of Pannellum used by the
+// adapter. Keeping the vendor surface narrow makes upgrades reviewable.
 export interface PannellumHotSpotConfig {
   id: string
   pitch: number

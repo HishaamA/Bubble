@@ -15,6 +15,7 @@ type MemoryBubbleProps = {
 
 const BUBBLE_ACCENTS = ['coral', 'sage', 'sky', 'sun', 'lavender'] as const
 
+/** Renders a bundled family memory at its persisted constellation position. */
 export function MemoryBubble({
   memory,
   order,

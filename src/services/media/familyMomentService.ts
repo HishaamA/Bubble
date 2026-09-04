@@ -8,8 +8,13 @@ import {
   getSupabaseClient,
 } from '../../lib/supabase'
 import { bootstrapCurrentClerkProfile } from '../persistence'
-import { processPanoramaForSharing } from './processPanorama'
+import {
+  processPanoramaForSharing,
+  type ProcessedPanorama,
+} from './processPanorama'
 
+// Remote family moments use a database row for authorization and immutable
+// private Storage objects for the large panorama, thumbnail, and voice media.
 const FAMILY_MEDIA_BUCKET = 'family-media'
 
 export type FamilyMomentConnection = {
@@ -89,10 +94,27 @@ const AUDIO_EXTENSION_BY_MIME_TYPE = new Map([
   ['audio/webm', 'webm'],
 ])
 
-function normalizedAudioMimeType(value: string | undefined) {
+/** Removes MIME parameters before allow-list and extension lookup. */
+function normalizeAudioMimeType(value: string | undefined) {
   return value?.split(';', 1)[0]?.trim().toLowerCase() ?? ''
 }
 
+/** Prevents untrusted identifiers from becoming storage path segments. */
+function assertValidFamilyMomentConnection(
+  connection: FamilyMomentConnection,
+): void {
+  if (
+    !UUID_PATTERN.test(connection.circleId) ||
+    !UUID_PATTERN.test(connection.userId)
+  ) {
+    throw new TypeError('The family sync connection is invalid.')
+  }
+}
+
+/**
+ * Converts local annotations into the atomic RPC payload and a separate list
+ * of private voice objects that must be uploaded before that RPC can commit.
+ */
 function prepareRemoteAnnotations(
   connection: FamilyMomentConnection,
   momentId: string,
@@ -156,8 +178,8 @@ function prepareRemoteAnnotations(
       throw new TypeError('Voice annotations must include an audio recording.')
     }
 
-    const declaredMimeType = normalizedAudioMimeType(annotation.audioMimeType)
-    const blobMimeType = normalizedAudioMimeType(annotation.audioBlob.type)
+    const declaredMimeType = normalizeAudioMimeType(annotation.audioMimeType)
+    const blobMimeType = normalizeAudioMimeType(annotation.audioBlob.type)
     if (
       declaredMimeType &&
       blobMimeType &&
@@ -200,6 +222,7 @@ function prepareRemoteAnnotations(
   return { remoteAnnotations, voiceUploads }
 }
 
+/** Generates an unguessable suffix so re-recorded audio never reuses a URL. */
 function createVoiceVersion() {
   const randomBytes = new Uint8Array(16)
   globalThis.crypto.getRandomValues(randomBytes)
@@ -208,6 +231,7 @@ function createVoiceVersion() {
   )
 }
 
+/** Accepts old and current RPC response shapes during rolling deployments. */
 function parseStaleAudioPaths(data: unknown): string[] {
   if (!data) return []
   if (typeof data === 'string') return data ? [data] : []
@@ -229,6 +253,7 @@ function parseStaleAudioPaths(data: unknown): string[] {
   )
 }
 
+/** Returns the current account's earliest approved family membership. */
 export async function getFamilyMomentConnection(): Promise<
   FamilyMomentConnection | null
 > {
@@ -247,32 +272,45 @@ export async function getFamilyMomentConnection(): Promise<
 
   if (error) throw error
   if (!data?.circle_id) return null
-  return { userId, circleId: String(data.circle_id) }
+  if (
+    typeof data.circle_id !== 'string' ||
+    !UUID_PATTERN.test(data.circle_id) ||
+    !UUID_PATTERN.test(userId)
+  ) {
+    throw new Error('Supabase returned an invalid family membership.')
+  }
+  return { userId, circleId: data.circle_id }
 }
 
+/**
+ * Uploads sanitized media derivatives, then atomically publishes their moment
+ * metadata. Any objects uploaded before a failure are removed best-effort.
+ */
 export async function publishFamilyMoment(
   connection: FamilyMomentConnection,
   submission: Capture360Submission,
-) {
+): Promise<ProcessedPanorama> {
   const client = getSupabaseClient()
   if (!client) throw new Error('Family sync is not configured.')
+  assertValidFamilyMomentConnection(connection)
   const mediaBucket = client.storage.from(FAMILY_MEDIA_BUCKET)
 
-  const processed = await processPanoramaForSharing(submission.file)
-  const panoramaPath = `${connection.circleId}/panoramas/${connection.userId}/${submission.id}.jpg`
-  const thumbnailPath = `${connection.circleId}/thumbnails/${connection.userId}/${submission.id}.jpg`
-
-  const annotations = submission.annotations ?? []
+  // Validate the moment and annotations before spending memory decoding the
+  // panorama or constructing any storage operations.
+  const localAnnotations = submission.annotations ?? []
   const { remoteAnnotations, voiceUploads } = prepareRemoteAnnotations(
     connection,
     submission.id,
-    annotations,
+    localAnnotations,
   )
+  const processedPanorama = await processPanoramaForSharing(submission.file)
+  const panoramaPath = `${connection.circleId}/panoramas/${connection.userId}/${submission.id}.jpg`
+  const thumbnailPath = `${connection.circleId}/thumbnails/${connection.userId}/${submission.id}.jpg`
 
-  const uploads = [
+  const uploadOperations = [
     {
       path: panoramaPath,
-      request: mediaBucket.upload(panoramaPath, processed.viewer, {
+      request: mediaBucket.upload(panoramaPath, processedPanorama.viewer, {
         cacheControl: '31536000',
         contentType: 'image/jpeg',
         upsert: false,
@@ -280,7 +318,7 @@ export async function publishFamilyMoment(
     },
     {
       path: thumbnailPath,
-      request: mediaBucket.upload(thumbnailPath, processed.thumbnail, {
+      request: mediaBucket.upload(thumbnailPath, processedPanorama.thumbnail, {
         cacheControl: '31536000',
         contentType: 'image/jpeg',
         upsert: false,
@@ -296,17 +334,18 @@ export async function publishFamilyMoment(
     })),
   ]
   const uploadResults = await Promise.allSettled(
-    uploads.map(({ request }) => request),
+    uploadOperations.map(({ request }) => request),
   )
   const uploadedPaths = uploadResults.flatMap((result, index) =>
     result.status === 'fulfilled' && !result.value.error
-      ? [uploads[index].path]
+      ? [uploadOperations[index].path]
       : [],
   )
-  const failedUpload = uploadResults.find(
+  const failedUploadResult = uploadResults.find(
     (result) => result.status === 'rejected' || Boolean(result.value.error),
   )
 
+  /** Removes only objects uploaded by this publish attempt before finalization. */
   async function cleanUpUnfinalizedUploads() {
     if (uploadedPaths.length === 0) return
     try {
@@ -318,10 +357,12 @@ export async function publishFamilyMoment(
     }
   }
 
-  if (failedUpload) {
+  if (failedUploadResult) {
     await cleanUpUnfinalizedUploads()
-    if (failedUpload.status === 'rejected') throw failedUpload.reason
-    throw failedUpload.value.error
+    if (failedUploadResult.status === 'rejected') {
+      throw failedUploadResult.reason
+    }
+    throw failedUploadResult.value.error
   }
 
   try {
@@ -333,10 +374,10 @@ export async function publishFamilyMoment(
         p_capture_kind: submission.source === 'daily' ? 'scheduled' : 'manual',
         p_panorama_path: panoramaPath,
         p_thumbnail_path: thumbnailPath,
-        p_panorama_width: processed.viewerWidth,
-        p_panorama_height: processed.viewerHeight,
-        p_thumbnail_width: processed.thumbnailWidth,
-        p_thumbnail_height: processed.thumbnailHeight,
+        p_panorama_width: processedPanorama.viewerWidth,
+        p_panorama_height: processedPanorama.viewerHeight,
+        p_thumbnail_width: processedPanorama.thumbnailWidth,
+        p_thumbnail_height: processedPanorama.thumbnailHeight,
         p_caption: submission.caption || null,
         p_annotations: remoteAnnotations,
       },
@@ -347,7 +388,7 @@ export async function publishFamilyMoment(
     throw reason
   }
 
-  return processed
+  return processedPanorama
 }
 
 /**
@@ -362,6 +403,7 @@ export async function replaceFamilyMomentAnnotations(
 ): Promise<void> {
   const client = getSupabaseClient()
   if (!client) throw new Error('Family sync is not configured.')
+  assertValidFamilyMomentConnection(connection)
   const mediaBucket = client.storage.from(FAMILY_MEDIA_BUCKET)
   const { remoteAnnotations, voiceUploads } = prepareRemoteAnnotations(
     connection,
@@ -370,7 +412,7 @@ export async function replaceFamilyMomentAnnotations(
     { createVoiceVersion },
   )
 
-  const uploads = voiceUploads.map(({ path, blob, contentType }) => ({
+  const uploadOperations = voiceUploads.map(({ path, blob, contentType }) => ({
     path,
     request: mediaBucket.upload(path, blob, {
       cacheControl: '31536000',
@@ -379,15 +421,16 @@ export async function replaceFamilyMomentAnnotations(
     }),
   }))
   const uploadResults = await Promise.allSettled(
-    uploads.map(({ request }) => request),
+    uploadOperations.map(({ request }) => request),
   )
   const uploadedPaths = uploadResults.flatMap((result, index) =>
     result.status === 'fulfilled' && !result.value.error
-      ? [uploads[index].path]
+      ? [uploadOperations[index].path]
       : [],
   )
 
-  async function cleanUp(paths: string[]) {
+  /** Attempts storage cleanup without masking the transaction's primary result. */
+  async function removeMediaPathsBestEffort(paths: string[]) {
     if (paths.length === 0) return
     try {
       await mediaBucket.remove(paths)
@@ -397,13 +440,15 @@ export async function replaceFamilyMomentAnnotations(
     }
   }
 
-  const failedUpload = uploadResults.find(
+  const failedUploadResult = uploadResults.find(
     (result) => result.status === 'rejected' || Boolean(result.value.error),
   )
-  if (failedUpload) {
-    await cleanUp(uploadedPaths)
-    if (failedUpload.status === 'rejected') throw failedUpload.reason
-    throw failedUpload.value.error
+  if (failedUploadResult) {
+    await removeMediaPathsBestEffort(uploadedPaths)
+    if (failedUploadResult.status === 'rejected') {
+      throw failedUploadResult.reason
+    }
+    throw failedUploadResult.value.error
   }
 
   let staleAudioPaths: string[]
@@ -416,19 +461,23 @@ export async function replaceFamilyMomentAnnotations(
     if (error) throw error
     staleAudioPaths = parseStaleAudioPaths(data)
   } catch (reason) {
-    await cleanUp(uploadedPaths)
+    await removeMediaPathsBestEffort(uploadedPaths)
     throw reason
   }
 
   const currentAudioPaths = new Set(uploadedPaths)
-  await cleanUp(staleAudioPaths.filter((path) => !currentAudioPaths.has(path)))
+  await removeMediaPathsBestEffort(
+    staleAudioPaths.filter((path) => !currentAudioPaths.has(path)),
+  )
 }
 
+/** Reads the server-authoritative daily capture window for this family. */
 export async function getFamilyDailyCaptureWindow(
   connection: FamilyMomentConnection,
 ): Promise<FamilyDailyCaptureWindow | null> {
   const client = getSupabaseClient()
   if (!client) return null
+  assertValidFamilyMomentConnection(connection)
 
   const { data, error } = await client.rpc(
     'get_or_create_daily_capture_window',
@@ -436,9 +485,12 @@ export async function getFamilyDailyCaptureWindow(
   )
   if (error) throw error
 
-  const row = Array.isArray(data) ? data[0] : data
-  if (!row || typeof row !== 'object') return null
-  const record = row as { opens_at?: unknown; closes_at?: unknown }
+  const captureWindowRow = Array.isArray(data) ? data[0] : data
+  if (!captureWindowRow || typeof captureWindowRow !== 'object') return null
+  const record = captureWindowRow as {
+    opens_at?: unknown
+    closes_at?: unknown
+  }
   if (
     typeof record.opens_at !== 'string' ||
     typeof record.closes_at !== 'string'
@@ -454,11 +506,16 @@ export async function getFamilyDailyCaptureWindow(
   return { startsAt, endsAt }
 }
 
+/**
+ * Loads the newest ready family moments and their annotation media. A missing
+ * voice object degrades to its text metadata instead of hiding the panorama.
+ */
 export async function fetchFamilyMoments(
   connection: FamilyMomentConnection,
 ): Promise<SavePanoramaMomentInput[]> {
   const client = getSupabaseClient()
   if (!client) return []
+  assertValidFamilyMomentConnection(connection)
 
   const { data, error } = await client
     .from('family_moments')
@@ -497,7 +554,7 @@ export async function fetchFamilyMoments(
   }
 
   const uploaderIds = [...new Set(rows.map(({ uploader_id }) => uploader_id))]
-  const names = new Map<string, string>()
+  const uploaderNamesById = new Map<string, string>()
 
   if (uploaderIds.length > 0) {
     const profileResult = await client
@@ -506,12 +563,15 @@ export async function fetchFamilyMoments(
       .in('id', uploaderIds)
     if (!profileResult.error) {
       for (const profile of profileResult.data ?? []) {
-        names.set(String(profile.id), String(profile.display_name))
+        uploaderNamesById.set(String(profile.id), String(profile.display_name))
       }
     }
   }
 
-  const downloads = await Promise.all(
+  // Moment downloads are independent, so fetch them concurrently. Within a
+  // moment, panorama and annotation media also download together; individual
+  // missing voice clips degrade to text while a missing panorama drops the row.
+  const downloadedMoments = await Promise.all(
     rows.map(async (row): Promise<SavePanoramaMomentInput | null> => {
       const persistedAnnotations = annotationsByMoment.get(row.id) ?? []
       const [panoramaDownload, downloadedAnnotations] = await Promise.all([
@@ -565,7 +625,7 @@ export async function fetchFamilyMoments(
         uploaderDisplayName:
           row.uploader_id === connection.userId
             ? 'You'
-            : names.get(row.uploader_id) ?? 'Family member',
+            : uploaderNamesById.get(row.uploader_id) ?? 'Family member',
         ownedByCurrentUser: row.uploader_id === connection.userId,
         familySynced: true,
         annotations: downloadedAnnotations,
@@ -573,17 +633,19 @@ export async function fetchFamilyMoments(
     }),
   )
 
-  return downloads.filter(
+  return downloadedMoments.filter(
     (moment): moment is SavePanoramaMomentInput => moment !== null,
   )
 }
 
+/** Finds deletion tombstones only for moments still present in local cache. */
 export async function fetchFamilyMomentDeletionIds(
   connection: FamilyMomentConnection,
   cachedMomentIds: readonly string[],
 ): Promise<string[]> {
   const client = getSupabaseClient()
   if (!client) return []
+  assertValidFamilyMomentConnection(connection)
   const candidateIds = [
     ...new Set(cachedMomentIds.filter((id) => UUID_PATTERN.test(id))),
   ]
@@ -593,7 +655,7 @@ export async function fetchFamilyMomentDeletionIds(
     { length: Math.ceil(candidateIds.length / 100) },
     (_, index) => candidateIds.slice(index * 100, index * 100 + 100),
   )
-  const results = await Promise.all(
+  const deletionQueryResults = await Promise.all(
     chunks.map(async (ids) => {
       const { data, error } = await client
         .from('family_moment_deletions')
@@ -605,13 +667,14 @@ export async function fetchFamilyMomentDeletionIds(
     }),
   )
 
-  return results.flat().flatMap((row) => {
+  return deletionQueryResults.flat().flatMap((row) => {
     if (!row || typeof row !== 'object' || !('moment_id' in row)) return []
     const momentId = String(row.moment_id)
     return UUID_PATTERN.test(momentId) ? [momentId] : []
   })
 }
 
+/** Narrows deletion RPC responses before using their object paths. */
 function parseFamilyMomentDeletions(data: unknown): FamilyMomentDeletion[] {
   const rows = Array.isArray(data) ? data : data ? [data] : []
   return rows.flatMap((row) => {
@@ -628,10 +691,13 @@ function parseFamilyMomentDeletions(data: unknown): FamilyMomentDeletion[] {
   })
 }
 
+/** Removes private objects before closing a durable pending-deletion row. */
 async function completeFamilyMomentDeletion(
   connection: FamilyMomentConnection,
   deletion: FamilyMomentDeletion,
 ) {
+  // Storage objects are removed before finalizing the pending database row.
+  // If either step fails, the row remains available for the resume path.
   const client = getSupabaseClient()
   if (!client) throw new Error('Family sync is not configured.')
 
@@ -663,6 +729,7 @@ export async function deleteFamilyMoment(
   }
   const client = getSupabaseClient()
   if (!client) throw new Error('Family sync is not configured.')
+  assertValidFamilyMomentConnection(connection)
 
   const { data, error } = await client.rpc('begin_delete_own_family_moment', {
     p_circle_id: connection.circleId,
@@ -685,11 +752,13 @@ export async function deleteFamilyMoment(
   }
 }
 
+/** Retries media cleanup for deletions already hidden by durable tombstones. */
 export async function resumePendingFamilyMomentDeletions(
   connection: FamilyMomentConnection,
 ): Promise<void> {
   const client = getSupabaseClient()
   if (!client) return
+  assertValidFamilyMomentConnection(connection)
 
   const { data, error } = await client.rpc(
     'list_pending_own_family_moment_deletions',
@@ -697,18 +766,22 @@ export async function resumePendingFamilyMomentDeletions(
   )
   if (error) throw error
 
-  const pending = parseFamilyMomentDeletions(data)
-  const results = await Promise.allSettled(
-    pending.map((deletion) =>
+  const pendingDeletions = parseFamilyMomentDeletions(data)
+  const cleanupResults = await Promise.allSettled(
+    pendingDeletions.map((deletion) =>
       completeFamilyMomentDeletion(connection, deletion),
     ),
   )
-  const failure = results.find(
+  const firstFailure = cleanupResults.find(
     (result): result is PromiseRejectedResult => result.status === 'rejected',
   )
-  if (failure) throw failure.reason
+  if (firstFailure) throw firstFailure.reason
 }
 
+/**
+ * Subscribes to new ready moments and deletion tombstones. Consumers may await
+ * `ready` to distinguish an active channel from a silent connection failure.
+ */
 export function subscribeToFamilyMoments(
   circleId: string,
   onChange: (deletedMomentId?: string) => void,
@@ -719,6 +792,9 @@ export function subscribeToFamilyMoments(
       ready: Promise.resolve(),
       unsubscribe: () => undefined,
     }
+  }
+  if (!UUID_PATTERN.test(circleId)) {
+    throw new TypeError('A valid family ID is required for live updates.')
   }
 
   let resolveReady: () => void

@@ -19,6 +19,7 @@ type ToggleRowProps = {
   onChange: () => void
 }
 
+/** Renders an accessible settings switch with stable label relationships. */
 function ToggleRow({
   id,
   label,
@@ -49,6 +50,7 @@ function ToggleRow({
   )
 }
 
+/** Reduces the full family snapshot to the copy shown in the settings row. */
 function getFamilySummary(snapshot: FamilySyncSnapshot | null) {
   if (!snapshot) {
     return {
@@ -84,12 +86,13 @@ function getFamilySummary(snapshot: FamilySyncSnapshot | null) {
   }
 }
 
+/** Renders account, family, appearance, and notification settings. */
 export function SettingsPage() {
   const navigate = useNavigate()
   const { signOut, user } = useAuth()
   const { theme: selectedTheme, setTheme, themes } = useAppTheme()
-  const [notifications, setNotifications] = useState(true)
-  const [quietHours, setQuietHours] = useState(true)
+  const [notificationsEnabled, setNotificationsEnabled] = useState(true)
+  const [quietHoursEnabled, setQuietHoursEnabled] = useState(true)
   const [savingPreference, setSavingPreference] = useState<
     'notifications' | 'quiet-hours' | null
   >(null)
@@ -103,68 +106,71 @@ export function SettingsPage() {
     useState<FamilySyncSnapshot | null>(null)
   const familySummary = getFamilySummary(familySnapshot)
   const displayName = user?.displayName || 'Family member'
-  const initial = displayName.slice(0, 1).toUpperCase()
+  const profileInitial = displayName.slice(0, 1).toUpperCase()
   const accountIdentity = user?.email || user?.phone || 'Signed in'
   const userId = user?.id ?? null
 
   useEffect(() => {
-    let active = true
+    let requestActive = true
     if (!userId) return () => undefined
 
     void readProfilePreferences()
-      .then((preferences) => {
-        if (!active) return
-        setNotifications(preferences.notificationsEnabled)
-        setQuietHours(preferences.quietHoursEnabled)
+      .then((profilePreferences) => {
+        if (!requestActive) return
+        setNotificationsEnabled(profilePreferences.notificationsEnabled)
+        setQuietHoursEnabled(profilePreferences.quietHoursEnabled)
         setPreferenceError(null)
       })
       .catch(() => {
-        if (active) {
+        if (requestActive) {
           setPreferenceError('Preferences could not be synced right now.')
         }
       })
 
     return () => {
-      active = false
+      requestActive = false
     }
   }, [userId])
 
+  /** Optimistically toggles family updates and rolls back a failed save. */
   async function handleNotificationsChange() {
-    const nextValue = !notifications
-    setNotifications(nextValue)
+    const nextNotificationsEnabled = !notificationsEnabled
+    setNotificationsEnabled(nextNotificationsEnabled)
     setPreferenceError(null)
     setSavingPreference('notifications')
     try {
-      const saved = await updateProfilePreferences({
-        notificationsEnabled: nextValue,
+      const savedPreferences = await updateProfilePreferences({
+        notificationsEnabled: nextNotificationsEnabled,
       })
-      setNotifications(saved.notificationsEnabled)
+      setNotificationsEnabled(savedPreferences.notificationsEnabled)
     } catch {
-      setNotifications(!nextValue)
+      setNotificationsEnabled(!nextNotificationsEnabled)
       setPreferenceError('Family updates could not be saved.')
     } finally {
       setSavingPreference(null)
     }
   }
 
+  /** Optimistically toggles quiet hours and restores the prior value on failure. */
   async function handleQuietHoursChange() {
-    const nextValue = !quietHours
-    setQuietHours(nextValue)
+    const nextQuietHoursEnabled = !quietHoursEnabled
+    setQuietHoursEnabled(nextQuietHoursEnabled)
     setPreferenceError(null)
     setSavingPreference('quiet-hours')
     try {
-      const saved = await updateProfilePreferences({
-        quietHoursEnabled: nextValue,
+      const savedPreferences = await updateProfilePreferences({
+        quietHoursEnabled: nextQuietHoursEnabled,
       })
-      setQuietHours(saved.quietHoursEnabled)
+      setQuietHoursEnabled(savedPreferences.quietHoursEnabled)
     } catch {
-      setQuietHours(!nextValue)
+      setQuietHoursEnabled(!nextQuietHoursEnabled)
       setPreferenceError('Quiet evenings could not be saved.')
     } finally {
       setSavingPreference(null)
     }
   }
 
+  /** Completes sign-out before replacing the protected settings route. */
   async function handleSignOut() {
     await signOut()
     navigate('/login', { replace: true })
@@ -185,7 +191,7 @@ export function SettingsPage() {
           {user?.imageUrl ? (
             <img src={user.imageUrl} alt={`${displayName} profile`} />
           ) : (
-            <span aria-hidden="true">{initial}</span>
+            <span aria-hidden="true">{profileInitial}</span>
           )}
         </div>
       </header>
@@ -204,10 +210,18 @@ export function SettingsPage() {
           }
           aria-expanded={showProfileSettings}
           aria-controls="profile-account-panel"
-          onClick={() => setShowProfileSettings((value) => !value)}
+          onClick={() =>
+            setShowProfileSettings((wasProfileSettingsOpen) =>
+              !wasProfileSettingsOpen
+            )
+          }
         >
           <span className="profile-account-mark" aria-hidden="true">
-            {user?.imageUrl ? <img src={user.imageUrl} alt="" /> : initial}
+            {user?.imageUrl ? (
+              <img src={user.imageUrl} alt="" />
+            ) : (
+              profileInitial
+            )}
           </span>
           <span className="profile-family-copy">
             <strong>{displayName}</strong>
@@ -259,7 +273,9 @@ export function SettingsPage() {
           aria-label={showFamilySync ? 'Close family sharing' : 'Manage family sharing'}
           aria-expanded={showFamilySync}
           aria-controls="profile-family-group-panel"
-          onClick={() => setShowFamilySync((value) => !value)}
+          onClick={() =>
+            setShowFamilySync((wasFamilySyncOpen) => !wasFamilySyncOpen)
+          }
         >
           <span className="profile-family-mark" aria-hidden="true">♥</span>
           <span className="profile-family-copy">
@@ -316,7 +332,7 @@ export function SettingsPage() {
             id="family-notifications"
             label="Family updates"
             description="New moments, plans, and messages"
-            checked={notifications}
+            checked={notificationsEnabled}
             disabled={savingPreference !== null}
             onChange={() => void handleNotificationsChange()}
           />
@@ -324,7 +340,7 @@ export function SettingsPage() {
             id="quiet-hours"
             label="Quiet evenings"
             description="Pause non-urgent updates from 10 PM to 8 AM"
-            checked={quietHours}
+            checked={quietHoursEnabled}
             disabled={savingPreference !== null}
             onChange={() => void handleQuietHoursChange()}
           />

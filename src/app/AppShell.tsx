@@ -11,6 +11,7 @@ import {
 } from './appViewportGeometry'
 import { AppTabBar } from './AppTabBar'
 
+/** Owns persistent viewport geometry, primary navigation, and global shortcuts. */
 export function AppShell({ children }: PropsWithChildren) {
   const { status: authStatus } = useAuth()
   const location = useLocation()

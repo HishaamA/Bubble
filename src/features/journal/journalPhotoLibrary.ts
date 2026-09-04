@@ -26,6 +26,7 @@ import {
 } from './journalPhotoTypes'
 import type { UnlockedCapsulePhoto } from './capsuleJournalArchive'
 
+/** Produces an RFC 4122 version-4 identifier even in older WebViews. */
 function createPhotoId() {
   if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
     return crypto.randomUUID()
@@ -46,6 +47,7 @@ function createPhotoId() {
   return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`
 }
 
+/** Turns a filename into bounded, human-readable initial caption text. */
 function captionFromFilename(filename: string) {
   return filename
     .replace(/\.[^.]+$/, '')
@@ -55,11 +57,13 @@ function captionFromFilename(filename: string) {
     .slice(0, 240)
 }
 
+/** Provides deterministic newest-first ordering when timestamps tie. */
 function newestFirst(left: JournalPhoto, right: JournalPhoto) {
   return right.capturedAt.localeCompare(left.capturedAt) ||
     right.id.localeCompare(left.id)
 }
 
+/** Keeps process-independent Blob data in preference to a short-lived URL. */
 function preferDurableImageSource(
   current: JournalPhoto['image'],
   stored: JournalPhoto['image'],
@@ -69,6 +73,7 @@ function preferDurableImageSource(
   return current
 }
 
+/** Merges a store refresh without replacing durable Blobs with expiring URLs. */
 export function mergeLocalJournalPhotos(
   currentPhotos: readonly JournalPhoto[],
   storedPhotos: readonly JournalPhoto[],
@@ -97,6 +102,7 @@ export function mergeLocalJournalPhotos(
   ].sort(newestFirst)
 }
 
+/** Replaces one photo by ID and restores canonical timeline ordering. */
 function upsertJournalPhoto(
   photos: readonly JournalPhoto[],
   photo: JournalPhoto,
@@ -107,6 +113,7 @@ function upsertJournalPhoto(
   ].sort(newestFirst)
 }
 
+/** Reconciles authoritative family rows with unsynced local imports. */
 export function mergeJournalPhotos(
   localPhotos: readonly JournalPhoto[],
   familyPhotos: readonly JournalPhoto[],
@@ -133,6 +140,7 @@ export function mergeJournalPhotos(
   ].sort(newestFirst)
 }
 
+/** Adapts a library photo to the shared unlocked-photo viewer contract. */
 export function journalPhotoAsUnlocked(
   photo: JournalPhoto,
 ): UnlockedCapsulePhoto {
@@ -157,6 +165,10 @@ const idleImportProgress: JournalPhotoImportProgress = {
   total: 0,
 }
 
+/**
+ * Owns account-scoped photo hydration, serialized imports, background upload,
+ * realtime refresh, and expiring signed-URL replacement.
+ */
 export function useJournalPhotoLibrary({
   cacheNamespace,
   contributorName = 'You',
@@ -184,18 +196,24 @@ export function useJournalPhotoLibrary({
   const syncFailureCountsRef = useRef(new Map<string, number>())
   const importQueueRef = useRef(Promise.resolve())
 
+  // State and ref move together because queued sync work must read the latest
+  // photo set before React commits its next render.
   const replacePhotos = useCallback((next: JournalPhoto[]) => {
     photosRef.current = next
     setPhotos(next)
     return next
   }, [])
 
+  // Coalesce refreshes within an account generation so focus, realtime, and
+  // connectivity events cannot fan out duplicate network/storage reads.
   const refresh = useCallback(() => {
     const generation = generationRef.current
     const existing = refreshPromiseRef.current
     if (existing?.generation === generation) return existing.promise
 
+    /** Rejects async work that crossed an account/cache generation boundary. */
     const isCurrent = () => generationRef.current === generation
+    /** Hydrates local media first, then overlays authoritative family metadata. */
     const request = (async () => {
       let storedPhotos: JournalPhoto[] = []
       try {
@@ -248,13 +266,17 @@ export function useJournalPhotoLibrary({
     return request
   }, [cacheNamespace, replacePhotos, store])
 
+  // One serialized worker drains durable pending photos. A request arriving
+  // mid-pass sets a flag so the same worker loops once more before it exits.
   const syncPending = useCallback(function requestPendingSync(): Promise<void> {
     const generation = generationRef.current
     syncRequestedRef.current = true
     const existing = syncPromiseRef.current
     if (existing?.generation === generation) return existing.promise
 
+    /** Rejects queued uploads after the account/cache generation changes. */
     const isCurrent = () => generationRef.current === generation
+    /** Drains one bounded pending-upload pass and repeats only when requested. */
     const request = (async () => {
       let syncedAny = false
       do {
@@ -333,6 +355,8 @@ export function useJournalPhotoLibrary({
     return request
   }, [cacheNamespace, refresh, replacePhotos, store])
 
+  // Imports are serialized to preserve file order and keep peak image-decoding
+  // memory bounded on mobile devices.
   const importPhotos = useCallback((
     files: readonly File[],
   ): Promise<JournalPhotoImportResult> => {
@@ -412,6 +436,7 @@ export function useJournalPhotoLibrary({
     const generation = generationRef.current + 1
     generationRef.current = generation
     photosRef.current = []
+    // oxlint-disable-next-line react/set-state-in-effect -- Clear the prior account's photos before asynchronous namespace hydration.
     setPhotos([])
     setImportProgress(idleImportProgress)
     refreshPromiseRef.current = null
@@ -455,12 +480,14 @@ export function useJournalPhotoLibrary({
       })
       .catch(() => undefined)
 
+    /** Flushes pending uploads before replacing expiring server URLs. */
     const refreshAndSync = () => {
       if (!active || generationRef.current !== generation) return
       void syncPending().then(() => {
         if (active && generationRef.current === generation) void refresh()
       })
     }
+    /** Defers foreground work until the document is actually visible. */
     const refreshWhenVisible = () => {
       if (document.visibilityState === 'visible') refreshAndSync()
     }

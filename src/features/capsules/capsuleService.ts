@@ -41,10 +41,12 @@ export type FamilyWeeklyCapsulePointer = {
   weekStart: string
 }
 
+/** Validates server identifiers before using them in storage paths or filters. */
 function isUuid(value: string) {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value)
 }
 
+/** Creates an RFC 4122 v4 identifier when randomUUID is unavailable. */
 function createUuid() {
   if (typeof crypto.randomUUID === 'function') return crypto.randomUUID()
   const bytes = crypto.getRandomValues(new Uint8Array(16))
@@ -54,6 +56,7 @@ function createUuid() {
   return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`
 }
 
+/** Normalizes Supabase's object-or-array relation shape into display copy. */
 function displayNameFromRelation(value: unknown, fallback: string) {
   const relation = Array.isArray(value) ? value[0] : value
   if (!relation || typeof relation !== 'object') return fallback
@@ -63,6 +66,7 @@ function displayNameFromRelation(value: unknown, fallback: string) {
     : fallback
 }
 
+/** Resolves the signed-in user's earliest approved family membership. */
 async function currentFamilyContext() {
   const client = getSupabaseClient()
   if (!client || !getClerkSupabaseIdentity()) return null
@@ -84,6 +88,7 @@ async function currentFamilyContext() {
   }
 }
 
+/** Validates an untrusted Capsule row before exposing it to UI state. */
 function normalizeCapsule(
   row: CapsuleRow,
   photos: CapsulePhoto[],
@@ -117,6 +122,7 @@ function normalizeCapsule(
   }
 }
 
+/** Joins a validated item row to short-lived signed media URLs. */
 function normalizeItem(
   row: CapsuleItemRow,
   signedUrls: Map<string, string>,
@@ -153,6 +159,7 @@ function normalizeItem(
   }
 }
 
+/** Returns the current family's weekly Capsule, creating it when necessary. */
 export async function ensureFamilyWeeklyCapsule() {
   const context = await currentFamilyContext()
   if (!context) return null
@@ -170,6 +177,7 @@ export async function ensureFamilyWeeklyCapsule() {
   return { id: row.id, weekStart: row.week_start } satisfies FamilyWeeklyCapsulePointer
 }
 
+/** Fetches Capsule metadata and signed media URLs for the active family. */
 export async function fetchFamilyCapsules(): Promise<FamilyCapsule[]> {
   const context = await currentFamilyContext()
   if (!context) return []
@@ -188,6 +196,8 @@ export async function fetchFamilyCapsules(): Promise<FamilyCapsule[]> {
   const itemRows: CapsuleItemRow[] = []
   const pageSize = 500
   if (capsuleIds.length > 0) {
+    // Supabase caps large result sets. Explicit paging prevents larger families
+    // from silently losing older Capsule items when that server limit is reached.
     for (let offset = 0; ; offset += pageSize) {
       const itemResult = await context.client
         .from('family_capsule_items')
@@ -205,6 +215,8 @@ export async function fetchFamilyCapsules(): Promise<FamilyCapsule[]> {
   const paths = itemRows.flatMap((row) => [row.image_path, row.thumbnail_path])
     .filter((path): path is string => typeof path === 'string')
   const signedUrls = new Map<string, string>()
+  // Storage signs at most 100 paths per request; retain positional mapping so a
+  // partial response cannot associate a URL with the wrong media object.
   for (let offset = 0; offset < paths.length; offset += 100) {
     const pathBatch = paths.slice(offset, offset + 100)
     const { data, error } = await context.client.storage
@@ -220,6 +232,8 @@ export async function fetchFamilyCapsules(): Promise<FamilyCapsule[]> {
     .map((row) => normalizeItem(row, signedUrls, context.userId))
     .filter((photo): photo is CapsulePhoto => photo !== null)
   const photosByCapsule = new Map<string, CapsulePhoto[]>()
+  // Group once before normalizing Capsules instead of repeatedly scanning every
+  // item for each parent row.
   photos.forEach((photo) => {
     const current = photosByCapsule.get(photo.capsuleId) ?? []
     current.push(photo)
@@ -234,6 +248,7 @@ export async function fetchFamilyCapsules(): Promise<FamilyCapsule[]> {
     .filter((capsule): capsule is FamilyCapsule => capsule !== null)
 }
 
+/** Creates a one-off family Capsule and returns its server ID when connected. */
 export async function createFamilySpecialCapsule(
   title: string,
   opensAt: string,
@@ -251,6 +266,7 @@ export async function createFamilySpecialCapsule(
   return typeof data === 'string' && isUuid(data) ? data : null
 }
 
+/** Uploads processed photo variants and records their Capsule membership. */
 export async function uploadFamilyCapsulePhoto(input: {
   capsuleId: string
   itemId?: string
@@ -322,6 +338,7 @@ export async function uploadFamilyCapsulePhoto(input: {
   return data
 }
 
+/** Subscribes to family Capsule changes and returns an async unsubscribe handle. */
 export async function subscribeToFamilyCapsules(onChange: () => void) {
   const context = await currentFamilyContext()
   if (!context) return () => undefined

@@ -3,20 +3,24 @@ import { Component, type ErrorInfo, type PropsWithChildren } from 'react'
 type ErrorBoundaryState = { hasError: boolean }
 type ErrorBoundaryProps = PropsWithChildren<{ onReload?: () => void }>
 
+/** Prevents a render failure from leaving the application on a blank screen. */
 export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState> {
-  state: ErrorBoundaryState = { hasError: false }
+  override state: ErrorBoundaryState = { hasError: false }
 
+  /** Switches rendering to the safe recovery screen after a child throws. */
   static getDerivedStateFromError(): ErrorBoundaryState {
     return { hasError: true }
   }
 
-  componentDidCatch(error: Error, info: ErrorInfo) {
+  /** Records diagnostic details without exposing them in the family UI. */
+  override componentDidCatch(error: Error, info: ErrorInfo) {
     // Keep the recovery screen intentionally generic. Render errors can include
     // media identifiers, so details stay in the developer console only.
     console.error('Bubble render failure', error, info.componentStack)
   }
 
-  render() {
+  /** Renders either the protected subtree or a self-contained recovery action. */
+  override render() {
     if (this.state.hasError) {
       return (
         <div className="fatal-state" role="alert">

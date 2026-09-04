@@ -17,7 +17,7 @@ vi.mock('./features/memories/shared', () => ({
   FamilyMomentSyncProvider: ({ children }: { children: ReactNode }) => children,
 }))
 
-import { AccountScopedData } from './App'
+import { AccountScopedData } from './app/AccountScopedData'
 import { AuthProvider, type AuthContextValue } from './features/auth'
 import { FamilyOnboardingProvider } from './features/onboarding'
 import type {

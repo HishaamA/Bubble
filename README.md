@@ -71,6 +71,8 @@ These rules are release constraints, not implementation suggestions:
 - Removing a member revokes server access immediately; local and Storage cleanup may complete asynchronously.
 
 See [`docs/architecture.md`](./docs/architecture.md) for the complete boundary and invariant list.
+First-party naming, documentation, control-flow, and validation conventions are
+recorded in [`docs/code-quality.md`](./docs/code-quality.md).
 
 ## Repository shape
 
@@ -154,7 +156,9 @@ the Vite preview cannot satisfy the guided-capture acceptance gate.
 
 ## Quality checks
 
-Before merging a feature, run the checks exposed by the project:
+Before merging a feature, follow the naming, documentation, boundary, and
+control-flow rules in [`docs/code-quality.md`](./docs/code-quality.md), then run
+the checks exposed by the project:
 
 ```bash
 pnpm lint

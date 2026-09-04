@@ -7,18 +7,22 @@ const DATABASE_PREFIX = 'kinsphere-family-journal-photos'
 const DATABASE_VERSION = 1
 const STORE_NAME = 'photos'
 
+/** Prevents callers from mutating records retained by the in-memory store. */
 function clonePhoto(photo: JournalPhoto): JournalPhoto {
   return { ...photo }
 }
 
+/** Narrows IndexedDB values to plain records before field validation. */
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value)
 }
 
+/** Accepts only media shapes supported by the journal renderer. */
 function isImageSource(value: unknown): value is JournalPhoto['image'] {
   return value instanceof Blob || (typeof value === 'string' && value.length > 0)
 }
 
+/** Rejects non-integral or implausibly large stored image dimensions. */
 function safeDimension(value: unknown, maximum: number) {
   return typeof value === 'number' &&
     Number.isSafeInteger(value) &&
@@ -26,6 +30,7 @@ function safeDimension(value: unknown, maximum: number) {
     value <= maximum
 }
 
+/** Validates an untrusted IndexedDB photo before exposing it to the UI. */
 export function parseStoredJournalPhoto(value: unknown): JournalPhoto | null {
   if (!isRecord(value)) return null
   const capturedAt = typeof value.capturedAt === 'string'
@@ -64,11 +69,13 @@ export function parseStoredJournalPhoto(value: unknown): JournalPhoto | null {
   }
 }
 
+/** Keeps storage output deterministic when two photos share a timestamp. */
 function newestFirst(left: JournalPhoto, right: JournalPhoto) {
   return right.capturedAt.localeCompare(left.capturedAt) ||
     right.id.localeCompare(left.id)
 }
 
+/** Converts process-local blob URLs back into restart-safe Blob data when possible. */
 async function durableImageSource(source: JournalPhoto['image']) {
   if (
     typeof source !== 'string' ||
@@ -85,6 +92,7 @@ async function durableImageSource(source: JournalPhoto['image']) {
   }
 }
 
+/** Resolves both image variants before a record crosses the storage boundary. */
 async function preparePhotoForPersistence(photo: JournalPhoto) {
   const [image, thumbnail] = await Promise.all([
     durableImageSource(photo.image),
@@ -93,6 +101,7 @@ async function preparePhotoForPersistence(photo: JournalPhoto) {
   return { ...photo, image, thumbnail }
 }
 
+/** Opens and upgrades the account database, surfacing blocked upgrades as errors. */
 function openDatabase(indexedDb: IDBFactory, name: string) {
   return new Promise<IDBDatabase>((resolve, reject) => {
     const request = indexedDb.open(name, DATABASE_VERSION)
@@ -113,10 +122,12 @@ function openDatabase(indexedDb: IDBFactory, name: string) {
   })
 }
 
+/** Names the photo database by account and family cache namespace. */
 export function journalPhotoDatabaseNameForSubject(subject: string) {
   return `${DATABASE_PREFIX}:${encodeURIComponent(subject.trim() || 'signed-out')}`
 }
 
+/** Creates an isolated in-memory photo store with validation and cloning. */
 export function createMemoryJournalPhotoStore(
   seed: JournalPhoto[] = [],
 ): JournalPhotoStore {
@@ -143,6 +154,7 @@ export function createMemoryJournalPhotoStore(
   }
 }
 
+/** Creates an account-scoped IndexedDB store for durable local photo copies. */
 export function createIndexedDbJournalPhotoStore(
   indexedDb: IDBFactory,
   subject: string,
@@ -216,6 +228,7 @@ export function createIndexedDbJournalPhotoStore(
   }
 }
 
+/** Selects IndexedDB in browsers and memory storage during SSR. */
 export function createDefaultJournalPhotoStore(subject: string) {
   if (typeof window === 'undefined' || !window.indexedDB) {
     return createMemoryJournalPhotoStore()

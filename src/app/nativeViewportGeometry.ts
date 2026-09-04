@@ -18,10 +18,12 @@ const insetProperties = {
   left: '--native-safe-area-left',
 } as const
 
+/** Rejects malformed inset values received across the native bridge. */
 function isSafeInset(value: unknown): value is number {
   return typeof value === 'number' && Number.isFinite(value) && value >= 0
 }
 
+/** Applies trusted native safe-area insets to document-level CSS variables. */
 export function applyNativeViewportGeometry(
   detail: NativeViewportGeometry,
   root: HTMLElement = document.documentElement,
@@ -38,6 +40,7 @@ export function applyNativeViewportGeometry(
   }
 }
 
+/** Listens for native safe-area updates until the returned cleanup is called. */
 export function installNativeViewportGeometrySync(
   target: Window = window,
   root: HTMLElement = document.documentElement,

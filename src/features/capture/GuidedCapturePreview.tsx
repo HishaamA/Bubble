@@ -15,6 +15,7 @@ type GuidedCapturePreviewProps = {
   onClose: () => void
 }
 
+/** Shows the guided-capture concept walkthrough in an accessible modal. */
 export function GuidedCapturePreview({ onClose }: GuidedCapturePreviewProps) {
   const [view, setView] = useState({ yaw: 22.5, pitch: 0 })
   const [captured, setCaptured] = useState<Set<string>>(() => new Set())
@@ -48,6 +49,8 @@ export function GuidedCapturePreview({ onClose }: GuidedCapturePreviewProps) {
     ? centralTarget.target.id
     : null
 
+  // Capture only after the same target remains centered for the full hold; a
+  // view change cancels and restarts this timer through effect cleanup.
   useEffect(() => {
     if (!holdingTarget) return
     const timer = window.setTimeout(() => {
@@ -60,6 +63,7 @@ export function GuidedCapturePreview({ onClose }: GuidedCapturePreviewProps) {
     return () => window.clearTimeout(timer)
   }, [holdingTarget])
 
+  /** Converts device orientation events into the preview's bounded camera view. */
   const updateFromDevice = useCallback((event: DeviceOrientationEvent) => {
     if (event.alpha === null || event.beta === null) return
     setView({
@@ -68,11 +72,14 @@ export function GuidedCapturePreview({ onClose }: GuidedCapturePreviewProps) {
     })
   }, [])
 
+  // Device orientation is optional: pointer dragging remains a complete fallback
+  // on browsers that do not expose sensor events.
   useEffect(() => {
     window.addEventListener('deviceorientation', updateFromDevice, true)
     return () => window.removeEventListener('deviceorientation', updateFromDevice, true)
   }, [updateFromDevice])
 
+  // Focus the sole modal action after paint and mirror its close behavior on Escape.
   useEffect(() => {
     const frame = window.requestAnimationFrame(() => closeButtonRef.current?.focus())
     const closeOnEscape = (event: KeyboardEvent) => {
@@ -87,6 +94,7 @@ export function GuidedCapturePreview({ onClose }: GuidedCapturePreviewProps) {
     }
   }, [onClose])
 
+  /** Begins one pointer-owned drag from the current spherical orientation. */
   function startDrag(event: ReactPointerEvent<HTMLDivElement>) {
     event.currentTarget.setPointerCapture(event.pointerId)
     dragRef.current = {
@@ -98,6 +106,7 @@ export function GuidedCapturePreview({ onClose }: GuidedCapturePreviewProps) {
     }
   }
 
+  /** Converts pointer deltas to a clamped preview orientation. */
   function moveDrag(event: ReactPointerEvent<HTMLDivElement>) {
     const drag = dragRef.current
     if (!drag || drag.pointerId !== event.pointerId) return
@@ -110,6 +119,7 @@ export function GuidedCapturePreview({ onClose }: GuidedCapturePreviewProps) {
     })
   }
 
+  /** Releases only the pointer that owns the current drag gesture. */
   function stopDrag(event: ReactPointerEvent<HTMLDivElement>) {
     if (dragRef.current?.pointerId === event.pointerId) dragRef.current = null
   }

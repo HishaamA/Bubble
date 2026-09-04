@@ -10,10 +10,12 @@ type WindowWithPannellum = Window & {
 
 let runtimePromise: Promise<PannellumRuntime> | undefined
 
+/** Reads the vendor namespace without widening the global Window declaration. */
 function currentRuntime(): PannellumRuntime | undefined {
   return (window as WindowWithPannellum).pannellum
 }
 
+/** Installs the document-owned vendor stylesheet at most once. */
 function ensureStylesheet(): void {
   // The stylesheet belongs to the document, not an individual viewer. Keeping
   // one marked node avoids duplicate downloads and prevents an unmount from
@@ -31,6 +33,7 @@ function ensureStylesheet(): void {
   document.head.append(link)
 }
 
+/** Resolves the bundled script's global API, sharing an existing script node. */
 function loadRuntime(): Promise<PannellumRuntime> {
   const loadedRuntime = currentRuntime()
   if (loadedRuntime) return Promise.resolve(loadedRuntime)
@@ -41,10 +44,12 @@ function loadRuntime(): Promise<PannellumRuntime> {
     )
     const script = existing ?? document.createElement('script')
 
+    /** Detaches this request's listeners without removing a shared asset. */
     const cleanup = () => {
       script.removeEventListener('load', handleLoad)
       script.removeEventListener('error', handleError)
     }
+    /** Accepts a load only when the script published the expected global API. */
     const handleLoad = () => {
       cleanup()
       const runtime = currentRuntime()
@@ -55,6 +60,7 @@ function loadRuntime(): Promise<PannellumRuntime> {
         reject(new Error('Pannellum loaded without exposing its viewer API.'))
       }
     }
+    /** Clears a script created here so a later route can make a clean retry. */
     const handleError = () => {
       cleanup()
       if (script.getAttribute(ASSET_MARKER) === 'script') script.remove()

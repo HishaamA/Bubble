@@ -20,6 +20,7 @@ import type {
   StoredPanoramaMoment,
 } from './types'
 
+/** Owns and revokes process-local playback URLs for durable annotation Blobs. */
 function createBrowserObjectUrlManager(): MomentObjectUrlManager {
   return {
     create(blob) {
@@ -47,6 +48,10 @@ function createBrowserObjectUrlManager(): MomentObjectUrlManager {
   }
 }
 
+/**
+ * Hydrates stored panoramas into renderable object URLs and owns their cleanup.
+ * Store mutations refresh first, then notify other provider instances.
+ */
 export function SharedMomentsProvider({
   children,
   store,
@@ -70,6 +75,7 @@ export function SharedMomentsProvider({
   const liveUrlsRef = useRef<string[]>([])
   const notifierRef = useRef<MomentChangeNotifier | null>(null)
 
+  /** Replaces render records and revokes every object URL from the prior snapshot. */
   const replaceMoments = useCallback(
     (records: StoredPanoramaMoment[]) => {
       const nextMoments = records.map((moment) => {
@@ -99,6 +105,7 @@ export function SharedMomentsProvider({
     [activeObjectUrls],
   )
 
+  /** Loads one current store snapshot and ignores superseded/unmounted requests. */
   const loadRecords = useCallback(async () => {
     const request = ++requestRef.current
 
@@ -119,6 +126,7 @@ export function SharedMomentsProvider({
     }
   }, [activeStore, replaceMoments])
 
+  /** Exposes a loading-aware reload operation to local and cross-tab callers. */
   const refresh = useCallback(async () => {
     setLoading(true)
     await loadRecords()
@@ -143,6 +151,7 @@ export function SharedMomentsProvider({
     }
   }, [activeObjectUrls, createNotifier, loadRecords, refresh])
 
+  /** Validates, persists, refreshes render URLs, then notifies peer providers. */
   const saveMoment = useCallback(
     async (input: SavePanoramaMomentInput) => {
       const moment = preparePanoramaMoment(input)
@@ -154,6 +163,7 @@ export function SharedMomentsProvider({
     [activeStore, refresh],
   )
 
+  /** Deduplicates IDs, removes them durably, then refreshes and broadcasts. */
   const removeMoments = useCallback(
     async (ids: readonly string[]) => {
       const uniqueIds = [...new Set(ids.map((id) => id.trim()).filter(Boolean))]

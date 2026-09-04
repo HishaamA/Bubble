@@ -5,6 +5,7 @@ export type BubblePlacementMap = Record<string, BubblePlacement>
 export const BUBBLE_PLACEMENT_STORAGE_KEY =
   'kinsphere.memory-bubble-placements.v1'
 
+/** Accepts only normalized finite coordinates read from browser storage. */
 function validCoordinate(value: unknown): value is number {
   return (
     typeof value === 'number' &&
@@ -14,6 +15,7 @@ function validCoordinate(value: unknown): value is number {
   )
 }
 
+/** Parses persisted placements and drops malformed or out-of-range entries. */
 export function parseBubblePlacements(value: string | null): BubblePlacementMap {
   if (!value) return {}
 
@@ -42,6 +44,7 @@ export function parseBubblePlacements(value: string | null): BubblePlacementMap 
   }
 }
 
+/** Reads placements without allowing unavailable WebView storage to break UI. */
 export function readBubblePlacements(
   storage: Pick<Storage, 'getItem'> | null =
     typeof window === 'undefined' ? null : window.localStorage,
@@ -54,6 +57,7 @@ export function readBubblePlacements(
   }
 }
 
+/** Persists all placements when browser storage is available. */
 export function saveBubblePlacements(
   placements: BubblePlacementMap,
   storage: Pick<Storage, 'setItem'> | null =
@@ -68,6 +72,7 @@ export function saveBubblePlacements(
   }
 }
 
+/** Keeps a bubble's pixel position within the current constellation world. */
 export function constrainBubblePosition({
   requested,
   bubble,
@@ -91,6 +96,7 @@ export function constrainBubblePosition({
   }
 }
 
+/** Converts a pixel position into a device-independent percentage placement. */
 export function normalizeBubblePosition(
   position: { top: number; left: number },
   world: { width: number; height: number },

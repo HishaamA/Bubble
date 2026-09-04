@@ -25,6 +25,7 @@ type PersistedFamilyCapsule = Omit<FamilyCapsule, 'photos'> & {
   photos: PersistedCapsulePhoto[]
 }
 
+/** Copies nested photo records so callers cannot mutate store-owned state. */
 function cloneCapsule(capsule: FamilyCapsule): FamilyCapsule {
   return {
     ...capsule,
@@ -32,10 +33,12 @@ function cloneCapsule(capsule: FamilyCapsule): FamilyCapsule {
   }
 }
 
+/** Identifies document-scoped URLs that cannot survive an app restart. */
 function isEphemeralObjectUrl(source: CapsuleImageSource): source is string {
   return typeof source === 'string' && source.startsWith('blob:')
 }
 
+/** Materializes object URLs as Blobs when the originating document still owns them. */
 async function durableImageSource(
   source: CapsuleImageSource,
 ): Promise<CapsuleImageSource> {
@@ -52,6 +55,7 @@ async function durableImageSource(
   }
 }
 
+/** Replaces every recoverable ephemeral media source before a store write. */
 async function prepareCapsuleForPersistence(
   capsule: FamilyCapsule,
 ): Promise<FamilyCapsule> {
@@ -67,6 +71,7 @@ async function prepareCapsuleForPersistence(
   }
 }
 
+/** Recognizes the versioned byte envelope without trusting IndexedDB contents. */
 function isPersistedImageBytes(value: unknown): value is PersistedImageBytes {
   if (!value || typeof value !== 'object') return false
   const candidate = value as Partial<PersistedImageBytes>
@@ -75,6 +80,7 @@ function isPersistedImageBytes(value: unknown): value is PersistedImageBytes {
     Object.prototype.toString.call(candidate.bytes) === '[object ArrayBuffer]'
 }
 
+/** Converts Blob-like sources to WebKit-safe persisted bytes when readable. */
 async function serializeImageSource(
   source: CapsuleImageSource,
 ): Promise<CapsuleImageSource | PersistedImageBytes> {
@@ -95,6 +101,7 @@ async function serializeImageSource(
   }
 }
 
+/** Restores current byte envelopes and legacy Blob records to image sources. */
 async function hydrateImageSource(
   source: CapsuleImageSource | PersistedImageBytes,
 ): Promise<CapsuleImageSource> {
@@ -111,6 +118,7 @@ async function hydrateImageSource(
   }
 }
 
+/** Serializes Blob sources as stable bytes for reliable iOS IndexedDB storage. */
 export async function serializeCapsuleForIndexedDb(
   capsule: FamilyCapsule,
 ): Promise<PersistedFamilyCapsule> {
@@ -126,6 +134,7 @@ export async function serializeCapsuleForIndexedDb(
   }
 }
 
+/** Rehydrates byte-backed and legacy Blob records into usable image sources. */
 export async function hydrateCapsuleFromIndexedDb(
   capsule: PersistedFamilyCapsule,
 ): Promise<FamilyCapsule> {
@@ -141,10 +150,12 @@ export async function hydrateCapsuleFromIndexedDb(
   }
 }
 
+/** Orders ISO creation timestamps from newest to oldest. */
 function newestFirst(left: FamilyCapsule, right: FamilyCapsule) {
   return right.createdAt.localeCompare(left.createdAt)
 }
 
+/** Opens and upgrades the account-scoped IndexedDB database. */
 function openDatabase(indexedDb: IDBFactory, name: string) {
   return new Promise<IDBDatabase>((resolve, reject) => {
     const request = indexedDb.open(name, DATABASE_VERSION)
@@ -161,10 +172,12 @@ function openDatabase(indexedDb: IDBFactory, name: string) {
   })
 }
 
+/** Names each Capsule database by account and family storage subject. */
 export function capsuleDatabaseNameForSubject(subject: string) {
   return `${DATABASE_PREFIX}:${encodeURIComponent(subject.trim() || 'signed-out')}`
 }
 
+/** Creates an isolated in-memory Capsule store with defensive cloning. */
 export function createMemoryCapsuleStore(seed: FamilyCapsule[] = []): CapsuleStore {
   const records = new Map(seed.map((capsule) => [capsule.id, cloneCapsule(capsule)]))
   return {
@@ -181,6 +194,7 @@ export function createMemoryCapsuleStore(seed: FamilyCapsule[] = []): CapsuleSto
   }
 }
 
+/** Creates a byte-safe, account-scoped IndexedDB Capsule store. */
 export function createIndexedDbCapsuleStore(
   indexedDb: IDBFactory,
   subject: string,
@@ -241,6 +255,11 @@ export function createIndexedDbCapsuleStore(
   }
 }
 
+/**
+ * Mirrors mutations to memory, retries transient durable-store failures, and
+ * promotes queued changes on the next read. Cache reconciliation is best effort
+ * and cannot hide a successful primary read.
+ */
 export function createResilientCapsuleStore(
   primary: CapsuleStore,
   fallback: CapsuleStore = createMemoryCapsuleStore(),
@@ -251,6 +270,7 @@ export function createResilientCapsuleStore(
 
   const dirtyOperations = new Map<string, DirtyOperation>()
 
+  /** Gives transient IndexedDB failures one immediate retry before fallback. */
   async function retryPrimary<T>(operation: () => Promise<T>) {
     let lastError: unknown
     for (let attempt = 0; attempt < 2; attempt += 1) {
@@ -265,6 +285,7 @@ export function createResilientCapsuleStore(
       : new Error('Capsule storage is temporarily unavailable.')
   }
 
+  /** Replays fallback-accepted writes in insertion order against durable storage. */
   async function flushDirtyOperations() {
     for (const [capsuleId, operation] of [...dirtyOperations]) {
       if (operation.kind === 'save') {
@@ -280,9 +301,15 @@ export function createResilientCapsuleStore(
 
   return {
     async list() {
+      let capsules: FamilyCapsule[]
       try {
         await flushDirtyOperations()
-        const capsules = await retryPrimary(() => primary.list())
+        capsules = await retryPrimary(() => primary.list())
+      } catch {
+        return fallback.list()
+      }
+
+      try {
         const capsuleIds = new Set(capsules.map(({ id }) => id))
         const fallbackCapsules = await fallback.list()
         await Promise.all([
@@ -291,10 +318,11 @@ export function createResilientCapsuleStore(
             .map(({ id }) => fallback.remove(id)),
           ...capsules.map((capsule) => fallback.save(capsule)),
         ])
-        return capsules
       } catch {
-        return fallback.list()
+        // The primary result is authoritative; fallback storage is only a
+        // recoverability cache and may be unavailable independently.
       }
+      return capsules
     },
     async save(capsule) {
       const durableCapsule = await prepareCapsuleForPersistence(capsule)
@@ -321,6 +349,7 @@ export function createResilientCapsuleStore(
   }
 }
 
+/** Selects the resilient IndexedDB store, or memory storage during SSR. */
 export function createDefaultCapsuleStore(subject: string): CapsuleStore {
   if (typeof window === 'undefined' || !window.indexedDB) {
     return createMemoryCapsuleStore()

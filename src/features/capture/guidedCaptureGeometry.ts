@@ -11,6 +11,7 @@ export type GuideProjectionOptions = {
 
 type Vec3 = readonly [number, number, number]
 
+/** Distributes capture targets evenly around one latitude ring. */
 function makeTargetRing(
   pitch: number,
   count: number,
@@ -41,14 +42,17 @@ export const STANDARD_GUIDE_TARGETS: readonly GuideTarget[] = [
 const DEFAULT_HORIZONTAL_FOV_DEGREES = 62
 const DEFAULT_VERTICAL_FOV_DEGREES = 78
 
+/** Converts public degree-based orientation values for trigonometric operations. */
 function degreesToRadians(value: number) {
   return value * (Math.PI / 180)
 }
 
+/** Measures alignment between two normalized 3D directions. */
 function dot(left: Vec3, right: Vec3) {
   return left[0] * right[0] + left[1] * right[1] + left[2] * right[2]
 }
 
+/** Converts yaw and pitch into a unit vector on the capture sphere. */
 function sphericalDirection(yawDegrees: number, pitchDegrees: number): Vec3 {
   const yaw = degreesToRadians(yawDegrees)
   const pitch = degreesToRadians(pitchDegrees)
@@ -60,6 +64,7 @@ function sphericalDirection(yawDegrees: number, pitchDegrees: number): Vec3 {
   ]
 }
 
+/** Builds the forward/right/up basis for the current camera orientation. */
 function cameraBasis(yawDegrees: number, pitchDegrees: number) {
   const yaw = degreesToRadians(yawDegrees)
   const pitch = degreesToRadians(pitchDegrees)
@@ -75,6 +80,7 @@ function cameraBasis(yawDegrees: number, pitchDegrees: number) {
   }
 }
 
+/** Restricts a scalar to an inclusive range. */
 function clamp(value: number, minimum: number, maximum: number) {
   return Math.max(minimum, Math.min(maximum, value))
 }

@@ -6,6 +6,7 @@ type AppWhimsyProps = {
   page: AppWhimsyPage
 }
 
+/** Renders decorative, non-interactive artwork for the selected app section. */
 export function AppWhimsy({ page }: AppWhimsyProps) {
   return (
     <div

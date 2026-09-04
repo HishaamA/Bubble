@@ -65,6 +65,7 @@ type FaceReviewPreview = {
   faceScale: number
 }
 
+/** Generates a collision-resistant local identifier for people and references. */
 function createLocalId() {
   if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) {
     return crypto.randomUUID()
@@ -72,6 +73,7 @@ function createLocalId() {
   return `person-${Date.now()}-${Math.random().toString(36).slice(2)}`
 }
 
+/** Derives a compact avatar label from a person's display name. */
 function personInitials(name: string) {
   return name
     .trim()
@@ -81,6 +83,7 @@ function personInitials(name: string) {
     .join('') || '?'
 }
 
+/** Formats a local calendar day for date inputs without UTC day drift. */
 function localIsoDate(date: Date) {
   const year = date.getFullYear()
   const month = String(date.getMonth() + 1).padStart(2, '0')
@@ -88,12 +91,14 @@ function localIsoDate(date: Date) {
   return `${year}-${month}-${day}`
 }
 
+/** Describes how much durable progress remains after an interrupted face scan. */
 function stoppedScanMessage(savedPhotoCount: number) {
   return savedPhotoCount > 0
     ? `Scan stopped. Results from ${savedPhotoCount} ${savedPhotoCount === 1 ? 'photo were' : 'photos were'} saved.`
     : 'Scan stopped. No face data was saved.'
 }
 
+/** Applies count, type, and size limits before reference-photo decoding starts. */
 function referencePhotoError(files: readonly File[]) {
   if (!files.length) return 'Choose at least one clear face photo.'
   if (files.length > MAX_REFERENCE_PHOTOS_AT_ONCE) {
@@ -108,6 +113,7 @@ function referencePhotoError(files: readonly File[]) {
   return ''
 }
 
+/** Fingerprints pending work so effects do not restart an unchanged scan queue. */
 function automaticScanSignature(
   faceProfiles: PeopleTimelineState['faceProfiles'],
   faceScans: PeopleTimelineState['faceScans'],
@@ -135,10 +141,12 @@ function automaticScanSignature(
   return `${FACE_SCAN_REVISION}\u0003${profileSignature.join('\u0000')}\u0001${pendingPhotoKeys.join('\u0000')}`
 }
 
+/** Gives one face/person suggestion a stable review-dialog identity. */
 function faceReviewKey(suggestion: FaceSuggestion) {
   return `${suggestion.photoKey}\u0000${suggestion.faceId}\u0000${suggestion.personId}`
 }
 
+/** Scans reference files sequentially to bound model and image memory use. */
 async function scanReferencePhotos(files: readonly File[]) {
   /*
    * Enrollment Files are intentionally short-lived input capabilities. The
@@ -159,6 +167,7 @@ async function scanReferencePhotos(files: readonly File[]) {
   return { scans, failed: files.length - scans.length }
 }
 
+/** Creates an editable day draft from the photo's original local timestamp. */
 function originalDateDraft(photo: PeopleTimelinePhoto): DateDraft {
   const capturedDate = new Date(photo.capturedAt)
   if (!Number.isFinite(capturedDate.getTime())) {
@@ -167,6 +176,7 @@ function originalDateDraft(photo: PeopleTimelinePhoto): DateDraft {
   return { precision: 'day', value: localIsoDate(capturedDate) }
 }
 
+/** Builds the correct viewer route for direct-library and Capsule photos. */
 function photoDestination(photo: PeopleTimelinePhoto) {
   if (photo.kind === 'journal-photo') {
     return `/journal/library/${encodeURIComponent(photo.id)}`
@@ -174,6 +184,7 @@ function photoDestination(photo: PeopleTimelinePhoto) {
   return `/journal/photo/${encodeURIComponent(photo.capsuleId)}/${encodeURIComponent(photo.id)}`
 }
 
+/** Captures enough Journal state to restore the person and photo on return. */
 function photoRouteState(photo: PeopleTimelinePhoto, personId: string) {
   return {
     returnTo: '/journal',
@@ -186,6 +197,10 @@ function photoRouteState(photo: PeopleTimelinePhoto, personId: string) {
   }
 }
 
+/**
+ * Coordinates people profiles, face scans, review decisions, manual tagging,
+ * corrected dates, and the chronologically grouped family photo timeline.
+ */
 export function PeopleTimeline({
   photos,
   journalPhotos = [],
@@ -431,18 +446,21 @@ export function PeopleTimeline({
     timelinePhotos,
   ), [timelinePhotos, timelineState.faceProfiles, timelineState.faceScans])
 
+  /** Keeps render state and async scan/save readers on the same snapshot. */
   const replaceTimelineState = useCallback((nextState: typeof timelineState) => {
     timelineStateRef.current = nextState
     setTimelineState(nextState)
     return nextState
   }, [])
 
+  /** Applies one functional update against the latest timeline ref. */
   const updateTimelineState = useCallback((
     update: (current: typeof timelineState) => typeof timelineState,
   ) => {
     return replaceTimelineState(update(timelineStateRef.current))
   }, [replaceTimelineState])
 
+  /** Serializes IndexedDB writes so an older snapshot cannot finish last. */
   const queueTimelineStateSave = useCallback((state: typeof timelineState) => {
     // `savePeopleTimelineState` is an account-namespaced local persistence
     // boundary. Keeping the queue here also makes it harder for a future caller
@@ -459,6 +477,7 @@ export function PeopleTimeline({
     let active = true
     scanController.current?.abort()
     scanController.current = null
+    // oxlint-disable-next-line react/set-state-in-effect -- Reset private face data synchronously at the account namespace boundary.
     setScanProgress(null)
     setCacheReady(false)
     replaceTimelineState(emptyPeopleTimelineState())
@@ -510,12 +529,14 @@ export function PeopleTimeline({
       selectedPersonId !== FACE_REVIEW_PERSON_ID &&
       !timelineState.people.some(({ id }) => id === selectedPersonId)
     ) {
+      // oxlint-disable-next-line react/set-state-in-effect -- Persisted selections can become invalid after profile deletion or hydration.
       setSelectedPersonId(FAMILY_PERSON_ID)
     }
   }, [selectedPersonId, timelineState.people])
 
   useEffect(() => {
     if (!visiblePhotos.length) {
+      // oxlint-disable-next-line react/set-state-in-effect -- The active key must follow the externally hydrated filtered collection.
       setActivePhotoKey(null)
       return
     }
@@ -563,6 +584,7 @@ export function PeopleTimeline({
     if (restoredPersonSignature.current !== personSignature) {
       restoredPersonSignature.current = personSignature
       if (selectedPersonId !== restoredPersonId) {
+        // oxlint-disable-next-line react/set-state-in-effect -- Router restoration is an external navigation synchronization.
         setSelectedPersonId(restoredPersonId)
         setActivePhotoKey(null)
       }
@@ -617,6 +639,7 @@ export function PeopleTimeline({
   }, [cacheNamespace, displayedPhoto, focusMemoryId, selectedPersonId])
 
   useEffect(() => {
+    // oxlint-disable-next-line react/set-state-in-effect -- Editors are scoped to the externally selected photo record.
     setTagEditorOpen(false)
     setDateEditorOpen(false)
     setDateError('')
@@ -632,6 +655,7 @@ export function PeopleTimeline({
     }
   }, [])
 
+  /** Selects a person and their first matched photo without changing routes. */
   function choosePerson(personId: string) {
     setSelectedPersonId(personId)
     setActivePhotoKey(null)
@@ -641,6 +665,7 @@ export function PeopleTimeline({
     setManageError('')
   }
 
+  /** Opens the selected person's standalone scrapbook route. */
   function openPersonAlbum(personId: string) {
     if (onOpenPersonAlbum) {
       onOpenPersonAlbum(personId)
@@ -649,6 +674,7 @@ export function PeopleTimeline({
     choosePerson(personId)
   }
 
+  /** Returns from a scrapbook and opens that person's inline management panel. */
   function managePersonFromScrapbook(personId: string) {
     if (!onClosePersonAlbum) return
     const person = timelineStateRef.current.people.find(({ id }) => id === personId)
@@ -658,6 +684,7 @@ export function PeopleTimeline({
     onClosePersonAlbum()
   }
 
+  /** Restores focus after the add-person form has unmounted. */
   function restoreAddPersonOpenerFocus() {
     const opener = addPersonOpenerRef.current
     if (!opener) return
@@ -673,6 +700,7 @@ export function PeopleTimeline({
     })
   }
 
+  /** Closes and resets the add-person workflow before restoring its opener. */
   function closeAddPerson() {
     setAddingPerson(false)
     setNewPersonPortraits([])
@@ -680,6 +708,7 @@ export function PeopleTimeline({
     restoreAddPersonOpenerFocus()
   }
 
+  /** Records the exact invoking control before showing the add-person form. */
   function openAddPerson(event: MouseEvent<HTMLButtonElement>) {
     if (photoPickerBusy) return
     addPersonOpenerRef.current = event.currentTarget
@@ -689,11 +718,13 @@ export function PeopleTimeline({
     setManagingPerson(false)
   }
 
+  /** Forwards the styled upload action to the hidden native file input. */
   function openPhotoPicker() {
     if (photoPickerBusy) return
     photoInputRef.current?.click()
   }
 
+  /** Imports selected photos and reports partial failures without losing successes. */
   async function addJournalPhotos(event: ChangeEvent<HTMLInputElement>) {
     const input = event.currentTarget
     const files = Array.from(input.files ?? [])
@@ -735,6 +766,7 @@ export function PeopleTimeline({
     }
   }
 
+  /** Scans references first, then adds the person and profile in one state update. */
   async function addPerson(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     const form = event.currentTarget
@@ -806,6 +838,7 @@ export function PeopleTimeline({
     }
   }
 
+  /** Opens management for a person and optionally preserves the invoking control. */
   function startManagingPerson(
     person: PeopleTimelineState['people'][number] | undefined = selectedPerson,
   ) {
@@ -820,11 +853,13 @@ export function PeopleTimeline({
     setManagingPerson(true)
   }
 
+  /** Selects one ambiguous detected face for an explicit identity decision. */
   function openFaceReview(preview: FaceReviewPreview) {
     choosePerson(FACE_REVIEW_PERSON_ID)
     setActivePhotoKey(preview.photo.key)
   }
 
+  /** Saves a trimmed, non-empty person name while retaining their stable ID. */
   function renamePerson(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     if (!selectedPerson) return
@@ -849,6 +884,7 @@ export function PeopleTimeline({
     setManageError('')
   }
 
+  /** Validates and appends bounded reference appearances for the managed person. */
   async function saveReferencePortrait(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     if (!selectedPerson) return
@@ -911,6 +947,7 @@ export function PeopleTimeline({
     }
   }
 
+  /** Removes a person plus every assignment, profile, and dismissal referencing them. */
   function deleteSelectedPerson() {
     if (!selectedPerson) return
     removePersonScrapbookProfile(cacheNamespace, selectedPerson.id)
@@ -932,6 +969,7 @@ export function PeopleTimeline({
     choosePerson(FAMILY_PERSON_ID)
   }
 
+  /** Adds or removes a manual whole-photo assignment for the active photo. */
   function setPhotoTag(personId: string, tagged: boolean) {
     if (!displayedPhoto) return
     const automaticallyMatched = automaticMatches.some((match) =>
@@ -969,6 +1007,7 @@ export function PeopleTimeline({
     })
   }
 
+  /** Accepts, reassigns, or dismisses one face-specific review candidate. */
   function reviewFaceMatch(
     suggestion: FaceSuggestion,
     decision: 'yes' | 'no' | 'unsure',
@@ -980,6 +1019,7 @@ export function PeopleTimeline({
       return
     }
     updateTimelineState((current) => {
+      /** Matches the exact reviewed face/person tuple without affecting siblings. */
       const sameFace = (entry: { photoKey: string; personId: string; faceId?: string }) =>
         entry.photoKey === suggestion.photoKey &&
         entry.personId === suggestion.personId &&
@@ -1013,6 +1053,7 @@ export function PeopleTimeline({
     })
   }
 
+  /** Seeds the date editor from an existing override or original timestamp. */
   function beginDateEdit() {
     if (!displayedPhoto) return
     setDateDraft(
@@ -1022,6 +1063,7 @@ export function PeopleTimeline({
     setDateEditorOpen(true)
   }
 
+  /** Switches date precision while retaining a sensible value for that mode. */
   function changeDatePrecision(precision: TimelineDatePrecision) {
     if (!displayedPhoto) return
     const fallback = originalDateDraft(displayedPhoto)
@@ -1037,6 +1079,7 @@ export function PeopleTimeline({
     setDateError('')
   }
 
+  /** Validates and saves the active photo's day or approximate-year correction. */
   function saveDate(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     if (!displayedPhoto) return
@@ -1061,6 +1104,7 @@ export function PeopleTimeline({
     setDateError('')
   }
 
+  /** Removes the active override so the original capture timestamp is used again. */
   function restoreCapturedDate() {
     if (!displayedPhoto) return
     updateTimelineState((current) => {
@@ -1071,6 +1115,7 @@ export function PeopleTimeline({
     setDateEditorOpen(false)
   }
 
+  /** Runs one cancellable face-scan pass with durable per-photo checkpoints. */
   const scanPhotos = useCallback(async (automatic = false) => {
     if (scanController.current || scanProgress) return
     if (!Object.keys(timelineStateRef.current.faceProfiles).length) {
@@ -1167,6 +1212,7 @@ export function PeopleTimeline({
     }
   }, [queueTimelineStateSave, scanProgress, timelinePhotos, updateTimelineState])
 
+  /** Aborts model work and fingerprints the remaining queue to prevent auto-restart. */
   function cancelFaceScan() {
     const savedPhotoCount = scanSavedPhotoCount.current
     scanController.current?.abort()
@@ -1184,6 +1230,7 @@ export function PeopleTimeline({
     setScanMessage(stoppedScanMessage(savedPhotoCount))
   }
 
+  /** Clears all private face vectors while preserving manual people and dates. */
   async function clearFaceData() {
     lastAutomaticScanSignature.current = ''
     const clearedState = updateTimelineState((current) => ({

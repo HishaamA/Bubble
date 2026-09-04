@@ -46,10 +46,12 @@ const TAPE_COLORS = [
 const CARD_TILTS = ['-1.8deg', '1.25deg', '-0.65deg', '1.7deg', '-1.15deg'] as const
 const CARD_DOODLES = ['✦', '♡', '≈', '❋', '⌁'] as const
 
+/** Chooses authored caption text before falling back to an accessible label. */
 function photoDescription(photo: PeopleTimelinePhoto, personName: string) {
   return photo.caption.trim() || `A family photo with ${personName}`
 }
 
+/** Owns one person's keyed local profile state and scrapbook presentation. */
 function PersonScrapbookContent({
   person,
   photos,
@@ -66,6 +68,7 @@ function PersonScrapbookContent({
   const [saveState, setSaveState] = useState<'idle' | 'saved' | 'error'>('idle')
   const photoCountLabel = `${photos.length} ${photos.length === 1 ? 'little moment' : 'little moments'}`
 
+  /** Persists each edited field immediately and exposes storage failure inline. */
   function updateProfile<Key extends keyof PersonScrapbookProfile>(
     field: Key,
     value: PersonScrapbookProfile[Key],
@@ -257,6 +260,7 @@ function PersonScrapbookContent({
   )
 }
 
+/** Resolves a routed person and presents their photos and private scrapbook. */
 export function PersonScrapbookPage(props: PersonScrapbookPageProps) {
   const scrapbookIdentity = `${props.cacheNamespace}\u0000${props.person.id}`
   return <PersonScrapbookContent key={scrapbookIdentity} {...props} />

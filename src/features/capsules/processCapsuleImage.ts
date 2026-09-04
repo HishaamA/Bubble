@@ -5,10 +5,12 @@ const MAX_THUMBNAIL_EDGE = 560
 const MAX_DECODED_PIXELS = 80_000_000
 const JPEG_QUALITY = 0.88
 
+/** Applies the upload MIME type and compressed-file size limits. */
 export function acceptsCapsuleImage(file: Pick<File, 'type' | 'size'>) {
   return file.size > 0 && file.size <= 25 * 1024 * 1024 && file.type.startsWith('image/')
 }
 
+/** Prevents decoded images from exceeding the browser's safe pixel budget. */
 export function hasSafeCapsuleImageDimensions(width: number, height: number) {
   return (
     Number.isSafeInteger(width) &&
@@ -19,6 +21,7 @@ export function hasSafeCapsuleImageDimensions(width: number, height: number) {
   )
 }
 
+/** Computes aspect-preserving output dimensions without enlarging the source. */
 function fitWithin(width: number, height: number, maxEdge: number) {
   const scale = Math.min(1, maxEdge / Math.max(width, height))
   return {
@@ -27,6 +30,7 @@ function fitWithin(width: number, height: number, maxEdge: number) {
   }
 }
 
+/** Converts a rendered canvas to JPEG and rejects browsers that return no bytes. */
 function canvasToBlob(canvas: HTMLCanvasElement, quality: number) {
   return new Promise<Blob>((resolve, reject) => {
     canvas.toBlob(
@@ -37,6 +41,7 @@ function canvasToBlob(canvas: HTMLCanvasElement, quality: number) {
   })
 }
 
+/** Decodes through a temporary object URL and always releases that URL. */
 async function decodeImage(file: File) {
   const objectUrl = URL.createObjectURL(file)
   try {
@@ -50,6 +55,7 @@ async function decodeImage(file: File) {
   }
 }
 
+/** Draws a decoded image into an opaque, metadata-free output canvas. */
 function renderImage(
   image: HTMLImageElement,
   dimensions: { width: number; height: number },

@@ -27,6 +27,7 @@ const FACE_RES_DISTANCE_MULTIPLIER = 25
 const FACE_RES_NORMALIZATION_MIN = 0.2
 const FACE_RES_NORMALIZATION_MAX = 0.8
 
+/** Converts journal and Capsule sources into one deduplicated timeline model. */
 export function toPeopleTimelinePhotos(
   photos: readonly UnlockedCapsulePhoto[],
   journalPhotos: readonly JournalPhoto[] = [],
@@ -65,27 +66,38 @@ export function toPeopleTimelinePhotos(
   return [...capsulePhotos, ...directPhotos]
 }
 
-function migratedPhotoKey(
-  storedKey: string,
+/** Builds a content-ID resolver for unstable Capsule IDs stored before v4. */
+function createLegacyPhotoKeyResolver(
   capsulePhotos: readonly PeopleTimelinePhoto[],
-) {
-  if (!storedKey.startsWith('capsule:')) return storedKey
-  const matchingPhoto = [...capsulePhotos]
-    .sort((left, right) => right.id.length - left.id.length)
-    .find((photo) => storedKey.endsWith(`:${photo.id}`))
-  return matchingPhoto?.key ?? storedKey
+): (storedKey: string) => string {
+  // Legacy keys include a Capsule ID that is no longer stable. Resolve by the
+  // longest photo-ID suffix so overlapping IDs cannot capture each other.
+  const photosByLongestId = [...capsulePhotos].sort(
+    (left, right) => right.id.length - left.id.length,
+  )
+  return (storedKey) => {
+    if (!storedKey.startsWith('capsule:')) return storedKey
+    const matchingPhoto = photosByLongestId.find((photo) =>
+      storedKey.endsWith(`:${photo.id}`),
+    )
+    return matchingPhoto?.key ?? storedKey
+  }
 }
 
+/** Remaps legacy source-specific photo keys onto current content-stable keys. */
 export function migrateLegacyPeopleTimelineState(
   state: PeopleTimelineState,
   photos: readonly PeopleTimelinePhoto[],
 ) {
-  const capsulePhotos = photos
+  const capsulePhotos = photos.filter(
+    (photo) => photo.kind === 'capsule-photo',
+  )
+  const migratePhotoKey = createLegacyPhotoKeyResolver(capsulePhotos)
   let changed = false
 
   const assignmentsByKey = new Map<string, PeopleTimelineState['assignments'][number]>()
   for (const assignment of state.assignments) {
-    const photoKey = migratedPhotoKey(assignment.photoKey, capsulePhotos)
+    const photoKey = migratePhotoKey(assignment.photoKey)
     if (photoKey !== assignment.photoKey) changed = true
     const nextAssignment = { ...assignment, photoKey }
     const key = `${photoKey}\u0000${assignment.personId}`
@@ -97,7 +109,7 @@ export function migrateLegacyPeopleTimelineState(
 
   const dateOverrides: PeopleTimelineState['dateOverrides'] = {}
   for (const [storedKey, dateOverride] of Object.entries(state.dateOverrides)) {
-    const photoKey = migratedPhotoKey(storedKey, capsulePhotos)
+    const photoKey = migratePhotoKey(storedKey)
     if (photoKey !== storedKey) changed = true
     if (!dateOverrides[photoKey] || photoKey === storedKey) {
       dateOverrides[photoKey] = dateOverride
@@ -106,7 +118,7 @@ export function migrateLegacyPeopleTimelineState(
 
   const faceScans: PeopleTimelineState['faceScans'] = {}
   for (const [storedKey, scan] of Object.entries(state.faceScans)) {
-    const photoKey = migratedPhotoKey(storedKey, capsulePhotos)
+    const photoKey = migratePhotoKey(storedKey)
     if (photoKey !== storedKey) changed = true
     if (!faceScans[photoKey] || photoKey === storedKey) {
       faceScans[photoKey] = scan
@@ -118,7 +130,7 @@ export function migrateLegacyPeopleTimelineState(
     faceProfiles[personId] = {
       references: profile.references.map((reference) => {
         if (!reference.photoKey) return reference
-        const photoKey = migratedPhotoKey(reference.photoKey, capsulePhotos)
+        const photoKey = migratePhotoKey(reference.photoKey)
         if (photoKey !== reference.photoKey) changed = true
         return photoKey === reference.photoKey
           ? reference
@@ -129,7 +141,7 @@ export function migrateLegacyPeopleTimelineState(
 
   const dismissalsByKey = new Map<string, PeopleTimelineState['dismissedSuggestions'][number]>()
   for (const dismissal of state.dismissedSuggestions) {
-    const photoKey = migratedPhotoKey(dismissal.photoKey, capsulePhotos)
+    const photoKey = migratePhotoKey(dismissal.photoKey)
     if (photoKey !== dismissal.photoKey) changed = true
     const key = `${photoKey}\u0000${dismissal.faceId ?? ''}\u0000${dismissal.personId}`
     dismissalsByKey.set(key, { ...dismissal, photoKey })
@@ -147,6 +159,7 @@ export function migrateLegacyPeopleTimelineState(
   }
 }
 
+/** Converts partial date overrides into sortable midday/representative times. */
 function parsedOverrideTime(override: TimelineDateOverride | undefined) {
   if (!override) return Number.NaN
   if (override.precision === 'year') {
@@ -156,6 +169,7 @@ function parsedOverrideTime(override: TimelineDateOverride | undefined) {
   return new Date(`${override.value}T12:00:00`).getTime()
 }
 
+/** Resolves a photo's effective timestamp after a user date correction. */
 export function timelinePhotoTime(
   photo: PeopleTimelinePhoto,
   dateOverrides: PeopleTimelineState['dateOverrides'],
@@ -166,6 +180,7 @@ export function timelinePhotoTime(
   return Number.isFinite(capturedTime) ? capturedTime : Number.MAX_SAFE_INTEGER
 }
 
+/** Sorts photos oldest-first using corrected dates and deterministic tie breaks. */
 export function sortTimelinePhotos(
   photos: readonly PeopleTimelinePhoto[],
   dateOverrides: PeopleTimelineState['dateOverrides'],
@@ -177,6 +192,7 @@ export function sortTimelinePhotos(
   })
 }
 
+/** Formats the effective date at the precision selected by the user. */
 export function formatTimelinePhotoDate(
   photo: PeopleTimelinePhoto,
   dateOverride?: TimelineDateOverride,
@@ -195,6 +211,7 @@ export function formatTimelinePhotoDate(
   }).format(rawDate)
 }
 
+/** Measures descriptor similarity and safely rejects incompatible vectors. */
 export function cosineSimilarity(left: readonly number[], right: readonly number[]) {
   if (left.length === 0 || left.length !== right.length) return -1
   let product = 0
@@ -257,6 +274,7 @@ export function faceResSimilarity(
   return Math.round(100 * Math.max(0, Math.min(1, normalized))) / 100
 }
 
+/** Scores a detected face against the best known appearance for one person. */
 function strongestReferenceSimilarity(
   detectedFace: readonly number[],
   references: readonly FaceReference[],
@@ -295,11 +313,13 @@ type MatchThresholds = {
   minimumFaceQuality: number
 }
 
+/** Rejects undersized or non-finite descriptors before matching. */
 function validReference(reference: FaceReference) {
   return reference.embedding.length >= MINIMUM_DESCRIPTOR_LENGTH &&
     reference.embedding.every(Number.isFinite)
 }
 
+/** Builds per-person reference sets, including bounded confirmed appearances. */
 function referenceProfiles(state: PeopleTimelineState): PersonReferences[] {
   const profiles = state.people.flatMap(({ id: personId }) => {
     const profile = state.faceProfiles[personId]
@@ -353,6 +373,7 @@ function referenceProfiles(state: PeopleTimelineState): PersonReferences[] {
   return profiles
 }
 
+/** Requires weak detections to clear a stricter similarity threshold. */
 function qualityAdjustedThreshold(
   minimumSimilarity: number,
   faceQuality: number,
@@ -363,10 +384,12 @@ function qualityAdjustedThreshold(
   return Math.min(1, minimumSimilarity + qualityPenalty)
 }
 
+/** Creates a collision-safe identity for one face/person decision. */
 function faceDecisionKey(photoKey: string, faceId: string, personId: string) {
   return `${photoKey}\u0000${faceId}\u0000${personId}`
 }
 
+/** Produces one-to-one face matches that satisfy the supplied confidence policy. */
 function createMatchDecisions(
   state: PeopleTimelineState,
   thresholds: MatchThresholds,
@@ -457,6 +480,7 @@ function createMatchDecisions(
   )
 }
 
+/** Selects high-confidence automatic people suggestions from stored face scans. */
 export function createFaceSuggestions(
   state: PeopleTimelineState,
   minimumSimilarity = DEFAULT_HIGH_SIMILARITY,
@@ -471,6 +495,7 @@ export function createFaceSuggestions(
   })
 }
 
+/** Returns borderline matches that need an explicit person decision. */
 export function createFaceReviewCandidates(
   state: PeopleTimelineState,
   minimumSimilarity = DEFAULT_REVIEW_SIMILARITY,
@@ -492,6 +517,7 @@ export function createFaceReviewCandidates(
   )
 }
 
+/** Combines manual assignments with accepted automatic matches for one photo. */
 export function effectivePeopleForPhoto(
   state: PeopleTimelineState,
   photoKey: string,

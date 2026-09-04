@@ -8,6 +8,7 @@ const DAY_START_MINUTES = 9 * 60
 const DAY_END_MINUTES = 21 * 60
 const DEFAULT_WINDOW_MINUTES = 15
 
+/** Formats the device's local calendar day without a UTC conversion. */
 function localDateKey(date: Date) {
   const year = date.getFullYear()
   const month = String(date.getMonth() + 1).padStart(2, '0')
@@ -15,6 +16,7 @@ function localDateKey(date: Date) {
   return `${year}-${month}-${day}`
 }
 
+/** Produces a deterministic unsigned FNV-1a hash for offline scheduling. */
 function hashString(value: string) {
   let hash = 2166136261
 
@@ -52,6 +54,7 @@ export function createDailyCaptureWindow(
   return { startsAt, endsAt }
 }
 
+/** Classifies a time as early, open, or expired for one capture window. */
 export function getDailyCapturePhase(
   now: Date,
   window: DailyCaptureWindow,

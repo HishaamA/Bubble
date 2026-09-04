@@ -1122,4 +1122,76 @@ describe('MemoryConstellation', () => {
       ),
     ).toBeGreaterThanOrEqual(2.5)
   })
+
+  it('waits for an asynchronously hydrated shared memory before restoring focus', () => {
+    vi.useFakeTimers()
+    const random = vi.spyOn(Math, 'random').mockReturnValue(0.21)
+    const view = render(
+      <MemoryRouter
+        initialEntries={[
+          {
+            pathname: '/',
+            state: { restoreMemoryId: `shared-${sharedMoment.id}` },
+          },
+        ]}
+      >
+        <MemoryConstellation sharedMoments={[]} />
+      </MemoryRouter>,
+    )
+
+    const field = screen.getByLabelText('Family memory constellation')
+    const space = screen.getByTestId('memory-constellation-space')
+    Object.defineProperties(field, {
+      clientWidth: { configurable: true, value: 360 },
+      clientHeight: { configurable: true, value: 560 },
+    })
+    Object.defineProperties(space, {
+      clientWidth: { configurable: true, value: 720 },
+      clientHeight: { configurable: true, value: 896 },
+    })
+    const dinner = screen.getByRole('button', {
+      name: /open sunday dinner memory/i,
+    })
+    Object.defineProperties(dinner, {
+      offsetLeft: { configurable: true, value: 20 },
+      offsetTop: { configurable: true, value: 20 },
+      offsetWidth: { configurable: true, value: 80 },
+      offsetHeight: { configurable: true, value: 80 },
+    })
+    vi.advanceTimersByTime(20)
+
+    view.rerender(
+      <MemoryRouter
+        initialEntries={[
+          {
+            pathname: '/',
+            state: { restoreMemoryId: `shared-${sharedMoment.id}` },
+          },
+        ]}
+      >
+        <MemoryConstellation sharedMoments={[sharedMoment]} />
+      </MemoryRouter>,
+    )
+
+    const sharedBubble = document.querySelector<HTMLElement>(
+      `[data-memory-id="shared-${sharedMoment.id}"]`,
+    )
+    expect(sharedBubble).not.toBeNull()
+    Object.defineProperties(sharedBubble as HTMLElement, {
+      offsetLeft: { configurable: true, value: 320 },
+      offsetTop: { configurable: true, value: 408 },
+      offsetWidth: { configurable: true, value: 80 },
+      offsetHeight: { configurable: true, value: 80 },
+    })
+    fireEvent.pointerMove(field, {
+      pointerId: 1,
+      pointerType: 'mouse',
+      clientX: 180,
+      clientY: 280,
+    })
+    vi.advanceTimersByTime(20)
+
+    expect(random).not.toHaveBeenCalled()
+    expect(sharedBubble).toHaveAttribute('data-center-focus', 'true')
+  })
 })

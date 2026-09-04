@@ -192,7 +192,7 @@ describe('voiceNoteRecorder', () => {
 
   it('rejects devices with no backend-compatible recorder format', async () => {
     class UnsupportedMediaRecorder extends FakeMediaRecorder {
-      static isTypeSupported() {
+      static override isTypeSupported() {
         return false
       }
     }

@@ -36,6 +36,7 @@ import type {
 
 const DEMO_VOICE_NOTE =
   'Sunday dinner always sounds like this: everyone talking, everyone laughing, and nobody ready to leave.'
+/** Provides the compact comments glyph used by the panorama toolbar. */
 function CommentsIcon() {
   return (
     <svg viewBox="0 0 24 24" aria-hidden="true">
@@ -45,6 +46,7 @@ function CommentsIcon() {
   )
 }
 
+/** Provides the annotation-point glyph used by the panorama toolbar. */
 function MemoryPointIcon() {
   return (
     <svg viewBox="0 0 24 24" aria-hidden="true">
@@ -53,6 +55,7 @@ function MemoryPointIcon() {
   )
 }
 
+/** Chooses the most descriptive available text for an annotation. */
 function annotationDescription(annotation: PanoramaAnnotation) {
   const message = annotation.message.trim()
   if (message) return message
@@ -61,6 +64,7 @@ function annotationDescription(annotation: PanoramaAnnotation) {
     : 'A note from this moment'
 }
 
+/** Builds an accessible hotspot label without repeating empty metadata. */
 function annotationHotSpotLabel(annotation: PanoramaAnnotation) {
   const description = annotationDescription(annotation)
   if (annotation.kind === 'voice') {
@@ -71,6 +75,7 @@ function annotationHotSpotLabel(annotation: PanoramaAnnotation) {
   return `Read note: ${description}`
 }
 
+/** Matches a timestamp to the viewer's local calendar day. */
 function isSameLocalDay(value: string, reference: Date): boolean {
   const date = new Date(value)
   return (
@@ -90,6 +95,10 @@ type PanoramaMemoryScreenProps = {
   ) => Promise<void>
 }
 
+/**
+ * Resolves a routed memory into its panorama, annotations, comments, and VR
+ * presentation while preserving the correct return destination.
+ */
 export function PanoramaMemoryScreen({
   sharedMoments = [],
   sharedMomentsLoading = false,
@@ -166,6 +175,7 @@ export function PanoramaMemoryScreen({
     onUpdateMomentAnnotations,
   )
 
+  /** Seeds editable metadata from the current owner-controlled annotations. */
   const openPointEditor = useCallback(() => {
     if (!sharedMoment || !canEditMemoryPoints) return
     setCommentsOpen(false)
@@ -181,6 +191,7 @@ export function PanoramaMemoryScreen({
     setPointEditorOpen(true)
   }, [canEditMemoryPoints, sharedMoment])
 
+  /** Serializes annotation revisions and reports only the latest save outcome. */
   const savePointDraft = useCallback((next: StoredPanoramaAnnotation[]) => {
     if (
       !sharedMoment ||
@@ -225,12 +236,14 @@ export function PanoramaMemoryScreen({
     sharedMoment,
   ])
 
+  /** Closes only after the current draft is saved and error-free. */
   const closePointEditor = useCallback(() => {
     if (pointEditorSaving || pointEditorError) return
     setPointEditorOpen(false)
     setPointEditorSaved(false)
   }, [pointEditorError, pointEditorSaving])
 
+  /** Invalidates pending completion status before abandoning an unsaved draft. */
   const discardPointEditor = useCallback(() => {
     if (pointEditorSaving) return
     pointSaveRevisionRef.current += 1
@@ -242,6 +255,7 @@ export function PanoramaMemoryScreen({
   useEffect(() => {
     if (!pointEditorOpen) return
 
+    /** Applies the same guarded close rules to the Escape key. */
     const closeFromKeyboard = (event: KeyboardEvent) => {
       if (event.key !== 'Escape' || pointEditorSaving || pointEditorError) return
       event.preventDefault()
@@ -343,15 +357,18 @@ export function PanoramaMemoryScreen({
     [],
   )
 
+  /** Stops demo speech and clears the visible voice-note transcript. */
   const stopVoiceNote = useCallback(() => {
     if ('speechSynthesis' in window) window.speechSynthesis.cancel()
     setVoiceMessage(null)
   }, [])
 
+  /** Selects one panorama hotspot for its detail overlay. */
   const openAnnotation = useCallback((annotation: PanoramaAnnotation) => {
     setActiveAnnotation(annotation)
   }, [])
 
+  /** Closes the comments modal and restores focus to its toolbar control. */
   const closeComments = useCallback(() => {
     setCommentsOpen(false)
     setCommentsError(null)
@@ -360,12 +377,14 @@ export function PanoramaMemoryScreen({
     })
   }, [])
 
+  /** Opens either the whole-moment thread or one annotation's replies. */
   const openComments = useCallback((annotationId: string | null = null) => {
     setCommentTargetAnnotationId(annotationId)
     setCommentsError(null)
     setCommentsOpen(true)
   }, [])
 
+  /** Persists one comment and merges it into the timestamp-ordered local thread. */
   const submitComment = useCallback(async (
     body: string,
     annotationId: string | null,
@@ -404,6 +423,7 @@ export function PanoramaMemoryScreen({
     }
   }, [commentsSending, sharedMomentId])
 
+  /** Returns to the origin route while preserving its restoration context. */
   const returnToMemories = useCallback(() => {
     if ('speechSynthesis' in window) window.speechSynthesis.cancel()
     navigate(returnTo, {
@@ -415,6 +435,7 @@ export function PanoramaMemoryScreen({
     })
   }, [memory.id, navigate, returnTo, routeState?.journalContext])
 
+  /** Replaces a direct VR route with its journal or constellation origin. */
   const returnFromVrToOrigin = useCallback(() => {
     if ('speechSynthesis' in window) window.speechSynthesis.cancel()
     navigate(returnTo, {
@@ -426,6 +447,7 @@ export function PanoramaMemoryScreen({
     })
   }, [navigate, returnTo, routeState?.journalContext, selectedVrMemoryId])
 
+  /** Plays the bundled demo note through speech synthesis when available. */
   const playVoiceNote = useCallback(() => {
     setVoiceMessage(DEMO_VOICE_NOTE)
     if (!('speechSynthesis' in window)) return
@@ -437,6 +459,7 @@ export function PanoramaMemoryScreen({
     window.speechSynthesis.speak(note)
   }, [])
 
+  /** Freezes the current memory choice before opening Cardboard preparation. */
   const openVrSetup = useCallback(() => {
     setSelectedVrMemoryId(memory.id)
     setVrError(null)
@@ -535,6 +558,7 @@ export function PanoramaMemoryScreen({
     ]
   }, [openAnnotation, selectedVrSharedMoment, selectedVrStaticMemory])
 
+  /** Prefers the native Cardboard viewer and falls back to the DOM stereo host. */
   const enterCardboard = useCallback(async (options?: CardboardEntryOptions) => {
     if (vrEntering || cardboardActive) return
 
@@ -549,7 +573,6 @@ export function PanoramaMemoryScreen({
           ? await presentNativeCardboardPanorama({
               scene: nativeScene,
               sourceBlob: selectedVrSharedMoment?.blob,
-              onClosed: returnFromVrToOrigin,
             })
         : false
 
@@ -573,7 +596,6 @@ export function PanoramaMemoryScreen({
     cardboardActive,
     cardboardScenes,
     requestedOpenVr,
-    returnFromVrToOrigin,
     selectedVrSharedMoment,
     vrEntering,
   ])

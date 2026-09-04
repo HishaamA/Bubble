@@ -1,3 +1,4 @@
+/** Shared Clerk modal tokens that keep hosted authentication inside Bubble's visual system. */
 export const clerkAppearance = {
   variables: {
     colorPrimary: '#e3a638',
@@ -12,6 +13,8 @@ export const clerkAppearance = {
   },
   options: {
     animations: true,
+    // Local/demo builds intentionally use Clerk development instances; Bubble
+    // provides its own setup state instead of showing Clerk's duplicate banner.
     unsafe_disableDevelopmentModeWarnings: true,
   },
   elements: {
@@ -90,6 +93,7 @@ export const clerkAppearance = {
   },
 } as const
 
+/** Product-specific copy overrides for Clerk's sign-in and sign-up screens. */
 export const clerkLocalization = {
   formFieldInputPlaceholder__phoneNumber: 'Phone number',
   signIn: {

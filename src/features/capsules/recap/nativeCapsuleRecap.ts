@@ -46,6 +46,7 @@ const pluginRegistry = globalThis as CapsuleRecapRegistry
 const CapsuleRecap = pluginRegistry.__kinsphereCapsuleRecap ??=
   registerPlugin<CapsuleRecapPlugin>('CapsuleRecap')
 
+/** Reports whether the installed native shell exposes recap rendering. */
 export function isNativeCapsuleRecapAvailable(): boolean {
   const platform = Capacitor.getPlatform()
   return (
@@ -55,6 +56,7 @@ export function isNativeCapsuleRecapAvailable(): boolean {
   )
 }
 
+/** Fails before bridge calls when the installed shell lacks recap support. */
 function requireNativeCapsuleRecap() {
   if (!isNativeCapsuleRecapAvailable()) {
     throw new Error('Native capsule recap rendering is not available on this device.')

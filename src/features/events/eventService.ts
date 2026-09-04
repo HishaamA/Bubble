@@ -39,16 +39,19 @@ type NormalizedFamilyEventInput = {
   details: string | null
 }
 
+/** Creates an unmistakably local fallback ID when family sync is unavailable. */
 function localEventId() {
   return `family-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`
 }
 
+/** Accepts only UUIDs that can safely be passed to event RPCs. */
 function isUuid(value: string) {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
     value,
   )
 }
 
+/** Trims and bounds form input before it reaches local state or PostgreSQL. */
 function normalizeFamilyEventInput(
   input: CreateFamilyEventInput,
 ): NormalizedFamilyEventInput {
@@ -76,6 +79,7 @@ function normalizeFamilyEventInput(
   return { title, startsAt, location, details }
 }
 
+/** Resolves the signed-in user's first approved family membership. */
 async function currentCircleId() {
   const client = getSupabaseClient()
   if (!client || !getClerkSupabaseIdentity()) return null
@@ -93,6 +97,7 @@ async function currentCircleId() {
   return typeof data?.circle_id === 'string' ? data.circle_id : null
 }
 
+/** Converts an untrusted database row into the UI's stable event shape. */
 function toFamilyEventRecord(row: FamilyEventRow): FamilyEventRecord | null {
   if (
     typeof row.id !== 'string' ||
@@ -118,6 +123,7 @@ function toFamilyEventRecord(row: FamilyEventRow): FamilyEventRecord | null {
   }
 }
 
+/** Creates a family plan remotely, or reports a local-only result offline. */
 export async function createFamilyEvent(
   input: CreateFamilyEventInput,
 ): Promise<CreateFamilyEventResult> {
@@ -175,6 +181,7 @@ export async function updateFamilyEventDetails(
   return data === true
 }
 
+/** Fetches and validates all plans visible to the active family. */
 export async function fetchFamilyEvents(): Promise<FamilyEventRecord[]> {
   const client = getSupabaseClient()
   if (!client) return []
@@ -195,6 +202,7 @@ export async function fetchFamilyEvents(): Promise<FamilyEventRecord[]> {
     .filter((event): event is FamilyEventRecord => event !== null)
 }
 
+/** Subscribes to family plan changes and returns an async unsubscribe handle. */
 export async function subscribeToFamilyEvents(onChange: () => void) {
   const client = getSupabaseClient()
   if (!client) return () => undefined
@@ -220,6 +228,7 @@ export async function subscribeToFamilyEvents(onChange: () => void) {
   }
 }
 
+/** Persists reminder intent for a server-backed plan when connected. */
 export async function syncEventReminder(eventId: string, enabled: boolean) {
   const client = getSupabaseClient()
   if (!client || !isUuid(eventId)) return false

@@ -27,11 +27,17 @@ type BubbleMotionInput = {
   pressed: boolean
 }
 
+/** Bounds motion values before they become CSS transforms. */
 const clamp = (value: number, minimum: number, maximum: number) =>
   Math.min(maximum, Math.max(minimum, value))
 
+/** Stabilizes transform strings to avoid sub-pixel churn between frames. */
 const round = (value: number) => Math.round(value * 100) / 100
 
+/**
+ * Resolves pointer repulsion, depth parallax, and press feedback for one bubble.
+ * Returned offsets are clamped so the bubble remains inside its visible field.
+ */
 export function calculateBubbleMotion({
   pointer,
   field,

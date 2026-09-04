@@ -21,6 +21,7 @@
   border-radius: inherit;
 }
 
+/* The interactive canvas and accessible fallback occupy the same viewport. */
 .ks-panorama__canvas,
 .ks-panorama__fallback {
   position: absolute;
@@ -46,6 +47,7 @@
   pointer-events: none;
 }
 
+/* Flat mode remains fully usable when WebGL or motion rendering is unavailable. */
 .ks-panorama__fallback {
   z-index: 1;
   display: grid;
@@ -188,6 +190,7 @@
   line-height: 1.3;
 }
 
+/* A single vertical rail keeps every viewer action thumb-reachable. */
 .ks-panorama__controls {
   position: absolute;
   z-index: 5;
@@ -272,6 +275,7 @@
   border-color: var(--theme-paper, #fff1d2);
 }
 
+/* Status messages share the same high-contrast glass treatment over photos. */
 .ks-panorama__status,
 .ks-panorama__notice,
 .ks-panorama__instructions,
@@ -352,6 +356,7 @@
   transform: translate(-50%, -50%);
 }
 
+/* Runtime-created hotspots cannot use React components, so their icon lives here. */
 .ks-panorama-hotspot {
   display: grid;
   inline-size: 3rem;

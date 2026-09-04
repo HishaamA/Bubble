@@ -1,5 +1,6 @@
-import type { ReactNode } from 'react'
 import { HashRouter, Navigate, Outlet, Route, Routes } from 'react-router-dom'
+import { AccountScopedData } from './app/AccountScopedData'
+import { createAccountCacheNamespace } from './app/accountCacheNamespace'
 import { AppShell } from './app/AppShell'
 import { ErrorBoundary } from './app/ErrorBoundary'
 import { LegacyRouteRedirect } from './app/LegacyRouteRedirect'
@@ -18,10 +19,6 @@ import {
   useAuth,
 } from './features/auth'
 import { EventReminderCoordinator } from './features/events/EventReminderCoordinator'
-import {
-  FamilyMomentSyncProvider,
-  SharedMomentsProvider,
-} from './features/memories/shared'
 import { SettingsPage } from './features/profile'
 import {
   FamilyOnboardingProvider,
@@ -31,12 +28,7 @@ import {
 } from './features/onboarding'
 import './App.css'
 
-export function memberCacheNamespace(userId: string, familyId: string) {
-  // Every local cache is namespaced by both account and family. This prevents
-  // a shared phone from showing the previous household's offline memories.
-  return `${userId}:${familyId}`
-}
-
+/** Preserves the Journal plans context when resolving the retired event route. */
 function openPlansFromLegacyEventRoute(state: unknown) {
   // Old links still land in the right Journal tab without discarding the
   // caller's focus and scroll restoration state.
@@ -59,43 +51,24 @@ function openPlansFromLegacyEventRoute(state: unknown) {
   }
 }
 
-export function AccountScopedData({ children }: { children: ReactNode }) {
-  const { status, user } = useAuth()
-  const { snapshot } = useFamilyOnboarding()
-  const familyId =
-    snapshot?.kind === 'member' ? snapshot.membership.familyId : 'no-family'
-  const cacheNamespace =
-    status === 'signed-in' && user
-      ? memberCacheNamespace(user.id, familyId)
-      : 'signed-out:no-family'
-
-  // Changing the key tears down Blob URLs, subscriptions, and IndexedDB-backed
-  // providers together when the active account or family changes.
-  return (
-    <SharedMomentsProvider
-      key={cacheNamespace}
-      cacheNamespace={cacheNamespace}
-    >
-      <FamilyMomentSyncProvider>{children}</FamilyMomentSyncProvider>
-    </SharedMomentsProvider>
-  )
-}
-
+/** Keeps signed-in preview sessions out of the production onboarding flow. */
 function OnboardingRoute() {
   const { isDevelopmentPreview, user } = useAuth()
   if (isDevelopmentPreview) return <Navigate to="/" replace />
   return <OnboardingPage key={user?.id ?? 'signed-out'} />
 }
 
+/** Returns the cache partition for the current account and family membership. */
 function useActiveMemberCacheNamespace() {
   const { user } = useAuth()
   const { snapshot } = useFamilyOnboarding()
   const familyId = snapshot?.kind === 'member'
     ? snapshot.membership.familyId
     : 'no-family'
-  return memberCacheNamespace(user?.id ?? 'signed-out', familyId)
+  return createAccountCacheNamespace(user?.id ?? 'signed-out', familyId)
 }
 
+/** Supplies the active cache partition to the Capsule feature. */
 function CapsuleRoute() {
   const cacheNamespace = useActiveMemberCacheNamespace()
   return (
@@ -103,6 +76,7 @@ function CapsuleRoute() {
   )
 }
 
+/** Supplies the active cache partition to the Journal feature. */
 function JournalMemberRoute() {
   const cacheNamespace = useActiveMemberCacheNamespace()
   return (
@@ -110,6 +84,7 @@ function JournalMemberRoute() {
   )
 }
 
+/** Supplies the active cache partition to the full-screen photo viewer. */
 function CapsulePhotoMemberRoute() {
   const cacheNamespace = useActiveMemberCacheNamespace()
   return (
@@ -117,6 +92,7 @@ function CapsulePhotoMemberRoute() {
   )
 }
 
+/** Wraps every member route in the shell and account-scoped data providers. */
 function MemberApplication() {
   return (
     <AccountScopedData>
@@ -127,6 +103,7 @@ function MemberApplication() {
   )
 }
 
+/** Declares authentication, membership, and member-only application routes. */
 function App() {
   // Authentication and family membership are separate gates: a valid account
   // must never bootstrap family-scoped providers before membership is known.

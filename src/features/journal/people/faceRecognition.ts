@@ -32,6 +32,7 @@ export type ReferencePortraitScan = {
   quality: number
 }
 
+/** User-correctable enrollment failure for a supplied reference portrait. */
 export class ReferencePortraitError extends Error {
   constructor(message: string) {
     super(message)
@@ -41,6 +42,7 @@ export class ReferencePortraitError extends Error {
 
 let humanPromise: Promise<HumanRuntime> | null = null
 
+/** Internal marker used to decide when WebGL inference may retry on CPU. */
 class FaceDetectionFailure extends Error {
   constructor(message = 'Face detection failed') {
     super(message)
@@ -58,10 +60,12 @@ const MIN_ENROLLMENT_FACE_SIZE = 96
 const MIN_ENROLLMENT_DETECTOR_SCORE = 0.58
 const MIN_ENROLLMENT_QUALITY = 0.62
 
+/** Bounds confidence and geometry values to their persisted unit interval. */
 function clampUnit(value: number) {
   return Math.max(0, Math.min(1, value))
 }
 
+/** Releases model tensors and canvases before replacing an inference runtime. */
 function disposeHuman(human: HumanInstance) {
   const disposedModels = new Set<object>()
   for (const model of Object.values(human.models.models)) {
@@ -87,6 +91,7 @@ function disposeHuman(human: HumanInstance) {
   human.process.canvas = null
 }
 
+/** Configures and loads the minimal Human pipeline required for face matching. */
 async function loadHumanWithBackend(backend: 'webgl' | 'cpu') {
   const { Human } = await import('@vladmandic/human')
   const human = new Human({
@@ -159,6 +164,7 @@ async function loadHumanWithBackend(backend: 'webgl' | 'cpu') {
   }
 }
 
+/** Shares one lazy runtime and falls back from WebGL to CPU during initialization. */
 async function getHuman() {
   if (!humanPromise) {
     humanPromise = loadHumanWithBackend('webgl')
@@ -171,6 +177,7 @@ async function getHuman() {
   return humanPromise
 }
 
+/** Disposes a failed WebGL runtime before creating the process-wide CPU fallback. */
 function switchToCpu(failedRuntime: HumanRuntime) {
   disposeHuman(failedRuntime.human)
   humanPromise = loadHumanWithBackend('cpu').catch((error: unknown) => {
@@ -180,6 +187,7 @@ function switchToCpu(failedRuntime: HumanRuntime) {
   return humanPromise
 }
 
+/** Loads URL or Blob media and returns an explicit resource-release callback. */
 function loadImage(source: CapsuleImageSource) {
   return new Promise<{ image: HTMLImageElement; release: () => void }>(
     (resolve, reject) => {
@@ -210,6 +218,7 @@ function loadImage(source: CapsuleImageSource) {
   )
 }
 
+/** Uses the largest head-axis rotation as the enrollment pose penalty. */
 function facePoseAngle(face: Awaited<ReturnType<HumanInstance['detect']>>['face'][number]) {
   const angle = face.rotation?.angle
   if (!angle) return 0
@@ -220,21 +229,28 @@ function facePoseAngle(face: Awaited<ReturnType<HumanInstance['detect']>>['face'
   )
 }
 
+/** Converts detector pixel geometry into bounded, image-relative coordinates. */
 function normalizedFaceBox(
-  box: readonly number[] | undefined,
+  faceBox: readonly number[] | undefined,
   imageWidth: number,
   imageHeight: number,
 ): [number, number, number, number] {
-  if (!box || box.length < 4 || imageWidth <= 0 || imageHeight <= 0) {
+  if (!faceBox || faceBox.length < 4 || imageWidth <= 0 || imageHeight <= 0) {
     return [0, 0, 1, 1]
   }
-  const x = clampUnit((box[0] ?? 0) / imageWidth)
-  const y = clampUnit((box[1] ?? 0) / imageHeight)
-  const width = clampUnit((box[2] ?? 0) / imageWidth)
-  const height = clampUnit((box[3] ?? 0) / imageHeight)
-  return [x, y, Math.min(width, 1 - x), Math.min(height, 1 - y)]
+  const normalizedX = clampUnit((faceBox[0] ?? 0) / imageWidth)
+  const normalizedY = clampUnit((faceBox[1] ?? 0) / imageHeight)
+  const normalizedWidth = clampUnit((faceBox[2] ?? 0) / imageWidth)
+  const normalizedHeight = clampUnit((faceBox[3] ?? 0) / imageHeight)
+  return [
+    normalizedX,
+    normalizedY,
+    Math.min(normalizedWidth, 1 - normalizedX),
+    Math.min(normalizedHeight, 1 - normalizedY),
+  ]
 }
 
+/** Combines model confidence, face size, and pose into one matching-quality score. */
 function detectionQuality(
   detectorScore: number,
   descriptorScore: number,
@@ -248,6 +264,7 @@ function detectionQuality(
   )
 }
 
+/** Extracts deterministic, position-ordered descriptors from one independent photo. */
 async function facesForPhoto(
   human: HumanInstance,
   source: CapsuleImageSource,
@@ -308,6 +325,7 @@ async function facesForPhoto(
   }
 }
 
+/** Extracts one high-quality face descriptor from a reference portrait. */
 export async function scanReferencePortrait(source: CapsuleImageSource) {
   let preparedSource = source
   if (typeof File !== 'undefined' && source instanceof File) {
@@ -383,6 +401,7 @@ export async function scanReferencePortrait(source: CapsuleImageSource) {
   } satisfies ReferencePortraitScan
 }
 
+/** Scans eligible timeline photos once and reports incremental checkpoints. */
 export async function scanTimelineFaces(
   photos: readonly PeopleTimelinePhoto[],
   onCheckpoint?: (checkpoint: FaceScanCheckpoint) => void | Promise<void>,
