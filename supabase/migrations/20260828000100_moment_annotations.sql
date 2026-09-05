@@ -334,9 +334,8 @@ using (
   )
 );
 
-comment on policy family_media_delete_unfinalized_by_uploader
-on storage.objects is
-  'Lets an uploader remove only their own unreferenced failed-upload objects; finalized family media stays immutable.';
+-- Lets an uploader remove only their own unreferenced failed-upload objects;
+-- finalized family media stays immutable.
 
 revoke all on function public.finalize_360_moment_with_annotations(
   uuid,

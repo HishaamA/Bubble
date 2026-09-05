@@ -431,9 +431,8 @@ using (
   and public.can_delete_own_unreferenced_family_journal_media(name)
 );
 
-comment on policy family_media_delete_unfinalized_journal_by_uploader
-on storage.objects is
-  'Lets an approved uploader clean up only their own unreferenced Journal photo objects; finalized family photos remain immutable.';
+-- Lets an approved uploader clean up only their own unreferenced Journal photo
+-- objects; finalized family photos remain immutable.
 
 do $$
 begin

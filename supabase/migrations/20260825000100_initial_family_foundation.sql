@@ -951,7 +951,7 @@ with check (
   and split_part(name, '/', 4) <> ''
 );
 
-comment on policy family_media_insert_by_approved_members on storage.objects is
-  'Objects are immutable to clients. Deletion/finalization is reserved for trusted backend jobs.';
+-- Objects are immutable to clients. Deletion/finalization is reserved for
+-- trusted backend jobs.
 
 commit;

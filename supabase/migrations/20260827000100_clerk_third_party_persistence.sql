@@ -633,8 +633,8 @@ with check (
   and split_part(name, '/', 4) <> ''
 );
 
-comment on policy family_media_insert_by_approved_members on storage.objects is
-  'Immutable uploads are scoped to the internal app user resolved from the verified Clerk JWT subject.';
+-- Immutable uploads are scoped to the internal app user resolved from the
+-- verified Clerk JWT subject.
 
 comment on column public.profile_preferences.onboarding_completed_at is
   'Durable tutorial completion for the authenticated identity; null until the user finishes onboarding.';

@@ -430,9 +430,8 @@ using (
   )
 );
 
-comment on policy family_media_delete_unfinalized_by_uploader
-on storage.objects is
-  'Lets an approved uploader remove only their own unreferenced failed panorama or thumbnail uploads.';
+-- Lets an approved uploader remove only their own unreferenced failed panorama
+-- or thumbnail uploads.
 
 create policy family_voice_delete_unreferenced_by_uploader
 on storage.objects
@@ -443,8 +442,8 @@ using (
   and public.can_delete_own_unreferenced_family_voice(name)
 );
 
-comment on policy family_voice_delete_unreferenced_by_uploader
-on storage.objects is
-  'Lets an approved uploader delete only their own private voice object after it is unreferenced, including stale paths returned by replace_360_moment_annotations.';
+-- Lets an approved uploader delete only their own private voice object after it
+-- is unreferenced, including stale paths returned by
+-- replace_360_moment_annotations.
 
 commit;

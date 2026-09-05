@@ -434,9 +434,8 @@ using (
   )
 );
 
-comment on policy family_media_delete_unfinalized_capsule_by_uploader
-on storage.objects is
-  'Lets an approved uploader remove only their own canonical, unreferenced Capsule upload objects; finalized Capsule media stays immutable.';
+-- Lets an approved uploader remove only their own canonical, unreferenced
+-- Capsule upload objects; finalized Capsule media stays immutable.
 
 do $$
 begin
