@@ -114,6 +114,34 @@
   overflow-x: clip;
 }
 
+/* Route chunks load inside the persistent shell so navigation never jumps. */
+.app-route-loading {
+  display: grid;
+  min-height: 100%;
+  place-items: center;
+}
+
+.app-route-loading > span {
+  width: 2.25rem;
+  aspect-ratio: 1;
+  border: 0.2rem solid color-mix(in srgb, var(--theme-accent, #e7afc4) 28%, transparent);
+  border-top-color: var(--theme-accent, #e7afc4);
+  border-radius: 50%;
+  animation: app-route-loading-spin 700ms linear infinite;
+}
+
+@keyframes app-route-loading-spin {
+  to {
+    transform: rotate(1turn);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .app-route-loading > span {
+    animation: none;
+  }
+}
+
 .app-content > :is(.ks-feature, .journal-page) {
   padding-top: var(--app-page-top);
   padding-bottom: calc(var(--bottom-chrome-height) + var(--safe-bottom) + 1rem);

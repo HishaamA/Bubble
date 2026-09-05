@@ -1,32 +1,60 @@
+import { lazy, Suspense, type PropsWithChildren } from 'react'
 import { HashRouter, Navigate, Outlet, Route, Routes } from 'react-router-dom'
 import { AccountScopedData } from './app/AccountScopedData'
 import { createAccountCacheNamespace } from './app/accountCacheNamespace'
 import { AppShell } from './app/AppShell'
 import { ErrorBoundary } from './app/ErrorBoundary'
 import { LegacyRouteRedirect } from './app/LegacyRouteRedirect'
-import {
-  CapsulePhotoRoute,
-  CaptureRoute,
-  JournalRoute,
-  MemoriesRoute,
-  PanoramaRoute,
-} from './app/MemoryExperienceRoutes'
-import { CapsulesPage } from './features/capsules'
-import {
-  AuthPage,
-  AuthProvider,
-  RequireAuthentication,
-  useAuth,
-} from './features/auth'
+import { AuthProvider, RequireAuthentication } from './features/auth/AuthProvider'
+import { useAuth } from './features/auth/authContext'
 import { EventReminderCoordinator } from './features/events/EventReminderCoordinator'
-import { SettingsPage } from './features/profile'
-import {
-  FamilyOnboardingProvider,
-  OnboardingPage,
-  RequireFamilyMembership,
-  useFamilyOnboarding,
-} from './features/onboarding'
+import { FamilyOnboardingProvider } from './features/onboarding/FamilyOnboardingProvider'
+import { useFamilyOnboarding } from './features/onboarding/familyOnboardingContext'
+import { OnboardingPage } from './features/onboarding/OnboardingPage'
+import { RequireFamilyMembership } from './features/onboarding/RequireFamilyMembership'
 import './App.css'
+
+// Each screen is a separate dynamic entry. The initial app shell therefore
+// downloads only the route the member opens, while feature CSS follows that
+// route instead of being bundled into every launch.
+const AuthPage = lazy(() => import('./features/auth/AuthPage').then((module) => ({
+  default: module.AuthPage,
+})))
+const MemoriesRoute = lazy(() => import('./app/routes/MemoriesRoutes').then((module) => ({
+  default: module.MemoriesRoute,
+})))
+const PanoramaRoute = lazy(() => import('./app/routes/MemoriesRoutes').then((module) => ({
+  default: module.PanoramaRoute,
+})))
+const CaptureRoute = lazy(() => import('./app/routes/CaptureRoute').then((module) => ({
+  default: module.CaptureRoute,
+})))
+const JournalRoute = lazy(() => import('./app/routes/JournalRoutes').then((module) => ({
+  default: module.JournalRoute,
+})))
+const CapsulePhotoRoute = lazy(() => import('./app/routes/JournalRoutes').then((module) => ({
+  default: module.CapsulePhotoRoute,
+})))
+const CapsulesPage = lazy(() => import('./features/capsules/CapsulesPage').then((module) => ({
+  default: module.CapsulesPage,
+})))
+const SettingsPage = lazy(() => import('./features/profile/ProfilePage').then((module) => ({
+  default: module.SettingsPage,
+})))
+
+/** Keeps route transitions inside the themed app while a lazy chunk arrives. */
+function RouteLoading() {
+  return (
+    <section className="app-route-loading" role="status" aria-label="Loading page">
+      <span aria-hidden="true" />
+    </section>
+  )
+}
+
+/** Supplies the same lightweight fallback to public lazy routes. */
+function DeferredRoute({ children }: PropsWithChildren) {
+  return <Suspense fallback={<RouteLoading />}>{children}</Suspense>
+}
 
 /** Preserves the Journal plans context when resolving the retired event route. */
 function openPlansFromLegacyEventRoute(state: unknown) {
@@ -55,7 +83,11 @@ function openPlansFromLegacyEventRoute(state: unknown) {
 function OnboardingRoute() {
   const { isDevelopmentPreview, user } = useAuth()
   if (isDevelopmentPreview) return <Navigate to="/" replace />
-  return <OnboardingPage key={user?.id ?? 'signed-out'} />
+  return (
+    <DeferredRoute>
+      <OnboardingPage key={user?.id ?? 'signed-out'} />
+    </DeferredRoute>
+  )
 }
 
 /** Returns the cache partition for the current account and family membership. */
@@ -97,7 +129,9 @@ function MemberApplication() {
   return (
     <AccountScopedData>
       <AppShell>
-        <Outlet />
+        <Suspense fallback={<RouteLoading />}>
+          <Outlet />
+        </Suspense>
       </AppShell>
     </AccountScopedData>
   )
@@ -114,7 +148,14 @@ function App() {
           <EventReminderCoordinator />
           <HashRouter>
             <Routes>
-              <Route path="/login" element={<AuthPage />} />
+              <Route
+                path="/login"
+                element={
+                  <DeferredRoute>
+                    <AuthPage />
+                  </DeferredRoute>
+                }
+              />
               <Route element={<RequireAuthentication />}>
                 <Route path="/onboarding" element={<OnboardingRoute />} />
                 <Route element={<RequireFamilyMembership />}>

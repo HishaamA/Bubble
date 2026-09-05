@@ -1,4 +1,4 @@
-import './Capture360Page.css'
+import './Capture360Shortcut.css'
 
 type Capture360ShortcutProps = {
   onClick: () => void
