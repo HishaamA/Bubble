@@ -1,5 +1,10 @@
 begin;
 
+-- Supabase Storage enables this transaction-local flag when its API removes
+-- object metadata. The DELETE statements below simulate that step while RLS
+-- remains enabled and continues to decide which rows the caller may remove.
+set local storage.allow_delete_query = 'true';
+
 create extension if not exists pgtap with schema extensions;
 select plan(59);
 

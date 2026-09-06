@@ -298,10 +298,14 @@ select ok(
   'family comments join Supabase Realtime when its standard publication exists'
 );
 
-select has_policy(
-  'public',
-  'family_moment_comments',
-  'family_moment_comments_read_by_approved_members',
+select ok(
+  exists (
+    select 1
+    from pg_catalog.pg_policies
+    where schemaname = 'public'
+      and tablename = 'family_moment_comments'
+      and policyname = 'family_moment_comments_read_by_approved_members'
+  ),
   'the family comments table has an explicit approved-member read policy'
 );
 

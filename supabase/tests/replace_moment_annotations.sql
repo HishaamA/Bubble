@@ -1,5 +1,10 @@
 begin;
 
+-- Supabase Storage enables this transaction-local flag when its API removes
+-- object metadata. The DELETE statements below simulate that step while RLS
+-- remains enabled and continues to decide which rows the caller may remove.
+set local storage.allow_delete_query = 'true';
+
 create extension if not exists pgtap with schema extensions;
 select plan(26);
 
@@ -550,10 +555,14 @@ select is(
 
 reset role;
 
-select has_policy(
-  'storage',
-  'objects',
-  'family_voice_delete_unreferenced_by_uploader',
+select ok(
+  exists (
+    select 1
+    from pg_catalog.pg_policies
+    where schemaname = 'storage'
+      and tablename = 'objects'
+      and policyname = 'family_voice_delete_unreferenced_by_uploader'
+  ),
   'Storage has an explicit uploader-owned unreferenced voice cleanup policy'
 );
 

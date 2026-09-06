@@ -253,24 +253,24 @@ select is(
 
 set local role anon;
 
-select like(
+select matches(
   pg_temp.create_event_result('eeeeeeee-aaaa-4aaa-8aaa-aaaaaaaaaaaa'),
-  '42501:%',
+  '^42501:',
   'anonymous callers cannot create an event'
 );
 
-select like(
+select matches(
   pg_temp.complete_event_result('ffffffff-ffff-4fff-8fff-ffffffffffff'),
-  '42501:%',
+  '^42501:',
   'anonymous callers cannot complete a family event'
 );
 
-select like(
+select matches(
   pg_temp.update_event_details_result(
     'ffffffff-ffff-4fff-8fff-ffffffffffff',
     'anonymous update'
   ),
-  '42501:%',
+  '^42501:',
   'anonymous callers cannot update family event details'
 );
 

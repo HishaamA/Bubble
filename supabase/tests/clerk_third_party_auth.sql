@@ -466,10 +466,13 @@ select is(
     join pg_catalog.pg_namespace as namespace
       on namespace.oid = proc.pronamespace
     where namespace.nspname = 'public'
-      and pg_catalog.strpos(
-        pg_catalog.pg_get_functiondef(proc.oid),
-        'auth.uid()'
-      ) > 0
+      and case
+        when proc.prokind in ('f', 'p') then pg_catalog.strpos(
+          pg_catalog.pg_get_functiondef(proc.oid),
+          'auth.uid()'
+        ) > 0
+        else false
+      end
   ),
   0::bigint,
   'application functions no longer cast Clerk subjects through auth.uid()'

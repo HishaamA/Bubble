@@ -373,25 +373,25 @@ select set_config(
   true
 );
 
-select like(
+select matches(
   pg_temp.direct_flight_insert_result(),
-  '42501:%',
+  '^42501:',
   'an authenticated member cannot bypass the service function with a direct insert'
 );
 
-select like(
+select matches(
   pg_temp.direct_flight_update_result(
     '73000000-0000-4000-8000-000000000001'
   ),
-  '42501:%',
+  '^42501:',
   'an authenticated member cannot directly alter a provider snapshot row'
 );
 
-select like(
+select matches(
   pg_temp.direct_flight_delete_result(
     '73000000-0000-4000-8000-000000000001'
   ),
-  '42501:%',
+  '^42501:',
   'an authenticated member cannot bypass the guarded delete RPC'
 );
 
