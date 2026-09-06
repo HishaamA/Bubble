@@ -31,6 +31,7 @@ if (unsupportedArgument) {
 
 const supabaseCommand = ['pnpm', 'exec', 'supabase']
 const functionUrl = 'http://127.0.0.1:54321/functions/v1/flight-status'
+const localWebOrigin = 'http://localhost:5173'
 const commandEnvironment = {
   ...process.env,
   // Supabase telemetry is not part of a deterministic local test run.
@@ -107,7 +108,7 @@ async function waitForFunctionServer() {
     try {
       const response = await fetch(functionUrl, {
         method: 'OPTIONS',
-        headers: { Origin: 'http://localhost:5173' },
+        headers: { Origin: localWebOrigin },
       })
       if (response.status === 204) return
     } catch {
@@ -122,14 +123,38 @@ async function waitForFunctionServer() {
 async function testFunctionBoundary() {
   const preflightResponse = await fetch(functionUrl, {
     method: 'OPTIONS',
-    headers: { Origin: 'http://localhost:5173' },
+    headers: { Origin: localWebOrigin },
   })
+  const allowedOrigin = preflightResponse.headers.get(
+    'access-control-allow-origin',
+  )
   if (
     preflightResponse.status !== 204
-    || preflightResponse.headers.get('access-control-allow-origin')
-      !== 'http://localhost:5173'
+    || (allowedOrigin !== localWebOrigin && allowedOrigin !== '*')
   ) {
-    throw new Error('The flight-status CORS preflight contract failed.')
+    throw new Error(
+      'The flight-status CORS preflight contract failed '
+      + `(status ${preflightResponse.status}, origin ${String(allowedOrigin)}).`,
+    )
+  }
+
+  // Local Kong normalizes allowed CORS responses to `*`, so the browser-facing
+  // header cannot prove the function's allow-list. Exercise the handler with a
+  // hostile origin as a separate request to preserve that security boundary.
+  const untrustedOriginResponse = await fetch(functionUrl, {
+    method: 'POST',
+    headers: {
+      Origin: 'https://untrusted.example',
+      'Content-Type': 'application/json',
+    },
+    body: '{}',
+  })
+  const untrustedOriginBody = await untrustedOriginResponse.json()
+  if (
+    untrustedOriginResponse.status !== 403
+    || untrustedOriginBody?.error !== 'Origin is not allowed.'
+  ) {
+    throw new Error('The flight-status origin allow-list contract failed.')
   }
 
   const invalidJsonResponse = await fetch(functionUrl, {
