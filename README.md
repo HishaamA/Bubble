@@ -28,7 +28,7 @@
 </p>
 
 > [!NOTE]
-> Bubble is an actively developed private prototype. The repository contains a
+> Bubble is an actively developed private prototype. The repository contains a 
 > working web experience, native iOS and Android projects, custom capture and
 > media plugins, a versioned Supabase backend, and automated tests. It is not an
 > App Store or Play Store release, a hosted service, or a completed security
