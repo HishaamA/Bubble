@@ -40,6 +40,10 @@ function sourceFiles(directory: string): string[] {
   })
 }
 
+function projectRelative(file: string) {
+  return path.relative(process.cwd(), file).split(path.sep).join('/')
+}
+
 function attributeNames(opening: ts.JsxOpeningLikeElement, sourceFile: ts.SourceFile) {
   return new Set(opening.attributes.properties.flatMap((attribute) => (
     ts.isJsxAttribute(attribute) ? [attribute.name.getText(sourceFile)] : []
@@ -66,7 +70,7 @@ function hasRenderedContent(node: ts.JsxElement, sourceFile: ts.SourceFile): boo
 function referenceFor(sourceFile: ts.SourceFile, node: ts.Node): Omit<ControlFinding, 'reason'> {
   const location = sourceFile.getLineAndCharacterOfPosition(node.getStart(sourceFile))
   return {
-    file: path.relative(process.cwd(), sourceFile.fileName),
+    file: projectRelative(sourceFile.fileName),
     line: location.line + 1,
   }
 }
@@ -100,7 +104,7 @@ function auditInteractiveMarkup() {
 
         if (tag === 'button') {
           buttonCount += 1
-          controlFiles.add(path.relative(process.cwd(), file))
+          controlFiles.add(projectRelative(file))
           if (!attributes.has('type')) {
             findings.push({ ...reference, reason: 'native button has no explicit type' })
           }
