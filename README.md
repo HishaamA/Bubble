@@ -208,7 +208,7 @@ composition.
 
 Imported images are bounded before decoding and sharing:
 
-- JPEG input only
+- JPEG input
 - maximum input size of 25 MB
 - maximum decoded area of 80 million pixels
 - panorama aspect-ratio validation
