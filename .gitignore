@@ -19,12 +19,20 @@ pnpm-debug.log*
 .env
 .env.*
 !.env.example
+!/.env.demo
 !supabase/.env.demo.example
 *.pem
 *.p8
 *.p12
 *.keystore
 *.jks
+*.mobileprovision
+/.npmrc
+android/key.properties
+android/app/google-services.json
+ios/App/App/GoogleService-Info.plist
+*service-account*.json
+*serviceAccount*.json
 
 # Supabase local state and private configuration
 supabase/.branches/
