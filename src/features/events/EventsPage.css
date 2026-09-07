@@ -1139,9 +1139,13 @@
 .event-sheet {
   position: fixed;
   z-index: 100;
-  inset: 0;
+  top: var(--app-visual-viewport-offset-top, 0px);
+  right: 0;
+  bottom: auto;
+  left: 0;
   display: grid;
   width: min(100%, 31.25rem);
+  height: var(--app-visual-viewport-height, 100dvh);
   margin-inline: auto;
   padding:
     max(
@@ -1173,7 +1177,7 @@
   display: grid;
   width: 100%;
   min-width: 0;
-  max-height: calc(100dvh - 1.7rem);
+  max-height: 100%;
   padding: 1rem;
   overflow-x: hidden;
   overflow-y: auto;

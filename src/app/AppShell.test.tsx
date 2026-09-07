@@ -107,6 +107,10 @@ afterEach(() => {
   } else {
     Reflect.deleteProperty(window, 'innerHeight')
   }
+  document.documentElement.style.removeProperty('--app-visual-viewport-height')
+  document.documentElement.style.removeProperty('--app-visual-viewport-offset-top')
+  delete document.documentElement.dataset.keyboardOpen
+  delete document.documentElement.dataset.textEntryActive
 })
 
 describe('AppShell', () => {
@@ -133,7 +137,7 @@ describe('AppShell', () => {
     expect(screen.getByLabelText('Current route')).toHaveTextContent('/')
   })
 
-  it('uses the visual viewport while the iPhone keyboard is open and restores it', () => {
+  it('publishes the current visual viewport before a member route renders', () => {
     Object.defineProperty(window, 'innerHeight', {
       configurable: true,
       value: 844,
@@ -148,19 +152,18 @@ describe('AppShell', () => {
       value: visualViewport,
     })
 
-    const { container } = renderShell('/capsule', <RouteSwitcher />)
-    const shell = container.querySelector<HTMLElement>('.app-viewport')
-    expect(shell).toHaveStyle('--app-visual-viewport-height: 402px')
-    expect(shell).toHaveAttribute('data-keyboard-open', 'true')
-
-    Object.assign(visualViewport, { height: 844 })
-    visualViewport.dispatchEvent(new Event('resize'))
-    expect(shell).toHaveStyle('--app-visual-viewport-height: 844px')
-    expect(shell).toHaveAttribute('data-keyboard-open', 'false')
+    renderShell('/capsule', <RouteSwitcher />)
+    expect(document.documentElement).toHaveStyle(
+      '--app-visual-viewport-height: 402px',
+    )
+    expect(document.documentElement).toHaveAttribute(
+      'data-keyboard-open',
+      'true',
+    )
   })
 
   it('dismisses a focused field when switching routes', async () => {
-    const { container } = renderShell('/capsule', <RouteSwitcher />)
+    renderShell('/capsule', <RouteSwitcher />)
     const input = screen.getByRole('textbox', { name: 'Draft title' })
     input.focus()
     expect(document.activeElement).toBe(input)
@@ -168,7 +171,7 @@ describe('AppShell', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Settings' }))
 
     await waitFor(() => expect(document.activeElement).not.toBe(input))
-    expect(container.querySelector('.app-viewport')).toHaveAttribute(
+    expect(document.documentElement).toHaveAttribute(
       'data-keyboard-open',
       'false',
     )

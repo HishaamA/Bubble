@@ -434,11 +434,14 @@
 .journal-page .people-timeline__person-form input,
 .journal-page .people-timeline__person-form input[type='file'] {
   min-height: 3rem;
-  border: 1.5px solid var(--person-form-line);
+  border: 1.5px solid var(--theme-field-border, var(--person-form-line));
   border-radius: 0.72rem;
   color: var(--person-form-ink);
   caret-color: var(--journal-coral);
-  background: color-mix(in srgb, var(--journal-paper) 36%, white);
+  background: var(
+    --theme-field-surface,
+    color-mix(in srgb, var(--journal-coral) 12%, white)
+  );
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.78);
   font-size: 0.78rem;
   transition: border-color 150ms ease, box-shadow 150ms ease, background 150ms ease;
@@ -474,7 +477,11 @@
 
 .journal-page .people-timeline__person-form input:focus {
   border-color: color-mix(in srgb, var(--journal-coral) 82%, var(--person-form-ink));
-  background: color-mix(in srgb, var(--journal-paper) 20%, white);
+  background: color-mix(
+    in srgb,
+    var(--theme-field-surface, white) 82%,
+    white
+  );
   box-shadow:
     0 0 0 3px color-mix(in srgb, var(--journal-coral) 22%, transparent),
     inset 0 1px 0 rgba(255, 255, 255, 0.84);
@@ -3294,4 +3301,81 @@
   height: 1px;
   justify-self: center;
   pointer-events: none;
+}
+
+/* Narrow flight-ticket resilience -----------------------------------------
+   The ticket header includes three actions as well as the user-supplied trip
+   name, flight number, and status. Give that identity its own two-row mobile
+   rhythm instead of shortening meaningful copy to make everything share one
+   line. Arrival fallbacks may wrap at their word boundary rather than ending
+   in an ellipsis (for example, "Not applicable" on cancelled journeys). */
+.journal-page[data-section='flights'] .flight-tracker,
+.journal-page[data-section='flights'] .flight-tracker .flight-list,
+.journal-page[data-section='flights'] .flight-tracker .flight-list > li,
+.journal-page[data-section='flights'] .flight-tracker .flight-card,
+.journal-page[data-section='flights'] .flight-tracker .flight-card__topline,
+.journal-page[data-section='flights'] .flight-tracker .flight-card__identity,
+.journal-page[data-section='flights'] .flight-tracker .flight-card__times,
+.journal-page[data-section='flights'] .flight-tracker .flight-card__times > div,
+.journal-page[data-section='flights'] .flight-tracker .flight-card__details,
+.journal-page[data-section='flights'] .flight-tracker .flight-detail__times,
+.journal-page[data-section='flights'] .flight-tracker .flight-detail__times > div {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.journal-page[data-section='flights'] .flight-tracker .flight-card {
+  box-sizing: border-box;
+  width: 100%;
+}
+
+@media (max-width: 26.875rem) {
+  .journal-page[data-section='flights'] .flight-tracker .flight-card--featured .flight-card__topline {
+    min-height: 3rem;
+    height: auto;
+  }
+
+  .journal-page[data-section='flights'] .flight-tracker .flight-card--featured .flight-card__identity {
+    display: grid;
+    width: 100%;
+    grid-template-columns: minmax(0, 4.75rem) minmax(0, 1fr);
+    align-content: start;
+    align-items: center;
+    justify-content: start;
+    gap: 0.16rem 0.38rem;
+  }
+
+  .journal-page[data-section='flights'] .flight-tracker .flight-card--featured .flight-card__traveler {
+    grid-column: 1 / -1;
+    min-width: 0;
+    max-width: 100%;
+    overflow: visible;
+    overflow-wrap: anywhere;
+    line-height: 1.12;
+    text-overflow: clip;
+    white-space: normal;
+  }
+
+  .journal-page[data-section='flights'] .flight-tracker .flight-card--featured .flight-card__number {
+    grid-column: 1;
+    overflow-wrap: anywhere;
+  }
+
+  .journal-page[data-section='flights'] .flight-tracker .flight-card--featured .flight-card__status {
+    width: fit-content;
+    max-width: 100%;
+    grid-column: 2;
+    justify-self: start;
+    overflow-wrap: anywhere;
+    line-height: 1.1;
+    white-space: normal;
+  }
+
+  .journal-page[data-section='flights'] .flight-tracker .flight-card--featured .flight-card__times strong {
+    overflow: visible;
+    overflow-wrap: normal;
+    line-height: 1.04;
+    text-overflow: clip;
+    white-space: normal;
+  }
 }

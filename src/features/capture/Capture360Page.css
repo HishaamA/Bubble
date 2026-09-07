@@ -43,6 +43,19 @@
     var(--theme-sage, #a5b37a)
   );
   --capture-action-ink: var(--theme-action-ink, var(--theme-ink, #301027));
+  --capture-paper-ink: var(--theme-ink, #301027);
+  --capture-field-surface: var(
+    --theme-field-surface,
+    color-mix(in srgb, var(--theme-action-soft, #f0d0d9) 28%, white)
+  );
+  --capture-field-border: var(
+    --theme-field-border,
+    color-mix(in srgb, var(--capture-paper-ink) 48%, transparent)
+  );
+  --capture-field-placeholder: var(
+    --theme-field-placeholder,
+    color-mix(in srgb, var(--capture-paper-ink) 62%, var(--theme-paper, #fff1d2))
+  );
   --feature-accent: var(--capture-action);
   width: 100%;
   max-width: 100%;
@@ -695,11 +708,12 @@
   min-width: 0;
   justify-content: space-between;
   gap: 0.75rem;
+  color: var(--capture-text);
 }
 
 .capture-editor .ks-field small {
   min-width: 0;
-  color: var(--capture-text-subtle);
+  color: var(--capture-text-muted);
   font-size: 0.63rem;
   font-weight: 500;
   text-align: right;
@@ -709,8 +723,22 @@
   max-width: 100%;
   min-height: 5.6rem;
   resize: none;
+  border: 1.5px solid var(--capture-field-border);
+  color: var(--capture-paper-ink);
+  background: var(--capture-field-surface);
+  caret-color: var(--capture-paper-ink);
   /* iOS zooms the whole WebView when a focused field is below 16px. */
   font-size: 1rem;
+}
+
+.capture-editor .ks-field textarea::placeholder {
+  color: var(--capture-field-placeholder);
+  opacity: 1;
+}
+
+.capture-editor .ks-field textarea:focus {
+  border-color: var(--capture-action);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--capture-action) 26%, transparent);
 }
 
 .capture-editor .ks-primary-button {
@@ -747,17 +775,25 @@
   padding: 0.45rem 0;
 }
 
-.capture-success {
+.capture-page .capture-success {
   display: grid;
   width: 100%;
   min-width: 0;
   max-width: 100%;
   padding: 1.3rem;
   justify-items: center;
-  border: 1px solid var(--capture-line);
+  border: 1.5px solid var(--capture-field-border);
   border-radius: 1.2rem;
-  background: var(--capture-surface);
+  color: var(--capture-paper-ink);
+  background:
+    repeating-linear-gradient(
+      to bottom,
+      transparent 0 1.65rem,
+      color-mix(in srgb, var(--capture-paper-ink) 7%, transparent) 1.65rem calc(1.65rem + 1px)
+    ),
+    var(--theme-paper, #fff1d2);
   box-shadow: 0 0.7rem 1.8rem color-mix(in srgb, var(--theme-shadow, #0c0108) 38%, transparent);
+  color-scheme: light;
   text-align: center;
 }
 
@@ -778,16 +814,17 @@
   box-shadow: 0 0.5rem 1.2rem color-mix(in srgb, var(--theme-shadow, #0c0108) 26%, transparent);
 }
 
-.capture-success h2 {
+.capture-page .capture-success h2 {
   margin: 0;
+  color: var(--capture-paper-ink);
   font-size: 1.65rem;
 }
 
-.capture-success > p:not(.eyebrow) {
+.capture-page .capture-success > p:not(.eyebrow) {
   width: 100%;
   max-width: 19rem;
   margin: 0.6rem 0 1rem;
-  color: var(--capture-text-muted);
+  color: color-mix(in srgb, var(--capture-paper-ink) 72%, var(--theme-paper, #fff1d2));
   font-size: 0.75rem;
   line-height: 1.5;
   overflow-wrap: anywhere;

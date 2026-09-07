@@ -199,7 +199,6 @@ export function Capture360Page({
   const libraryInputRef = useRef<HTMLInputElement>(null)
   const capturePageRef = useRef<HTMLElement>(null)
   const captionInputRef = useRef<HTMLTextAreaElement>(null)
-  const captionComposerRef = useRef<HTMLDivElement>(null)
   const sourceRef = useRef<CaptureSource>(initialMode)
   const pickerRef = useRef<'camera' | 'library'>('library')
   const previewUrlRef = useRef<string | null>(null)
@@ -244,44 +243,16 @@ export function Capture360Page({
     }
   }, [])
 
-  // The visual viewport follows the mobile keyboard more accurately than the
-  // layout viewport. Keep the caption action visible while that keyboard moves.
+  // The shared app coordinator reveals focused fields. Capture additionally
+  // tracks a compact breakpoint so its preview and actions fit the keyboard-
+  // adjusted height without installing a second focus-scroll loop.
   useEffect(() => {
     if (!draft || reviewingPanorama || shared) return
 
-    const captionInput = captionInputRef.current
-    const captionComposer = captionComposerRef.current
     const capturePage = capturePageRef.current
-    if (!captionInput || !captionComposer || !capturePage) return
+    if (!capturePage) return
 
-    let animationFrame = 0
-    const uninstallViewportSync = installCaptureEditorViewportSync(capturePage)
-    /** Scrolls the focused caption composer into the currently visible viewport. */
-    const revealCaptionControls = () => {
-      if (document.activeElement !== captionInput) return
-      window.cancelAnimationFrame(animationFrame)
-      animationFrame = window.requestAnimationFrame(() => {
-        captionComposer.scrollIntoView?.({
-          block: 'nearest',
-          inline: 'nearest',
-        })
-      })
-    }
-    const visualViewport = window.visualViewport
-
-    captionInput.addEventListener('focus', revealCaptionControls)
-    window.addEventListener('resize', revealCaptionControls)
-    visualViewport?.addEventListener('resize', revealCaptionControls)
-    visualViewport?.addEventListener('scroll', revealCaptionControls)
-
-    return () => {
-      uninstallViewportSync()
-      window.cancelAnimationFrame(animationFrame)
-      captionInput.removeEventListener('focus', revealCaptionControls)
-      window.removeEventListener('resize', revealCaptionControls)
-      visualViewport?.removeEventListener('resize', revealCaptionControls)
-      visualViewport?.removeEventListener('scroll', revealCaptionControls)
-    }
+    return installCaptureEditorViewportSync(capturePage)
   }, [draft, reviewingPanorama, shared])
 
   const currentTime = now ?? clock
@@ -965,7 +936,7 @@ export function Capture360Page({
             Edit 360 &amp; points
           </button>
 
-          <div className="capture-editor__composer" ref={captionComposerRef}>
+          <div className="capture-editor__composer">
             <label className="ks-field">
               <span>Moment title <small>optional · above the bubble</small></span>
               <textarea

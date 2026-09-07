@@ -1309,6 +1309,113 @@
   }
 }
 
+/*
+ * The named Demo Day Capsule gets a compact presentation control. It opens
+ * bundled sample frames only; the sealed family's media remains behind the
+ * normal lock boundary above this footer.
+ */
+.capsule-demo-day {
+  display: flex;
+  width: calc(100% - 1.5rem);
+  max-width: calc(100% - 1.5rem);
+  min-width: 0;
+  min-height: 2.85rem;
+  margin: 0.15rem 0.75rem 0.8rem;
+  padding: 0.5rem 0.7rem;
+  align-items: center;
+  justify-content: center;
+  gap: 0.55rem;
+  border: 1.5px dashed color-mix(in srgb, var(--theme-action, var(--capsule-coral)) 76%, var(--theme-ink, var(--capsule-ink)));
+  border-radius: 0.55rem 0.75rem 0.6rem 0.7rem;
+  color: var(--theme-ink, var(--capsule-ink));
+  background:
+    repeating-linear-gradient(
+      4deg,
+      color-mix(in srgb, var(--theme-ink, var(--capsule-ink)) 3%, transparent) 0 1px,
+      transparent 1px 5px
+    ),
+    color-mix(in srgb, var(--theme-action-soft, var(--capsule-paper-deep)) 54%, var(--theme-paper, var(--capsule-paper-light)));
+  box-shadow: 0.12rem 0.16rem 0 color-mix(in srgb, var(--theme-shadow, var(--capsule-shadow)) 58%, transparent);
+  font-family: var(--font-ui, system-ui, sans-serif);
+  cursor: pointer;
+}
+
+.capsule-demo-day > span:first-child {
+  display: grid;
+  width: 1.75rem;
+  height: 1.75rem;
+  flex: 0 0 1.75rem;
+  place-items: center;
+  border: 1px solid color-mix(in srgb, var(--theme-action, var(--capsule-coral)) 76%, transparent);
+  border-radius: 48% 52% 45% 55% / 55% 47% 53% 45%;
+  color: var(--theme-action-ink, var(--capsule-ink));
+  background: var(--theme-action, var(--capsule-yellow));
+  font-size: 0.58rem;
+  transform: rotate(-3deg);
+}
+
+.capsule-demo-day > span:last-child {
+  display: grid;
+  min-width: 0;
+  gap: 0.04rem;
+  color: color-mix(in srgb, var(--theme-ink, var(--capsule-ink)) 76%, transparent);
+  font-size: 0.58rem;
+  line-height: 1.15;
+  text-align: left;
+}
+
+.capsule-demo-day strong {
+  color: var(--theme-ink, var(--capsule-ink));
+  font-size: 0.72rem;
+  letter-spacing: 0.015em;
+}
+
+.capsule-demo-day:active {
+  box-shadow: 0.04rem 0.06rem 0 color-mix(in srgb, var(--theme-shadow, var(--capsule-shadow)) 45%, transparent);
+  transform: translate(0.08rem, 0.08rem);
+}
+
+.capsule-demo-day:focus-visible {
+  outline: 2px dashed var(--theme-action, var(--capsule-coral));
+  outline-offset: 0.2rem;
+}
+
+/*
+ * iOS date controls have a large intrinsic width, and native constraint
+ * bubbles can extend beyond a phone viewport. The form handles validation
+ * itself, while these rules keep every field and its message inside the paper.
+ */
+.capsule-special-form .ks-field,
+.capsule-special-form .ks-field input {
+  box-sizing: border-box;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+}
+
+.capsule-special-form .ks-field input[aria-invalid='true'] {
+  border-color: var(--theme-action, var(--capsule-coral));
+  background: var(--theme-paper-strong, var(--capsule-paper-light));
+  box-shadow: 0 0 0 0.18rem color-mix(in srgb, var(--theme-action, var(--capsule-coral)) 18%, transparent);
+}
+
+.capsule-special-form__error {
+  display: block;
+  width: fit-content;
+  max-width: 100%;
+  margin-top: 0.14rem;
+  padding: 0.24rem 0.42rem;
+  border-left: 0.18rem solid var(--theme-action, var(--capsule-coral));
+  border-radius: 0.16rem 0.4rem 0.4rem 0.16rem;
+  color: var(--theme-ink, var(--capsule-ink));
+  background: color-mix(in srgb, var(--theme-action-soft, var(--capsule-paper-deep)) 46%, var(--theme-paper-strong, var(--capsule-paper-light)));
+  font-family: var(--font-ui, system-ui, sans-serif);
+  font-size: 0.58rem;
+  font-weight: 700;
+  line-height: 1.3;
+  overflow-wrap: anywhere;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .capsule-locked-cover__icon {
     animation: none;
@@ -3190,14 +3297,14 @@
 }
 
 /* Featured weekly Capsule ------------------------------------------------
- * This is a loose scene on the page, not a card. The fanned photos and round
- * seal sit directly on the selected theme canvas. Special Capsules remain
- * ticket-like cards because each is a separate, named occasion.
+ * The current week is an open envelope rather than a generic card. Synthetic
+ * teaser frames sit behind the front pocket, so locked family media never
+ * enters the DOM while the upcoming reveal still feels tangible.
  */
 .capsule-page__section[aria-labelledby='weekly-capsule-title']
   > .capsule-collection[data-featured='true']
   .capsule-collection__photos {
-  min-height: clamp(11.8rem, 52vw, 14rem);
+  min-height: clamp(13.25rem, 57vw, 15.25rem);
   overflow: visible;
   border: 0;
   border-radius: 0;
@@ -3205,127 +3312,213 @@
   box-shadow: none;
 }
 
-/* A quiet stitched arc ties the little photos to their seal. It has no fill,
-   so the weekly Capsule never acquires a panel or envelope silhouette. */
+/* Older versions drew the weekly art with these pseudo-elements. The named
+   paper layers below make the stacking order explicit and easier to maintain. */
 .capsule-page__section[aria-labelledby='weekly-capsule-title']
   > .capsule-collection[data-featured='true']
-  .capsule-collection__photos::before {
-  position: absolute;
-  z-index: 1;
-  right: 12%;
-  bottom: 1.6rem;
-  left: 12%;
-  height: 3rem;
-  border: 0;
-  border-bottom: 1.5px dashed color-mix(in srgb, var(--theme-action, var(--capsule-coral)) 72%, transparent);
-  border-radius: 0 0 50% 50%;
-  background: transparent;
-  box-shadow: none;
-  clip-path: none;
-  content: '';
-  pointer-events: none;
-  transform: rotate(-1.5deg);
+  .capsule-envelope::before,
+.capsule-page__section[aria-labelledby='weekly-capsule-title']
+  > .capsule-collection[data-featured='true']
+  .capsule-envelope::after {
+  content: none;
 }
 
 .capsule-page__section[aria-labelledby='weekly-capsule-title']
   > .capsule-collection[data-featured='true']
-  .capsule-collection__photos::after {
+  .capsule-envelope__back {
   position: absolute;
   z-index: 1;
   right: 4%;
-  bottom: 2.05rem;
-  left: auto;
-  width: 1rem;
-  height: 1rem;
-  border: 0;
-  background: transparent;
-  box-shadow: none;
-  clip-path: none;
-  color: color-mix(in srgb, var(--theme-secondary, var(--capsule-sage)) 84%, var(--theme-paper, var(--capsule-paper)));
-  content: '\2726';
-  font-family: var(--font-ui, system-ui, sans-serif);
-  font-size: 0.95rem;
-  line-height: 1;
+  bottom: 0.2rem;
+  left: 4%;
+  height: clamp(9.25rem, 40vw, 10.6rem);
+  overflow: hidden;
+  border: 1.5px solid color-mix(in srgb, var(--theme-action, var(--capsule-coral)) 72%, var(--theme-ink, var(--capsule-ink)));
+  border-radius: 0.8rem 0.8rem 1rem 1rem;
+  background:
+    repeating-linear-gradient(
+      5deg,
+      color-mix(in srgb, var(--theme-ink, var(--capsule-ink)) 2.5%, transparent) 0 1px,
+      transparent 1px 5px
+    ),
+    color-mix(in srgb, var(--theme-action-soft, var(--capsule-yellow)) 46%, var(--theme-paper, var(--capsule-paper)));
+  box-shadow: 0 0.65rem 1.2rem color-mix(in srgb, var(--theme-shadow, var(--capsule-shadow)) 56%, transparent);
+  clip-path: polygon(0 36%, 48% 1%, 52% 1%, 100% 36%, 100% 100%, 0 100%);
   pointer-events: none;
-  transform: rotate(8deg);
 }
 
 .capsule-page__section[aria-labelledby='weekly-capsule-title']
   > .capsule-collection[data-featured='true']
-  :is(.capsule-photo-strip:not(.capsule-photo-strip--empty), .capsule-empty-polaroids) {
+  .capsule-envelope__back::before {
+  position: absolute;
+  inset: 0.42rem;
+  border: 1px dashed color-mix(in srgb, var(--theme-action, var(--capsule-coral)) 58%, var(--theme-ink, var(--capsule-ink)));
+  border-radius: 0.55rem 0.55rem 0.7rem 0.7rem;
+  content: '';
+  clip-path: polygon(0 35%, 48% 1%, 52% 1%, 100% 35%, 100% 100%, 0 100%);
+  opacity: 0.72;
+}
+
+.capsule-page__section[aria-labelledby='weekly-capsule-title']
+  > .capsule-collection[data-featured='true']
+  .capsule-envelope__front {
+  position: absolute;
+  z-index: 4;
+  right: 4%;
+  bottom: 0.18rem;
+  left: 4%;
+  height: clamp(6.75rem, 29vw, 7.65rem);
+  overflow: hidden;
+  border: 1.5px solid color-mix(in srgb, var(--theme-action, var(--capsule-coral)) 70%, var(--theme-ink, var(--capsule-ink)));
+  border-radius: 0 0 0.9rem 0.9rem;
+  background:
+    linear-gradient(
+      147deg,
+      transparent 0 49.5%,
+      color-mix(in srgb, var(--theme-action, var(--capsule-coral)) 28%, transparent) 50% 50.6%,
+      transparent 51%
+    ),
+    linear-gradient(
+      33deg,
+      transparent 0 49.5%,
+      color-mix(in srgb, var(--theme-action, var(--capsule-coral)) 28%, transparent) 50% 50.6%,
+      transparent 51%
+    ),
+    repeating-linear-gradient(
+      5deg,
+      color-mix(in srgb, var(--theme-ink, var(--capsule-ink)) 2.5%, transparent) 0 1px,
+      transparent 1px 5px
+    ),
+    color-mix(in srgb, var(--theme-action-soft, var(--capsule-yellow)) 30%, var(--theme-paper, var(--capsule-paper)));
+  box-shadow: 0 -0.15rem 0.55rem color-mix(in srgb, var(--theme-shadow, var(--capsule-shadow)) 26%, transparent);
+  clip-path: polygon(0 0, 50% 39%, 100% 0, 100% 100%, 0 100%);
+  pointer-events: none;
+}
+
+.capsule-page__section[aria-labelledby='weekly-capsule-title']
+  > .capsule-collection[data-featured='true']
+  .capsule-envelope__stitch {
+  position: absolute;
+  right: 0.58rem;
+  bottom: 0.55rem;
+  left: 0.58rem;
+  height: 2rem;
+  border-right: 1px dashed color-mix(in srgb, var(--theme-action, var(--capsule-coral)) 66%, var(--theme-ink, var(--capsule-ink)));
+  border-bottom: 1px dashed color-mix(in srgb, var(--theme-action, var(--capsule-coral)) 66%, var(--theme-ink, var(--capsule-ink)));
+  border-left: 1px dashed color-mix(in srgb, var(--theme-action, var(--capsule-coral)) 66%, var(--theme-ink, var(--capsule-ink)));
+  border-radius: 0 0 0.5rem 0.5rem;
+  opacity: 0.74;
+}
+
+.capsule-page__section[aria-labelledby='weekly-capsule-title']
+  > .capsule-collection[data-featured='true']
+  .capsule-envelope__front::after {
+  position: absolute;
+  right: 1.2rem;
+  bottom: 0.75rem;
+  color: color-mix(in srgb, var(--theme-secondary, var(--capsule-sage)) 82%, var(--theme-ink, var(--capsule-ink)));
+  content: '\2661';
+  font-family: var(--font-accent, Georgia, serif);
+  font-size: 1.05rem;
+  line-height: 1;
+}
+
+.capsule-page__section[aria-labelledby='weekly-capsule-title']
+  > .capsule-collection[data-featured='true']
+  .capsule-envelope .capsule-empty-polaroids--teasers {
   position: absolute;
   z-index: 2;
-  inset: 0.35rem 3% auto;
-  min-height: 9.2rem;
-  padding: 0.7rem 0.3rem 0;
+  inset: 0.1rem 3.5% auto;
+  min-height: clamp(9.9rem, 43vw, 11.35rem);
+  padding: 0.65rem 0.25rem 0;
   align-items: flex-start;
   overflow: visible;
-}
-
-.capsule-page__section[aria-labelledby='weekly-capsule-title']
-  > .capsule-collection[data-featured='true']
-  :is(.capsule-photo-strip:not(.capsule-photo-strip--empty), .capsule-empty-polaroids) li {
-  width: 26%;
-  margin-left: -2.2%;
-  flex-basis: 26%;
-}
-
-.capsule-page__section[aria-labelledby='weekly-capsule-title']
-  > .capsule-collection[data-featured='true']
-  :is(.capsule-photo-strip:not(.capsule-photo-strip--empty), .capsule-empty-polaroids) li:first-child {
-  margin-left: 0;
-}
-
-.capsule-page__section[aria-labelledby='weekly-capsule-title']
-  > .capsule-collection[data-featured='true']
-  .capsule-empty-polaroids--teasers {
-  filter: blur(0.26rem) saturate(0.72) brightness(0.78);
-  opacity: 0.86;
+  filter: blur(0.31rem) saturate(0.68) brightness(0.76);
+  opacity: 0.88;
   transform: none;
 }
 
-/* The seal is intentionally organic and compact: status, not a pill button. */
 .capsule-page__section[aria-labelledby='weekly-capsule-title']
   > .capsule-collection[data-featured='true']
-  .capsule-locked-cover {
-  inset: auto auto 0.45rem 50%;
+  .capsule-envelope .capsule-empty-polaroids--teasers li {
+  width: 25.5%;
+  margin-left: -2.2%;
+  flex-basis: 25.5%;
+  border-color: color-mix(in srgb, var(--theme-paper, var(--capsule-paper)) 92%, white);
+  box-shadow: 0 0.32rem 0.72rem color-mix(in srgb, var(--theme-shadow, var(--capsule-shadow)) 72%, transparent);
+  animation: capsule-envelope-photo-drift 4.8s ease-in-out infinite;
+}
+
+.capsule-page__section[aria-labelledby='weekly-capsule-title']
+  > .capsule-collection[data-featured='true']
+  .capsule-envelope .capsule-empty-polaroids--teasers li:nth-child(2) {
+  animation-delay: -1.2s;
+}
+
+.capsule-page__section[aria-labelledby='weekly-capsule-title']
+  > .capsule-collection[data-featured='true']
+  .capsule-envelope .capsule-empty-polaroids--teasers li:nth-child(3) {
+  animation-delay: -2.4s;
+}
+
+.capsule-page__section[aria-labelledby='weekly-capsule-title']
+  > .capsule-collection[data-featured='true']
+  .capsule-envelope .capsule-empty-polaroids--teasers li:nth-child(4) {
+  animation-delay: -3.6s;
+}
+
+/* The lock is a wax-seal-like status marker placed on the front flap. */
+.capsule-page__section[aria-labelledby='weekly-capsule-title']
+  > .capsule-collection[data-featured='true']
+  .capsule-envelope .capsule-locked-cover {
+  z-index: 5;
+  inset: auto auto 0.95rem 50%;
   display: grid;
-  width: 5.7rem;
+  width: 4.55rem;
   min-width: 0;
-  height: 5.45rem;
+  height: 4.35rem;
   min-height: 0;
-  padding: 0.62rem;
+  padding: 0.45rem;
   place-items: center;
   align-content: center;
-  border: 1.5px dashed color-mix(in srgb, var(--theme-action, var(--capsule-coral)) 74%, var(--theme-ink, var(--capsule-ink)));
+  border: 2px solid color-mix(in srgb, var(--theme-paper, var(--capsule-paper)) 68%, var(--theme-action, var(--capsule-coral)));
   border-radius: 48% 52% 46% 54% / 54% 46% 53% 47%;
-  gap: 0.1rem;
-  color: var(--theme-ink, var(--capsule-ink));
+  gap: 0.05rem;
+  color: var(--theme-action-ink, var(--capsule-ink));
   background:
-    repeating-linear-gradient(5deg, color-mix(in srgb, var(--theme-ink, var(--capsule-ink)) 2%, transparent) 0 1px, transparent 1px 5px),
-    var(--theme-paper, var(--capsule-paper-light));
-  box-shadow: 0 0.38rem 0.85rem color-mix(in srgb, var(--theme-shadow, var(--capsule-shadow)) 68%, transparent);
+    repeating-linear-gradient(
+      8deg,
+      color-mix(in srgb, var(--theme-ink, var(--capsule-ink)) 3%, transparent) 0 1px,
+      transparent 1px 5px
+    ),
+    var(--theme-action, var(--capsule-coral));
+  box-shadow:
+    0 0 0 0.18rem color-mix(in srgb, var(--theme-action, var(--capsule-coral)) 42%, var(--theme-paper, var(--capsule-paper))),
+    0 0.4rem 0.78rem color-mix(in srgb, var(--theme-shadow, var(--capsule-shadow)) 68%, transparent);
   transform: translateX(-50%) rotate(-2deg);
 }
 
 .capsule-page__section[aria-labelledby='weekly-capsule-title']
   > .capsule-collection[data-featured='true']
-  .capsule-locked-cover__icon {
-  width: 1.75rem;
-  height: 1.75rem;
+  .capsule-envelope .capsule-locked-cover__icon {
+  width: 1.62rem;
+  height: 1.62rem;
+  margin: 0;
+  border-color: color-mix(in srgb, var(--theme-action-ink, var(--capsule-ink)) 38%, transparent);
   color: var(--theme-action-ink, var(--capsule-ink));
-  background: var(--theme-action-soft, var(--capsule-yellow));
+  background: color-mix(in srgb, var(--theme-paper, var(--capsule-paper)) 78%, var(--theme-action-soft, var(--capsule-yellow)));
+  box-shadow: 0.1rem 0.12rem 0 color-mix(in srgb, var(--theme-shadow, var(--capsule-shadow)) 32%, transparent);
 }
 
 .capsule-page__section[aria-labelledby='weekly-capsule-title']
   > .capsule-collection[data-featured='true']
-  .capsule-locked-cover__message {
-  max-width: 4.4rem;
-  color: var(--theme-ink, var(--capsule-ink));
+  .capsule-envelope .capsule-locked-cover__message {
+  max-width: 3.7rem;
+  color: var(--theme-action-ink, var(--capsule-ink));
   font-family: var(--font-ui, system-ui, sans-serif);
-  font-size: 0.61rem;
-  font-weight: 720;
-  line-height: 1.15;
+  font-size: 0.54rem;
+  font-weight: 760;
+  line-height: 1.08;
   text-align: center;
   white-space: normal;
 }
@@ -3336,23 +3529,60 @@
   padding-top: 0.35rem;
 }
 
+@keyframes capsule-envelope-photo-drift {
+  0%,
+  100% {
+    translate: 0 0;
+  }
+
+  50% {
+    translate: 0 -0.12rem;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .capsule-page__section[aria-labelledby='weekly-capsule-title']
+    > .capsule-collection[data-featured='true']
+    .capsule-envelope .capsule-empty-polaroids--teasers li {
+    animation: none;
+  }
+}
+
 @media (max-width: 22rem) {
   .capsule-page__section[aria-labelledby='weekly-capsule-title']
     > .capsule-collection[data-featured='true']
     .capsule-collection__photos {
-    min-height: 11rem;
+    min-height: 12.4rem;
   }
 
   .capsule-page__section[aria-labelledby='weekly-capsule-title']
     > .capsule-collection[data-featured='true']
-    :is(.capsule-photo-strip:not(.capsule-photo-strip--empty), .capsule-empty-polaroids) {
-    min-height: 8.55rem;
+    .capsule-envelope__back {
+    right: 2.5%;
+    left: 2.5%;
+    height: 8.8rem;
   }
 
   .capsule-page__section[aria-labelledby='weekly-capsule-title']
     > .capsule-collection[data-featured='true']
-    .capsule-locked-cover {
-    width: 5.25rem;
-    height: 5rem;
+    .capsule-envelope__front {
+    right: 2.5%;
+    left: 2.5%;
+    height: 6.4rem;
+  }
+
+  .capsule-page__section[aria-labelledby='weekly-capsule-title']
+    > .capsule-collection[data-featured='true']
+    .capsule-envelope .capsule-empty-polaroids--teasers {
+    inset-inline: 1.5%;
+    min-height: 9.2rem;
+  }
+
+  .capsule-page__section[aria-labelledby='weekly-capsule-title']
+    > .capsule-collection[data-featured='true']
+    .capsule-envelope .capsule-locked-cover {
+    bottom: 0.78rem;
+    width: 4.2rem;
+    height: 4.05rem;
   }
 }

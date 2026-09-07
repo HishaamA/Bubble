@@ -172,6 +172,7 @@ describe('CapsulesPage', () => {
     const card = weeklySection.querySelector('article')!
     const teaserList = card.querySelector('.capsule-empty-polaroids')!
     const teaserImages = teaserList.querySelectorAll('img')
+    const envelope = card.querySelector('.capsule-envelope')!
     const weeklyCapsule = (await store.list()).find(({ kind }) => kind === 'weekly')!
     const exactOpenDate = new Intl.DateTimeFormat('en', {
       weekday: 'long',
@@ -183,6 +184,10 @@ describe('CapsulesPage', () => {
     }).format(new Date(weeklyCapsule.opensAt))
 
     expect(teaserList).toHaveAttribute('aria-hidden', 'true')
+    expect(envelope).toHaveAttribute('data-photo-state', 'empty')
+    expect(envelope.querySelector('.capsule-envelope__back')).toHaveAttribute('aria-hidden', 'true')
+    expect(envelope.querySelector('.capsule-envelope__front')).toHaveAttribute('aria-hidden', 'true')
+    expect(envelope.querySelector('.capsule-envelope__stitch')).toBeInTheDocument()
     expect(teaserImages).toHaveLength(4)
     teaserImages.forEach((image) => {
       expect(image).toHaveAttribute(
@@ -241,6 +246,10 @@ describe('CapsulesPage', () => {
     )
 
     expect(featuredCapsule).toHaveAttribute('data-featured', 'true')
+    expect(featuredCapsule.querySelector('.capsule-envelope')).toHaveAttribute(
+      'data-photo-state',
+      'single',
+    )
     expect(teaserImages).toHaveLength(4)
     teaserImages.forEach((image) => {
       expect(image).toHaveAttribute(
@@ -355,6 +364,33 @@ describe('CapsulesPage', () => {
         }),
       ]),
     )
+  })
+
+  it('uses compact inline feedback instead of native date-validation bubbles', async () => {
+    const user = userEvent.setup()
+    const store = createMemoryCapsuleStore()
+    render(<CapsulesPage now={testNow} store={store} />)
+    await screen.findByRole('heading', { name: currentWeekRange })
+
+    await user.click(screen.getByRole('button', { name: 'Create a special Capsule' }))
+    const title = screen.getByRole('textbox', { name: 'Name' })
+    const openDate = screen.getByLabelText('Open after')
+    const form = screen.getByRole('button', { name: 'Create Capsule' }).closest('form')!
+    expect(form).toHaveAttribute('novalidate')
+
+    await user.type(title, 'A day already gone')
+    fireEvent.change(openDate, { target: { value: '2026-08-28' } })
+    await user.click(screen.getByRole('button', { name: 'Create Capsule' }))
+
+    expect(openDate).toHaveAttribute('aria-invalid', 'true')
+    expect(openDate).toHaveFocus()
+    expect(screen.getByRole('alert')).toHaveTextContent('Choose tomorrow or a later date.')
+    expect(screen.getByRole('heading', { name: 'Keep one occasion together' })).toBeInTheDocument()
+    expect((await store.list()).filter(({ kind }) => kind === 'special')).toHaveLength(0)
+
+    fireEvent.change(openDate, { target: { value: '2026-09-20' } })
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+    expect(openDate).not.toHaveAttribute('aria-invalid')
   })
 
   it('admits only one special Capsule when the form submits twice in one turn', async () => {
@@ -686,6 +722,60 @@ describe('CapsulesPage', () => {
       name: 'Demo only: Preview Lea’s wedding recap',
     })).not.toBeInTheDocument()
     expect(screen.queryByRole('dialog', { name: capsule.title })).not.toBeInTheDocument()
+  })
+
+  it('plays and exports the bundled Demo Day recap without mounting its locked photo', async () => {
+    const user = userEvent.setup()
+    const capsule = lockedSpecialCapsule('smac-demo-day', 'SMAC Demo Day', 4)
+    const store = createMemoryCapsuleStore([capsule])
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      {
+        ok: true,
+        blob: async () => new Blob(['public demo frame'], { type: 'image/png' }),
+      } as Response,
+    )
+    nativeRecapMocks.isNativeCapsuleRecapAvailable.mockReturnValue(true)
+
+    try {
+      render(<CapsulesPage now={testNow} store={store} />)
+
+      const card = (await screen.findByRole('heading', {
+        name: capsule.title,
+      })).closest('article')!
+      expect(card.querySelector('img')).toBeNull()
+
+      await user.click(within(card).getByRole('button', {
+        name: 'Play SMAC Demo Day sample recap',
+      }))
+
+      const dialog = screen.getByRole('dialog', { name: capsule.title })
+      expect(within(dialog).getByText('Demo preview')).toBeInTheDocument()
+      expect(within(dialog).getByText('Bubble demo')).toBeInTheDocument()
+      expect(dialog.querySelector('img')).toHaveAttribute(
+        'src',
+        '/assets/journal/demo/demo-album-sunday.png',
+      )
+      expect(card.querySelector('img')).toBeNull()
+
+      await user.click(within(dialog).getByRole('button', { name: 'Save video' }))
+
+      await waitFor(() => {
+        expect(fetchSpy).toHaveBeenCalledTimes(3)
+        expect(fetchSpy.mock.calls.map(([source]) => source)).toEqual([
+          '/assets/journal/demo/demo-album-sunday.png',
+          '/assets/panoramas/sunday-dinner-demo.jpg',
+          '/assets/capsules/demo-locked-capsule-photos.png',
+        ])
+        expect(nativeRecapMocks.stageNativeCapsuleRecapImage).toHaveBeenCalledTimes(3)
+        expect(nativeRecapMocks.renderNativeCapsuleRecap).toHaveBeenCalledTimes(1)
+        expect(nativeRecapMocks.shareNativeCapsuleRecap).toHaveBeenCalledTimes(1)
+      })
+      expect(within(dialog).getByRole('status')).toHaveTextContent(
+        'Your recap is ready to save or share.',
+      )
+    } finally {
+      fetchSpy.mockRestore()
+    }
   })
 
   it('demo-opens only the selected Capsule and includes its local pending photo', async () => {

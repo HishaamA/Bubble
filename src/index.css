@@ -81,6 +81,17 @@ select {
   -webkit-tap-highlight-color: transparent;
 }
 
+/* Leave breathing room when the focused control is revealed inside any of the
+   app's independently scrolling pages, drawers, or bottom sheets. */
+:is(
+  input:not([type='checkbox']):not([type='radio']):not([type='range']):not([type='file']),
+  textarea,
+  select,
+  [contenteditable]:not([contenteditable='false'])
+) {
+  scroll-margin-block: 1.25rem;
+}
+
 code,
 kbd,
 samp {

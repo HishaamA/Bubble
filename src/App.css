@@ -1395,6 +1395,18 @@
   transform: scale(0.95);
 }
 
+/* The keyboard already occupies the lower viewport. Removing primary chrome
+   while editing gives the focused field and its submit action that space. */
+html[data-keyboard-open='true'] .tab-bar {
+  display: none;
+}
+
+@media (hover: none) and (pointer: coarse) {
+  html[data-text-entry-active='true'] .tab-bar {
+    display: none;
+  }
+}
+
 @media (max-width: 22rem) {
   .app-viewport {
     --bottom-chrome-height: 3.7rem;
@@ -1823,7 +1835,8 @@
 }
 
 @media (min-width: 42rem) and (min-height: 46rem) {
-  .app-viewport:not([data-keyboard-open='true']) {
+  html:not([data-keyboard-open='true']):not([data-text-entry-active='true'])
+    .app-viewport {
     height: min(94svh, 58rem);
     height: min(94dvh, 58rem);
     margin-top: 3svh;

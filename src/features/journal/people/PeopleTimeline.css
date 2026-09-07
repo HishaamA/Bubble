@@ -749,9 +749,10 @@
 }
 
 .journal-page .people-timeline__manage-panel .people-timeline__rename-form input {
-  border-color: rgba(53, 17, 41, 0.28);
+  border-color: var(--theme-field-border, rgba(53, 17, 41, 0.48));
   color: var(--journal-paper-ink, #351129);
-  background: #fffaf0;
+  background: var(--theme-field-surface, #fffaf0);
+  caret-color: var(--journal-paper-ink, #351129);
 }
 
 .journal-page .people-timeline__manage-panel .people-timeline__form-actions button:first-child,
@@ -767,9 +768,9 @@
 }
 
 .journal-page .people-timeline__manage-panel .people-timeline__face-picker {
-  border-color: rgba(53, 17, 41, 0.28);
+  border-color: var(--theme-field-border, rgba(53, 17, 41, 0.48));
   color: #67485c;
-  background: #fffaf0;
+  background: var(--theme-field-surface, #fffaf0);
 }
 
 .journal-page .people-timeline__manage-panel .people-timeline__face-picker-action {

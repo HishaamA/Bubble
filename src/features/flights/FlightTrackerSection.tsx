@@ -1315,7 +1315,7 @@ function FlightTrackerBody({
                       <span className="flight-card__duration">{duration} · Direct</span>
                       <div>
                         <span>{flight.snapshot.actualArrival ? 'Arrived' : 'Arrive'}</span>
-                        <strong>{cancelled ? 'Not available' : formatTicketTime(arrival, flight.snapshot.destination.timeZone) ?? 'Not available'}</strong>
+                        <strong>{cancelled ? 'Not applicable' : formatTicketTime(arrival, flight.snapshot.destination.timeZone) ?? 'Not available'}</strong>
                         <small>{cancelled ? 'No estimate' : formatDayMonth(flight.travelDate)}</small>
                         {cancelled ? <span className="flight-tracker__sr-only">No ETA</span> : null}
                       </div>

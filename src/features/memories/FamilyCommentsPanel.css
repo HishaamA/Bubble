@@ -35,6 +35,15 @@
   pointer-events: auto;
 }
 
+/* Primary navigation is hidden while composing on a touch device, so the
+   comments drawer can use the newly visible strip above the keyboard. */
+@media (hover: none) and (pointer: coarse) {
+  html[data-text-entry-active='true'] .family-comments-panel {
+    top: max(calc(var(--app-page-top) + 0.5rem), 0.75rem);
+    bottom: max(0.75rem, var(--safe-bottom));
+  }
+}
+
 .family-comments-panel__header {
   display: grid;
   grid-template-columns: 2.45rem minmax(0, 1fr) 2.75rem;
@@ -237,8 +246,14 @@
   outline: none;
 }
 
+.family-comments-panel__composer textarea::placeholder {
+  color: rgb(255 255 255 / 58%);
+  opacity: 1;
+}
+
 .family-comments-panel__composer textarea:focus {
-  border-color: rgb(225 177 106 / 48%);
+  border-color: rgb(225 177 106 / 72%);
+  box-shadow: 0 0 0 3px rgb(225 177 106 / 12%);
 }
 
 .family-comments-panel__composer button {

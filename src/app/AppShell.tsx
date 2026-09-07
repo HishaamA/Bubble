@@ -1,17 +1,16 @@
 import { Capacitor } from '@capacitor/core'
-import { useEffect, useRef, type PropsWithChildren } from 'react'
+import { useEffect, type PropsWithChildren } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { Icon } from '../components/Icon'
 import { useAuth } from '../features/auth/authContext'
 import { Capture360Shortcut } from '../features/capture/Capture360Shortcut'
 import {
   blurActiveTextControl,
-  installAppViewportGeometrySync,
   synchronizeAppViewportGeometry,
 } from './appViewportGeometry'
 import { AppTabBar } from './AppTabBar'
 
-/** Owns persistent viewport geometry, primary navigation, and global shortcuts. */
+/** Owns member-route navigation, global shortcuts, and route focus cleanup. */
 export function AppShell({ children }: PropsWithChildren) {
   const { status: authStatus } = useAuth()
   const location = useLocation()
@@ -24,32 +23,19 @@ export function AppShell({ children }: PropsWithChildren) {
     showPrimaryChrome && !location.pathname.startsWith('/capture')
   const showMomentsShortcuts = showPrimaryChrome && location.pathname === '/'
   const nativeApp = Capacitor.isNativePlatform()
-  const viewportRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
-    const viewport = viewportRef.current
-    if (!viewport) return
-    // Capacitor keeps one WebView alive across routes. Mirror the native safe
-    // area and visual viewport onto that persistent shell instead of sizing
-    // every screen independently.
-    return installAppViewportGeometrySync(viewport)
-  }, [])
-
-  useEffect(() => {
-    const viewport = viewportRef.current
-    if (!viewport) return
-
     // iOS can keep the software keyboard attached to an input after a route
     // change. Blurring first prevents the next page from inheriting its height.
     blurActiveTextControl()
-    synchronizeAppViewportGeometry(viewport)
+    synchronizeAppViewportGeometry(document.documentElement)
     const frame = window.requestAnimationFrame(() => {
-      synchronizeAppViewportGeometry(viewport)
+      synchronizeAppViewportGeometry(document.documentElement)
     })
     // A final pass catches the delayed viewport animation after the keyboard
     // or native navigation chrome finishes moving.
     const settled = window.setTimeout(() => {
-      synchronizeAppViewportGeometry(viewport)
+      synchronizeAppViewportGeometry(document.documentElement)
     }, 350)
 
     return () => {
@@ -60,7 +46,6 @@ export function AppShell({ children }: PropsWithChildren) {
 
   return (
     <div
-      ref={viewportRef}
       className={`app-viewport${nativeApp ? ' app-viewport--native' : ''}`}
       data-app-shell={nativeApp ? 'native' : 'web'}
     >

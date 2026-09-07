@@ -81,6 +81,13 @@
   --theme-on-canvas-muted: color-mix(in srgb, var(--theme-paper) 72%, transparent);
   --theme-surface: var(--theme-canvas-soft);
   --theme-surface-deep: var(--theme-canvas-deep);
+  /* Form controls need to read as writable areas without becoming white utility
+   * boxes. These opaque roles keep ink, placeholder, and border contrast stable
+   * on every cream-paper surface while retaining the selected colour story. */
+  --theme-field-surface: color-mix(in srgb, var(--theme-action-soft) 28%, white);
+  --theme-field-border: color-mix(in srgb, var(--theme-ink) 54%, transparent);
+  --theme-field-placeholder: color-mix(in srgb, var(--theme-ink) 70%, var(--theme-paper));
+  --theme-field-focus: var(--theme-action);
   /*
    * The shell owns the one full-screen backdrop. Feature pages are transparent
    * over it, which prevents a route from introducing a second gradient or a
@@ -984,20 +991,40 @@
   background: var(--theme-action);
 }
 
+:root[data-bubble-theme] .person-scrapbook__details-grid label {
+  border-color: var(--theme-field-border);
+}
+
 :root[data-bubble-theme] .person-scrapbook__details-grid label:first-child {
-  background: color-mix(in srgb, var(--theme-action) 22%, var(--theme-paper));
+  background: color-mix(in srgb, var(--theme-action) 32%, var(--theme-paper));
 }
 
 :root[data-bubble-theme] .person-scrapbook__details-grid label:nth-child(2) {
-  background: color-mix(in srgb, var(--theme-secondary) 26%, var(--theme-paper));
+  background: color-mix(in srgb, var(--theme-secondary) 36%, var(--theme-paper));
 }
 
 :root[data-bubble-theme] .person-scrapbook__details-grid label:nth-child(3) {
-  background: color-mix(in srgb, var(--theme-panel) 24%, var(--theme-paper));
+  background: color-mix(in srgb, var(--theme-panel) 34%, var(--theme-paper));
 }
 
 :root[data-bubble-theme] .person-scrapbook__details-grid label:nth-child(4) {
-  background: color-mix(in srgb, var(--theme-tertiary) 23%, var(--theme-paper));
+  background: color-mix(in srgb, var(--theme-tertiary) 33%, var(--theme-paper));
+}
+
+:root[data-bubble-theme] .person-scrapbook__details-grid :is(input, textarea) {
+  border-color: var(--theme-field-border);
+  color: var(--theme-ink);
+  background: var(--theme-field-surface);
+  caret-color: var(--theme-ink);
+}
+
+:root[data-bubble-theme] .person-scrapbook__details-grid :is(input, textarea)::placeholder {
+  color: var(--theme-field-placeholder);
+}
+
+:root[data-bubble-theme] .person-scrapbook__details-grid :is(input, textarea):focus {
+  border-color: color-mix(in srgb, var(--theme-ink) 76%, transparent);
+  background: var(--theme-field-surface);
 }
 
 :root[data-bubble-theme] .panorama-screen {
@@ -1057,6 +1084,33 @@
   background: color-mix(in srgb, var(--theme-panel) 42%, var(--theme-paper));
 }
 
+/* Plans are written on lined paper, so their controls use the shared tinted
+ * field rather than a nearly transparent layer that disappears into the page. */
+:root[data-bubble-theme] :is(
+  .event-sheet .ks-field input,
+  .event-sheet__task-row input
+) {
+  border-color: var(--theme-field-border);
+  color: var(--theme-ink);
+  background: var(--theme-field-surface);
+  caret-color: var(--theme-ink);
+}
+
+:root[data-bubble-theme] :is(
+  .event-sheet .ks-field input,
+  .event-sheet__task-row input
+)::placeholder {
+  color: var(--theme-field-placeholder);
+}
+
+:root[data-bubble-theme] :is(
+  .event-sheet .ks-field input,
+  .event-sheet__task-row input
+):focus {
+  border-color: var(--theme-field-focus);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--theme-field-focus) 26%, transparent);
+}
+
 :root[data-bubble-theme] .flight-detail__actions .flight-detail__notify,
 :root[data-bubble-theme] .flight-detail__actions .flight-detail__notify[aria-pressed='true'] {
   color: var(--theme-action-ink);
@@ -1086,19 +1140,38 @@
   color: var(--theme-ink);
 }
 
-:root[data-bubble-theme] :is(.flight-field input, .flight-choice__list > button) {
+:root[data-bubble-theme] .flight-field input {
+  border-color: var(--theme-field-border);
+  color: var(--theme-ink);
+  background: var(--theme-field-surface);
+  caret-color: var(--theme-ink);
+}
+
+:root[data-bubble-theme] .flight-choice__list > button {
   border-color: color-mix(in srgb, var(--theme-ink) 28%, transparent);
   color: var(--theme-ink);
   background: color-mix(in srgb, white 42%, var(--theme-paper));
 }
 
 :root[data-bubble-theme] .flight-field input::placeholder {
-  color: color-mix(in srgb, var(--theme-muted) 70%, transparent);
+  color: var(--theme-field-placeholder);
 }
 
 :root[data-bubble-theme] .flight-field input:focus {
-  border-color: var(--theme-action);
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--theme-action) 18%, transparent);
+  border-color: var(--theme-field-focus);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--theme-field-focus) 26%, transparent);
+}
+
+:root[data-bubble-theme] .flight-field input:disabled {
+  border-color: color-mix(in srgb, var(--theme-ink) 30%, transparent);
+  color: color-mix(in srgb, var(--theme-ink) 62%, var(--theme-paper));
+  background: color-mix(in srgb, var(--theme-field-surface) 58%, var(--theme-paper));
+  opacity: 1;
+  -webkit-text-fill-color: color-mix(in srgb, var(--theme-ink) 62%, var(--theme-paper));
+}
+
+:root[data-bubble-theme] .flight-field input:disabled::placeholder {
+  color: color-mix(in srgb, var(--theme-ink) 46%, var(--theme-paper));
 }
 
 :root[data-bubble-theme] .flight-choice__header p {
@@ -1293,10 +1366,14 @@
 }
 
 :root[data-bubble-theme] .email-auth__field input {
-  border-color: color-mix(in srgb, var(--theme-ink) 32%, transparent);
+  border-color: var(--theme-field-border);
   color: var(--theme-ink);
-  background: color-mix(in srgb, var(--theme-paper) 90%, white);
+  background: var(--theme-field-surface);
   caret-color: var(--theme-action);
+}
+
+:root[data-bubble-theme] .email-auth__field input::placeholder {
+  color: var(--theme-field-placeholder);
 }
 
 :root[data-bubble-theme] .email-auth__field input:focus {
@@ -1454,9 +1531,13 @@
 }
 
 :root[data-bubble-theme] .onboarding-family__form input {
-  border-color: color-mix(in srgb, var(--theme-ink) 36%, transparent);
+  border-color: var(--theme-field-border);
   color: var(--theme-ink);
-  background: color-mix(in srgb, var(--theme-paper) 90%, white);
+  background: var(--theme-field-surface);
+}
+
+:root[data-bubble-theme] .onboarding-family__form input::placeholder {
+  color: var(--theme-field-placeholder);
 }
 
 :root[data-bubble-theme] .onboarding-family__form input:focus {
@@ -1614,14 +1695,14 @@
 }
 
 :root[data-bubble-theme] .family-sync :is(input, .family-sync__invite output) {
-  border-color: color-mix(in srgb, var(--theme-ink) 34%, transparent);
+  border-color: var(--theme-field-border);
   color: var(--theme-ink);
-  background: color-mix(in srgb, var(--theme-paper) 90%, white);
+  background: var(--theme-field-surface);
   caret-color: var(--theme-action);
 }
 
 :root[data-bubble-theme] .family-sync input::placeholder {
-  color: color-mix(in srgb, var(--theme-muted) 70%, transparent);
+  color: var(--theme-field-placeholder);
 }
 
 :root[data-bubble-theme] .family-sync input:focus {

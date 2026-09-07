@@ -28,9 +28,10 @@
   );
   position: fixed;
   z-index: 120;
-  inset: 0;
+  inset-block-start: var(--app-visual-viewport-offset-top, 0px);
+  inset-inline: 0;
   inline-size: min(100%, 46rem);
-  block-size: 100dvh;
+  block-size: var(--app-visual-viewport-height, 100dvh);
   margin-inline: auto;
   overflow: hidden;
   isolation: isolate;
@@ -273,7 +274,7 @@
 .guided-panorama-review__sheet {
   display: grid;
   inline-size: 100%;
-  max-block-size: min(35rem, calc(100dvh - var(--review-safe-top) - 2rem));
+  max-block-size: min(35rem, calc(100% - var(--review-safe-top) - 2rem));
   padding: 0.55rem 1rem 1rem;
   overflow-x: hidden;
   overflow-y: auto;
@@ -403,15 +404,26 @@
   min-block-size: 6.4rem;
   padding: 0.82rem;
   resize: vertical;
-  border: 1px solid var(--review-line);
+  border: 1.5px solid color-mix(in srgb, var(--review-text) 36%, transparent);
   border-radius: 0.95rem;
   color: var(--review-text);
-  background: color-mix(in srgb, var(--theme-canvas-deep, #180611) 54%, transparent);
+  background: color-mix(
+    in srgb,
+    var(--theme-canvas-deep, #180611) 84%,
+    var(--theme-canvas-soft, #3a102b)
+  );
+  caret-color: var(--review-action);
   font: 400 0.9rem/1.45 var(--font-ui);
 }
 
 .guided-panorama-review__editor textarea::placeholder {
-  color: color-mix(in srgb, var(--review-text) 34%, transparent);
+  color: color-mix(in srgb, var(--review-text) 62%, transparent);
+  opacity: 1;
+}
+
+.guided-panorama-review__editor textarea:focus {
+  border-color: var(--review-action);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--review-action) 24%, transparent);
 }
 
 .guided-panorama-review__editor-meta {

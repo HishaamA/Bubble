@@ -2304,7 +2304,12 @@
   box-shadow: 0.12rem 0.15rem 0 rgba(72, 20, 47, 0.15);
 }
 
-.flight-field input,
+.flight-field input {
+  border-color: rgba(53, 17, 41, 0.5);
+  color: var(--flight-ink);
+  background: #fff8e8;
+}
+
 .flight-choice__list > button {
   border-color: rgba(75, 24, 50, 0.32);
   color: var(--flight-ink);
@@ -2312,7 +2317,24 @@
 }
 
 .flight-field input::placeholder {
-  color: rgba(53, 17, 41, 0.42);
+  color: rgba(53, 17, 41, 0.62);
+}
+
+.flight-field input:focus {
+  border-color: #a53f5d;
+  box-shadow: 0 0 0 3px rgba(165, 63, 93, 0.2);
+}
+
+.flight-field input:disabled {
+  border-color: rgba(53, 17, 41, 0.3);
+  color: rgba(53, 17, 41, 0.62);
+  background: rgba(255, 248, 232, 0.68);
+  opacity: 1;
+  -webkit-text-fill-color: rgba(53, 17, 41, 0.62);
+}
+
+.flight-field input:disabled::placeholder {
+  color: rgba(53, 17, 41, 0.48);
 }
 
 .flight-sheet__submit,

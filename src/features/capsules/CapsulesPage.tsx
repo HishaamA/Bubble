@@ -503,6 +503,40 @@ function CapsuleLockedCover({ opensAt }: { opensAt: string }) {
 }
 
 const LOCKED_CAPSULE_TEASER_SRC = '/assets/capsules/demo-locked-capsule-photos.png'
+const DEMO_DAY_TITLE = 'SMAC Demo Day'
+const DEMO_DAY_RECAP_SOURCES = [
+  '/assets/journal/demo/demo-album-sunday.png',
+  '/assets/panoramas/sunday-dinner-demo.jpg',
+  LOCKED_CAPSULE_TEASER_SRC,
+] as const
+
+/** Identifies the presentation Capsule without granting access to its locked media. */
+function isDemoDayCapsule(capsule: FamilyCapsule) {
+  return capsule.kind === 'special' && capsule.title.trim().toLocaleLowerCase() === DEMO_DAY_TITLE.toLocaleLowerCase()
+}
+
+/** Builds a public sample recap whose frames are never sourced from the locked Capsule. */
+function createDemoDayRecap(capsule: FamilyCapsule): FamilyCapsule {
+  const photos: CapsulePhoto[] = DEMO_DAY_RECAP_SOURCES.map((source, index) => ({
+    id: `demo-day-photo-${index + 1}`,
+    capsuleId: capsule.id,
+    image: source,
+    thumbnail: source,
+    width: 1200,
+    height: 900,
+    caption: ['Friends arriving', 'Dinner together', 'Little moments'][index],
+    capturedAt: new Date(2026, 8, 5, 18, index * 10).toISOString(),
+    contributorName: 'Bubble demo',
+    ownedByCurrentUser: false,
+    syncStatus: 'synced',
+  }))
+
+  return {
+    ...capsule,
+    photos,
+    totalPhotoCount: photos.length,
+  }
+}
 
 /** Renders synthetic teaser frames that cannot disclose private family photos. */
 function LockedCapsuleTeasers() {
@@ -520,6 +554,22 @@ function LockedCapsuleTeasers() {
         </li>
       ))}
     </ul>
+  )
+}
+
+/**
+ * Provides the paper layers for the featured weekly envelope. They are
+ * deliberately separate from the teaser photos so the pocket can sit in
+ * front of the frames while its open flap remains behind them.
+ */
+function CapsuleEnvelopeLayers() {
+  return (
+    <>
+      <span className="capsule-envelope__back" aria-hidden="true" />
+      <span className="capsule-envelope__front" aria-hidden="true">
+        <span className="capsule-envelope__stitch" />
+      </span>
+    </>
   )
 }
 
@@ -543,8 +593,19 @@ function PhotoStrip({
   // while it is sealed. Besides making the upcoming reveal feel tangible, it
   // guarantees that no family photo is mounted in the DOM before unlock day.
   if (locked && showLockedTeasers) {
+    const photoState = representedPhotoCount === 0
+      ? 'empty'
+      : representedPhotoCount === 1
+        ? 'single'
+        : 'multiple'
+
     return (
-      <div className="capsule-collection__photos" data-locked="true">
+      <div
+        className="capsule-collection__photos capsule-envelope"
+        data-locked="true"
+        data-photo-state={photoState}
+      >
+        <CapsuleEnvelopeLayers />
         <LockedCapsuleTeasers />
         <CapsuleLockedCover opensAt={opensAt} />
       </div>
@@ -625,6 +686,7 @@ function CapsuleCard({
   onChoosePhoto,
   onOpenRecap,
   onDemoUnlock,
+  onOpenDemoDay,
 }: {
   capsule: FamilyCapsule
   now: Date
@@ -635,6 +697,7 @@ function CapsuleCard({
   onChoosePhoto: (event: ChangeEvent<HTMLInputElement>, capsule: FamilyCapsule) => void
   onOpenRecap: (capsule: FamilyCapsule) => void
   onDemoUnlock: (capsule: FamilyCapsule) => void
+  onOpenDemoDay: (capsule: FamilyCapsule) => void
 }) {
   const unlocked = isCapsuleUnlocked(capsule.opensAt, now)
   const canContribute = !unlocked
@@ -642,6 +705,7 @@ function CapsuleCard({
   const pendingPhotoCount = capsule.photos.filter(({ syncStatus }) => syncStatus === 'pending').length
   const recapPhotoCount = capsuleRecapPhotos(capsule.photos).length
   const displayTitle = capsuleDisplayTitle(capsule)
+  const offersDemoDayRecap = isDemoDayCapsule(capsule)
 
   return (
     <article
@@ -703,7 +767,21 @@ function CapsuleCard({
           </button>
         )}
       </div>
-      {allowLockedPreview && !unlocked && capsule.photos.length > 0 ? (
+      {offersDemoDayRecap ? (
+        <button
+          className="capsule-demo-day"
+          type="button"
+          aria-label={`Play ${displayTitle} sample recap`}
+          onClick={() => onOpenDemoDay(capsule)}
+        >
+          <span aria-hidden="true">▶</span>
+          <span>
+            <strong>Demo Day</strong>
+            Play sample recap
+          </span>
+        </button>
+      ) : null}
+      {!offersDemoDayRecap && allowLockedPreview && !unlocked && capsule.photos.length > 0 ? (
         <button
           className="capsule-demo-unlock"
           type="button"
@@ -972,6 +1050,11 @@ export function CapsulesPage({
   const [announcement, setAnnouncement] = useState('')
   const [activeRecapId, setActiveRecapId] = useState('')
   const [demoRecapId, setDemoRecapId] = useState('')
+  const [demoDayRecapId, setDemoDayRecapId] = useState('')
+  const [specialFormErrors, setSpecialFormErrors] = useState<{
+    title?: string
+    openDate?: string
+  }>({})
   const [authoritativeWeeklyId, setAuthoritativeWeeklyId] = useState('')
   const weekKey = toLocalDateInput(startOfCapsuleWeek(clock))
   const clockRef = useRef(clock)
@@ -1162,16 +1245,36 @@ export function CapsulesPage({
   /** Creates a durable special Capsule draft and promotes it through normal sync. */
   async function createSpecialCapsule(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
-    const form = new FormData(event.currentTarget)
+    const formElement = event.currentTarget
+    const form = new FormData(formElement)
     const title = String(form.get('title') ?? '').trim()
     const openDate = String(form.get('openDate') ?? '')
-    if (!title || !openDate) return
+    const earliestOpenDate = toLocalDateInput(addLocalDays(clockRef.current, 1))
+    const errors: { title?: string; openDate?: string } = {}
+
+    if (!title) errors.title = 'Give this Capsule a name.'
+    if (!openDate) {
+      errors.openDate = 'Choose the day this Capsule should open.'
+    } else if (openDate < earliestOpenDate) {
+      errors.openDate = 'Choose tomorrow or a later date.'
+    }
+
+    if (errors.title || errors.openDate) {
+      setSpecialFormErrors(errors)
+      const invalidControl = formElement.elements.namedItem(
+        errors.title ? 'title' : 'openDate',
+      )
+      if (invalidControl instanceof HTMLElement) invalidControl.focus()
+      return
+    }
 
     const opensAt = new Date(`${openDate}T20:00:00`)
     if (Number.isNaN(opensAt.getTime())) {
-      setAnnouncement('Choose a valid day for this Capsule to open.')
+      setSpecialFormErrors({ openDate: 'Choose a valid day for this Capsule to open.' })
       return
     }
+
+    setSpecialFormErrors({})
 
     // A state-only busy flag is too late for two submit events dispatched in
     // the same turn. Acquire the ref before allocating an ID or mutating the
@@ -1217,6 +1320,7 @@ export function CapsulesPage({
   function openRecap(capsule: FamilyCapsule) {
     if (!isCapsuleUnlocked(capsule.opensAt, clockRef.current)) return
     setDemoRecapId('')
+    setDemoDayRecapId('')
     setActiveRecapId(capsule.id)
   }
 
@@ -1227,7 +1331,16 @@ export function CapsulesPage({
     // so a stale handler or programmatic call cannot disclose locked media.
     if (isDevelopmentPreview !== true) return
     if (isCapsuleUnlocked(capsule.opensAt, clockRef.current)) return
+    setDemoDayRecapId('')
     setDemoRecapId(capsule.id)
+    setActiveRecapId(capsule.id)
+  }
+
+  /** Opens the bundled showcase recap while leaving the real Demo Day Capsule sealed. */
+  function openDemoDayRecap(capsule: FamilyCapsule) {
+    if (!isDemoDayCapsule(capsule)) return
+    setDemoRecapId('')
+    setDemoDayRecapId(capsule.id)
     setActiveRecapId(capsule.id)
   }
 
@@ -1235,13 +1348,25 @@ export function CapsulesPage({
   function closeRecap() {
     setActiveRecapId('')
     setDemoRecapId('')
+    setDemoDayRecapId('')
   }
 
   const activeRecapCandidate = capsules.find(({ id }) => id === activeRecapId) ?? null
-  const activeRecap = activeRecapCandidate && (
+  const activeRecapUsesDemoDayMedia = Boolean(
+    activeRecapCandidate &&
+    demoDayRecapId === activeRecapCandidate.id &&
+    isDemoDayCapsule(activeRecapCandidate),
+  )
+  const activeRecapAllowed = activeRecapCandidate && (
     isCapsuleUnlocked(activeRecapCandidate.opensAt, clock) ||
-    (isDevelopmentPreview === true && demoRecapId === activeRecapCandidate.id)
-  ) ? activeRecapCandidate : null
+    (isDevelopmentPreview === true && demoRecapId === activeRecapCandidate.id) ||
+    activeRecapUsesDemoDayMedia
+  )
+  const activeRecap = activeRecapAllowed && activeRecapCandidate
+    ? activeRecapUsesDemoDayMedia
+      ? createDemoDayRecap(activeRecapCandidate)
+      : activeRecapCandidate
+    : null
   const currentWeekly = capsules.find(({ id }) => id === authoritativeWeeklyId) ??
     capsules.find((capsule) => capsule.kind === 'weekly' && capsule.weekStart === weekKey)
   const pastWeeklyRecaps = capsules.filter((capsule) => (
@@ -1267,7 +1392,10 @@ export function CapsulesPage({
           aria-label={creating ? 'Close special Capsule form' : 'Create a special Capsule'}
           aria-expanded={creating}
           disabled={savingSpecialCapsule}
-          onClick={() => setCreating((value) => !value)}
+          onClick={() => {
+            setSpecialFormErrors({})
+            setCreating((value) => !value)
+          }}
         >
           {creating ? '×' : '+'}
         </button>
@@ -1276,18 +1404,54 @@ export function CapsulesPage({
       <p className="capsule-page__announcement" role="status" aria-live="polite">{announcement}</p>
 
       {creating ? (
-        <form className="capsule-special-form" onSubmit={(event) => void createSpecialCapsule(event)}>
+        <form className="capsule-special-form" noValidate onSubmit={(event) => void createSpecialCapsule(event)}>
           <div>
             <p>Special Capsule</p>
             <h2>Keep one occasion together</h2>
           </div>
           <label className="ks-field">
             <span>Name</span>
-            <input name="title" autoFocus maxLength={64} placeholder="Grandpa’s 60th" required />
+            <input
+              name="title"
+              autoFocus
+              maxLength={64}
+              placeholder="Grandpa’s 60th"
+              required
+              aria-invalid={specialFormErrors.title ? 'true' : undefined}
+              aria-describedby={specialFormErrors.title ? 'capsule-title-error' : undefined}
+              onChange={() => {
+                if (specialFormErrors.title) {
+                  setSpecialFormErrors((current) => ({ ...current, title: undefined }))
+                }
+              }}
+            />
+            {specialFormErrors.title ? (
+              <small className="capsule-special-form__error" id="capsule-title-error" role="alert">
+                {specialFormErrors.title}
+              </small>
+            ) : null}
           </label>
           <label className="ks-field">
             <span>Open after</span>
-            <input name="openDate" type="date" min={toLocalDateInput(addLocalDays(clock, 1))} defaultValue={toLocalDateInput(addLocalDays(clock, 7))} required />
+            <input
+              name="openDate"
+              type="date"
+              min={toLocalDateInput(addLocalDays(clock, 1))}
+              defaultValue={toLocalDateInput(addLocalDays(clock, 7))}
+              required
+              aria-invalid={specialFormErrors.openDate ? 'true' : undefined}
+              aria-describedby={specialFormErrors.openDate ? 'capsule-date-error' : undefined}
+              onChange={() => {
+                if (specialFormErrors.openDate) {
+                  setSpecialFormErrors((current) => ({ ...current, openDate: undefined }))
+                }
+              }}
+            />
+            {specialFormErrors.openDate ? (
+              <small className="capsule-special-form__error" id="capsule-date-error" role="alert">
+                {specialFormErrors.openDate}
+              </small>
+            ) : null}
           </label>
           <p>Everyone can add ordinary photos until 8:00 PM on this day.</p>
           <button className="ks-primary-button" type="submit" disabled={savingSpecialCapsule}>
@@ -1323,6 +1487,7 @@ export function CapsulesPage({
             onChoosePhoto={addPhoto}
             onOpenRecap={openRecap}
             onDemoUnlock={openDemoRecap}
+            onOpenDemoDay={openDemoDayRecap}
           />
         </section>
       ) : null}
@@ -1357,6 +1522,7 @@ export function CapsulesPage({
                   onChoosePhoto={addPhoto}
                   onOpenRecap={openRecap}
                   onDemoUnlock={openDemoRecap}
+                  onOpenDemoDay={openDemoDayRecap}
                 />
               </li>
             ))}
@@ -1382,6 +1548,7 @@ export function CapsulesPage({
             onChoosePhoto={addPhoto}
             onOpenRecap={openRecap}
             onDemoUnlock={openDemoRecap}
+            onOpenDemoDay={openDemoDayRecap}
           />
         ))}
         <button
@@ -1402,9 +1569,10 @@ export function CapsulesPage({
       {activeRecap ? (
         <RecapSheet
           capsule={activeRecap}
-          demoMode={demoRecapId === activeRecap.id}
+          demoMode={demoRecapId === activeRecap.id || activeRecapUsesDemoDayMedia}
           onClose={closeRecap}
           onPreparePhotos={async () => {
+            if (activeRecapUsesDemoDayMedia) return activeRecap.photos
             const refreshed = await refreshCapsules()
             return refreshed.capsules.find(({ id }) => id === activeRecap.id)?.photos ?? []
           }}

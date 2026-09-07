@@ -9,6 +9,7 @@ import {
 import './index.css'
 import App from './App.tsx'
 import { AuthBootstrapFailure } from './app/AuthBootstrapFailure'
+import { installAppViewportGeometrySync } from './app/appViewportGeometry'
 import './theme/AppTheme.css'
 import { installNativeViewportGeometrySync } from './app/nativeViewportGeometry'
 import { clerkAppearance, clerkLocalization } from './clerkUi'
@@ -19,6 +20,10 @@ import { initializeAppTheme } from './theme/AppTheme'
 
 initializeAppTheme()
 installNativeViewportGeometrySync()
+// One document-level coordinator covers member routes, sign-in, onboarding,
+// and every fixed sheet. It also keeps focused fields visible as the native
+// software keyboard animates rather than making each feature solve it alone.
+installAppViewportGeometrySync(document.documentElement)
 
 /** Fails early with a useful message when the HTML entry point is incomplete. */
 function requireApplicationRoot(): HTMLElement {
