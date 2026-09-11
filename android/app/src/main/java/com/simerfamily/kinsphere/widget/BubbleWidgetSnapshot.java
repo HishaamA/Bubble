@@ -7,9 +7,11 @@ import java.util.Calendar;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Date;
+import java.util.HashSet;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Locale;
+import java.util.Set;
 import java.util.TimeZone;
 import org.json.JSONArray;
 import org.json.JSONException;
@@ -19,14 +21,16 @@ import org.json.JSONObject;
 final class BubbleWidgetSnapshot {
 
     static final int CONTRACT_VERSION = 1;
-    static final int MAX_SNAPSHOT_BYTES = 32 * 1024;
+    static final int MAX_SNAPSHOT_BYTES = 64 * 1024;
     private static final int MAX_SCHEDULE_ENTRIES = 12;
+    private static final int MAX_PAGES = 12;
 
     private static final String[] KINDS = {
         "urgent", "unlock", "today", "capture", "memory", "empty"
     };
     private static final String[] THEMES = { "plum", "forest", "midnight" };
     private static final String[] PRIVACY_VALUES = { "full", "hidden" };
+    private static final String[] PAGE_GROUPS = { "tasks", "photos", "recap", "capture" };
     private static final String[] ISO_PATTERNS = {
         "yyyy-MM-dd'T'HH:mm:ss.SSSXXX",
         "yyyy-MM-dd'T'HH:mm:ssXXX",
@@ -44,6 +48,7 @@ final class BubbleWidgetSnapshot {
     final String route;
     final String privacy;
     final List<ScheduledCard> schedule;
+    final List<Page> pages;
 
     BubbleWidgetSnapshot(
         long generatedAtMillis,
@@ -58,6 +63,36 @@ final class BubbleWidgetSnapshot {
         String privacy,
         List<ScheduledCard> schedule
     ) {
+        this(
+            generatedAtMillis,
+            nextRefreshAtMillis,
+            kind,
+            theme,
+            eyebrow,
+            title,
+            subtitle,
+            badge,
+            route,
+            privacy,
+            schedule,
+            Collections.emptyList()
+        );
+    }
+
+    BubbleWidgetSnapshot(
+        long generatedAtMillis,
+        long nextRefreshAtMillis,
+        String kind,
+        String theme,
+        String eyebrow,
+        String title,
+        String subtitle,
+        String badge,
+        String route,
+        String privacy,
+        List<ScheduledCard> schedule,
+        List<Page> pages
+    ) {
         this.generatedAtMillis = generatedAtMillis;
         this.nextRefreshAtMillis = nextRefreshAtMillis;
         this.kind = kind;
@@ -69,6 +104,7 @@ final class BubbleWidgetSnapshot {
         this.route = route;
         this.privacy = privacy;
         this.schedule = Collections.unmodifiableList(new ArrayList<>(schedule));
+        this.pages = Collections.unmodifiableList(new ArrayList<>(pages));
     }
 
     /** Parses the exact version-one payload, rejecting oversized or unsafe fields. */
@@ -118,6 +154,7 @@ final class BubbleWidgetSnapshot {
             theme,
             privacy
         );
+        List<Page> pages = parsePages(json, privacy);
 
         return new BubbleWidgetSnapshot(
             generatedAt,
@@ -130,7 +167,8 @@ final class BubbleWidgetSnapshot {
             badge,
             route,
             privacy,
-            schedule
+            schedule,
+            pages
         );
     }
 
@@ -148,6 +186,7 @@ final class BubbleWidgetSnapshot {
             "Open camera",
             "/capture?mode=manual",
             "hidden",
+            Collections.emptyList(),
             Collections.emptyList()
         );
     }
@@ -183,7 +222,8 @@ final class BubbleWidgetSnapshot {
                 active.badge,
                 active.route,
                 active.privacy,
-                Collections.emptyList()
+                Collections.emptyList(),
+                pages
             );
         }
         return this;
@@ -207,6 +247,22 @@ final class BubbleWidgetSnapshot {
 
     boolean mayShowThumbnail() {
         return "full".equals(privacy) && ("memory".equals(kind) || "unlock".equals(kind));
+    }
+
+    boolean isCurrentLocalDay(long nowMillis) {
+        return isSameLocalDay(generatedAtMillis, nowMillis);
+    }
+
+    Page findPage(String id) {
+        if (id == null) {
+            return null;
+        }
+        for (Page page : pages) {
+            if (page.id.equals(id)) {
+                return page;
+            }
+        }
+        return null;
     }
 
     String toStorageJson() {
@@ -236,10 +292,99 @@ final class BubbleWidgetSnapshot {
                 }
                 json.put("schedule", scheduled);
             }
+            if (!pages.isEmpty()) {
+                JSONArray pageValues = new JSONArray();
+                for (Page page : pages) {
+                    pageValues.put(page.toJson());
+                }
+                json.put("pages", pageValues);
+            }
             return json.toString();
         } catch (JSONException impossible) {
             throw new IllegalStateException("Validated widget data could not be serialized.", impossible);
         }
+    }
+
+    private static List<Page> parsePages(JSONObject json, String parentPrivacy) {
+        if (!json.has("pages") || json.isNull("pages")) {
+            return Collections.emptyList();
+        }
+        Object raw = json.opt("pages");
+        if (!(raw instanceof JSONArray)) {
+            throw new IllegalArgumentException("pages must be an array.");
+        }
+        JSONArray values = (JSONArray) raw;
+        if (values.length() > MAX_PAGES) {
+            throw new IllegalArgumentException("pages has too many entries.");
+        }
+        if (values.length() > 0 && !"full".equals(parentPrivacy)) {
+            throw new IllegalArgumentException("hidden snapshots cannot contain pages.");
+        }
+
+        String[] allowedKeys = {
+            "id", "group", "kind", "theme", "eyebrow", "title",
+            "subtitle", "badge", "route", "privacy"
+        };
+        List<Page> result = new ArrayList<>();
+        Set<String> ids = new HashSet<>();
+        for (int index = 0; index < values.length(); index += 1) {
+            Object rawPage = values.opt(index);
+            if (!(rawPage instanceof JSONObject)) {
+                throw new IllegalArgumentException("pages entries must be objects.");
+            }
+            JSONObject page = (JSONObject) rawPage;
+            requireOnlyKeys(page, allowedKeys, "page");
+            String id = requireText(page, "id", 120);
+            if (!ids.add(id)) {
+                throw new IllegalArgumentException("page ids must be unique.");
+            }
+            String group = requireEnum(page, "group", PAGE_GROUPS);
+            String kind = requireEnum(page, "kind", KINDS);
+            if (!isSupportedPageKind(group, kind)) {
+                throw new IllegalArgumentException("page group does not match its kind.");
+            }
+            String theme = requireEnum(page, "theme", THEMES);
+            String eyebrow = requireText(page, "eyebrow", 40);
+            String title = requireText(page, "title", 260);
+            String subtitle = optionalText(page, "subtitle", 320);
+            String badge = optionalText(page, "badge", 40);
+            String route = requireText(page, "route", 512);
+            String privacy = requireEnum(page, "privacy", PRIVACY_VALUES);
+            if (!parentPrivacy.equals(privacy) || !isLocalRoute(route)) {
+                throw new IllegalArgumentException("page does not match its snapshot.");
+            }
+            result.add(new Page(
+                id,
+                group,
+                kind,
+                theme,
+                eyebrow,
+                title,
+                subtitle,
+                badge,
+                route,
+                privacy
+            ));
+        }
+        return result;
+    }
+
+    private static String kindForGroup(String group) {
+        switch (group) {
+            case "tasks":
+                return "today";
+            case "photos":
+                return "memory";
+            case "recap":
+                return "unlock";
+            case "capture":
+            default:
+                return "capture";
+        }
+    }
+
+    static boolean isSupportedPageKind(String group, String kind) {
+        return contains(PAGE_GROUPS, group) && kindForGroup(group).equals(kind);
     }
 
     private static List<ScheduledCard> parseSchedule(
@@ -273,7 +418,7 @@ final class BubbleWidgetSnapshot {
                 throw new IllegalArgumentException("schedule entries must be objects.");
             }
             JSONObject entry = (JSONObject) rawEntry;
-            requireOnlyKeys(entry, allowedKeys);
+            requireOnlyKeys(entry, allowedKeys, "schedule");
             long effectiveAt = requireTimestamp(entry, "effectiveAt");
             if (
                 effectiveAt <= previous ||
@@ -439,12 +584,73 @@ final class BubbleWidgetSnapshot {
         return calendar.getTimeInMillis();
     }
 
-    private static void requireOnlyKeys(JSONObject json, String[] allowed) {
+    private static void requireOnlyKeys(JSONObject json, String[] allowed, String label) {
         Iterator<String> keys = json.keys();
         while (keys.hasNext()) {
             if (!contains(allowed, keys.next())) {
-                throw new IllegalArgumentException("schedule contains an unsupported field.");
+                throw new IllegalArgumentException(label + " contains an unsupported field.");
             }
+        }
+    }
+
+    static final class Page {
+        final String id;
+        final String group;
+        final String kind;
+        final String theme;
+        final String eyebrow;
+        final String title;
+        final String subtitle;
+        final String badge;
+        final String route;
+        final String privacy;
+
+        Page(
+            String id,
+            String group,
+            String kind,
+            String theme,
+            String eyebrow,
+            String title,
+            String subtitle,
+            String badge,
+            String route,
+            String privacy
+        ) {
+            this.id = id;
+            this.group = group;
+            this.kind = kind;
+            this.theme = theme;
+            this.eyebrow = eyebrow;
+            this.title = title;
+            this.subtitle = subtitle;
+            this.badge = badge;
+            this.route = route;
+            this.privacy = privacy;
+        }
+
+        boolean mayShowThumbnail() {
+            return "full".equals(privacy) &&
+                ("photos".equals(group) || "recap".equals(group));
+        }
+
+        JSONObject toJson() throws JSONException {
+            JSONObject json = new JSONObject();
+            json.put("id", id);
+            json.put("group", group);
+            json.put("kind", kind);
+            json.put("theme", theme);
+            json.put("eyebrow", eyebrow);
+            json.put("title", title);
+            if (subtitle != null) {
+                json.put("subtitle", subtitle);
+            }
+            if (badge != null) {
+                json.put("badge", badge);
+            }
+            json.put("route", route);
+            json.put("privacy", privacy);
+            return json;
         }
     }
 

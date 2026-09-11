@@ -9,6 +9,7 @@ import {
   synchronizeAppViewportGeometry,
 } from './appViewportGeometry'
 import { AppTabBar } from './AppTabBar'
+import { schedulePrimaryRoutePreloads } from './primaryRoutePreload'
 
 /** Owns member-route navigation, global shortcuts, and route focus cleanup. */
 export function AppShell({ children }: PropsWithChildren) {
@@ -23,6 +24,11 @@ export function AppShell({ children }: PropsWithChildren) {
     showPrimaryChrome && !location.pathname.startsWith('/capture')
   const showMomentsShortcuts = showPrimaryChrome && location.pathname === '/'
   const nativeApp = Capacitor.isNativePlatform()
+
+  useEffect(() => {
+    if (!showPrimaryNavigation) return
+    return schedulePrimaryRoutePreloads(location.pathname)
+  }, [location.pathname, showPrimaryNavigation])
 
   useEffect(() => {
     // iOS can keep the software keyboard attached to an input after a route

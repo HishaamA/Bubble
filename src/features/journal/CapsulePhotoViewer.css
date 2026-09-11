@@ -19,7 +19,8 @@
 }
 
 .journal-photo-viewer__bar {
-  position: relative;
+  position: sticky;
+  top: max(0px, env(safe-area-inset-top), var(--native-safe-area-top, 0px));
   z-index: 2;
   display: grid;
   grid-template-columns: 2.75rem minmax(0, 1fr) 2.75rem;
@@ -29,6 +30,9 @@
   margin: 0 auto 0.7rem;
   align-items: center;
   gap: 0.65rem;
+  padding-block: 0.3rem;
+  background: var(--theme-canvas-deep, #080706);
+  box-shadow: 0 -4rem 0 var(--theme-canvas-deep, #080706);
 }
 
 .journal-photo-viewer__bar > div {
@@ -155,7 +159,7 @@
 .journal-photo-post__figure {
   display: grid;
   width: 100%;
-  min-height: min(65dvh, 31rem);
+  min-height: 0;
   margin: 0;
   overflow: hidden;
   place-items: center;
@@ -165,7 +169,8 @@
 .journal-photo-post__image {
   display: block;
   width: 100%;
-  height: min(65dvh, 31rem);
+  height: auto;
+  max-height: min(52dvh, 29rem);
   object-fit: contain;
   user-select: none;
   -webkit-touch-callout: none;
@@ -173,6 +178,7 @@
 
 .journal-photo-placeholder.journal-photo-post__image {
   display: grid;
+  min-height: 12rem;
   place-items: center;
   color: rgba(237, 187, 132, 0.66);
   background: #15110d;
@@ -310,8 +316,9 @@
 
   .journal-photo-post__figure,
   .journal-photo-post__image {
-    min-height: min(58dvh, 25rem);
-    height: min(58dvh, 25rem);
+    min-height: 0;
+    height: auto;
+    max-height: min(48dvh, 24rem);
   }
 }
 

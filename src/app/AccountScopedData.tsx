@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react'
+import { useEffect, type ReactNode } from 'react'
 import { useAuth } from '../features/auth'
 import {
   FamilyMomentSyncProvider,
@@ -6,6 +6,7 @@ import {
 } from '../features/memories/shared'
 import { useFamilyOnboarding } from '../features/onboarding'
 import { createAccountCacheNamespace } from './accountCacheNamespace'
+import { retainMemberSessionCaches } from './memberSessionCache'
 
 type AccountScopedDataProps = {
   children: ReactNode
@@ -25,6 +26,8 @@ export function AccountScopedData({ children }: AccountScopedDataProps) {
     status === 'signed-in' && user
       ? createAccountCacheNamespace(user.id, familyId)
       : 'signed-out:no-family'
+
+  useEffect(() => retainMemberSessionCaches(cacheNamespace), [cacheNamespace])
 
   return (
     <SharedMomentsProvider

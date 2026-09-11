@@ -193,7 +193,7 @@ describe('SettingsPage', () => {
     })
     expect(persistence.updateProfilePreferences).toHaveBeenCalledWith({
       notificationsEnabled: false,
-    })
+    }, { expectedSubject: 'user_clerk_alice' })
 
     const quietHours = screen.getByRole('switch', {
       name: 'Quiet evenings',
@@ -204,7 +204,7 @@ describe('SettingsPage', () => {
     })
     expect(persistence.updateProfilePreferences).toHaveBeenCalledWith({
       quietHoursEnabled: false,
-    })
+    }, { expectedSubject: 'user_clerk_alice' })
 
     const widgetPreviews = screen.getByRole('switch', {
       name: 'Widget previews',
@@ -220,7 +220,7 @@ describe('SettingsPage', () => {
     })
     expect(persistence.updateProfilePreferences).toHaveBeenCalledWith({
       widgetPreviewsEnabled: true,
-    })
+    }, { expectedSubject: 'user_clerk_alice' })
 
     await user.click(screen.getByRole('button', { name: 'Manage family sharing' }))
     expect(screen.getByRole('heading', { name: 'Family Sync' })).toBeInTheDocument()
@@ -336,7 +336,7 @@ describe('SettingsPage', () => {
 
     expect(persistence.updateProfilePreferences).toHaveBeenCalledWith({
       widgetPreviewsEnabled: false,
-    })
+    }, { expectedSubject: 'user_clerk_alice' })
     expect(window.localStorage.getItem(widgetPrivacyKey)).toBe('hidden')
     view.unmount()
   })

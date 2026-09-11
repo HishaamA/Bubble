@@ -3,7 +3,10 @@ import { eventStorageKey } from '../events/eventStorage'
 import {
   BUBBLE_WIDGET_DATA_CHANGED_EVENT,
   PLAN_CHECKLISTS_STORAGE_KEY,
+  beginWidgetPrivacyChange,
+  confirmWidgetPrivacyChange,
   markWidgetRecapViewed,
+  readPendingWidgetOptOut,
   readViewedWidgetRecaps,
   readWidgetChecklistProgress,
   readWidgetLocalEvents,
@@ -68,5 +71,62 @@ describe('widgetStorage', () => {
     expect(readWidgetPrivacy('subject-b')).toBe('hidden')
     expect(writeWidgetPrivacy('subject-a', 'hidden')).toBe(true)
     expect(readWidgetPrivacy('subject-a')).toBe('hidden')
+  })
+
+  it('keeps a pending opt-out private through hydration and isolated to its account and family', () => {
+    const scope = 'alice:family:a'
+    writeWidgetPrivacy(scope, 'full')
+    writeWidgetPrivacy('alice:family:b', 'full')
+    writeWidgetPrivacy('bob:family:a', 'full')
+    const token = beginWidgetPrivacyChange(scope, 'hidden')
+
+    expect(token).toBeTruthy()
+    expect(readPendingWidgetOptOut(scope)).toBe(token)
+    expect(writeWidgetPrivacy(scope, 'full')).toBe(true)
+    expect(readWidgetPrivacy(scope)).toBe('hidden')
+    expect(readWidgetPrivacy('alice:family:b')).toBe('full')
+    expect(readWidgetPrivacy('bob:family:a')).toBe('full')
+    expect(readPendingWidgetOptOut('alice:family:b')).toBeNull()
+    expect(readPendingWidgetOptOut('bob:family:a')).toBeNull()
+
+    // Even stale/raw persisted full cannot bypass the independent deny marker.
+    window.localStorage.setItem(eventStorageKey('bubble-widget-privacy:v1', scope), 'full')
+    expect(readWidgetPrivacy(scope)).toBe('hidden')
+  })
+
+  it('clears protection only for the latest explicit confirmation, including a renewed opt-in', () => {
+    const firstOptOut = beginWidgetPrivacyChange('subject', 'hidden')
+    const nextOptIn = beginWidgetPrivacyChange('subject', 'full')
+    expect(nextOptIn).not.toBe(firstOptOut)
+    expect(confirmWidgetPrivacyChange('subject', 'hidden', firstOptOut)).toBe(false)
+    expect(readPendingWidgetOptOut('subject')).toBe(nextOptIn)
+    expect(readWidgetPrivacy('subject')).toBe('hidden')
+
+    expect(confirmWidgetPrivacyChange('subject', 'full', nextOptIn)).toBe(true)
+    expect(readPendingWidgetOptOut('subject')).toBeNull()
+    expect(readWidgetPrivacy('subject')).toBe('full')
+
+    const finalOptOut = beginWidgetPrivacyChange('subject', 'hidden')
+    expect(confirmWidgetPrivacyChange('subject', 'full', null)).toBe(false)
+    expect(confirmWidgetPrivacyChange('subject', 'hidden', finalOptOut)).toBe(true)
+    expect(readPendingWidgetOptOut('subject')).toBeNull()
+    expect(readWidgetPrivacy('subject')).toBe('hidden')
+  })
+
+  it('does not republish when hydration or confirmation leaves effective privacy unchanged', () => {
+    const listener = vi.fn()
+    window.addEventListener(BUBBLE_WIDGET_DATA_CHANGED_EVENT, listener)
+
+    writeWidgetPrivacy('subject', 'full')
+    writeWidgetPrivacy('subject', 'full')
+    expect(listener).toHaveBeenCalledTimes(1)
+    const token = beginWidgetPrivacyChange('subject', 'hidden')
+    expect(listener).toHaveBeenCalledTimes(2)
+    writeWidgetPrivacy('subject', 'full')
+    writeWidgetPrivacy('subject', 'hidden')
+    confirmWidgetPrivacyChange('subject', 'hidden', token)
+    expect(listener).toHaveBeenCalledTimes(2)
+
+    window.removeEventListener(BUBBLE_WIDGET_DATA_CHANGED_EVENT, listener)
   })
 })

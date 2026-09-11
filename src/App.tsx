@@ -10,6 +10,7 @@ import {
 import { AccountScopedData } from './app/AccountScopedData'
 import { createAccountCacheNamespace } from './app/accountCacheNamespace'
 import { AppShell } from './app/AppShell'
+import { loadCapsulesRoute, loadJournalRoute, loadMomentsRoute } from './app/primaryRoutePreload'
 import { ErrorBoundary } from './app/ErrorBoundary'
 import { LegacyRouteRedirect } from './app/LegacyRouteRedirect'
 import { AuthProvider, RequireAuthentication } from './features/auth/AuthProvider'
@@ -30,22 +31,22 @@ import './App.css'
 const AuthPage = lazy(() => import('./features/auth/AuthPage').then((module) => ({
   default: module.AuthPage,
 })))
-const MemoriesRoute = lazy(() => import('./app/routes/MemoriesRoutes').then((module) => ({
+const MemoriesRoute = lazy(() => loadMomentsRoute().then((module) => ({
   default: module.MemoriesRoute,
 })))
-const PanoramaRoute = lazy(() => import('./app/routes/MemoriesRoutes').then((module) => ({
+const PanoramaRoute = lazy(() => loadMomentsRoute().then((module) => ({
   default: module.PanoramaRoute,
 })))
 const CaptureRoute = lazy(() => import('./app/routes/CaptureRoute').then((module) => ({
   default: module.CaptureRoute,
 })))
-const JournalRoute = lazy(() => import('./app/routes/JournalRoutes').then((module) => ({
+const JournalRoute = lazy(() => loadJournalRoute().then((module) => ({
   default: module.JournalRoute,
 })))
-const CapsulePhotoRoute = lazy(() => import('./app/routes/JournalRoutes').then((module) => ({
+const CapsulePhotoRoute = lazy(() => loadJournalRoute().then((module) => ({
   default: module.CapsulePhotoRoute,
 })))
-const CapsulesPage = lazy(() => import('./features/capsules/CapsulesPage').then((module) => ({
+const CapsulesPage = lazy(() => loadCapsulesRoute().then((module) => ({
   default: module.CapsulesPage,
 })))
 const SettingsPage = lazy(() => import('./features/profile/ProfilePage').then((module) => ({

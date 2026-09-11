@@ -34,15 +34,11 @@ const mocks = vi.hoisted(() => {
     }),
     rpc: vi.fn(),
   }
-  return { circles, client, membership, preferences, requests }
+  return { circles, client, membership, preferences, requests, identity: vi.fn() }
 })
 
 vi.mock('../../lib/supabase', () => ({
-  getClerkSupabaseIdentity: () => ({
-    subject: 'user_clerk_alice',
-    displayName: 'Alice Ahmed',
-    email: 'alice@example.test',
-  }),
+  getClerkSupabaseIdentity: mocks.identity,
   getSupabaseClient: () => mocks.client,
 }))
 
@@ -90,6 +86,11 @@ function familyRow(role: 'owner' | 'member' = 'owner') {
 
 beforeEach(() => {
   vi.clearAllMocks()
+  mocks.identity.mockReturnValue({
+    subject: 'user_clerk_alice',
+    displayName: 'Alice Ahmed',
+    email: 'alice@example.test',
+  })
   mocks.client.rpc.mockImplementation(async (name: string) => {
     if (name === 'bootstrap_current_user') {
       return { data: [bootstrapRow()], error: null }
@@ -340,5 +341,51 @@ describe('Clerk-backed persistence service', () => {
       p_display_name: 'Alice Ahmed',
       p_email: 'alice@example.test',
     })
+  })
+
+  it('rejects queued preference saves if the expected account is no longer signed in', async () => {
+    mocks.identity.mockReturnValue({ subject: 'user_clerk_bob' })
+
+    await expect(updateProfilePreferences(
+      { notificationsEnabled: false }, { expectedSubject: 'user_clerk_alice' },
+    )).rejects.toThrow('The account changed before your preferences could be saved.')
+
+    expect(mocks.client.rpc).not.toHaveBeenCalled()
+    expect(mocks.preferences.update).not.toHaveBeenCalled()
+  })
+
+  it('rechecks the account after bootstrap before writing preferences', async () => {
+    mocks.client.rpc.mockImplementationOnce(async () => {
+      mocks.identity.mockReturnValue({ subject: 'user_clerk_bob' })
+      return { data: [bootstrapRow()], error: null }
+    })
+
+    await expect(updateProfilePreferences(
+      { quietHoursEnabled: false }, { expectedSubject: 'user_clerk_alice' },
+    )).rejects.toThrow('The account changed before your preferences could be saved.')
+
+    expect(mocks.preferences.update).not.toHaveBeenCalled()
+  })
+
+  it('pins unguarded callers to their original account and rejects a stale response', async () => {
+    mocks.preferences.single.mockImplementationOnce(async () => {
+      mocks.identity.mockReturnValue({ subject: 'user_clerk_bob' })
+      return { data: { widget_previews_enabled: true }, error: null }
+    })
+
+    await expect(updateProfilePreferences({ widgetPreviewsEnabled: true }))
+      .rejects.toThrow('The account changed before your preferences could be saved.')
+
+    expect(mocks.preferences.eq).toHaveBeenCalledWith('user_id', internalUserId)
+    expect(mocks.preferences.update).toHaveBeenCalledTimes(1)
+  })
+
+  it('allows a guarded save only for its mapped original account', async () => {
+    await expect(updateProfilePreferences(
+      { widgetPreviewsEnabled: false }, { expectedSubject: 'user_clerk_alice' },
+    )).resolves.toMatchObject({ widgetPreviewsEnabled: false })
+
+    expect(mocks.preferences.update).toHaveBeenCalledWith({ widget_previews_enabled: false })
+    expect(mocks.preferences.eq).toHaveBeenCalledWith('user_id', internalUserId)
   })
 })

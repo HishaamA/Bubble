@@ -1,5 +1,6 @@
 import { Link, useLocation } from 'react-router-dom'
 import { Icon, type IconName } from '../components/Icon'
+import { preloadPrimaryRoute } from './primaryRoutePreload'
 
 type Tab = {
   label: string
@@ -54,6 +55,16 @@ export function AppTabBar() {
           <Link
             key={tab.path}
             to={tab.path}
+            onPointerDown={() => { void preloadPrimaryRoute(tab.path).catch(() => undefined) }}
+            onFocus={() => { void preloadPrimaryRoute(tab.path).catch(() => undefined) }}
+            onClick={(event) => {
+              // Re-tapping the exact page should not enqueue another history
+              // entry, clear route intent, or restart its loading effects.
+              if (location.pathname === tab.path && !location.search && event.button === 0 &&
+                !event.metaKey && !event.ctrlKey && !event.shiftKey && !event.altKey) {
+                event.preventDefault()
+              }
+            }}
             state={
               preservesJournalContext
                 ? { journalContext: routeState.journalContext }

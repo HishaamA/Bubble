@@ -11,9 +11,11 @@ const maxDimension = 384
  */
 export async function materializeWidgetThumbnail(
   source: CapsuleImageSource,
+  signal?: AbortSignal,
 ): Promise<string | undefined> {
   try {
-    const blob = await sourceBlob(source)
+    if (signal?.aborted) return undefined
+    const blob = await sourceBlob(source, signal)
     if (!blob || blob.size > maxSourceBytes || !blob.type.startsWith('image/')) {
       return undefined
     }
@@ -24,6 +26,7 @@ export async function materializeWidgetThumbnail(
         : undefined
     }
 
+    if (signal?.aborted) return undefined
     const bitmap = await createImageBitmap(blob)
     try {
       const scale = Math.min(1, maxDimension / Math.max(bitmap.width, bitmap.height))
@@ -51,16 +54,26 @@ export async function materializeWidgetThumbnail(
   }
 }
 
-async function sourceBlob(source: CapsuleImageSource) {
+async function sourceBlob(source: CapsuleImageSource, signal?: AbortSignal) {
   if (source instanceof Blob) return source
   if (source.length > 10_000_000) return null
   const url = source.trim()
   if (!url || (!url.startsWith('data:image/') && !url.startsWith('blob:') && !/^https?:\/\//i.test(url))) {
     return null
   }
-  const response = await fetch(url, { cache: 'no-store' })
-  if (!response.ok) return null
-  return await response.blob()
+  const controller = new AbortController()
+  const abort = () => controller.abort()
+  if (signal?.aborted) return null
+  signal?.addEventListener('abort', abort, { once: true })
+  const timeout = setTimeout(abort, 8_000)
+  try {
+    const response = await fetch(url, { cache: 'no-store', signal: controller.signal })
+    if (!response.ok) return null
+    return await response.blob()
+  } finally {
+    clearTimeout(timeout)
+    signal?.removeEventListener('abort', abort)
+  }
 }
 
 function canvasBlob(canvas: HTMLCanvasElement, quality: number) {

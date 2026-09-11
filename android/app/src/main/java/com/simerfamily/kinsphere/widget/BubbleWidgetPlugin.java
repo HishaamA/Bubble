@@ -7,10 +7,16 @@ import com.getcapacitor.PluginCall;
 import com.getcapacitor.PluginMethod;
 import com.getcapacitor.annotation.CapacitorPlugin;
 import java.io.IOException;
+import java.util.Iterator;
+import java.util.LinkedHashMap;
+import java.util.Map;
+import org.json.JSONObject;
 
 /** Receives bounded widget state from the shared Bubble web application. */
 @CapacitorPlugin(name = "BubbleWidget")
 public final class BubbleWidgetPlugin extends Plugin {
+
+    private static final int MAX_PAGE_THUMBNAILS = 8;
 
     @PluginMethod
     public void update(PluginCall call) {
@@ -19,12 +25,21 @@ public final class BubbleWidgetPlugin extends Plugin {
         final BubbleWidgetSnapshot snapshot;
         try {
             snapshot = BubbleWidgetSnapshot.parse(rawSnapshot);
+            if (
+                !snapshot.pages.isEmpty() &&
+                !snapshot.isCurrentLocalDay(System.currentTimeMillis())
+            ) {
+                throw new IllegalArgumentException(
+                    "pages require a snapshot generated on the current local day."
+                );
+            }
         } catch (IllegalArgumentException exception) {
             call.reject(exception.getMessage(), "INVALID_WIDGET_SNAPSHOT", exception);
             return;
         }
 
         if (
+            snapshot.mayShowThumbnail() &&
             rawThumbnail != null &&
             rawThumbnail.length() > BubbleWidgetImages.MAX_BASE64_CHARACTERS
         ) {
@@ -32,14 +47,33 @@ public final class BubbleWidgetPlugin extends Plugin {
             return;
         }
 
+        final Map<String, String> encodedPageThumbnails;
+        try {
+            encodedPageThumbnails = readPageThumbnails(call, snapshot);
+        } catch (IllegalArgumentException exception) {
+            call.reject(exception.getMessage(), "INVALID_WIDGET_THUMBNAIL", exception);
+            return;
+        }
+
         Bitmap thumbnail = null;
+        Map<String, Bitmap> pageThumbnails = new LinkedHashMap<>();
         try {
             if (snapshot.mayShowThumbnail() && rawThumbnail != null) {
                 thumbnail = BubbleWidgetImages.decodeThumbnail(rawThumbnail);
             }
-            BubbleWidgetStore.save(getContext(), snapshot, thumbnail);
+            for (Map.Entry<String, String> entry : encodedPageThumbnails.entrySet()) {
+                pageThumbnails.put(
+                    entry.getKey(),
+                    BubbleWidgetImages.decodeThumbnail(entry.getValue())
+                );
+            }
+            BubbleWidgetStore.save(getContext(), snapshot, thumbnail, pageThumbnails);
             BubbleWidgetScheduler.replace(getContext(), snapshot);
-            BubbleWidgetProvider.updateAll(getContext());
+            if ("hidden".equals(snapshot.privacy)) {
+                BubbleWidgetProvider.showPrivateFallback(getContext());
+            } else {
+                BubbleWidgetProvider.updateAll(getContext());
+            }
 
             JSObject result = new JSObject();
             result.put("updated", true);
@@ -57,7 +91,61 @@ public final class BubbleWidgetPlugin extends Plugin {
             if (thumbnail != null && !thumbnail.isRecycled()) {
                 thumbnail.recycle();
             }
+            for (Bitmap pageThumbnail : pageThumbnails.values()) {
+                if (pageThumbnail != null && !pageThumbnail.isRecycled()) {
+                    pageThumbnail.recycle();
+                }
+            }
         }
+    }
+
+    private static Map<String, String> readPageThumbnails(
+        PluginCall call,
+        BubbleWidgetSnapshot snapshot
+    ) {
+        // A privacy opt-out must not be blocked by stale or malformed media fields.
+        if ("hidden".equals(snapshot.privacy)) {
+            return new LinkedHashMap<>();
+        }
+        Object raw = call.getData().opt("pageThumbnails");
+        if (raw == null || raw == JSONObject.NULL) {
+            return new LinkedHashMap<>();
+        }
+        if (!(raw instanceof JSONObject)) {
+            throw new IllegalArgumentException("pageThumbnails must be an object.");
+        }
+
+        JSONObject object = (JSONObject) raw;
+        if (object.length() > MAX_PAGE_THUMBNAILS) {
+            throw new IllegalArgumentException("pageThumbnails has too many images.");
+        }
+        Map<String, String> result = new LinkedHashMap<>();
+        Iterator<String> keys = object.keys();
+        while (keys.hasNext()) {
+            String pageId = keys.next();
+            BubbleWidgetSnapshot.Page page = snapshot.findPage(pageId);
+            Object value = object.opt(pageId);
+            if (
+                page == null ||
+                !page.mayShowThumbnail() ||
+                !(value instanceof String)
+            ) {
+                throw new IllegalArgumentException(
+                    "pageThumbnails contains an unsupported page image."
+                );
+            }
+            String encoded = (String) value;
+            if (
+                encoded.isEmpty() ||
+                encoded.length() > BubbleWidgetImages.MAX_BASE64_CHARACTERS
+            ) {
+                throw new IllegalArgumentException(
+                    "pageThumbnails contains an image with an unsupported size."
+                );
+            }
+            result.put(pageId, encoded);
+        }
+        return result;
     }
 
     @PluginMethod
@@ -65,7 +153,7 @@ public final class BubbleWidgetPlugin extends Plugin {
         try {
             BubbleWidgetStore.clear(getContext());
             BubbleWidgetScheduler.cancel(getContext());
-            BubbleWidgetProvider.updateAll(getContext());
+            BubbleWidgetProvider.showPrivateFallback(getContext());
             JSObject result = new JSObject();
             result.put("cleared", true);
             call.resolve(result);

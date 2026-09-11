@@ -153,22 +153,71 @@ reveal, bounded hotspot coordinates, and unique job idempotency keys.
 
 ### Home Screen widget
 
-1. The authenticated app selects one small daily card from already-authorized
+1. The authenticated app selects an automatic daily card from already-authorized
    events and Capsules: due soon, newly opened recap, another item today,
    contribution prompt, recent weekly memory, then the private empty state.
+   It also builds a bounded browsing deck: up to four unfinished tasks or plans today,
+   two Capsules unlocked today, six real photos from the immediately previous
+   week's opened Capsule, and a contribution/empty card when applicable and
+   space remains. Future or still-locked media never enters this deck.
 2. A member must explicitly enable **Widget previews** before task names or
    family photos can leave the app surface. The server-confirmed preference is
    mirrored only into that account-and-family's local partition.
-3. The shared client publishes one bounded, versioned snapshot and an optional
-   freshly resized thumbnail through the native bridge. Android stores it in
-   app-private files; iOS uses the App Group
+3. The version-1 snapshot retains its original card and automatic schedule, with
+   an additive optional `pages` array of at most 12 cards. Each page has a stable
+   `id` (at most 120 characters), a `group` (`tasks`, `photos`, `recap`, or
+   `capture`), and the existing card fields. Pages inherit the parent snapshot's
+   local-day expiry and must match its theme and privacy. Images stay outside
+   the JSON: the bridge accepts the legacy `thumbnailBase64` plus an optional
+   `pageThumbnails` map from page ID to resized image data, with at most eight
+   media pages. Android stores snapshots and images in app-private files; iOS
+   uses the App Group
    `group.com.simerfamily.kinsphere.widget` shared with WidgetKit.
-4. Native widgets validate every field and local route, render the selected
-   Plum, Forest, or Midnight card, and fail to generic copy without media after
-   sign-out, invalid data, or local-day rollover.
-5. Taps use an allowlisted app deep link. Recap acknowledgement occurs only
+4. The publisher debounces changes, caches resized thumbnails within the current
+   account/family scope, and skips unchanged native publications. Signed-storage
+   token rotation does not invalidate an otherwise unchanged image, while its
+   origin, path, and image transformations remain part of the cache identity.
+   Privacy changes and account/family changes clear that cache.
+5. Native widgets validate every field, page, and local route; render the selected
+   Plum, Forest, or Midnight card; and fail to generic copy without media after
+   preview opt-out, sign-out, invalid data, or local-day rollover. Media filenames
+   are native-generated, never page IDs or caller-supplied paths. Removing private
+   content also clears saved page selections.
+6. Taps use an allowlisted app deep link. Recap acknowledgement occurs only
    after the signed-in app re-fetches the requested, unlocked family Capsule
    and actually opens its recap.
+
+#### Browsing and keeping a card visible
+
+- **iOS:** The original `BubbleWidget` kind remains the automatic widget. On
+  iOS 17 and later, previous/next App Intent buttons browse eligible cards
+  without launching the app. Once chosen, a page remains selected across
+  same-day snapshot updates by stable page ID, until it disappears, expires, or
+  previews are disabled. Selection is stored per widget kind, not per placed
+  instance. Before manual selection, the original automatic schedule still
+  applies. Separate **Bubble Tasks**, **Bubble Photos**, and **Bubble Recap**
+  widgets filter the same deck; an empty category shows its own generic prompt,
+  never another category's private content.
+- **iOS swipe setup:** All four widgets use the small Home Screen size. Add the
+  desired category widgets, then drag one onto another to make an iOS widget
+  stack. In **Edit Stack**, disable **Smart Rotate** and **Widget Suggestions**
+  to keep the category the user swipes to. This is the supported swipe mechanism
+  on iOS, including iOS 15/16 where the in-widget paging buttons are unavailable.
+  WidgetKit controls the outer rounded-square shape and does not expose a custom
+  swipe gesture for Bubble to replace the system stack. See Apple's
+  [widget and stack instructions](https://support.apple.com/en-ie/118610).
+- **Android:** A native `StackView` supports direct vertical swiping through the
+  deck inside the 2x2 widget. Bubble never automatically advances or explicitly
+  resets its displayed child; stable page IDs, unchanged-publication suppression,
+  and quiet same-day timer refreshes help retain the current card. The launcher
+  owns the swipe position, so persistence is best-effort across changed decks,
+  launcher restarts, resizing, or removing and re-adding the widget. There is no
+  cross-device or app-managed Android page-selection setting.
+
+The layouts fill their available widget area with bounded text, full-bleed media,
+and subtle doodles. A recap is a poster/play affordance, not an inline autoplaying
+video; tapping opens the recap in the app. Photo reactions are also performed in
+the authenticated in-app photo destination, not directly on the Home Screen.
 
 Widget extensions never hold Supabase or Clerk credentials and do not perform
 background family fetches. Native timelines can expire or redraw a stored

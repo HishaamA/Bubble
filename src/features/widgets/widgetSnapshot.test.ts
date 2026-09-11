@@ -226,6 +226,21 @@ describe('selectBubbleWidget', () => {
     )
   })
 
+  it.each(['image', 'photo', 'IMG_4065.PNG', 'FullSizeRender.jpg'])('replaces generic caption %s with readable widget copy', (caption) => {
+    const lastWeek = capsule({
+      weekStart: '2026-08-31',
+      opensAt: new Date(2026, 8, 7, 0).toISOString(),
+      closesAt: new Date(2026, 8, 7, 0).toISOString(),
+      photos: [photo({ caption })],
+    })
+    expect(select({ authorizedCapsules: [lastWeek] }).snapshot).toMatchObject({
+      kind: 'memory',
+      eyebrow: 'Last week',
+      title: 'A little memory',
+      subtitle: 'Mum',
+    })
+  })
+
   it('falls through to calm empty when last week has no synced photo', () => {
     const older = capsule({
       id: 'older-weekly',
@@ -442,5 +457,212 @@ describe('selectBubbleWidgetTimeline', () => {
     expect(new TextEncoder().encode(
       JSON.stringify(selection.snapshot),
     ).byteLength).toBeLessThan(32 * 1_024)
+  })
+})
+
+describe('widget browsing pages', () => {
+  function timeline(overrides: Partial<SelectBubbleWidgetInput> = {}) {
+    return selectBubbleWidgetTimeline({
+      now,
+      theme: 'plum',
+      privacy: 'full',
+      events: [],
+      authorizedCapsules: [],
+      ...overrides,
+    })
+  }
+
+  function lastWeek(overrides: Partial<FamilyCapsule> = {}) {
+    return capsule({
+      id: 'last-week',
+      weekStart: '2026-08-31',
+      opensAt: new Date(2026, 8, 7).toISOString(),
+      closesAt: new Date(2026, 8, 7).toISOString(),
+      photos: [photo({
+        capsuleId: 'last-week',
+        capturedAt: new Date(2026, 8, 6, 18).toISOString(),
+      })],
+      ...overrides,
+    })
+  }
+
+  it('keeps tasks and last week’s photos browsable alongside the automatic urgent card', () => {
+    const selection = timeline({
+      events: [event({
+        startsAt: at(19),
+        tasks: [{ id: 'cake', label: 'Bring the cake' }],
+      })],
+      authorizedCapsules: [lastWeek()],
+    })
+
+    expect(selection.snapshot.kind).toBe('urgent')
+    expect(selection.snapshot.pages).toEqual([
+      expect.objectContaining({
+        group: 'tasks', title: 'Bring the cake', route: '/journal?section=plans',
+      }),
+      expect.objectContaining({
+        group: 'photos', title: 'Sunday dinner', route: '/journal/photo/last-week/photo-1',
+      }),
+    ])
+    const photoPage = selection.snapshot.pages?.find((page) => page.group === 'photos')
+    expect(photoPage).toBeDefined()
+    expect(selection.pageThumbnails?.[photoPage!.id]).toBe('https://example.test/thumb.jpg')
+    expect(JSON.stringify(selection.snapshot.pages)).not.toContain('https://')
+  })
+
+  it('bounds the deck to four tasks, two recaps, six photos, and eight media sources', () => {
+    const recentRecaps = Array.from({ length: 3 }, (_, index) => capsule({
+      id: `recap-${index}`,
+      kind: 'special',
+      opensAt: at(17, index),
+      photos: [photo({ thumbnail: `https://example.test/recap-${index}.jpg` })],
+    }))
+    const selection = timeline({
+      events: [event({
+        tasks: Array.from({ length: 8 }, (_, index) => ({
+          id: `task-${index}`, label: `Task ${index}`,
+        })),
+      })],
+      authorizedCapsules: [
+        ...recentRecaps,
+        lastWeek({
+          photos: Array.from({ length: 10 }, (_, index) => photo({
+            id: `memory-${index}`,
+            capsuleId: 'last-week',
+            capturedAt: new Date(2026, 8, 6, 12, index).toISOString(),
+            thumbnail: `https://example.test/memory-${index}.jpg`,
+          })),
+        }),
+      ],
+    })
+    const pages = selection.snapshot.pages ?? []
+
+    expect(pages).toHaveLength(12)
+    expect(pages.filter((page) => page.group === 'tasks')).toHaveLength(4)
+    expect(pages.filter((page) => page.group === 'recap')).toHaveLength(2)
+    expect(pages.filter((page) => page.group === 'photos')).toHaveLength(6)
+    expect(new Set(pages.map((page) => page.id)).size).toBe(12)
+    expect(Object.keys(selection.pageThumbnails ?? {})).toHaveLength(8)
+    expect(Object.keys(selection.pageThumbnails ?? {})).toEqual(
+      pages.filter((page) => page.group !== 'tasks').map((page) => page.id),
+    )
+  })
+
+  it('strips the entire deck, media sources, and sensitive copy when previews are hidden', () => {
+    const selection = timeline({
+      privacy: 'hidden',
+      events: [event({ tasks: [{ id: 'private-task', label: 'Private appointment' }] })],
+      authorizedCapsules: [
+        capsule({ title: 'Private celebration' }),
+        lastWeek({ photos: [photo({ caption: 'Private caption' })] }),
+      ],
+    })
+
+    expect(selection.snapshot.pages).toBeUndefined()
+    expect(selection.pageThumbnails).toBeUndefined()
+    expect(selection.thumbnail).toBeUndefined()
+    expect(JSON.stringify(selection)).not.toMatch(/Private|https:\/\//)
+    expect(selection.snapshot.privacy).toBe('hidden')
+    expect(selection.snapshot.schedule?.every((entry) => entry.privacy === 'hidden')).toBe(true)
+  })
+
+  it('excludes locked and local-only Capsules and photos that are not synced or dated', () => {
+    const selection = timeline({
+      authorizedCapsules: [
+        capsule({
+          id: 'locked', title: 'Locked secret',
+          opensAt: new Date(2026, 8, 12, 13).toISOString(),
+          closesAt: new Date(2026, 8, 12, 13).toISOString(),
+          photos: [photo({ thumbnail: 'https://example.test/locked.jpg' })],
+        }),
+        capsule({
+          id: 'local-only', title: 'Local secret', familySynced: false,
+          photos: [photo({ thumbnail: 'https://example.test/local-only.jpg' })],
+        }),
+        lastWeek({
+          photos: [
+            photo({ id: 'allowed', caption: 'Shared memory', thumbnail: 'https://example.test/allowed.jpg' }),
+            photo({ id: 'pending', syncStatus: 'pending', thumbnail: 'https://example.test/pending.jpg' }),
+            photo({ id: 'undated', capturedAt: 'invalid-date', thumbnail: 'https://example.test/undated.jpg' }),
+          ],
+        }),
+      ],
+    })
+
+    expect(selection.snapshot.pages).toEqual([
+      expect.objectContaining({ group: 'photos', route: '/journal/photo/last-week/allowed' }),
+    ])
+    expect(Object.values(selection.pageThumbnails ?? {})).toEqual(['https://example.test/allowed.jpg'])
+    expect(JSON.stringify(selection)).not.toMatch(/Locked secret|Local secret|locked\.jpg|local-only\.jpg|pending\.jpg|undated\.jpg/)
+  })
+
+  it('omits completed checklists and future-day tasks while keeping today’s remaining actions', () => {
+    const selection = timeline({
+      events: [
+        event({
+          id: 'today', tasks: [
+            { id: 'done', label: 'Finished task' },
+            { id: 'remaining', label: 'Today’s task' },
+          ], completedTaskIds: ['done'],
+        }),
+        event({
+          id: 'all-done', title: 'Completed plan',
+          tasks: [{ id: 'complete', label: 'Finished checklist' }],
+          completedTaskIds: ['complete'],
+        }),
+        event({
+          id: 'tomorrow', startsAt: new Date(2026, 8, 12, 9).toISOString(),
+          tasks: [{ id: 'tomorrow-task', label: 'Tomorrow’s task' }],
+        }),
+        event({ id: 'event-only', title: 'Dinner together', startsAt: at(22) }),
+      ],
+    })
+
+    expect(selection.snapshot.pages?.map((page) => page.title)).toEqual([
+      'Today’s task', 'Dinner together',
+    ])
+    expect(selection.snapshot.pages?.every((page) => page.group === 'tasks')).toBe(true)
+  })
+
+  it('keeps task page IDs stable when labels change and tasks or events are reordered', () => {
+    const original = [
+      event({
+        id: 'first-event',
+        tasks: [{ id: 'one', label: 'Original one' }, { id: 'two', label: 'Original two' }],
+      }),
+      event({ id: 'second-event', tasks: [{ id: 'one', label: 'Other event task' }] }),
+    ]
+    const before = timeline({ events: original }).snapshot.pages ?? []
+    const after = timeline({ events: [
+      original[1],
+      { ...original[0], tasks: [{ id: 'two', label: 'Renamed two' }, { id: 'one', label: 'Renamed one' }] },
+    ] }).snapshot.pages ?? []
+    const idFor = (pages: typeof before, title: string) => pages.find((page) => page.title === title)?.id
+
+    expect(before).toHaveLength(3)
+    expect(after).toHaveLength(3)
+    expect(idFor(after, 'Renamed one')).toBe(idFor(before, 'Original one'))
+    expect(idFor(after, 'Renamed two')).toBe(idFor(before, 'Original two'))
+    expect(idFor(after, 'Other event task')).toBe(idFor(before, 'Other event task'))
+    expect(new Set(before.map((page) => page.id)).size).toBe(3)
+    expect(new Set(after.map((page) => page.id))).toEqual(new Set(before.map((page) => page.id)))
+  })
+
+  it('keeps a viewed recap browsable without repeating it as the automatic card', () => {
+    const selection = timeline({
+      events: [event({ startsAt: at(21) })],
+      authorizedCapsules: [capsule({ id: 'viewed-recap', kind: 'special', title: 'Demo day' })],
+      viewedRecapIds: new Set(['viewed-recap']),
+    })
+
+    expect(selection.snapshot.kind).toBe('today')
+    expect(selection.snapshot.title).toBe('Family dinner')
+    expect(selection.snapshot.pages).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        group: 'recap',
+        title: 'Demo day is ready',
+        route: '/capsule?recap=viewed-recap&source=widget',
+      }),
+    ]))
   })
 })

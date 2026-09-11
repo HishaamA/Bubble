@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
+  applyAppViewportGeometry,
   blurActiveTextControl,
   installAppViewportGeometrySync,
   isTextEntryControl,
@@ -61,6 +62,19 @@ afterEach(() => {
 })
 
 describe('app viewport geometry', () => {
+  it('does not invalidate styles again when tab changes leave geometry unchanged', () => {
+    const shell = document.createElement('div')
+    const write = vi.spyOn(shell.style, 'setProperty')
+    const geometry = { height: 874, offsetTop: 0, keyboardOpen: false }
+    applyAppViewportGeometry(shell, geometry)
+    expect(write).toHaveBeenCalledTimes(2)
+    for (let index = 0; index < 10; index++) applyAppViewportGeometry(shell, geometry)
+    expect(write).toHaveBeenCalledTimes(2)
+    applyAppViewportGeometry(shell, { ...geometry, height: 420, keyboardOpen: true })
+    expect(write).toHaveBeenCalledTimes(3)
+    expect(shell).toHaveAttribute('data-keyboard-open', 'true')
+  })
+
   it('shrinks the shell to the keyboard-adjusted viewport and restores it', () => {
     setLayoutHeight(844)
     const visualViewport = installVisualViewport({ height: 844 })

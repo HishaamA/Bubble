@@ -1,9 +1,45 @@
-import { render, screen, within } from '@testing-library/react'
-import { MemoryRouter } from 'react-router-dom'
-import { describe, expect, it } from 'vitest'
+import { fireEvent, render, screen, within } from '@testing-library/react'
+import { MemoryRouter, useLocation } from 'react-router-dom'
+import { describe, expect, it, vi } from 'vitest'
 import { AppTabBar } from './AppTabBar'
+import { preloadPrimaryRoute } from './primaryRoutePreload'
+
+vi.mock('./primaryRoutePreload', () => ({ preloadPrimaryRoute: vi.fn().mockResolvedValue(undefined) }))
+
+function LocationProbe() {
+  const location = useLocation()
+  return <output data-testid="location">{JSON.stringify(location)}</output>
+}
 
 describe('AppTabBar', () => {
+  it('keeps repeated taps on the current page from adding navigation work', () => {
+    render(<MemoryRouter initialEntries={[{ pathname: '/journal', state: { section: 'plans' } }]}>
+      <AppTabBar /><LocationProbe />
+    </MemoryRouter>)
+    const before = screen.getByTestId('location').textContent
+    for (let index = 0; index < 8; index++) fireEvent.click(screen.getByRole('link', { name: 'Journal' }))
+    expect(screen.getByTestId('location').textContent).toBe(before)
+  })
+
+  it('follows the latest destination during rapid tab changes', () => {
+    render(<MemoryRouter><AppTabBar /><LocationProbe /></MemoryRouter>)
+    for (const name of ['Journal', 'Capsule', 'Moments', 'Journal', 'Moments', 'Capsule']) {
+      fireEvent.click(screen.getByRole('link', { name }))
+    }
+    expect(JSON.parse(screen.getByTestId('location').textContent ?? '{}').pathname).toBe('/capsule')
+    expect(screen.getByRole('link', { name: 'Capsule' })).toHaveAttribute('aria-current', 'page')
+  })
+
+  it('warms a destination on touch-down or keyboard focus without navigating', () => {
+    vi.mocked(preloadPrimaryRoute).mockClear()
+    render(<MemoryRouter><AppTabBar /><LocationProbe /></MemoryRouter>)
+    fireEvent.pointerDown(screen.getByRole('link', { name: 'Journal' }))
+    fireEvent.focus(screen.getByRole('link', { name: 'Capsule' }))
+    expect(preloadPrimaryRoute).toHaveBeenNthCalledWith(1, '/journal')
+    expect(preloadPrimaryRoute).toHaveBeenNthCalledWith(2, '/capsule')
+    expect(JSON.parse(screen.getByTestId('location').textContent ?? '{}').pathname).toBe('/')
+  })
+
   it('shows the three primary destinations', () => {
     render(
       <MemoryRouter>

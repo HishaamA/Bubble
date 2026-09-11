@@ -70,9 +70,18 @@ export function applyAppViewportGeometry(
   element: HTMLElement,
   geometry: AppViewportGeometry,
 ): void {
-  element.style.setProperty('--app-visual-viewport-height', `${geometry.height}px`)
-  element.style.setProperty('--app-visual-viewport-offset-top', `${geometry.offsetTop}px`)
-  element.dataset.keyboardOpen = geometry.keyboardOpen ? 'true' : 'false'
+  const height = `${geometry.height}px`
+  const offset = `${geometry.offsetTop}px`
+  const keyboard = geometry.keyboardOpen ? 'true' : 'false'
+  // Repeated tab taps do not change viewport geometry. Avoid invalidating
+  // styles across a photo-heavy page three times for the same dimensions.
+  if (element.style.getPropertyValue('--app-visual-viewport-height') !== height) {
+    element.style.setProperty('--app-visual-viewport-height', height)
+  }
+  if (element.style.getPropertyValue('--app-visual-viewport-offset-top') !== offset) {
+    element.style.setProperty('--app-visual-viewport-offset-top', offset)
+  }
+  if (element.dataset.keyboardOpen !== keyboard) element.dataset.keyboardOpen = keyboard
 }
 
 /** Reads and applies the current browser viewport in one operation. */

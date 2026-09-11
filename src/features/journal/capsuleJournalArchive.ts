@@ -1,4 +1,6 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useSyncExternalStore } from 'react'
+import { createMemberSessionCache } from '../../app/memberSessionCache'
+import { CAPSULES_CHANGED_EVENT } from '../capsules/capsuleChanges'
 import {
   createDefaultCapsuleStore,
   createMemoryCapsuleStore,
@@ -114,26 +116,144 @@ export function unlockedCapsulePhotos(
   }).sort((left, right) => left.capturedAt.localeCompare(right.capturedAt))
 }
 
-/** Loads local data first, then opportunistically refreshes and caches family data. */
-async function loadArchive(store: CapsuleStore) {
-  let localCapsules: FamilyCapsule[] = []
-  try {
-    localCapsules = await store.list()
-  } catch {
-    // Family sync can still populate the read-only Journal archive.
-  }
+const archiveWarmLifetimeMs = 30_000
 
-  try {
-    const merged = mergeJournalCapsules(
-      localCapsules,
-      await fetchFamilyCapsules(),
-    )
-    await Promise.all(merged.map((capsule) => store.save(capsule)))
-      .catch(() => undefined)
-    return merged
-  } catch {
-    return localCapsules
+type ArchiveSnapshot = { capsules: FamilyCapsule[]; clock: Date; loading: boolean }
+type ArchiveSession = {
+  store: CapsuleStore
+  snapshot: ArchiveSnapshot
+  refreshedAt: number
+  disposed: boolean
+  dirty: boolean
+  epoch: number
+  pending: Promise<FamilyCapsule[]> | null
+  listeners: Set<() => void>
+  subscribe: (listener: () => void) => () => void
+  getSnapshot: () => ArchiveSnapshot
+}
+
+function createArchiveSession(store: CapsuleStore): ArchiveSession {
+  const session: ArchiveSession = {
+    store,
+    snapshot: { capsules: [], clock: new Date(), loading: true },
+    refreshedAt: 0,
+    disposed: false,
+    dirty: false,
+    epoch: 0,
+    pending: null,
+    listeners: new Set(),
+    subscribe: (listener) => {
+      session.listeners.add(listener)
+      return () => { session.listeners.delete(listener) }
+    },
+    getSnapshot: () => session.snapshot,
   }
+  return session
+}
+
+function disposeArchiveSession(session: ArchiveSession) {
+  session.disposed = true
+  session.epoch += 1
+  session.pending = null
+  session.snapshot = { capsules: [], clock: new Date(), loading: true }
+  session.listeners.forEach((listener) => listener())
+  session.listeners.clear()
+}
+
+/** Isolated test/store sessions can be reused during React's effect replay. */
+function resumeIsolatedArchiveSession(session: ArchiveSession) {
+  session.disposed = false
+}
+
+const archiveSessions = createMemberSessionCache<ArchiveSession>({ dispose: disposeArchiveSession })
+let listeningForCapsuleChanges = false
+
+/** Keep warm offline data fresh even when its Journal consumer is unmounted. */
+function listenForCapsuleChanges() {
+  if (listeningForCapsuleChanges) return
+  listeningForCapsuleChanges = true
+  window.addEventListener(CAPSULES_CHANGED_EVENT, (event) => {
+    const namespace = (event as CustomEvent<{ cacheNamespace?: string }>).detail?.cacheNamespace
+    if (typeof namespace !== 'string') return
+    const session = archiveSessions.get(namespace)
+    if (!session || session.disposed) return
+    session.dirty = true
+    if (session.listeners.size > 0) void refreshArchive(session)
+  })
+}
+
+function publishArchive(session: ArchiveSession, capsules: FamilyCapsule[]) {
+  if (session.disposed) return
+  session.snapshot = { capsules, clock: new Date(), loading: false }
+  session.listeners.forEach((listener) => listener())
+}
+
+/** Compares metadata/source identity without re-reading or serializing Blob bytes. */
+function unchangedCapsule(previous: FamilyCapsule | undefined, next: FamilyCapsule) {
+  if (!previous || previous.photos.length !== next.photos.length) return false
+  const metadataKeys = new Set([...Object.keys(previous), ...Object.keys(next)])
+  for (const key of metadataKeys) {
+    if (key !== 'photos' && previous[key as keyof FamilyCapsule] !== next[key as keyof FamilyCapsule]) return false
+  }
+  return next.photos.every((photo, index) => {
+    const oldPhoto = previous.photos[index]
+    const keys = new Set([...Object.keys(oldPhoto), ...Object.keys(photo)])
+    return [...keys].every((key) => oldPhoto[key as keyof CapsulePhoto] === photo[key as keyof CapsulePhoto])
+  })
+}
+
+/** One read worker survives tab remounts; local content publishes before network/persistence. */
+function refreshArchive(session: ArchiveSession, allowWarm = false): Promise<FamilyCapsule[]> {
+  if (session.disposed) return Promise.resolve([])
+  if (session.pending) return session.pending
+  const now = Date.now()
+  const revealPassed = session.snapshot.capsules.some(({ opensAt }) => {
+    const revealTime = new Date(opensAt).getTime()
+    return revealTime > session.snapshot.clock.getTime() && revealTime <= now
+  })
+  if (allowWarm && !session.dirty && !revealPassed && !session.snapshot.loading && now - session.refreshedAt < archiveWarmLifetimeMs) {
+    return Promise.resolve(session.snapshot.capsules)
+  }
+  const epoch = session.epoch
+  session.dirty = false
+  const isCurrent = () => !session.disposed && session.epoch === epoch
+  const request = (async () => {
+    let localCapsules = session.snapshot.capsules
+    try {
+      const stored = await session.store.list()
+      if (!isCurrent()) return []
+      localCapsules = stored
+      publishArchive(session, stored)
+    } catch {
+      // Family sync can still populate the archive if device storage is unavailable.
+    }
+    if (!isCurrent()) return []
+    try {
+      const family = await fetchFamilyCapsules()
+      if (!isCurrent()) return []
+      const merged = mergeJournalCapsules(localCapsules, family)
+      publishArchive(session, merged)
+      const localById = new Map(localCapsules.map((capsule) => [capsule.id, capsule]))
+      for (const capsule of merged) {
+        if (!isCurrent()) return []
+        if (!unchangedCapsule(localById.get(capsule.id), capsule)) {
+          await session.store.save(capsule).catch(() => undefined)
+        }
+      }
+    } catch {
+      if (isCurrent()) publishArchive(session, localCapsules)
+    }
+    if (!isCurrent()) return []
+    session.refreshedAt = Date.now()
+    return session.snapshot.capsules
+  })()
+  session.pending = request
+  void request.finally(() => {
+    if (session.pending === request) session.pending = null
+    // A local edit arriving during this read must not be lost behind its result.
+    if (!session.disposed && session.dirty && session.listeners.size > 0) void refreshArchive(session)
+  })
+  return request
 }
 
 type JournalCapsuleArchiveOptions = {
@@ -148,43 +268,36 @@ export function useJournalCapsuleArchive({
   enabled = true,
   store: suppliedStore,
 }: JournalCapsuleArchiveOptions) {
-  const store = useMemo(
-    () => suppliedStore ?? (
-      typeof window === 'undefined'
+  const session = useMemo(
+    () => {
+      if (suppliedStore) return createArchiveSession(suppliedStore)
+      const cached = archiveSessions.get(cacheNamespace)
+      if (cached && !cached.disposed) return cached
+      const next = createArchiveSession(typeof window === 'undefined'
         ? createMemoryCapsuleStore()
-        : createDefaultCapsuleStore(cacheNamespace)
-    ),
+        : createDefaultCapsuleStore(cacheNamespace))
+      archiveSessions.set(cacheNamespace, next)
+      return next
+    },
     [cacheNamespace, suppliedStore],
   )
-  const [capsules, setCapsules] = useState<FamilyCapsule[]>([])
-  const [loading, setLoading] = useState(enabled)
-  const [clock, setClock] = useState(() => new Date())
+  const snapshot = useSyncExternalStore(session.subscribe, session.getSnapshot, session.getSnapshot)
+  const { capsules, clock } = snapshot
 
   /** Reconciles both sources and advances the reveal clock used by the journal. */
-  const refresh = useCallback(async () => {
-    const next = await loadArchive(store)
-    setCapsules(next)
-    setClock(new Date())
-    return next
-  }, [store])
+  const refresh = useCallback(() => refreshArchive(session), [session])
 
   useEffect(() => {
     if (!enabled) return
-
+    listenForCapsuleChanges()
+    if (suppliedStore) resumeIsolatedArchiveSession(session)
     let active = true
     let unsubscribe: () => void = () => undefined
     // Realtime callbacks may outlive this hook by one task; the active flag
     // prevents those late responses from writing into an unmounted consumer.
-    const refreshWhileActive = async () => {
-      const next = await loadArchive(store)
-      if (active) {
-        setCapsules(next)
-        setClock(new Date())
-        setLoading(false)
-      }
-    }
+    const refreshWhileActive = () => { if (active) void refreshArchive(session) }
 
-    void refreshWhileActive()
+    void refreshArchive(session, true)
     void subscribeToFamilyCapsules(() => void refreshWhileActive())
       .then((stop) => {
         if (active) unsubscribe = stop
@@ -200,14 +313,17 @@ export function useJournalCapsuleArchive({
     }
     window.addEventListener('online', refreshWhenOnline)
     document.addEventListener('visibilitychange', refreshWhenVisible)
+    const signedUrlRefresh = window.setInterval(refreshWhileActive, 50 * 60 * 1000)
 
     return () => {
       active = false
       unsubscribe()
+      window.clearInterval(signedUrlRefresh)
       window.removeEventListener('online', refreshWhenOnline)
       document.removeEventListener('visibilitychange', refreshWhenVisible)
+      if (suppliedStore) disposeArchiveSession(session)
     }
-  }, [enabled, store])
+  }, [enabled, session, suppliedStore])
 
   useEffect(() => {
     if (!enabled || capsules.length === 0) return
@@ -231,7 +347,7 @@ export function useJournalCapsuleArchive({
   return {
     capsules,
     clock,
-    loading,
+    loading: enabled && snapshot.loading,
     refresh,
   }
 }

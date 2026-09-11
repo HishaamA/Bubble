@@ -40,6 +40,11 @@ export type BubbleWidgetScheduleEntry = BubbleWidgetCard & {
   effectiveAt: string
 }
 
+export type BubbleWidgetPage = BubbleWidgetCard & {
+  id: string
+  group: 'tasks' | 'photos' | 'recap' | 'capture'
+}
+
 export type BubbleWidgetSnapshot = BubbleWidgetCard & {
   version: 1
   generatedAt: string
@@ -50,6 +55,8 @@ export type BubbleWidgetSnapshot = BubbleWidgetCard & {
    * into a future entry.
    */
   schedule?: readonly BubbleWidgetScheduleEntry[]
+  /** Current, authorized choices only; the native day/privacy boundary applies to all. */
+  pages?: readonly BubbleWidgetPage[]
 }
 
 export type WidgetEvent = {
@@ -64,6 +71,7 @@ export type WidgetEvent = {
 export type BubbleWidgetSelection = {
   snapshot: BubbleWidgetSnapshot
   thumbnail?: CapsuleImageSource
+  pageThumbnails?: Readonly<Record<string, CapsuleImageSource>>
 }
 
 export type SelectBubbleWidgetInput = {
@@ -83,6 +91,7 @@ type EventAction = {
   event: WidgetEvent
   title: string
   task: boolean
+  taskId?: string
 }
 
 /**
@@ -210,15 +219,14 @@ export function selectBubbleWidget(
     .sort((left, right) => dateMs(right.opensAt) - dateMs(left.opensAt))[0]
   const memoryPhoto = memoryCapsule ? latestPhoto(memoryCapsule.photos) : undefined
   if (memoryCapsule && memoryPhoto) {
-    const caption = memoryPhoto.caption.trim()
     return protectSelection({
       snapshot: {
         ...common,
         kind: 'memory',
-        eyebrow: 'From your family',
-        title: caption || memoryCapsule.title,
+        eyebrow: 'Last week',
+        title: photoTitle(memoryPhoto),
         subtitle: memoryPhoto.contributorName
-          ? `Shared by ${memoryPhoto.contributorName}`
+          ? memoryPhoto.contributorName
           : 'A memory worth keeping',
         route: `/journal/photo/${encodeURIComponent(memoryCapsule.id)}/${encodeURIComponent(memoryPhoto.id)}`,
       },
@@ -271,13 +279,106 @@ export function selectBubbleWidgetTimeline(
     previous = next
   }
 
+  const deck = current.snapshot.privacy === 'full'
+    ? selectCurrentPages(input, current.snapshot)
+    : undefined
   return {
     ...current,
+    ...(deck && Object.keys(deck.thumbnails).length > 0
+      ? { pageThumbnails: deck.thumbnails }
+      : {}),
     snapshot: {
       ...current.snapshot,
       ...(schedule.length > 0 ? { schedule } : {}),
+      ...(deck && deck.pages.length > 0 ? { pages: deck.pages } : {}),
     },
   }
+}
+
+/** Keep tasks available alongside photos, without changing the automatic priority. */
+function selectCurrentPages(input: SelectBubbleWidgetInput, current: BubbleWidgetSnapshot) {
+  const pages: BubbleWidgetPage[] = []
+  const thumbnails: Record<string, CapsuleImageSource> = {}
+  const common = { theme: input.theme, privacy: 'full' as const }
+  const add = (page: BubbleWidgetPage, thumbnail?: CapsuleImageSource) => {
+    if (pages.length >= 12 || pages.some((existing) => existing.id === page.id)) return
+    pages.push(page)
+    if (thumbnail) thumbnails[page.id] = thumbnail
+  }
+  const todayActions = flattenActions(validFutureEvents(input.events, input.now)
+    .filter((event) => isSameLocalDay(new Date(event.startsAt), input.now)))
+  todayActions.slice(0, 4).forEach((action) => add({
+    ...common,
+    id: pageId('tasks', action.event.id, action.taskId ?? ''),
+    group: 'tasks',
+    kind: 'today',
+    eyebrow: action.task ? 'Today’s task' : 'Today',
+    title: action.title,
+    subtitle: eventSubtitle(action.event, action.task),
+    route: '/journal?section=plans',
+  }))
+
+  const opened = input.authorizedCapsules.filter((capsule) => (
+    isServiceAuthorizedCapsule(capsule) && dateMs(capsule.opensAt) <= input.now.getTime()
+  )).sort((left, right) => dateMs(right.opensAt) - dateMs(left.opensAt)
+    || left.id.localeCompare(right.id))
+  opened.filter((capsule) => isSameLocalDay(new Date(capsule.opensAt), input.now))
+    .slice(0, 2).forEach((capsule) => add({
+      ...common,
+      id: pageId('recap', capsule.id),
+      group: 'recap',
+      kind: 'unlock',
+      eyebrow: 'Capsule opened',
+      title: `${capsule.title} is ready`,
+      subtitle: 'Open it together',
+      route: `/capsule?recap=${encodeURIComponent(capsule.id)}&source=widget`,
+    }, latestPhoto(capsule.photos)?.thumbnail))
+
+  const previousWeek = opened.find((capsule) => (
+    capsule.kind === 'weekly' && representsImmediatelyPreviousLocalWeek(capsule, input.now)
+    && latestPhoto(capsule.photos) !== undefined
+  ))
+  if (previousWeek) {
+    [...previousWeek.photos].filter((photo) => (
+      photo.syncStatus === 'synced' && validDate(photo.capturedAt) !== null
+    )).sort((left, right) => dateMs(right.capturedAt) - dateMs(left.capturedAt)
+      || left.id.localeCompare(right.id)).slice(0, 6).forEach((photo) => add({
+      ...common,
+      id: pageId('photos', previousWeek.id, photo.id),
+      group: 'photos',
+      kind: 'memory',
+      eyebrow: 'Last week',
+      title: photoTitle(photo),
+      subtitle: photo.contributorName || 'A memory worth keeping',
+      route: `/journal/photo/${encodeURIComponent(previousWeek.id)}/${encodeURIComponent(photo.id)}`,
+    }, photo.thumbnail))
+  }
+  if (current.kind === 'capture' || current.kind === 'empty') {
+    add({
+      ...widgetCard(current),
+      id: pageId('capture', current.route),
+      group: 'capture',
+    })
+  }
+  return { pages, thumbnails }
+}
+
+function photoTitle(photo: CapsulePhoto) {
+  const caption = photo.caption.trim()
+  return /^(?:image|photo|img[_ -]?\d+|fullsizerender)(?:\.[a-z0-9]+)?$/i.test(caption)
+    ? 'A little memory'
+    : caption || 'A little memory'
+}
+
+/** Stable, bounded UI identifiers, not security tokens or filesystem paths. */
+function pageId(group: BubbleWidgetPage['group'], ...parts: string[]) {
+  let first = 2166136261
+  let second = 5381
+  for (const char of JSON.stringify(parts)) {
+    first = Math.imul(first ^ char.charCodeAt(0), 16777619)
+    second = Math.imul(second, 33) ^ char.charCodeAt(0)
+  }
+  return `${group}-${(first >>> 0).toString(36)}-${(second >>> 0).toString(36)}`
 }
 
 /** Limits contribution nudges to a short early-evening window. */
@@ -340,6 +441,7 @@ function flattenActions(events: readonly WidgetEvent[]): EventAction[] {
       event,
       title: task.label.trim(),
       task: true,
+      taskId: task.id,
     }))
   })
 }

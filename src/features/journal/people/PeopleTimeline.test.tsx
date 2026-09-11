@@ -724,7 +724,10 @@ describe('PeopleTimeline', () => {
       </MemoryRouter>,
     )
 
-    await waitFor(() => expect(scanTimelineFaces).toHaveBeenCalledTimes(1))
+    await waitFor(
+      () => expect(scanTimelineFaces).toHaveBeenCalledTimes(1),
+      { timeout: 2_000 },
+    )
     expect(vi.mocked(scanTimelineFaces).mock.calls[0]?.[0]).toEqual([
       expect.objectContaining({
         key: 'journal-photo:new-direct',
@@ -1087,7 +1090,10 @@ describe('PeopleTimeline', () => {
       capsulePhoto('new', '2024-01-01T12:00:00.000Z', 'New portrait'),
     ], namespace)
 
-    await waitFor(() => expect(scanTimelineFaces).toHaveBeenCalledTimes(1))
+    await waitFor(
+      () => expect(scanTimelineFaces).toHaveBeenCalledTimes(1),
+      { timeout: 2_000 },
+    )
     expect(vi.mocked(scanTimelineFaces).mock.calls[0]?.[0]).toEqual([
       expect.objectContaining({
         key: 'photo:new',
@@ -1099,6 +1105,38 @@ describe('PeopleTimeline', () => {
     expect(await screen.findByRole('slider', {
       name: 'Timeline position for Maya',
     })).toHaveAttribute('aria-valuetext', '1 of 2, January 1, 2020')
+  })
+
+  it('does not start a settling automatic scan after a quick route unmount', async () => {
+    vi.useFakeTimers()
+    try {
+      const namespace = 'people-cancel-settling-scan'
+      storedStates.set(namespace, stateWith({
+        people: [{ id: 'maya', name: 'Maya', createdAt: '2026-01-01' }],
+        faceProfiles: { maya: faceProfile(mayaEmbedding) },
+      }))
+      const view = renderTimeline([
+        capsulePhoto('pending', '2024-01-01T12:00:00.000Z', 'Pending portrait'),
+      ], namespace)
+
+      await act(async () => {
+        await Promise.resolve()
+      })
+      await act(async () => {
+        vi.advanceTimersByTime(699)
+      })
+      expect(scanTimelineFaces).not.toHaveBeenCalled()
+
+      view.unmount()
+      await act(async () => {
+        vi.advanceTimersByTime(1)
+        await Promise.resolve()
+      })
+
+      expect(scanTimelineFaces).not.toHaveBeenCalled()
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it('adds recognized photos from a newly opened Capsule to the matching slider once', async () => {
@@ -1168,7 +1206,10 @@ describe('PeopleTimeline', () => {
     const openedPhotos = [oldPortrait, openedPortrait, openedWithoutFamily]
     view.rerender(renderView(openedPhotos))
 
-    await waitFor(() => expect(scanTimelineFaces).toHaveBeenCalledTimes(1))
+    await waitFor(
+      () => expect(scanTimelineFaces).toHaveBeenCalledTimes(1),
+      { timeout: 2_000 },
+    )
     expect(vi.mocked(scanTimelineFaces).mock.calls[0]?.[0]).toEqual([
       expect.objectContaining({ key: 'photo:opened-portrait' }),
       expect.objectContaining({ key: 'photo:opened-empty-room' }),

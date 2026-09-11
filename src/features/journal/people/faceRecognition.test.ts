@@ -29,6 +29,7 @@ const humanMock = vi.hoisted(() => ({
   disposedBackends: [] as string[],
   resetBackends: [] as string[],
   activeBackend: '',
+  loadedSources: [] as string[],
   detectedSources: [] as string[],
   failWebglInit: false,
   webglTensorDispose: vi.fn(),
@@ -101,7 +102,10 @@ class LoadedImage {
 
   set src(value: string) {
     this.#src = value
-    if (value) queueMicrotask(() => this.onload?.())
+    if (value) {
+      humanMock.loadedSources.push(value)
+      queueMicrotask(() => this.onload?.())
+    }
   }
 }
 
@@ -119,6 +123,14 @@ const photo: PeopleTimelinePhoto = {
   canScanFaces: true,
 }
 
+function deferred<Value>() {
+  let resolve!: (value: Value | PromiseLike<Value>) => void
+  const promise = new Promise<Value>((complete) => {
+    resolve = complete
+  })
+  return { promise, resolve }
+}
+
 describe('on-device face recognition', () => {
   beforeEach(() => {
     vi.resetModules()
@@ -129,12 +141,92 @@ describe('on-device face recognition', () => {
     humanMock.disposedBackends.length = 0
     humanMock.resetBackends.length = 0
     humanMock.activeBackend = ''
+    humanMock.loadedSources.length = 0
     humanMock.detectedSources.length = 0
     humanMock.failWebglInit = false
     humanMock.webglTensorDispose.mockReset()
     humanMock.webglDetect.mockReset()
     humanMock.cpuDetect.mockReset()
     vi.stubGlobal('Image', LoadedImage)
+  })
+
+  it('does not load the face engine or image when already cancelled', async () => {
+    const controller = new AbortController()
+    controller.abort()
+    const { scanTimelineFaces } = await import('./faceRecognition')
+
+    await expect(
+      scanTimelineFaces([photo], undefined, controller.signal),
+    ).resolves.toEqual({
+      faceScans: {},
+      failedPhotoCount: 0,
+      completedPhotoCount: 0,
+    })
+    expect(humanMock.backends).toEqual([])
+    expect(humanMock.loadedSources).toEqual([])
+    expect(humanMock.detectedSources).toEqual([])
+  })
+
+  it('serializes concurrent inference on the process-wide Human runtime', async () => {
+    const firstDetection = deferred<{ face: never[] }>()
+    humanMock.webglDetect
+      .mockImplementationOnce(() => firstDetection.promise)
+      .mockResolvedValueOnce({ face: [] })
+    const { scanTimelineFaces } = await import('./faceRecognition')
+    const secondPhoto = {
+      ...photo,
+      key: 'photo:second',
+      id: 'second',
+      scanSource: '/second-full.jpg',
+    }
+
+    const firstPass = scanTimelineFaces([photo])
+    await vi.waitFor(() => expect(humanMock.webglDetect).toHaveBeenCalledTimes(1))
+    const secondPass = scanTimelineFaces([secondPhoto])
+    await Promise.resolve()
+
+    expect(humanMock.webglDetect).toHaveBeenCalledTimes(1)
+    firstDetection.resolve({ face: [] })
+    await Promise.all([firstPass, secondPass])
+
+    expect(humanMock.webglDetect).toHaveBeenCalledTimes(2)
+    expect(humanMock.detectedSources).toEqual([
+      '/portrait-full.jpg',
+      '/second-full.jpg',
+    ])
+  })
+
+  it('drops a cancelled queued pass before image decode or inference', async () => {
+    const firstDetection = deferred<{ face: never[] }>()
+    humanMock.webglDetect.mockImplementationOnce(() => firstDetection.promise)
+    const { scanTimelineFaces } = await import('./faceRecognition')
+    const controller = new AbortController()
+    const queuedPhoto = {
+      ...photo,
+      key: 'photo:queued',
+      id: 'queued',
+      scanSource: '/queued-full.jpg',
+    }
+
+    const activePass = scanTimelineFaces([photo])
+    await vi.waitFor(() => expect(humanMock.webglDetect).toHaveBeenCalledTimes(1))
+    const cancelledPass = scanTimelineFaces(
+      [queuedPhoto],
+      undefined,
+      controller.signal,
+    )
+    controller.abort()
+    firstDetection.resolve({ face: [] })
+    const [, cancelledResult] = await Promise.all([activePass, cancelledPass])
+
+    expect(cancelledResult).toEqual({
+      faceScans: {},
+      failedPhotoCount: 0,
+      completedPhotoCount: 0,
+    })
+    expect(humanMock.loadedSources).toEqual(['/portrait-full.jpg'])
+    expect(humanMock.detectedSources).toEqual(['/portrait-full.jpg'])
+    expect(humanMock.webglDetect).toHaveBeenCalledTimes(1)
   })
 
   it('retries detection on CPU when WebGL inference fails', async () => {

@@ -120,6 +120,7 @@ export function CapsulePhotoRoute({
 
   return (
     <CapsulePhotoViewer
+      reactionStorageScope={capsuleCacheNamespace}
       capsules={routeData.capsules}
       loading={routeData.loading}
       now={routeData.now}

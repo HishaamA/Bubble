@@ -8,7 +8,20 @@ import java.io.File;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.HashSet;
+import java.util.Iterator;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Locale;
+import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
+import org.json.JSONException;
+import org.json.JSONObject;
 
 /** App-private persistence shared by the Capacitor activity and widget provider. */
 final class BubbleWidgetStore {
@@ -17,9 +30,12 @@ final class BubbleWidgetStore {
     private static final String PREFERENCES = "bubble_widget_v1";
     private static final String SNAPSHOT_KEY = "snapshot";
     private static final String IMAGE_KEY = "thumbnail_file";
+    private static final String PAGE_IMAGES_KEY = "page_image_files";
     private static final String IMAGE_DIRECTORY = "bubble_widget";
     private static final String IMAGE_PREFIX = "thumbnail-";
+    private static final String PAGE_IMAGE_PREFIX = "page-";
     private static final String IMAGE_SUFFIX = ".jpg";
+    private static final int MAX_PAGE_IMAGES = 8;
     private static final String PRIVACY_BOUNDARY_FILE = "bubble-widget-private-v1.json";
 
     private BubbleWidgetStore() {}
@@ -28,10 +44,18 @@ final class BubbleWidgetStore {
     static final class Entry {
         final BubbleWidgetSnapshot snapshot;
         final Bitmap thumbnail;
+        final Map<String, Bitmap> pageThumbnails;
 
-        Entry(BubbleWidgetSnapshot snapshot, Bitmap thumbnail) {
+        Entry(
+            BubbleWidgetSnapshot snapshot,
+            Bitmap thumbnail,
+            Map<String, Bitmap> pageThumbnails
+        ) {
             this.snapshot = snapshot;
             this.thumbnail = thumbnail;
+            this.pageThumbnails = Collections.unmodifiableMap(
+                new LinkedHashMap<>(pageThumbnails)
+            );
         }
     }
 
@@ -52,13 +76,22 @@ final class BubbleWidgetStore {
 
     static void save(Context context, BubbleWidgetSnapshot snapshot, Bitmap thumbnail)
         throws IOException {
+        save(context, snapshot, thumbnail, Collections.emptyMap());
+    }
+
+    static void save(
+        Context context,
+        BubbleWidgetSnapshot snapshot,
+        Bitmap thumbnail,
+        Map<String, Bitmap> pageThumbnails
+    ) throws IOException {
         synchronized (LOCK) {
+            validatePageThumbnails(snapshot, pageThumbnails);
             SharedPreferences preferences = preferences(context);
-            String previousImageName = preferences.getString(IMAGE_KEY, null);
             String privateSnapshot = BubbleWidgetSnapshot
                 .fallback(snapshot.theme)
                 .toStorageJson();
-            PendingThumbnail pending = new PendingThumbnail();
+            PendingImages pending = new PendingImages();
 
             try {
                 runPrivacyTransaction(
@@ -68,9 +101,26 @@ final class BubbleWidgetStore {
                     ),
                     () -> {
                         if (thumbnail != null && snapshot.mayShowThumbnail()) {
-                            writeThumbnail(context, thumbnail, pending);
+                            pending.legacyName = newImageName(IMAGE_PREFIX, 0, "legacy");
+                            writeImage(context, thumbnail, pending.legacyName, pending);
                         }
-                        commitFinalSnapshot(preferences, snapshot, pending.name);
+                        int pageIndex = 0;
+                        for (Map.Entry<String, Bitmap> pageImage : pageThumbnails.entrySet()) {
+                            String name = newImageName(
+                                PAGE_IMAGE_PREFIX,
+                                pageIndex,
+                                pageImage.getKey()
+                            );
+                            writeImage(context, pageImage.getValue(), name, pending);
+                            pending.pageNames.put(pageImage.getKey(), name);
+                            pageIndex += 1;
+                        }
+                        commitFinalSnapshot(
+                            preferences,
+                            snapshot,
+                            pending.legacyName,
+                            pending.pageNames
+                        );
                         removePrivacyBoundaryMarker(context);
                     },
                     () -> {
@@ -79,17 +129,18 @@ final class BubbleWidgetStore {
                             preferences,
                             privateSnapshot
                         );
-                        deleteQuietly(pending.file);
+                        deleteQuietly(pending.files);
                     }
                 );
             } catch (RuntimeException exception) {
                 throw new IOException("Could not persist the widget snapshot.", exception);
             }
 
-            if (previousImageName != null && !previousImageName.equals(pending.name)) {
-                deleteQuietly(resolveImage(context, previousImageName));
+            Set<String> retained = new HashSet<>(pending.pageNames.values());
+            if (pending.legacyName != null) {
+                retained.add(pending.legacyName);
             }
-            deleteUnreferencedImages(context, pending.name, false);
+            deleteUnreferencedImages(context, retained, false);
         }
     }
 
@@ -104,10 +155,25 @@ final class BubbleWidgetStore {
         synchronized (LOCK) {
             SharedPreferences preferences = preferences(context);
             BubbleWidgetSnapshot snapshot = loadSnapshotLocked(context, preferences);
-            Bitmap thumbnail = snapshot != null && snapshot.mayShowThumbnail()
+            boolean currentDay = snapshot != null && snapshot.isCurrentLocalDay(
+                System.currentTimeMillis()
+            );
+            Bitmap thumbnail = currentDay && snapshot.mayShowThumbnail()
                 ? loadThumbnailLocked(context, preferences)
                 : null;
-            consumer.accept(new Entry(snapshot, thumbnail));
+            Map<String, Bitmap> pageThumbnails = currentDay
+                ? loadPageThumbnailsLocked(context, preferences, snapshot)
+                : Collections.emptyMap();
+            if (pageThumbnails == null) {
+                recycle(thumbnail);
+                clearBestEffort(context);
+                BubbleWidgetSnapshot fallback = BubbleWidgetSnapshot.fallback(
+                    snapshot == null ? "plum" : snapshot.theme
+                );
+                consumer.accept(new Entry(fallback, null, Collections.emptyMap()));
+                return;
+            }
+            consumer.accept(new Entry(snapshot, thumbnail, pageThumbnails));
         }
     }
 
@@ -127,7 +193,11 @@ final class BubbleWidgetStore {
                         () -> installPrivacyBoundary(preferences, privateSnapshot)
                     ),
                     () -> {
-                        if (!deleteUnreferencedImages(context, null, true)) {
+                        if (!deleteUnreferencedImages(
+                            context,
+                            Collections.emptySet(),
+                            true
+                        )) {
                             throw new IOException("Could not remove every widget thumbnail.");
                         }
                     },
@@ -255,6 +325,61 @@ final class BubbleWidgetStore {
         return BitmapFactory.decodeFile(file.getAbsolutePath(), options);
     }
 
+    /** Returns null for a corrupt mapping so callers can replace the whole deck privately. */
+    private static Map<String, Bitmap> loadPageThumbnailsLocked(
+        Context context,
+        SharedPreferences preferences,
+        BubbleWidgetSnapshot snapshot
+    ) {
+        String raw = preferences.getString(PAGE_IMAGES_KEY, null);
+        if (raw == null) {
+            return Collections.emptyMap();
+        }
+        if (snapshot == null || !"full".equals(snapshot.privacy)) {
+            return null;
+        }
+
+        Map<String, Bitmap> result = new LinkedHashMap<>();
+        try {
+            JSONObject names = new JSONObject(raw);
+            Iterator<String> keys = names.keys();
+            int count = 0;
+            while (keys.hasNext()) {
+                String pageId = keys.next();
+                count += 1;
+                BubbleWidgetSnapshot.Page page = snapshot.findPage(pageId);
+                Object rawName = names.opt(pageId);
+                if (
+                    count > MAX_PAGE_IMAGES ||
+                    page == null ||
+                    !page.mayShowThumbnail() ||
+                    !(rawName instanceof String)
+                ) {
+                    recycle(result);
+                    return null;
+                }
+                File file = resolveImage(context, (String) rawName);
+                if (file == null) {
+                    recycle(result);
+                    return null;
+                }
+                if (!file.isFile()) {
+                    continue;
+                }
+                BitmapFactory.Options options = new BitmapFactory.Options();
+                options.inPreferredConfig = Bitmap.Config.RGB_565;
+                Bitmap bitmap = BitmapFactory.decodeFile(file.getAbsolutePath(), options);
+                if (bitmap != null) {
+                    result.put(pageId, bitmap);
+                }
+            }
+            return result;
+        } catch (JSONException | RuntimeException exception) {
+            recycle(result);
+            return null;
+        }
+    }
+
     private static void installPrivacyBoundary(
         SharedPreferences preferences,
         String privateSnapshot
@@ -330,7 +455,8 @@ final class BubbleWidgetStore {
     private static void commitFinalSnapshot(
         SharedPreferences preferences,
         BubbleWidgetSnapshot snapshot,
-        String imageName
+        String imageName,
+        Map<String, String> pageImageNames
     ) throws IOException {
         SharedPreferences.Editor editor = preferences
             .edit()
@@ -339,23 +465,35 @@ final class BubbleWidgetStore {
         if (imageName != null) {
             editor.putString(IMAGE_KEY, imageName);
         }
+        if (!pageImageNames.isEmpty()) {
+            JSONObject names = new JSONObject();
+            try {
+                for (Map.Entry<String, String> entry : pageImageNames.entrySet()) {
+                    names.put(entry.getKey(), entry.getValue());
+                }
+            } catch (JSONException impossible) {
+                throw new IOException("Could not serialize widget image references.", impossible);
+            }
+            editor.putString(PAGE_IMAGES_KEY, names.toString());
+        }
         if (!editor.commit()) {
             throw new IOException("Could not persist the widget snapshot.");
         }
     }
 
-    private static void writeThumbnail(
+    private static void writeImage(
         Context context,
         Bitmap thumbnail,
-        PendingThumbnail pending
+        String imageName,
+        PendingImages pending
     ) throws IOException {
         File directory = thumbnailDirectory(context);
         if (!directory.isDirectory() && !directory.mkdirs()) {
             throw new IOException("Could not create the widget image directory.");
         }
-        pending.name = IMAGE_PREFIX + UUID.randomUUID() + IMAGE_SUFFIX;
-        pending.file = new File(directory, pending.name);
-        File temporary = new File(directory, pending.name + ".tmp");
+        File destination = new File(directory, imageName);
+        pending.files.add(destination);
+        File temporary = new File(directory, imageName + ".tmp");
         try (FileOutputStream output = new FileOutputStream(temporary, false)) {
             if (!thumbnail.compress(Bitmap.CompressFormat.JPEG, 84, output)) {
                 throw new IOException("Could not encode the widget thumbnail.");
@@ -366,15 +504,54 @@ final class BubbleWidgetStore {
             deleteQuietly(temporary);
             throw exception;
         }
-        if (!temporary.renameTo(pending.file)) {
+        if (!temporary.renameTo(destination)) {
             deleteQuietly(temporary);
             throw new IOException("Could not store the widget thumbnail.");
         }
     }
 
+    private static void validatePageThumbnails(
+        BubbleWidgetSnapshot snapshot,
+        Map<String, Bitmap> pageThumbnails
+    ) {
+        if (pageThumbnails == null || pageThumbnails.size() > MAX_PAGE_IMAGES) {
+            throw new IllegalArgumentException("pageThumbnails has an unsupported size.");
+        }
+        for (Map.Entry<String, Bitmap> entry : pageThumbnails.entrySet()) {
+            BubbleWidgetSnapshot.Page page = snapshot.findPage(entry.getKey());
+            if (
+                page == null ||
+                !page.mayShowThumbnail() ||
+                entry.getValue() == null ||
+                !"full".equals(snapshot.privacy)
+            ) {
+                throw new IllegalArgumentException("pageThumbnails does not match its snapshot.");
+            }
+        }
+    }
+
+    private static String newImageName(String prefix, int index, String identity) {
+        return prefix + String.format(Locale.US, "%02d", index) + "-" +
+            shortHash(identity) + "-" + UUID.randomUUID() + IMAGE_SUFFIX;
+    }
+
+    private static String shortHash(String value) {
+        try {
+            MessageDigest digest = MessageDigest.getInstance("SHA-256");
+            byte[] bytes = digest.digest(value.getBytes(StandardCharsets.UTF_8));
+            StringBuilder result = new StringBuilder(16);
+            for (int index = 0; index < 8; index += 1) {
+                result.append(String.format(Locale.US, "%02x", bytes[index] & 0xff));
+            }
+            return result.toString();
+        } catch (NoSuchAlgorithmException impossible) {
+            throw new IllegalStateException("SHA-256 is required by Android.", impossible);
+        }
+    }
+
     private static boolean deleteUnreferencedImages(
         Context context,
-        String retainedName,
+        Set<String> retainedNames,
         boolean removeDirectory
     ) {
         File directory = thumbnailDirectory(context);
@@ -385,7 +562,7 @@ final class BubbleWidgetStore {
         boolean deleted = true;
         if (files != null) {
             for (File file : files) {
-                if (retainedName == null || !retainedName.equals(file.getName())) {
+                if (!retainedNames.contains(file.getName())) {
                     try {
                         deleted &= !file.exists() || file.delete();
                     } catch (SecurityException exception) {
@@ -424,9 +601,10 @@ final class BubbleWidgetStore {
     private static File resolveImage(Context context, String imageName) {
         if (
             imageName == null ||
-            !imageName.startsWith(IMAGE_PREFIX) ||
+            (!imageName.startsWith(IMAGE_PREFIX) &&
+                !imageName.startsWith(PAGE_IMAGE_PREFIX)) ||
             !imageName.endsWith(IMAGE_SUFFIX) ||
-            imageName.length() > 96 ||
+            imageName.length() > 120 ||
             imageName.contains("/") ||
             imageName.contains("\\")
         ) {
@@ -445,8 +623,27 @@ final class BubbleWidgetStore {
         }
     }
 
-    private static final class PendingThumbnail {
-        String name;
-        File file;
+    private static void deleteQuietly(List<File> files) {
+        for (File file : files) {
+            deleteQuietly(file);
+        }
+    }
+
+    private static void recycle(Bitmap bitmap) {
+        if (bitmap != null && !bitmap.isRecycled()) {
+            bitmap.recycle();
+        }
+    }
+
+    private static void recycle(Map<String, Bitmap> bitmaps) {
+        for (Bitmap bitmap : bitmaps.values()) {
+            recycle(bitmap);
+        }
+    }
+
+    private static final class PendingImages {
+        String legacyName;
+        final Map<String, String> pageNames = new LinkedHashMap<>();
+        final List<File> files = new ArrayList<>();
     }
 }

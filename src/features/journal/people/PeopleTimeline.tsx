@@ -45,6 +45,7 @@ const FACE_REVIEW_PERSON_ID = 'review-face-matches'
 const MAX_REFERENCE_PHOTO_BYTES = 25 * 1024 * 1024
 const MAX_REFERENCE_PHOTOS_AT_ONCE = 5
 const MAX_FACE_REFERENCES_PER_PERSON = 12
+const AUTOMATIC_FACE_SCAN_SETTLE_MS = 700
 
 type DateDraft = {
   precision: TimelineDatePrecision
@@ -649,7 +650,9 @@ export function PeopleTimeline({
   // it on unmount so late checkpoints cannot retain those objects or update a
   // timeline that is no longer visible.
   useEffect(() => () => {
-    scanController.current?.abort()
+    const activeController = scanController.current
+    activeController?.abort()
+    if (scanController.current === activeController) scanController.current = null
     if (addPersonFocusFrameRef.current !== null) {
       window.cancelAnimationFrame(addPersonFocusFrameRef.current)
     }
@@ -1116,7 +1119,10 @@ export function PeopleTimeline({
   }
 
   /** Runs one cancellable face-scan pass with durable per-photo checkpoints. */
-  const scanPhotos = useCallback(async (automatic = false) => {
+  const scanPhotos = useCallback(async (
+    automatic = false,
+    expectedAutomaticSignature = '',
+  ) => {
     if (scanController.current || scanProgress) return
     if (!Object.keys(timelineStateRef.current.faceProfiles).length) {
       if (!automatic) setScanMessage('Add a face photo for someone before checking uploads.')
@@ -1130,6 +1136,20 @@ export function PeopleTimeline({
       if (!automatic) setScanMessage('Face matching is up to date.')
       return
     }
+    const currentAutomaticSignature = automatic
+      ? automaticScanSignature(
+          timelineStateRef.current.faceProfiles,
+          timelineStateRef.current.faceScans,
+          timelinePhotos,
+        )
+      : ''
+    if (
+      automatic &&
+      (!currentAutomaticSignature || (
+        expectedAutomaticSignature &&
+        expectedAutomaticSignature !== currentAutomaticSignature
+      ))
+    ) return
 
     /*
      * One controller identifies one library pass. Checkpoints are persisted
@@ -1139,6 +1159,7 @@ export function PeopleTimeline({
      */
     const controller = new AbortController()
     scanController.current = controller
+    if (automatic) lastAutomaticScanSignature.current = currentAutomaticSignature
     scanSavedPhotoCount.current = 0
     setScanProgress({ completed: 0, total: unscannedPhotos.length, saved: 0 })
     setPhotoImportMessage('')
@@ -1202,13 +1223,15 @@ export function PeopleTimeline({
         setScanMessage('Face matching is unavailable right now. Manual tagging still works in All photos.')
       }
     } finally {
-      lastAutomaticScanSignature.current = automaticScanSignature(
-        timelineStateRef.current.faceProfiles,
-        timelineStateRef.current.faceScans,
-        timelinePhotos,
-      )
-      if (!controller.signal.aborted) setScanProgress(null)
-      if (scanController.current === controller) scanController.current = null
+      if (scanController.current === controller) {
+        lastAutomaticScanSignature.current = automaticScanSignature(
+          timelineStateRef.current.faceProfiles,
+          timelineStateRef.current.faceScans,
+          timelinePhotos,
+        )
+        if (!controller.signal.aborted) setScanProgress(null)
+        scanController.current = null
+      }
     }
   }, [queueTimelineStateSave, scanProgress, timelinePhotos, updateTimelineState])
 
@@ -1269,8 +1292,14 @@ export function PeopleTimeline({
       lastAutomaticScanSignature.current === pendingScanKey
     ) return
 
-    lastAutomaticScanSignature.current = pendingScanKey
-    void scanPhotos(true)
+    // Journal navigation should get a quiet frame before local model loading
+    // begins. Cleanup cancels the delayed pass when the route unmounts or its
+    // pending work changes; the signature is only claimed inside scanPhotos
+    // after a controller and a still-current queue have actually been created.
+    const settleTimer = window.setTimeout(() => {
+      void scanPhotos(true, pendingScanKey)
+    }, AUTOMATIC_FACE_SCAN_SETTLE_MS)
+    return () => window.clearTimeout(settleTimer)
   }, [
     addingPersonBusy,
     cacheReady,

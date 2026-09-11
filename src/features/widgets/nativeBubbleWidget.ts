@@ -5,6 +5,7 @@ type BubbleWidgetPlugin = {
   update(options: {
     snapshot: string
     thumbnailBase64?: string
+    pageThumbnails?: Readonly<Record<string, string>>
   }): Promise<void>
   clear(): Promise<void>
 }
@@ -22,6 +23,7 @@ export function isNativeBubbleWidgetAvailable() {
 export async function updateNativeBubbleWidget(
   snapshot: BubbleWidgetSnapshot,
   thumbnailBase64?: string,
+  pageThumbnails?: Readonly<Record<string, string>>,
 ) {
   if (!isNativeBubbleWidgetAvailable()) return false
   const update = nativeOperation
@@ -29,6 +31,7 @@ export async function updateNativeBubbleWidget(
     .then(() => plugin.update({
       snapshot: JSON.stringify(snapshot),
       ...(thumbnailBase64 ? { thumbnailBase64 } : {}),
+      ...(pageThumbnails && Object.keys(pageThumbnails).length > 0 ? { pageThumbnails } : {}),
     }))
   nativeOperation = update.catch(() => undefined)
   await update

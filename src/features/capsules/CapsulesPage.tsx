@@ -35,9 +35,12 @@ import {
 } from './recap/nativeCapsuleRecap'
 import { CAPSULE_RECAP_PHOTO_DURATION_MS } from './recap/recapPlan'
 import {
-  createDefaultCapsuleStore,
-  createMemoryCapsuleStore,
-} from './capsuleStore'
+  getCapsuleSession,
+  isCapsuleSessionFresh,
+  refreshCapsuleSession,
+  retainCapsuleSessionDraft,
+  type CapsuleSyncResult,
+} from './capsuleSessionCache'
 import {
   createFamilySpecialCapsule,
   ensureFamilyWeeklyCapsule,
@@ -46,6 +49,7 @@ import {
   uploadFamilyCapsulePhoto,
 } from './capsuleService'
 import { getCapsulePhotoCapturedAt } from './capsulePhotoDate'
+import { notifyLocalCapsulesChanged } from './capsuleChanges'
 import { processCapsuleImage } from './processCapsuleImage'
 import type {
   CapsuleImageSource,
@@ -193,11 +197,6 @@ function mergeCapsules(
   ])
 }
 
-type CapsuleSyncResult = {
-  capsules: FamilyCapsule[]
-  authoritativeWeeklyId: string
-}
-
 /** Makes the local store exactly match the newly reconciled Capsule snapshot. */
 async function persistCapsuleSnapshot(
   store: CapsuleStore,
@@ -219,27 +218,38 @@ async function synchronizeCapsuleSnapshot(input: {
   displayName: string
   now: Date
   localWeekKey: string
+  isCurrent?: () => boolean
 }): Promise<CapsuleSyncResult> {
+  const assertCurrent = () => {
+    if (input.isCurrent?.() === false) throw new Error('This family session has ended.')
+  }
   const saved = await input.store.list()
+  assertCurrent()
   let next = saved
   let authoritativeWeeklyId = ''
 
   try {
     const authoritativeWeekly = await ensureFamilyWeeklyCapsule()
+    assertCurrent()
     if (authoritativeWeekly) {
       authoritativeWeeklyId = authoritativeWeekly.id
       next = mergeCapsules(saved, await fetchFamilyCapsules())
+      assertCurrent()
+      let remoteMutationSucceeded = false
 
       for (let index = 0; index < next.length; index += 1) {
         const capsule = next[index]
         if (capsule.kind !== 'special' || capsule.familySynced !== false) continue
+        assertCurrent()
         try {
           const familyId = await createFamilySpecialCapsule(
             capsule.title,
             capsule.opensAt,
             capsule.id,
           )
+          assertCurrent()
           if (familyId) {
+            remoteMutationSucceeded = true
             next[index] = {
               ...capsule,
               id: familyId,
@@ -268,6 +278,7 @@ async function synchronizeCapsuleSnapshot(input: {
             !photo.thumbnailWidth ||
             !photo.thumbnailHeight
           ) continue
+          assertCurrent()
           try {
             const familyPhotoId = await uploadFamilyCapsulePhoto({
               capsuleId: capsule.id,
@@ -283,7 +294,9 @@ async function synchronizeCapsuleSnapshot(input: {
               caption: photo.caption,
               capturedAt: photo.capturedAt,
             })
+            assertCurrent()
             if (familyPhotoId) {
+              remoteMutationSucceeded = true
               photos[photoIndex] = {
                 ...photo,
                 id: familyPhotoId,
@@ -298,16 +311,20 @@ async function synchronizeCapsuleSnapshot(input: {
         next[capsuleIndex] = { ...capsule, photos }
       }
 
-      try {
-        next = mergeCapsules(next, await fetchFamilyCapsules())
-      } catch {
-        // Successful writes remain in the local snapshot until URLs can refresh.
+      if (remoteMutationSucceeded) {
+        assertCurrent()
+        try {
+          next = mergeCapsules(next, await fetchFamilyCapsules())
+        } catch {
+          // Successful writes remain local until signed URLs can refresh.
+        }
       }
     }
   } catch {
     // No remote family context: keep the account-and-family-scoped local queue.
   }
 
+  assertCurrent()
   if (!authoritativeWeeklyId) {
     const localWeekly = next.find(
       (capsule) => capsule.kind === 'weekly' && capsule.weekStart === input.localWeekKey,
@@ -513,40 +530,6 @@ function CapsuleLockedCover({ opensAt }: { opensAt: string }) {
 }
 
 const LOCKED_CAPSULE_TEASER_SRC = '/assets/capsules/demo-locked-capsule-photos.png'
-const DEMO_DAY_TITLE = 'SMAC Demo Day'
-const DEMO_DAY_RECAP_SOURCES = [
-  '/assets/journal/demo/demo-album-sunday.png',
-  '/assets/panoramas/sunday-dinner-demo.jpg',
-  LOCKED_CAPSULE_TEASER_SRC,
-] as const
-
-/** Identifies the presentation Capsule without granting access to its locked media. */
-function isDemoDayCapsule(capsule: FamilyCapsule) {
-  return capsule.kind === 'special' && capsule.title.trim().toLocaleLowerCase() === DEMO_DAY_TITLE.toLocaleLowerCase()
-}
-
-/** Builds a public sample recap whose frames are never sourced from the locked Capsule. */
-function createDemoDayRecap(capsule: FamilyCapsule): FamilyCapsule {
-  const photos: CapsulePhoto[] = DEMO_DAY_RECAP_SOURCES.map((source, index) => ({
-    id: `demo-day-photo-${index + 1}`,
-    capsuleId: capsule.id,
-    image: source,
-    thumbnail: source,
-    width: 1200,
-    height: 900,
-    caption: ['Friends arriving', 'Dinner together', 'Little moments'][index],
-    capturedAt: new Date(2026, 8, 5, 18, index * 10).toISOString(),
-    contributorName: 'Bubble demo',
-    ownedByCurrentUser: false,
-    syncStatus: 'synced',
-  }))
-
-  return {
-    ...capsule,
-    photos,
-    totalPhotoCount: photos.length,
-  }
-}
 
 /** Renders synthetic teaser frames that cannot disclose private family photos. */
 function LockedCapsuleTeasers() {
@@ -696,7 +679,6 @@ function CapsuleCard({
   onChoosePhoto,
   onOpenRecap,
   onDemoUnlock,
-  onOpenDemoDay,
 }: {
   capsule: FamilyCapsule
   now: Date
@@ -707,7 +689,6 @@ function CapsuleCard({
   onChoosePhoto: (event: ChangeEvent<HTMLInputElement>, capsule: FamilyCapsule) => void
   onOpenRecap: (capsule: FamilyCapsule) => void
   onDemoUnlock: (capsule: FamilyCapsule) => void
-  onOpenDemoDay: (capsule: FamilyCapsule) => void
 }) {
   const unlocked = isCapsuleUnlocked(capsule.opensAt, now)
   const canContribute = !unlocked
@@ -715,7 +696,6 @@ function CapsuleCard({
   const pendingPhotoCount = capsule.photos.filter(({ syncStatus }) => syncStatus === 'pending').length
   const recapPhotoCount = capsuleRecapPhotos(capsule.photos).length
   const displayTitle = capsuleDisplayTitle(capsule)
-  const offersDemoDayRecap = isDemoDayCapsule(capsule)
 
   return (
     <article
@@ -778,21 +758,7 @@ function CapsuleCard({
           </button>
         )}
       </div>
-      {offersDemoDayRecap ? (
-        <button
-          className="capsule-demo-day"
-          type="button"
-          aria-label={`Play ${displayTitle} sample recap`}
-          onClick={() => onOpenDemoDay(capsule)}
-        >
-          <span aria-hidden="true">▶</span>
-          <span>
-            <strong>Demo Day</strong>
-            Play sample recap
-          </span>
-        </button>
-      ) : null}
-      {!offersDemoDayRecap && allowLockedPreview && !unlocked && capsule.photos.length > 0 ? (
+      {allowLockedPreview && !unlocked && capsule.photos.length > 0 ? (
         <button
           className="capsule-demo-unlock"
           type="button"
@@ -1041,48 +1007,65 @@ function RecapSheet({
  * Coordinates weekly and special Capsules across local persistence, family
  * sync, metadata-stripped uploads, and native/browser recap sharing.
  */
-export function CapsulesPage({
+export function CapsulesPage(props: CapsulesPageProps = {}) {
+  const { isDevelopmentPreview, user } = useAuth()
+  const storeSubject = props.cacheNamespace ?? user?.id ?? 'signed-out'
+  return (
+    <MemberCapsulesPage
+      key={storeSubject}
+      {...props}
+      storeSubject={storeSubject}
+      displayName={user?.displayName?.trim() || 'You'}
+      isDevelopmentPreview={isDevelopmentPreview}
+    />
+  )
+}
+
+/** Account-keyed presentation reuses only its bounded session data between tabs. */
+function MemberCapsulesPage({
   now,
   store: suppliedStore,
-  cacheNamespace,
   initialRecapId,
   initialContributionId,
   initialWidgetRequestKey,
   widgetStorageSubject,
-}: CapsulesPageProps = {}) {
-  const { isDevelopmentPreview, user } = useAuth()
-  const subject = user?.id ?? 'signed-out'
-  const storeSubject = cacheNamespace ?? subject
-  const displayName = user?.displayName?.trim() || 'You'
-  const store = useMemo(
-    () => suppliedStore ?? (
-      typeof window === 'undefined'
-        ? createMemoryCapsuleStore()
-        : createDefaultCapsuleStore(storeSubject)
-    ),
+  storeSubject,
+  displayName,
+  isDevelopmentPreview,
+}: CapsulesPageProps & {
+  storeSubject: string
+  displayName: string
+  isDevelopmentPreview?: boolean
+}) {
+  const session = useMemo(
+    () => getCapsuleSession(storeSubject, suppliedStore),
     [storeSubject, suppliedStore],
   )
+  const store = session.store
   const [clock, setClock] = useState(() => new Date(now ?? Date.now()))
-  const [capsules, setCapsules] = useState<FamilyCapsule[]>([])
-  const [loading, setLoading] = useState(true)
+  const [capsules, setCapsules] = useState<FamilyCapsule[]>(() => session.result?.capsules ?? [])
+  const [loading, setLoading] = useState(() => !session.result)
   const [creating, setCreating] = useState(false)
   const [savingSpecialCapsule, setSavingSpecialCapsule] = useState(false)
   const [uploadingCapsuleId, setUploadingCapsuleId] = useState('')
   const [announcement, setAnnouncement] = useState('')
   const [activeRecapId, setActiveRecapId] = useState('')
   const [demoRecapId, setDemoRecapId] = useState('')
-  const [demoDayRecapId, setDemoDayRecapId] = useState('')
   const [widgetContributionId, setWidgetContributionId] = useState('')
   const [specialFormErrors, setSpecialFormErrors] = useState<{
     title?: string
     openDate?: string
   }>({})
-  const [authoritativeWeeklyId, setAuthoritativeWeeklyId] = useState('')
+  const [authoritativeWeeklyId, setAuthoritativeWeeklyId] = useState(() => session.result?.authoritativeWeeklyId ?? '')
   const weekKey = toLocalDateInput(startOfCapsuleWeek(clock))
   const clockRef = useRef(clock)
-  const syncPromiseRef = useRef<Promise<CapsuleSyncResult> | null>(null)
+  const mountedRef = useRef(true)
   const createSpecialCapsuleInFlightRef = useRef(false)
-  const refreshedUnlocksRef = useRef(new Set<string>())
+  const refreshedUnlocksRef = useRef(new Set(
+    (session.result?.capsules ?? [])
+      .filter((capsule) => isCapsuleUnlocked(capsule.opensAt, new Date(session.observedAt)))
+      .map((capsule) => `${capsule.id}:${capsule.opensAt}`),
+  ))
   const handledInitialRecapRef = useRef('')
   const handledInitialContributionRef = useRef('')
   const pendingWidgetRecapAcknowledgementRef = useRef('')
@@ -1091,15 +1074,29 @@ export function CapsulesPage({
     clockRef.current = clock
   }, [clock])
 
+  useEffect(() => {
+    mountedRef.current = true
+    return () => { mountedRef.current = false }
+  }, [])
+
   /** Coalesces concurrent refresh triggers so one snapshot wins each sync cycle. */
   const refreshCapsules = useCallback(async () => {
-    if (syncPromiseRef.current) return syncPromiseRef.current
-    const request = synchronizeCapsuleSnapshot({
+    const requestNow = clockRef.current
+    const result = await refreshCapsuleSession(session, requestNow, () => synchronizeCapsuleSnapshot({
       store,
       displayName,
-      now: clockRef.current,
-      localWeekKey: weekKey,
-    }).then((result) => {
+      now: requestNow,
+      localWeekKey: toLocalDateInput(startOfCapsuleWeek(requestNow)),
+      isCurrent: () => !session.disposed,
+    }))
+    if (mountedRef.current && !session.disposed) {
+      // The authorized response already includes media that was open when it
+      // began. Only a later closed->open boundary needs another refresh.
+      result.capsules.forEach((capsule) => {
+        if (isCapsuleUnlocked(capsule.opensAt, new Date(session.observedAt))) {
+          refreshedUnlocksRef.current.add(`${capsule.id}:${capsule.opensAt}`)
+        }
+      })
       setCapsules(result.capsules)
       setAuthoritativeWeeklyId(result.authoritativeWeeklyId)
       // A homescreen recap tap waits for authorized family data, then opens once.
@@ -1115,7 +1112,6 @@ export function CapsulesPage({
           && capsuleRecapPhotos(capsule.photos).length > 0
         ) {
           setDemoRecapId('')
-          setDemoDayRecapId('')
           pendingWidgetRecapAcknowledgementRef.current = capsule.id
           setActiveRecapId(capsule.id)
         }
@@ -1139,21 +1135,15 @@ export function CapsulesPage({
           setWidgetContributionId(capsule.id)
         }
       }
-      return result
-    })
-    syncPromiseRef.current = request
-    try {
-      return await request
-    } finally {
-      if (syncPromiseRef.current === request) syncPromiseRef.current = null
     }
+    return result
   }, [
     displayName,
     initialContributionId,
     initialRecapId,
     initialWidgetRequestKey,
+    session,
     store,
-    weekKey,
   ])
 
   // A contribution widget tap lands on the exact authorized Capsule and puts
@@ -1185,6 +1175,12 @@ export function CapsulesPage({
   // bootstrap may finish after the user has navigated away.
   useEffect(() => {
     let active = true
+    // Returning to a recently hydrated tab needs no duplicate network or Blob
+    // persistence work. Widget destinations still revalidate before opening.
+    if (!initialRecapId && !initialContributionId && isCapsuleSessionFresh(session, clockRef.current)) {
+      setLoading(false)
+      return
+    }
     void refreshCapsules()
       .then(() => {
         if (active) setLoading(false)
@@ -1197,7 +1193,7 @@ export function CapsulesPage({
     return () => {
       active = false
     }
-  }, [refreshCapsules])
+  }, [initialContributionId, initialRecapId, refreshCapsules, session, weekKey])
 
   // Realtime events are only refresh hints. The full reconciler remains the one
   // source of ordering, validation, local-byte preservation, and retry behavior.
@@ -1205,7 +1201,7 @@ export function CapsulesPage({
     let active = true
     let unsubscribe: () => void = () => undefined
     void subscribeToFamilyCapsules(() => {
-      if (active) void refreshCapsules()
+      if (active) void refreshCapsules().catch(() => undefined)
     })
       .then((stop) => {
         if (active) unsubscribe = stop
@@ -1230,8 +1226,20 @@ export function CapsulesPage({
     newlyUnlocked.forEach((capsule) => {
       refreshedUnlocksRef.current.add(`${capsule.id}:${capsule.opensAt}`)
     })
-    void refreshCapsules()
-  }, [capsules, clock, refreshCapsules])
+    void (async () => {
+      // A refresh that began before this reveal cannot provide its newly
+      // authorized media. Let it finish, then refresh only if still needed.
+      if (session.inFlight) await session.inFlight.catch(() => undefined)
+      if (!mountedRef.current || session.disposed) return
+      if (newlyUnlocked.some((capsule) => new Date(capsule.opensAt).getTime() > session.observedAt)) {
+        await refreshCapsules()
+      }
+    })().catch(() => {
+      newlyUnlocked.forEach((capsule) => {
+        refreshedUnlocksRef.current.delete(`${capsule.id}:${capsule.opensAt}`)
+      })
+    })
+  }, [capsules, clock, refreshCapsules, session])
 
   // Mobile WebViews can miss browser online/visibility events while suspended,
   // so the native lifecycle signal participates in the same idempotent refresh.
@@ -1239,8 +1247,10 @@ export function CapsulesPage({
     let active = true
     let removeNativeListener: (() => Promise<void>) | undefined
     const refreshOnResume = () => {
-      setClock(new Date(now ?? Date.now()))
-      void refreshCapsules()
+      const resumedAt = new Date(now ?? Date.now())
+      clockRef.current = resumedAt
+      setClock(resumedAt)
+      void refreshCapsules().catch(() => undefined)
     }
     const refreshWhenVisible = () => {
       if (document.visibilityState === 'visible') refreshOnResume()
@@ -1265,10 +1275,17 @@ export function CapsulesPage({
 
   /** Applies an optimistic Capsule replacement before making it durable. */
   async function saveCapsule(nextCapsule: FamilyCapsule) {
-    setCapsules((current) => orderCapsules(current.map((capsule) => (
+    const next = orderCapsules((session.result?.capsules ?? capsules).map((capsule) => (
       capsule.id === nextCapsule.id ? nextCapsule : capsule
-    ))))
+    )))
+    setCapsules(next)
+    // Finish any pre-mutation reconciler before it can overwrite the new local
+    // photo. The following explicit refresh must read the durable new record.
+    if (session.inFlight) await session.inFlight.catch(() => undefined)
+    if (session.disposed) throw new Error('This family session has ended.')
     await store.save(nextCapsule)
+    retainCapsuleSessionDraft(session, { capsules: next, authoritativeWeeklyId })
+    notifyLocalCapsulesChanged(storeSubject)
   }
 
   /** Processes one selected photo, stores it locally, then attempts family sync. */
@@ -1383,7 +1400,14 @@ export function CapsulesPage({
     }
     setCapsules((current) => orderCapsules([...current, special]))
     try {
+      if (session.inFlight) await session.inFlight.catch(() => undefined)
+      if (session.disposed) throw new Error('This family session has ended.')
       await store.save(special)
+      retainCapsuleSessionDraft(session, {
+        capsules: orderCapsules([...(session.result?.capsules ?? capsules), special]),
+        authoritativeWeeklyId,
+      })
+      notifyLocalCapsulesChanged(storeSubject)
       const refreshed = await refreshCapsules()
       const synced = refreshed.capsules.some((capsule) => (
         capsule.id === localCapsuleId && capsule.familySynced === true
@@ -1406,7 +1430,6 @@ export function CapsulesPage({
   function openRecap(capsule: FamilyCapsule) {
     if (!isCapsuleUnlocked(capsule.opensAt, clockRef.current)) return
     setDemoRecapId('')
-    setDemoDayRecapId('')
     setActiveRecapId(capsule.id)
   }
 
@@ -1417,41 +1440,23 @@ export function CapsulesPage({
     // so a stale handler or programmatic call cannot disclose locked media.
     if (isDevelopmentPreview !== true) return
     if (isCapsuleUnlocked(capsule.opensAt, clockRef.current)) return
-    setDemoDayRecapId('')
     setDemoRecapId(capsule.id)
     setActiveRecapId(capsule.id)
   }
 
-  /** Opens the bundled showcase recap while leaving the real Demo Day Capsule sealed. */
-  function openDemoDayRecap(capsule: FamilyCapsule) {
-    if (!isDemoDayCapsule(capsule)) return
-    setDemoRecapId('')
-    setDemoDayRecapId(capsule.id)
-    setActiveRecapId(capsule.id)
-  }
-
-  /** Clears both production and preview recap selection state. */
+  /** Clears both production and development-preview recap selection state. */
   function closeRecap() {
     setActiveRecapId('')
     setDemoRecapId('')
-    setDemoDayRecapId('')
   }
 
   const activeRecapCandidate = capsules.find(({ id }) => id === activeRecapId) ?? null
-  const activeRecapUsesDemoDayMedia = Boolean(
-    activeRecapCandidate &&
-    demoDayRecapId === activeRecapCandidate.id &&
-    isDemoDayCapsule(activeRecapCandidate),
-  )
   const activeRecapAllowed = activeRecapCandidate && (
     isCapsuleUnlocked(activeRecapCandidate.opensAt, clock) ||
-    (isDevelopmentPreview === true && demoRecapId === activeRecapCandidate.id) ||
-    activeRecapUsesDemoDayMedia
+    (isDevelopmentPreview === true && demoRecapId === activeRecapCandidate.id)
   )
   const activeRecap = activeRecapAllowed && activeRecapCandidate
-    ? activeRecapUsesDemoDayMedia
-      ? createDemoDayRecap(activeRecapCandidate)
-      : activeRecapCandidate
+    ? activeRecapCandidate
     : null
   const currentWeekly = capsules.find(({ id }) => id === authoritativeWeeklyId) ??
     capsules.find((capsule) => capsule.kind === 'weekly' && capsule.weekStart === weekKey)
@@ -1573,7 +1578,6 @@ export function CapsulesPage({
             onChoosePhoto={addPhoto}
             onOpenRecap={openRecap}
             onDemoUnlock={openDemoRecap}
-            onOpenDemoDay={openDemoDayRecap}
           />
         </section>
       ) : null}
@@ -1608,7 +1612,6 @@ export function CapsulesPage({
                   onChoosePhoto={addPhoto}
                   onOpenRecap={openRecap}
                   onDemoUnlock={openDemoRecap}
-                  onOpenDemoDay={openDemoDayRecap}
                 />
               </li>
             ))}
@@ -1634,7 +1637,6 @@ export function CapsulesPage({
             onChoosePhoto={addPhoto}
             onOpenRecap={openRecap}
             onDemoUnlock={openDemoRecap}
-            onOpenDemoDay={openDemoDayRecap}
           />
         ))}
         <button
@@ -1655,7 +1657,7 @@ export function CapsulesPage({
       {activeRecap ? (
         <RecapSheet
           capsule={activeRecap}
-          demoMode={demoRecapId === activeRecap.id || activeRecapUsesDemoDayMedia}
+          demoMode={demoRecapId === activeRecap.id}
           onClose={closeRecap}
           onPlaybackReady={() => {
             if (
@@ -1666,7 +1668,6 @@ export function CapsulesPage({
             pendingWidgetRecapAcknowledgementRef.current = ''
           }}
           onPreparePhotos={async () => {
-            if (activeRecapUsesDemoDayMedia) return activeRecap.photos
             const refreshed = await refreshCapsules()
             return refreshed.capsules.find(({ id }) => id === activeRecap.id)?.photos ?? []
           }}

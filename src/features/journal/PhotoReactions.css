@@ -1,0 +1,72 @@
+.photo-reactions {
+  padding: 0.8rem;
+  border-top: 1px dashed color-mix(in srgb, var(--theme-paper, #fff1d2) 24%, transparent);
+  color: var(--theme-paper, #fff1d2);
+}
+
+.photo-reactions__heading {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.3rem 0.6rem;
+  margin-bottom: 0.6rem;
+  font-size: 0.76rem;
+  font-weight: 650;
+}
+
+.photo-reactions__heading small,
+.photo-reactions__status {
+  color: var(--theme-on-canvas-muted, #c9afb8);
+  font-size: 0.62rem;
+  font-weight: 400;
+}
+
+.photo-reactions__choices {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 0.35rem;
+}
+
+.photo-reactions__choices button {
+  display: flex;
+  min-width: 0;
+  min-height: 2.75rem;
+  padding: 0.35rem 0.2rem;
+  align-items: center;
+  justify-content: center;
+  gap: 0.2rem;
+  border: 1px solid color-mix(in srgb, var(--theme-action, #e6b5c4) 45%, transparent);
+  border-radius: 999px;
+  background: var(--theme-canvas-deep, #180611);
+  color: var(--theme-paper, #fff1d2);
+  font: inherit;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+
+.photo-reactions__choices button > span {
+  font-size: 1.2rem;
+  line-height: 1;
+}
+
+.photo-reactions__choices button small {
+  font-size: 0.65rem;
+}
+
+.photo-reactions__choices button[aria-pressed='true'] {
+  border-color: var(--theme-action, #e6b5c4);
+  background: var(--theme-action, #e6b5c4);
+  color: var(--theme-action-ink, #301027);
+}
+
+.photo-reactions__choices button:disabled { opacity: 0.6; }
+.photo-reactions__choices button:focus-visible {
+  outline: 2px solid var(--theme-paper, #fff1d2);
+  outline-offset: 3px;
+}
+.photo-reactions__status {
+  min-height: 1em;
+  margin: 0.5rem 0 0;
+  overflow-wrap: anywhere;
+}

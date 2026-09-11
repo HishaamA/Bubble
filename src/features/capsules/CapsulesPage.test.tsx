@@ -1,8 +1,10 @@
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { clearMemberSessionCaches } from '../../app/memberSessionCache'
 import { eventStorageKey } from '../events/eventStorage'
 import { createMemoryCapsuleStore } from './capsuleStore'
+import { CAPSULES_CHANGED_EVENT } from './capsuleChanges'
 import type { FamilyCapsule } from './types'
 
 const capsuleImageMocks = vi.hoisted(() => ({
@@ -110,6 +112,7 @@ function lockedSpecialCapsule(
 }
 
 beforeEach(() => {
+  clearMemberSessionCaches()
   vi.clearAllMocks()
   authMocks.isDevelopmentPreview = false
   capsuleServiceMocks.ensureFamilyWeeklyCapsule.mockResolvedValue(null)
@@ -145,7 +148,81 @@ beforeEach(() => {
   nativeRecapMocks.discardNativeCapsuleRecapArtifacts.mockResolvedValue(undefined)
 })
 
+afterEach(() => {
+  vi.useRealTimers()
+  vi.restoreAllMocks()
+})
+
 describe('CapsulesPage', () => {
+  it('renders a warm tab immediately without fetching or saving the same archive again', async () => {
+    const archive = unlockedCapsule()
+    capsuleServiceMocks.ensureFamilyWeeklyCapsule.mockResolvedValue({ id: archive.id, weekStart: archive.weekStart })
+    capsuleServiceMocks.fetchFamilyCapsules.mockResolvedValue([archive])
+    const first = render(<CapsulesPage now={testNow} cacheNamespace="member:family" />)
+    expect(await screen.findByRole('heading', { name: previousWeekRange })).toBeInTheDocument()
+    await waitFor(() => expect(screen.queryByText('Opening your family Capsule…')).not.toBeInTheDocument())
+    expect(capsuleServiceMocks.fetchFamilyCapsules).toHaveBeenCalledTimes(1)
+    first.unmount()
+
+    render(<CapsulesPage now={testNow} cacheNamespace="member:family" />)
+    expect(screen.getByRole('heading', { name: previousWeekRange })).toBeInTheDocument()
+    expect(screen.queryByText('Opening your family Capsule…')).not.toBeInTheDocument()
+    await act(async () => { await Promise.resolve() })
+    expect(capsuleServiceMocks.ensureFamilyWeeklyCapsule).toHaveBeenCalledTimes(1)
+    expect(capsuleServiceMocks.fetchFamilyCapsules).toHaveBeenCalledTimes(1)
+  })
+
+  it('shares an unfinished hydration with the next tab mount', async () => {
+    const archive = unlockedCapsule()
+    let resolveFetch!: (value: FamilyCapsule[]) => void
+    capsuleServiceMocks.ensureFamilyWeeklyCapsule.mockResolvedValue({ id: archive.id, weekStart: archive.weekStart })
+    capsuleServiceMocks.fetchFamilyCapsules.mockImplementation(() => new Promise((resolve) => { resolveFetch = resolve }))
+    const first = render(<CapsulesPage now={testNow} cacheNamespace="member:family" />)
+    await waitFor(() => expect(capsuleServiceMocks.fetchFamilyCapsules).toHaveBeenCalledTimes(1))
+    first.unmount()
+    render(<CapsulesPage now={testNow} cacheNamespace="member:family" />)
+    await act(async () => { resolveFetch([archive]) })
+    expect(await screen.findByRole('heading', { name: previousWeekRange })).toBeInTheDocument()
+    expect(capsuleServiceMocks.ensureFamilyWeeklyCapsule).toHaveBeenCalledTimes(1)
+    expect(capsuleServiceMocks.fetchFamilyCapsules).toHaveBeenCalledTimes(1)
+  })
+
+  it('does not flash the previous family archive when the account namespace changes', async () => {
+    const archive = unlockedCapsule()
+    capsuleServiceMocks.ensureFamilyWeeklyCapsule.mockResolvedValue({ id: archive.id, weekStart: archive.weekStart })
+    capsuleServiceMocks.fetchFamilyCapsules.mockResolvedValue([archive])
+    const view = render(<CapsulesPage now={testNow} cacheNamespace="member:family-a" />)
+    expect(await screen.findByRole('heading', { name: previousWeekRange })).toBeInTheDocument()
+    capsuleServiceMocks.fetchFamilyCapsules.mockImplementation(() => new Promise(() => undefined))
+    view.rerender(<CapsulesPage now={testNow} cacheNamespace="member:family-b" />)
+    expect(screen.queryByRole('heading', { name: previousWeekRange })).not.toBeInTheDocument()
+    expect(screen.getByText('Opening your family Capsule…')).toBeInTheDocument()
+  })
+
+  it('refreshes newly unlocked media once without re-fetching already-open archives', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(testNow)
+    const reveal = new Date(testNow.getTime() + 30_000).toISOString()
+    const special: FamilyCapsule = {
+      ...unlockedCapsule(), id: 'special-reveal', kind: 'special', title: 'Family reveal',
+      closesAt: reveal, opensAt: reveal, photos: [], totalPhotoCount: 1,
+    }
+    capsuleServiceMocks.ensureFamilyWeeklyCapsule.mockResolvedValue({ id: 'current-week', weekStart: '2026-08-24' })
+    capsuleServiceMocks.fetchFamilyCapsules.mockResolvedValue([special])
+    render(<CapsulesPage store={createMemoryCapsuleStore()} />)
+    await act(async () => { await vi.advanceTimersByTimeAsync(0) })
+    expect(capsuleServiceMocks.fetchFamilyCapsules).toHaveBeenCalledTimes(1)
+    capsuleServiceMocks.fetchFamilyCapsules.mockResolvedValue([{
+      ...special, photos: unlockedCapsule().photos.map((photo) => ({ ...photo, capsuleId: special.id })),
+    }])
+    await act(async () => { await vi.advanceTimersByTimeAsync(60_000) })
+    expect(capsuleServiceMocks.fetchFamilyCapsules).toHaveBeenCalledTimes(2)
+    const card = screen.getByRole('heading', { name: 'Family reveal' }).closest('article')!
+    expect(within(card).getByRole('button', { name: 'Play recap' })).toBeInTheDocument()
+    await act(async () => { await vi.advanceTimersByTimeAsync(60_000) })
+    expect(capsuleServiceMocks.fetchFamilyCapsules).toHaveBeenCalledTimes(2)
+  })
+
   it('starts a weekly Capsule with ordinary-photo upload only', async () => {
     const store = createMemoryCapsuleStore()
     const { container } = render(<CapsulesPage now={testNow} store={store} />)
@@ -265,8 +342,10 @@ describe('CapsulesPage', () => {
   it('adds and persists an uploaded regular photo without a 2:1 check', async () => {
     const user = userEvent.setup()
     const store = createMemoryCapsuleStore()
+    const dispatch = vi.spyOn(window, 'dispatchEvent')
     const { container } = render(<CapsulesPage now={testNow} store={store} />)
     await screen.findByRole('heading', { name: currentWeekRange })
+    expect(dispatch.mock.calls.filter(([event]) => event.type === CAPSULES_CHANGED_EVENT)).toHaveLength(0)
 
     const input = container.querySelector<HTMLInputElement>('input[type="file"]')
     expect(input).not.toBeNull()
@@ -294,6 +373,9 @@ describe('CapsulesPage', () => {
       syncStatus: 'pending',
       capturedAt: '2011-05-06T07:08:09.000Z',
     })
+    const changes = dispatch.mock.calls.filter(([event]) => event.type === CAPSULES_CHANGED_EVENT)
+    expect(changes).toHaveLength(1)
+    expect((changes[0][0] as CustomEvent).detail).toEqual({ cacheNamespace: 'user_simreen' })
   })
 
   it('sends the original capture date when a new photo is shared', async () => {
@@ -776,52 +858,127 @@ describe('CapsulesPage', () => {
     expect(screen.queryByRole('dialog', { name: capsule.title })).not.toBeInTheDocument()
   })
 
-  it('plays and exports the bundled Demo Day recap without mounting its locked photo', async () => {
-    const user = userEvent.setup()
-    const capsule = lockedSpecialCapsule('smac-demo-day', 'SMAC Demo Day', 4)
-    const store = createMemoryCapsuleStore([capsule])
-    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
-      {
-        ok: true,
-        blob: async () => new Blob(['public demo frame'], { type: 'image/png' }),
-      } as Response,
+  it('keeps SMAC Demo Day sealed until July 16 at 1 PM with no sample-recap bypass', async () => {
+    const capsule = lockedSpecialCapsule('smac-demo-day', 'SMAC Demo Day', 3)
+    const opensAt = new Date('2026-07-16T13:00:00+04:00').toISOString()
+    capsule.opensAt = opensAt
+    capsule.closesAt = opensAt
+    capsule.photos = capsule.photos.map((photo) => ({
+      ...photo,
+      image: '/uploads/smac-week-photo.jpg',
+      thumbnail: '/uploads/smac-week-photo-thumb.jpg',
+      syncStatus: 'synced',
+    }))
+
+    render(
+      <CapsulesPage
+        now={new Date('2026-07-16T12:59:59+04:00')}
+        store={createMemoryCapsuleStore([capsule])}
+      />,
     )
+
+    const card = (await screen.findByRole('heading', {
+      name: capsule.title,
+    })).closest('article')!
+    expect(card.querySelector('img')).toBeNull()
+    expect(within(card).getByText('Add photo')).toBeInTheDocument()
+    expect(card.querySelector<HTMLInputElement>('input[type="file"]')).toBeEnabled()
+    expect(within(card).queryByRole('button', { name: /sample recap/i })).not.toBeInTheDocument()
+    expect(within(card).queryByRole('button', { name: 'Play recap' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('dialog', { name: capsule.title })).not.toBeInTheDocument()
+  })
+
+  it('recaps every real SMAC upload in chronological order at the 1 PM unlock', async () => {
+    const user = userEvent.setup()
+    const capsule = lockedSpecialCapsule('smac-demo-day', 'SMAC Demo Day', 3)
+    const opensAt = new Date('2026-07-16T13:00:00+04:00').toISOString()
+    const actualSources = [
+      '/uploads/smac-demo-day.jpg',
+      '/uploads/smac-week-start.jpg',
+      '/uploads/smac-midweek.jpg',
+    ]
+    capsule.opensAt = opensAt
+    capsule.closesAt = opensAt
+    capsule.familySynced = true
+    capsule.photos = [
+      {
+        ...capsule.photos[0],
+        id: 'smac-demo-day-photo',
+        image: actualSources[0],
+        thumbnail: `${actualSources[0]}-thumb`,
+        caption: 'Demo Day doors open',
+        capturedAt: '2026-07-16T08:58:00.000Z',
+        contributorName: 'Simreen',
+        syncStatus: 'synced',
+      },
+      {
+        ...capsule.photos[0],
+        id: 'smac-week-start-photo',
+        image: actualSources[1],
+        thumbnail: `${actualSources[1]}-thumb`,
+        caption: 'Building the demo',
+        capturedAt: '2026-07-10T10:00:00.000Z',
+        contributorName: 'Simreen',
+        syncStatus: 'synced',
+      },
+      {
+        ...capsule.photos[0],
+        id: 'smac-midweek-photo',
+        image: actualSources[2],
+        thumbnail: `${actualSources[2]}-thumb`,
+        caption: 'Midweek progress',
+        capturedAt: '2026-07-13T14:00:00.000Z',
+        contributorName: 'Simreen',
+        syncStatus: 'synced',
+      },
+    ]
+    const expectedSourceOrder = [actualSources[1], actualSources[2], actualSources[0]]
+    const stagedPaths = expectedSourceOrder.map((_, index) => (
+      `file:///tmp/CapsuleRecapStaging/smac-${index}.jpg`
+    ))
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(async (source) => ({
+      ok: true,
+      blob: async () => new Blob([String(source)], { type: 'image/jpeg' }),
+    } as Response))
     nativeRecapMocks.isNativeCapsuleRecapAvailable.mockReturnValue(true)
+    nativeRecapMocks.stageNativeCapsuleRecapImage.mockImplementation(async () => ({
+      path: stagedPaths[nativeRecapMocks.stageNativeCapsuleRecapImage.mock.calls.length - 1],
+    }))
 
     try {
-      render(<CapsulesPage now={testNow} store={store} />)
+      render(
+        <CapsulesPage
+          now={new Date('2026-07-16T13:00:00+04:00')}
+          store={createMemoryCapsuleStore([capsule])}
+        />,
+      )
 
       const card = (await screen.findByRole('heading', {
         name: capsule.title,
       })).closest('article')!
-      expect(card.querySelector('img')).toBeNull()
-
-      await user.click(within(card).getByRole('button', {
-        name: 'Play SMAC Demo Day sample recap',
-      }))
+      expect(within(card).queryByRole('button', { name: /sample recap/i })).not.toBeInTheDocument()
+      await user.click(within(card).getByRole('button', { name: 'Play recap' }))
 
       const dialog = screen.getByRole('dialog', { name: capsule.title })
-      expect(within(dialog).getByText('Demo preview')).toBeInTheDocument()
-      expect(within(dialog).getByText('Bubble demo')).toBeInTheDocument()
-      expect(dialog.querySelector('img')).toHaveAttribute(
-        'src',
-        '/assets/journal/demo/demo-album-sunday.png',
-      )
-      expect(card.querySelector('img')).toBeNull()
+      expect(within(dialog).getByText('Family recap')).toBeInTheDocument()
+      expect(within(dialog).queryByText('Demo preview')).not.toBeInTheDocument()
+      expect(dialog.querySelector('img')).toHaveAttribute('src', expectedSourceOrder[0])
 
       await user.click(within(dialog).getByRole('button', { name: 'Save video' }))
 
       await waitFor(() => {
-        expect(fetchSpy).toHaveBeenCalledTimes(3)
-        expect(fetchSpy.mock.calls.map(([source]) => source)).toEqual([
-          '/assets/journal/demo/demo-album-sunday.png',
-          '/assets/panoramas/sunday-dinner-demo.jpg',
-          '/assets/capsules/demo-locked-capsule-photos.png',
-        ])
+        expect(fetchSpy.mock.calls.map(([source]) => source)).toEqual(expectedSourceOrder)
         expect(nativeRecapMocks.stageNativeCapsuleRecapImage).toHaveBeenCalledTimes(3)
-        expect(nativeRecapMocks.renderNativeCapsuleRecap).toHaveBeenCalledTimes(1)
+        expect(nativeRecapMocks.renderNativeCapsuleRecap).toHaveBeenCalledWith({
+          imagePaths: stagedPaths,
+        })
         expect(nativeRecapMocks.shareNativeCapsuleRecap).toHaveBeenCalledTimes(1)
       })
+      expect(fetchSpy.mock.calls.flat()).not.toEqual(expect.arrayContaining([
+        '/assets/journal/demo/demo-album-sunday.png',
+        '/assets/panoramas/sunday-dinner-demo.jpg',
+        '/assets/capsules/demo-locked-capsule-photos.png',
+      ]))
       expect(within(dialog).getByRole('status')).toHaveTextContent(
         'Your recap is ready to save or share.',
       )

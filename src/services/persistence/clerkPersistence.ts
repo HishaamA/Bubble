@@ -257,7 +257,16 @@ export async function readProfilePreferences(): Promise<ProfilePreferences> {
 /** Applies the supplied preference fields without overwriting omitted fields. */
 export async function updateProfilePreferences(
   patch: ProfilePreferencesPatch,
+  options: { expectedSubject?: string } = {},
 ): Promise<ProfilePreferences> {
+  const { client, identity } = requireAuthenticatedClient()
+  const expectedSubject = options.expectedSubject ?? identity.subject
+  const requireExpectedAccount = () => {
+    if (getClerkSupabaseIdentity()?.subject !== expectedSubject) {
+      throw new Error('The account changed before your preferences could be saved.')
+    }
+  }
+  requireExpectedAccount()
   const changes: UnknownRecord = {}
 
   if (typeof patch.notificationsEnabled === 'boolean') {
@@ -274,8 +283,11 @@ export async function updateProfilePreferences(
     return readProfilePreferences()
   }
 
-  const { client } = requireAuthenticatedClient()
   const profile = await bootstrapCurrentClerkProfile()
+  requireExpectedAccount()
+  if (profile.subject !== expectedSubject) {
+    throw new Error('The preference profile did not match the expected account.')
+  }
 
   const { data, error } = await client
     .from('profile_preferences')
@@ -286,6 +298,7 @@ export async function updateProfilePreferences(
     )
     .single()
   if (error) throw error
+  requireExpectedAccount()
   const preferences = asRecord(data)
   if (!preferences) {
     throw new Error('Your profile preferences could not be saved.')

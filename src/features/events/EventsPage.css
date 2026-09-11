@@ -1221,6 +1221,7 @@
 
 .event-sheet__row {
   display: grid;
+  min-width: 0;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 0.65rem;
 }
@@ -1228,8 +1229,30 @@
 .event-sheet__row > .ks-field,
 .event-sheet .ks-field,
 .event-sheet .ks-field input {
+  width: 100%;
   min-width: 0;
   max-width: 100%;
+  min-inline-size: 0;
+  max-inline-size: 100%;
+}
+
+/* WKWebView's date/time controls otherwise retain their native intrinsic width,
+   which can extend beyond the paper sheet even when the grid column shrinks. */
+.event-sheet .ks-field input {
+  display: block;
+}
+
+.event-sheet .ks-field input:is([type='date'], [type='time']) {
+  overflow: hidden;
+  appearance: none;
+  -webkit-appearance: none;
+}
+
+.event-sheet .ks-field input:is([type='date'], [type='time'])::-webkit-date-and-time-value {
+  width: 100%;
+  min-width: 0;
+  margin: 0;
+  text-align: left;
 }
 
 .event-sheet__tasks {

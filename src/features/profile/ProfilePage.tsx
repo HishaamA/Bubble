@@ -1,57 +1,13 @@
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { AppWhimsy } from '../../app/AppWhimsy'
-import {
-  readProfilePreferences,
-  updateProfilePreferences,
-} from '../../services/persistence'
 import { useAppTheme } from '../../theme/AppTheme'
 import { useAuth } from '../auth'
 import { familyEventStorageSubject } from '../events/eventStorage'
 import { useFamilyOnboarding } from '../onboarding/familyOnboardingContext'
-import { writeWidgetPrivacy } from '../widgets/widgetStorage'
 import '../FeaturePages.css'
 import { FamilySyncPanel, type FamilySyncSnapshot } from './family-sync'
-
-type ToggleRowProps = {
-  id: string
-  label: string
-  description: string
-  checked: boolean
-  disabled?: boolean
-  onChange: () => void
-}
-
-/** Renders an accessible settings switch with stable label relationships. */
-function ToggleRow({
-  id,
-  label,
-  description,
-  checked,
-  disabled = false,
-  onChange,
-}: ToggleRowProps) {
-  return (
-    <div className="settings-row">
-      <div className="settings-row__copy">
-        <strong id={`${id}-label`}>{label}</strong>
-        <span id={`${id}-description`}>{description}</span>
-      </div>
-      <button
-        className="ks-toggle"
-        type="button"
-        role="switch"
-        aria-checked={checked}
-        aria-labelledby={`${id}-label`}
-        aria-describedby={`${id}-description`}
-        disabled={disabled}
-        onClick={onChange}
-      >
-        <span className="screen-reader-only">{checked ? 'On' : 'Off'}</span>
-      </button>
-    </div>
-  )
-}
+import { ProfilePreferences } from './ProfilePreferences'
 
 /** Reduces the full family snapshot to the copy shown in the settings row. */
 function getFamilySummary(snapshot: FamilySyncSnapshot | null) {
@@ -95,20 +51,6 @@ export function SettingsPage() {
   const { signOut, user } = useAuth()
   const { snapshot: familyAccess } = useFamilyOnboarding()
   const { theme: selectedTheme, setTheme, themes } = useAppTheme()
-  const [notificationsEnabled, setNotificationsEnabled] = useState(true)
-  const [quietHoursEnabled, setQuietHoursEnabled] = useState(true)
-  const [widgetPreviewChoice, setWidgetPreviewChoice] = useState<{
-    userId: string
-    enabled: boolean
-  } | null>(null)
-  const [confirmedWidgetPreference, setConfirmedWidgetPreference] = useState<{
-    userId: string
-    enabled: boolean
-  } | null>(null)
-  const [savingPreference, setSavingPreference] = useState<
-    'notifications' | 'quiet-hours' | 'widget-previews' | null
-  >(null)
-  const [preferenceError, setPreferenceError] = useState<string | null>(null)
   const [showProfileSettings, setShowProfileSettings] = useState(false)
   const [showFamilySync, setShowFamilySync] = useState(false)
   // The compact settings row needs the same authoritative snapshot as the full
@@ -121,124 +63,10 @@ export function SettingsPage() {
   const profileInitial = displayName.slice(0, 1).toUpperCase()
   const accountIdentity = user?.email || user?.phone || 'Signed in'
   const userId = user?.id ?? null
-  const widgetPreviewsEnabled = widgetPreviewChoice?.userId === userId
-    ? widgetPreviewChoice.enabled
-    : false
   const familyId = familyAccess?.kind === 'member'
     ? familyAccess.membership.familyId
     : null
   const widgetStorageSubject = familyEventStorageSubject(userId, familyId)
-
-  useEffect(() => {
-    let requestActive = true
-    if (!userId) return () => undefined
-
-    void readProfilePreferences()
-      .then((profilePreferences) => {
-        if (!requestActive) return
-        setNotificationsEnabled(profilePreferences.notificationsEnabled)
-        setQuietHoursEnabled(profilePreferences.quietHoursEnabled)
-        setWidgetPreviewChoice({
-          userId,
-          enabled: profilePreferences.widgetPreviewsEnabled,
-        })
-        setConfirmedWidgetPreference({
-          userId,
-          enabled: profilePreferences.widgetPreviewsEnabled,
-        })
-        setPreferenceError(null)
-      })
-      .catch(() => {
-        if (requestActive) {
-          setPreferenceError('Preferences could not be synced right now.')
-        }
-      })
-
-    return () => {
-      requestActive = false
-    }
-  }, [userId])
-
-  // The native publisher intentionally reads a device-local, family-scoped
-  // privacy value. Mirror only server-confirmed choices, including when the
-  // active account moves to a different family partition.
-  useEffect(() => {
-    if (!userId || confirmedWidgetPreference?.userId !== userId) return
-    writeWidgetPrivacy(
-      widgetStorageSubject,
-      confirmedWidgetPreference.enabled ? 'full' : 'hidden',
-    )
-  }, [confirmedWidgetPreference, userId, widgetStorageSubject])
-
-  /** Optimistically toggles family updates and rolls back a failed save. */
-  async function handleNotificationsChange() {
-    const nextNotificationsEnabled = !notificationsEnabled
-    setNotificationsEnabled(nextNotificationsEnabled)
-    setPreferenceError(null)
-    setSavingPreference('notifications')
-    try {
-      const savedPreferences = await updateProfilePreferences({
-        notificationsEnabled: nextNotificationsEnabled,
-      })
-      setNotificationsEnabled(savedPreferences.notificationsEnabled)
-    } catch {
-      setNotificationsEnabled(!nextNotificationsEnabled)
-      setPreferenceError('Family updates could not be saved.')
-    } finally {
-      setSavingPreference(null)
-    }
-  }
-
-  /** Optimistically toggles quiet hours and restores the prior value on failure. */
-  async function handleQuietHoursChange() {
-    const nextQuietHoursEnabled = !quietHoursEnabled
-    setQuietHoursEnabled(nextQuietHoursEnabled)
-    setPreferenceError(null)
-    setSavingPreference('quiet-hours')
-    try {
-      const savedPreferences = await updateProfilePreferences({
-        quietHoursEnabled: nextQuietHoursEnabled,
-      })
-      setQuietHoursEnabled(savedPreferences.quietHoursEnabled)
-    } catch {
-      setQuietHoursEnabled(!nextQuietHoursEnabled)
-      setPreferenceError('Quiet evenings could not be saved.')
-    } finally {
-      setSavingPreference(null)
-    }
-  }
-
-  /** Reveals Home Screen details only after the opt-in is durably confirmed. */
-  async function handleWidgetPreviewsChange() {
-    if (!userId) return
-    const nextWidgetPreviewsEnabled = !widgetPreviewsEnabled
-    setWidgetPreviewChoice({ userId, enabled: nextWidgetPreviewsEnabled })
-    setPreferenceError(null)
-    setSavingPreference('widget-previews')
-    if (!nextWidgetPreviewsEnabled) {
-      // Opt-out is a local privacy boundary, so hide native content before a
-      // potentially slow or offline server save. Opt-in remains confirmed-only.
-      writeWidgetPrivacy(widgetStorageSubject, 'hidden')
-    }
-    try {
-      const savedPreferences = await updateProfilePreferences({
-        widgetPreviewsEnabled: nextWidgetPreviewsEnabled,
-      })
-      setWidgetPreviewChoice({
-        userId,
-        enabled: savedPreferences.widgetPreviewsEnabled,
-      })
-      setConfirmedWidgetPreference({
-        userId,
-        enabled: savedPreferences.widgetPreviewsEnabled,
-      })
-    } catch {
-      setWidgetPreviewChoice({ userId, enabled: !nextWidgetPreviewsEnabled })
-      setPreferenceError('Widget previews could not be saved.')
-    } finally {
-      setSavingPreference(null)
-    }
-  }
 
   /** Completes sign-out before replacing the protected settings route. */
   async function handleSignOut() {
@@ -393,42 +221,11 @@ export function SettingsPage() {
         </fieldset>
       </section>
 
-      <section className="ks-section" aria-labelledby="preferences-title">
-        <div className="ks-section__heading">
-          <h2 id="preferences-title">Preferences</h2>
-        </div>
-        <div className="ks-card settings-card">
-          <ToggleRow
-            id="family-notifications"
-            label="Family updates"
-            description="New moments, plans, and messages"
-            checked={notificationsEnabled}
-            disabled={savingPreference !== null}
-            onChange={() => void handleNotificationsChange()}
-          />
-          <ToggleRow
-            id="quiet-hours"
-            label="Quiet evenings"
-            description="Pause non-urgent updates from 10 PM to 8 AM"
-            checked={quietHoursEnabled}
-            disabled={savingPreference !== null}
-            onChange={() => void handleQuietHoursChange()}
-          />
-          <ToggleRow
-            id="widget-previews"
-            label="Widget previews"
-            description="Show task names and family photos on your Home Screen."
-            checked={widgetPreviewsEnabled}
-            disabled={savingPreference !== null}
-            onChange={() => void handleWidgetPreviewsChange()}
-          />
-        </div>
-        {preferenceError ? (
-          <p className="profile-page__preference-error" role="status">
-            {preferenceError}
-          </p>
-        ) : null}
-      </section>
+      <ProfilePreferences
+        key={userId ?? 'signed-out'}
+        userId={userId}
+        widgetStorageSubject={widgetStorageSubject}
+      />
 
       <button
         className="profile-page__sign-out"

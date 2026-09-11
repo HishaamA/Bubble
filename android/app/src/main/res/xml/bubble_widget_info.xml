@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <appwidget-provider xmlns:android="http://schemas.android.com/apk/res/android"
     android:description="@string/bubble_widget_description"
-    android:initialLayout="@layout/bubble_widget_text"
+    android:initialLayout="@layout/bubble_widget_stack"
     android:minWidth="110dp"
     android:minHeight="110dp"
     android:minResizeWidth="110dp"

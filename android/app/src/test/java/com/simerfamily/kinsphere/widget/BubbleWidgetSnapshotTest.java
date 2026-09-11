@@ -3,6 +3,8 @@ package com.simerfamily.kinsphere.widget;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNotSame;
 import static org.junit.Assert.assertSame;
+import static org.junit.Assert.assertTrue;
+import static org.junit.Assert.assertFalse;
 
 import java.util.Arrays;
 import java.util.Calendar;
@@ -62,6 +64,47 @@ public final class BubbleWidgetSnapshotTest {
         assertEquals(0L, snapshot.nextTransitionAtMillis(at(0, 1, 12)));
     }
 
+    @Test
+    public void keepsTheSwipeDeckAcrossAnInDayFlatScheduleTransition() {
+        BubbleWidgetSnapshot snapshot = deckSnapshot();
+
+        BubbleWidgetSnapshot scheduled = snapshot.forDisplay(at(18, 0, 11));
+
+        assertNotSame(snapshot, scheduled);
+        assertEquals("capture", scheduled.kind);
+        assertEquals(2, scheduled.pages.size());
+        assertEquals("task-1", scheduled.pages.get(0).id);
+        assertEquals("photo-1", scheduled.pages.get(1).id);
+    }
+
+    @Test
+    public void expiresEverySwipePageAfterLocalMidnight() {
+        BubbleWidgetSnapshot display = deckSnapshot().forDisplay(at(0, 1, 12));
+
+        assertEquals("hidden", display.privacy);
+        assertTrue(display.pages.isEmpty());
+    }
+
+    @Test
+    public void onlyUnlockedMediaGroupsMayUsePageImages() {
+        BubbleWidgetSnapshot snapshot = deckSnapshot();
+
+        assertFalse(snapshot.pages.get(0).mayShowThumbnail());
+        assertTrue(snapshot.pages.get(1).mayShowThumbnail());
+        assertSame(snapshot.pages.get(1), snapshot.findPage("photo-1"));
+    }
+
+    @Test
+    public void acceptsOnlyTheContractedGroupKindPairs() {
+        assertTrue(BubbleWidgetSnapshot.isSupportedPageKind("tasks", "today"));
+        assertTrue(BubbleWidgetSnapshot.isSupportedPageKind("photos", "memory"));
+        assertTrue(BubbleWidgetSnapshot.isSupportedPageKind("recap", "unlock"));
+        assertTrue(BubbleWidgetSnapshot.isSupportedPageKind("capture", "capture"));
+        assertFalse(BubbleWidgetSnapshot.isSupportedPageKind("tasks", "urgent"));
+        assertFalse(BubbleWidgetSnapshot.isSupportedPageKind("photos", "unlock"));
+        assertFalse(BubbleWidgetSnapshot.isSupportedPageKind("unknown", "capture"));
+    }
+
     private static BubbleWidgetSnapshot snapshot() {
         return new BubbleWidgetSnapshot(
             at(16, 0, 11),
@@ -95,6 +138,49 @@ public final class BubbleWidgetSnapshotTest {
                     "Open Bubble",
                     null,
                     "/",
+                    "full"
+                )
+            )
+        );
+    }
+
+    private static BubbleWidgetSnapshot deckSnapshot() {
+        BubbleWidgetSnapshot base = snapshot();
+        return new BubbleWidgetSnapshot(
+            base.generatedAtMillis,
+            base.nextRefreshAtMillis,
+            base.kind,
+            base.theme,
+            base.eyebrow,
+            base.title,
+            base.subtitle,
+            base.badge,
+            base.route,
+            base.privacy,
+            base.schedule,
+            Arrays.asList(
+                new BubbleWidgetSnapshot.Page(
+                    "task-1",
+                    "tasks",
+                    "today",
+                    "plum",
+                    "TODAY",
+                    "Pick up the cake",
+                    "6:00 PM",
+                    null,
+                    "/journal?tab=plans&plan=task-1",
+                    "full"
+                ),
+                new BubbleWidgetSnapshot.Page(
+                    "photo-1",
+                    "photos",
+                    "memory",
+                    "plum",
+                    "LAST WEEK",
+                    "Sunday dinner",
+                    "Mum",
+                    null,
+                    "/journal/photo/photo-1",
                     "full"
                 )
             )

@@ -7,6 +7,7 @@ import {
 import { Icon } from '../../components/Icon'
 import type { FamilyCapsule } from '../capsules/types'
 import { CapsulePhotoImage } from './CapsulePhotoImage'
+import { PhotoReactions } from './PhotoReactions'
 import { unlockedCapsulePhotos } from './capsuleJournalArchive'
 import { journalPhotoAsUnlocked } from './journalPhotoLibrary'
 import {
@@ -33,6 +34,7 @@ type CapsulePhotoViewerProps = {
   loading?: boolean
   now?: Date
   journalPhotos?: readonly JournalPhoto[]
+  reactionStorageScope?: string
 }
 
 /** Derives a short, stable avatar label from a contributor display name. */
@@ -76,6 +78,7 @@ export function CapsulePhotoViewer({
   loading = false,
   now = new Date(),
   journalPhotos = [],
+  reactionStorageScope,
 }: CapsulePhotoViewerProps) {
   const navigate = useNavigate()
   const location = useLocation()
@@ -244,6 +247,15 @@ export function CapsulePhotoViewer({
               {photo.capsuleTitle}
             </span>
           </div>
+          {reactionStorageScope ? (
+            <PhotoReactions
+              photoId={photo.id}
+              storageScope={reactionStorageScope}
+              shared={photo.syncStatus === 'synced' && capsules.some((capsule) =>
+                capsule.id === photo.capsuleId && capsule.familySynced === true,
+              )}
+            />
+          ) : null}
         </article>
       </div>
 

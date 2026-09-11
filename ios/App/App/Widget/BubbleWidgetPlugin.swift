@@ -51,12 +51,12 @@ public final class BubbleWidgetPlugin: CAPPlugin, CAPBridgedPlugin {
         qos: .utility
     )
 
-    private let maximumSnapshotBytes = 32 * 1_024
+    private let maximumSnapshotBytes = 64 * 1_024
     private let maximumScheduleEntries = 12
     private let maximumThumbnailCharacters = 8 * 1_024 * 1_024
     private let maximumThumbnailBytes = 5 * 1_024 * 1_024
     private let maximumThumbnailPixels: Int64 = 36_000_000
-    private let maximumStoredEdge: CGFloat = 720
+    private let maximumStoredEdge: CGFloat = 512
 
     @objc func update(_ call: CAPPluginCall) {
         guard let snapshotJSON = call.getString("snapshot") else {
@@ -64,6 +64,7 @@ public final class BubbleWidgetPlugin: CAPPlugin, CAPBridgedPlugin {
             return
         }
         let thumbnailBase64 = call.getString("thumbnailBase64")
+        let pageThumbnails = call.getObject("pageThumbnails")
 
         workQueue.async { [weak self] in
             guard let self else { return }
@@ -75,14 +76,15 @@ public final class BubbleWidgetPlugin: CAPPlugin, CAPBridgedPlugin {
                 } else {
                     thumbnail = nil
                 }
-                try self.persist(snapshot: snapshot, thumbnail: thumbnail)
-                WidgetCenter.shared.reloadTimelines(ofKind: BubbleWidgetConstants.widgetKind)
+                let pageImages = try self.validatedPageThumbnails(pageThumbnails, snapshot: snapshot)
+                try self.persist(snapshot: snapshot, thumbnail: thumbnail, pageImages: pageImages)
+                WidgetCenter.shared.reloadAllTimelines()
                 call.resolve()
             } catch {
-                // persist(snapshot:) installs a generic private snapshot before
-                // touching media. Reload even on failure so WidgetKit cannot
-                // keep showing the previously rendered family content.
-                WidgetCenter.shared.reloadTimelines(ofKind: BubbleWidgetConstants.widgetKind)
+                // A malformed or incomplete update hides prior family content
+                // before WidgetKit is asked to reload every installed kind.
+                try? self.clearStoredContent()
+                WidgetCenter.shared.reloadAllTimelines()
                 call.reject(error.localizedDescription, "WIDGET_UPDATE_FAILED", error)
             }
         }
@@ -91,30 +93,11 @@ public final class BubbleWidgetPlugin: CAPPlugin, CAPBridgedPlugin {
     @objc func clear(_ call: CAPPluginCall) {
         workQueue.async {
             do {
-                guard let containerURL = BubbleWidgetStorage.containerURL,
-                      let snapshotURL = BubbleWidgetStorage.snapshotURL,
-                      let thumbnailURL = BubbleWidgetStorage.thumbnailURL else {
-                    throw BubbleWidgetPluginError.storageUnavailable
-                }
-                let fileManager = FileManager.default
-                try fileManager.createDirectory(
-                    at: containerURL,
-                    withIntermediateDirectories: true,
-                    attributes: nil
-                )
-
-                let currentTheme = BubbleWidgetStorage.loadSnapshot()?.theme ?? .plum
-                try self.writeSnapshot(
-                    .privateFallback(theme: currentTheme),
-                    to: snapshotURL
-                )
-                if fileManager.fileExists(atPath: thumbnailURL.path) {
-                    try fileManager.removeItem(at: thumbnailURL)
-                }
-                WidgetCenter.shared.reloadTimelines(ofKind: BubbleWidgetConstants.widgetKind)
+                try self.clearStoredContent()
+                WidgetCenter.shared.reloadAllTimelines()
                 call.resolve()
             } catch {
-                WidgetCenter.shared.reloadTimelines(ofKind: BubbleWidgetConstants.widgetKind)
+                WidgetCenter.shared.reloadAllTimelines()
                 call.reject(error.localizedDescription, "WIDGET_CLEAR_FAILED", error)
             }
         }
@@ -132,7 +115,7 @@ public final class BubbleWidgetPlugin: CAPPlugin, CAPBridgedPlugin {
         let allowedKeys: Set<String> = [
             "version", "generatedAt", "nextRefreshAt", "kind", "theme",
             "eyebrow", "title", "subtitle", "badge", "route", "privacy",
-            "schedule"
+            "schedule", "pages"
         ]
         guard Set(dictionary.keys).isSubset(of: allowedKeys) else {
             throw BubbleWidgetPluginError.invalidSnapshot
@@ -186,6 +169,7 @@ public final class BubbleWidgetPlugin: CAPPlugin, CAPBridgedPlugin {
             expectedTheme: theme,
             expectedPrivacy: privacy
         )
+        let pages = try validatedPages(dictionary["pages"], theme: theme, privacy: privacy)
 
         return BubbleWidgetSnapshot(
             version: version,
@@ -199,8 +183,79 @@ public final class BubbleWidgetPlugin: CAPPlugin, CAPBridgedPlugin {
             badge: badge,
             route: route,
             privacy: privacy,
-            schedule: schedule
+            schedule: schedule,
+            pages: pages
         )
+    }
+
+    private func validatedPages(
+        _ rawValue: Any?,
+        theme: BubbleWidgetTheme,
+        privacy: BubbleWidgetPrivacy
+    ) throws -> [BubbleWidgetPage]? {
+        guard let rawValue, !(rawValue is NSNull) else { return nil }
+        guard let values = rawValue as? [[String: Any]], values.count <= 12,
+              privacy == .full || values.isEmpty else {
+            throw BubbleWidgetPluginError.invalidField("pages")
+        }
+        let keys: Set<String> = [
+            "id", "group", "kind", "theme", "eyebrow", "title", "subtitle", "badge", "route", "privacy"
+        ]
+        var ids: Set<String> = []
+        return try values.map { value in
+            guard Set(value.keys).isSubset(of: keys) else {
+                throw BubbleWidgetPluginError.invalidField("pages")
+            }
+            let id = try requiredString(value, key: "id", maximumBytes: 480)
+            guard id.count <= 120, ids.insert(id).inserted,
+                  id.unicodeScalars.allSatisfy({ !CharacterSet.controlCharacters.contains($0) }),
+                  let group = BubbleWidgetPageGroup(rawValue: try requiredString(value, key: "group", maximumBytes: 16)),
+                  let kind = BubbleWidgetKind(rawValue: try requiredString(value, key: "kind", maximumBytes: 16)),
+                  value["theme"] as? String == theme.rawValue,
+                  value["privacy"] as? String == privacy.rawValue else {
+                throw BubbleWidgetPluginError.invalidField("pages")
+            }
+            switch (group, kind) {
+            case (.tasks, .today), (.tasks, .urgent), (.photos, .memory), (.recap, .unlock),
+                 (.capture, .capture), (.capture, .empty): break
+            default: throw BubbleWidgetPluginError.invalidField("pages.group")
+            }
+            let route = try requiredString(value, key: "route", maximumBytes: 512)
+            guard route.hasPrefix("/"), !route.hasPrefix("//"), !route.contains("\\"),
+                  !route.contains("://"),
+                  route.unicodeScalars.allSatisfy({ !CharacterSet.controlCharacters.contains($0) }) else {
+                throw BubbleWidgetPluginError.invalidField("pages.route")
+            }
+            return BubbleWidgetPage(
+                id: id, group: group, kind: kind, theme: theme,
+                eyebrow: try requiredString(value, key: "eyebrow", maximumBytes: 64),
+                title: try requiredString(value, key: "title", maximumBytes: 1_040),
+                subtitle: try optionalString(value, key: "subtitle", maximumBytes: 1_280),
+                badge: try optionalString(value, key: "badge", maximumBytes: 64),
+                route: route, privacy: privacy
+            )
+        }
+    }
+
+    private func validatedPageThumbnails(
+        _ values: [String: Any]?,
+        snapshot: BubbleWidgetSnapshot
+    ) throws -> [String: Data] {
+        guard let values else { return [:] }
+        guard values.count <= 8, snapshot.privacy == .full || values.isEmpty else {
+            throw BubbleWidgetPluginError.invalidField("pageThumbnails")
+        }
+        let mediaIDs = Set((snapshot.pages ?? []).filter {
+            $0.group == .photos || $0.group == .recap
+        }.map(\.id))
+        var output: [String: Data] = [:]
+        for (id, raw) in values {
+            guard mediaIDs.contains(id), let encoded = raw as? String else {
+                throw BubbleWidgetPluginError.invalidField("pageThumbnails")
+            }
+            output[id] = try normalizedThumbnail(encoded)
+        }
+        return output
     }
 
     private func validatedSchedule(
@@ -384,10 +439,23 @@ public final class BubbleWidgetPlugin: CAPPlugin, CAPBridgedPlugin {
         return output
     }
 
-    private func persist(snapshot: BubbleWidgetSnapshot, thumbnail: Data?) throws {
+    private func clearStoredContent() throws {
         guard let containerURL = BubbleWidgetStorage.containerURL,
-              let snapshotURL = BubbleWidgetStorage.snapshotURL,
-              let thumbnailURL = BubbleWidgetStorage.thumbnailURL else {
+              let snapshotURL = BubbleWidgetStorage.snapshotURL else {
+            throw BubbleWidgetPluginError.storageUnavailable
+        }
+        try FileManager.default.createDirectory(at: containerURL, withIntermediateDirectories: true)
+        try writeSnapshot(
+            .privateFallback(theme: BubbleWidgetStorage.loadSnapshot()?.theme ?? .plum),
+            to: snapshotURL
+        )
+        BubbleWidgetStorage.clearSelections()
+        try BubbleWidgetStorage.clearMedia()
+    }
+
+    private func persist(snapshot: BubbleWidgetSnapshot, thumbnail: Data?, pageImages: [String: Data]) throws {
+        guard let containerURL = BubbleWidgetStorage.containerURL,
+              let snapshotURL = BubbleWidgetStorage.snapshotURL else {
             throw BubbleWidgetPluginError.storageUnavailable
         }
 
@@ -398,21 +466,29 @@ public final class BubbleWidgetPlugin: CAPPlugin, CAPBridgedPlugin {
             attributes: nil
         )
 
-        // A generic snapshot is the transaction's privacy boundary. If media
-        // cleanup or the final write fails, the extension can only render this
-        // non-sensitive card and will never pair content across accounts.
-        try writeSnapshot(
-            .privateFallback(theme: snapshot.theme),
-            to: snapshotURL
-        )
-
-        if let thumbnail {
-            try thumbnail.write(to: thumbnailURL, options: [.atomic, .completeFileProtectionUnlessOpen])
-        } else if fileManager.fileExists(atPath: thumbnailURL.path) {
-            try fileManager.removeItem(at: thumbnailURL)
+        var storedSnapshot = snapshot
+        storedSnapshot.mediaRevision = UUID().uuidString
+        if snapshot.privacy == .hidden {
+            // Privacy changes become visible before any media housekeeping.
+            try writeSnapshot(.privateFallback(theme: snapshot.theme), to: snapshotURL)
+            storedSnapshot.pages = nil
+            BubbleWidgetStorage.clearSelections()
         }
-
-        try writeSnapshot(snapshot, to: snapshotURL)
+        // Each revision has its own image filenames. Stage those first, then
+        // atomically publish their snapshot so a reader sees a complete old or
+        // new revision, never a new image under an old page. Keeping the old
+        // snapshot during staging also preserves the member's selected page.
+        if let thumbnail, let thumbnailURL = BubbleWidgetStorage.thumbnailURL(for: storedSnapshot) {
+            try thumbnail.write(to: thumbnailURL, options: [.atomic, .completeFileProtectionUnlessOpen])
+        }
+        for (pageID, data) in pageImages {
+            guard let url = BubbleWidgetStorage.thumbnailURL(for: storedSnapshot, pageID: pageID) else {
+                throw BubbleWidgetPluginError.storageUnavailable
+            }
+            try data.write(to: url, options: [.atomic, .completeFileProtectionUnlessOpen])
+        }
+        try writeSnapshot(storedSnapshot, to: snapshotURL)
+        try BubbleWidgetStorage.clearMedia(except: storedSnapshot.mediaRevision)
     }
 
     private func writeSnapshot(

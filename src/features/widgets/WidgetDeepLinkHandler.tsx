@@ -1,4 +1,4 @@
-import { useEffect } from 'react'
+import { useEffect, useRef } from 'react'
 import { App as CapacitorApp } from '@capacitor/app'
 import { Capacitor } from '@capacitor/core'
 import { useNavigate } from 'react-router-dom'
@@ -11,6 +11,11 @@ export function WidgetDeepLinkHandler({
   storageSubject: string
 }) {
   const navigate = useNavigate()
+  const navigateRef = useRef(navigate)
+
+  useEffect(() => {
+    navigateRef.current = navigate
+  }, [navigate])
 
   useEffect(() => {
     if (!Capacitor.isNativePlatform()) return
@@ -21,7 +26,7 @@ export function WidgetDeepLinkHandler({
       if (!active) return
       const destination = parseBubbleWidgetDeepLink(url)
       if (!destination) return
-      navigate(destination.to, {
+      navigateRef.current(destination.to, {
         ...(destination.state ? { state: destination.state } : {}),
       })
     }
@@ -42,7 +47,10 @@ export function WidgetDeepLinkHandler({
       active = false
       stop()
     }
-  }, [navigate, storageSubject])
+    // HashRouter gives useNavigate a new identity as the pathname changes.
+    // Re-subscribing for that change would replay getLaunchUrl's persistent
+    // launch URL on Back/Close and trap the member in the widget destination.
+  }, [storageSubject])
 
   return null
 }

@@ -3,7 +3,8 @@ import {
   fetchFamilyCapsules,
   subscribeToFamilyCapsules,
 } from '../capsules/capsuleService'
-import type { FamilyCapsule } from '../capsules/types'
+import type { CapsuleImageSource, FamilyCapsule } from '../capsules/types'
+import { toLocalDateInput } from '../capsules/capsuleDates'
 import {
   fetchFamilyEvents,
   subscribeToFamilyEvents,
@@ -30,6 +31,7 @@ import {
   readWidgetTaskDefinitions,
 } from './widgetStorage'
 import { materializeWidgetThumbnail } from './widgetThumbnail'
+import { widgetThumbnailCacheKey } from './widgetThumbnailCacheKey'
 
 type WidgetData = {
   storageSubject: string
@@ -56,23 +58,23 @@ export function WidgetSnapshotPublisher({
   const publishQueueRef = useRef(Promise.resolve())
   const publishVersionRef = useRef(0)
   const lastPayloadRef = useRef('')
-  const thumbnailCacheRef = useRef<{
-    source: unknown
-    dataUrl: string | undefined
-  } | null>(null)
+  const thumbnailCacheRef = useRef(new Map<CapsuleImageSource, string>())
 
   useEffect(() => {
     if (!isNativeBubbleWidgetAvailable()) return
     let active = true
     let stopEvents: () => void = () => undefined
     let stopCapsules: () => void = () => undefined
+    let refreshVersion = 0
+    const thumbnailCache = thumbnailCacheRef.current
 
     async function refresh() {
+      const version = ++refreshVersion
       const [events, capsules] = await Promise.allSettled([
         fetchFamilyEvents({ includeEarlierToday: true }),
         fetchFamilyCapsules(),
       ])
-      if (!active) return
+      if (!active || version !== refreshVersion) return
       setData((current) => ({
         storageSubject,
         events: events.status === 'fulfilled'
@@ -136,6 +138,7 @@ export function WidgetSnapshotPublisher({
       )
       document.removeEventListener('visibilitychange', refreshWhenVisible)
       lastPayloadRef.current = ''
+      thumbnailCache.clear()
       void clearNativeBubbleWidget().catch(() => undefined)
     }
   }, [storageSubject])
@@ -184,39 +187,62 @@ export function WidgetSnapshotPublisher({
   useEffect(() => {
     if (!isNativeBubbleWidgetAvailable()) return
     const version = ++publishVersionRef.current
+    const controller = new AbortController()
+    if (selection.snapshot.privacy === 'hidden') thumbnailCacheRef.current.clear()
     const timer = window.setTimeout(() => {
       void (async () => {
-        let thumbnailBase64: string | undefined
-        if (selection.thumbnail) {
-          const cached = thumbnailCacheRef.current
-          if (cached?.source === selection.thumbnail) {
-            thumbnailBase64 = cached.dataUrl
-          } else {
-            thumbnailBase64 = await materializeWidgetThumbnail(selection.thumbnail)
-            thumbnailCacheRef.current = {
-              source: selection.thumbnail,
-              dataUrl: thumbnailBase64,
-            }
-          }
+        const pageSources = Object.entries(selection.pageThumbnails ?? {}).slice(0, 8)
+        const sources = new Map([
+          ...(selection.thumbnail ? [selection.thumbnail] : []),
+          ...pageSources.map(([, source]) => source),
+        ].map((source) => [widgetThumbnailCacheKey(source), source]))
+        const cache = thumbnailCacheRef.current
+        for (const source of cache.keys()) {
+          if (!sources.has(source)) cache.delete(source)
+        }
+        for (const [key, source] of sources) {
+          if (controller.signal.aborted) return
+          if (cache.has(key)) continue
+          // Small, sequential thumbnails leave the UI free between images.
+          await new Promise<void>((resolve) => window.setTimeout(resolve, 0))
+          if (controller.signal.aborted) return
+          const image = await materializeWidgetThumbnail(source, controller.signal)
+          if (controller.signal.aborted || version !== publishVersionRef.current) return
+          if (image) cache.set(key, image)
         }
         if (version !== publishVersionRef.current) return
 
-        const signature = JSON.stringify([selection.snapshot, thumbnailBase64])
+        const thumbnailBase64 = selection.thumbnail ? cache.get(widgetThumbnailCacheKey(selection.thumbnail)) : undefined
+        const pageThumbnails = Object.fromEntries(pageSources.flatMap(([id, source]) => {
+          const image = cache.get(widgetThumbnailCacheKey(source))
+          return image ? [[id, image]] : []
+        }))
+        // A foreground refresh must not reset the user's chosen native page
+        // solely because the clock advanced. Midnight is still a hard boundary.
+        const signature = JSON.stringify([
+          { ...selection.snapshot, generatedAt: toLocalDateInput(new Date(selection.snapshot.generatedAt)) },
+          thumbnailBase64,
+          pageThumbnails,
+        ])
         if (signature === lastPayloadRef.current) return
         publishQueueRef.current = publishQueueRef.current
           .catch(() => undefined)
           .then(async () => {
             if (version !== publishVersionRef.current) return
-            await updateNativeBubbleWidget(
-              selection.snapshot,
-              thumbnailBase64,
-            )
+            if (Object.keys(pageThumbnails).length > 0) {
+              await updateNativeBubbleWidget(selection.snapshot, thumbnailBase64, pageThumbnails)
+            } else {
+              await updateNativeBubbleWidget(selection.snapshot, thumbnailBase64)
+            }
             lastPayloadRef.current = signature
           })
           .catch(() => undefined)
       })()
-    }, 180)
-    return () => window.clearTimeout(timer)
+    }, selection.snapshot.privacy === 'hidden' ? 0 : 180)
+    return () => {
+      controller.abort()
+      window.clearTimeout(timer)
+    }
   }, [selection])
 
   // Re-fetch at the next urgency, reveal, close, or day boundary while open.

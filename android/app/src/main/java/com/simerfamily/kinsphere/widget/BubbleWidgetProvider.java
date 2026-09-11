@@ -5,8 +5,8 @@ import android.appwidget.AppWidgetProvider;
 import android.content.ComponentName;
 import android.content.Context;
 import android.content.Intent;
-import android.graphics.Bitmap;
 import android.os.Bundle;
+import com.simerfamily.kinsphere.R;
 
 /** Home-screen widget provider for Bubble's prioritized daily snapshot. */
 public final class BubbleWidgetProvider extends AppWidgetProvider {
@@ -39,6 +39,7 @@ public final class BubbleWidgetProvider extends AppWidgetProvider {
     public void onReceive(Context context, Intent intent) {
         super.onReceive(context, intent);
         String action = intent == null ? null : intent.getAction();
+        BubbleWidgetSnapshot snapshot = BubbleWidgetStore.load(context);
         if (
             ACTION_REFRESH.equals(action) ||
             Intent.ACTION_BOOT_COMPLETED.equals(action) ||
@@ -46,8 +47,21 @@ public final class BubbleWidgetProvider extends AppWidgetProvider {
             Intent.ACTION_TIME_CHANGED.equals(action) ||
             Intent.ACTION_TIMEZONE_CHANGED.equals(action)
         ) {
-            updateAll(context);
-            BubbleWidgetScheduler.replace(context, BubbleWidgetStore.load(context));
+            boolean deckUnchanged = ACTION_REFRESH.equals(action) &&
+                snapshot != null &&
+                !snapshot.pages.isEmpty() &&
+                snapshot.isCurrentLocalDay(System.currentTimeMillis());
+            if (!deckUnchanged) {
+                if (
+                    snapshot != null &&
+                    !snapshot.isCurrentLocalDay(System.currentTimeMillis())
+                ) {
+                    showPrivateFallback(context);
+                } else {
+                    updateAll(context);
+                }
+            }
+            BubbleWidgetScheduler.replace(context, snapshot);
         }
     }
 
@@ -71,11 +85,9 @@ public final class BubbleWidgetProvider extends AppWidgetProvider {
         for (int appWidgetId : ids) {
             manager.updateAppWidget(
                 appWidgetId,
-                BubbleWidgetRenderer.render(
+                BubbleWidgetRenderer.renderPrivateFallback(
                     appContext,
                     appWidgetId,
-                    null,
-                    null,
                     manager.getAppWidgetOptions(appWidgetId)
                 )
             );
@@ -90,27 +102,12 @@ public final class BubbleWidgetProvider extends AppWidgetProvider {
         if (appWidgetIds == null || appWidgetIds.length == 0) {
             return;
         }
-        BubbleWidgetStore.withEntry(context, entry -> {
-            Bitmap thumbnail = entry.thumbnail;
-            try {
-                for (int appWidgetId : appWidgetIds) {
-                    Bundle options = manager.getAppWidgetOptions(appWidgetId);
-                    manager.updateAppWidget(
-                        appWidgetId,
-                        BubbleWidgetRenderer.render(
-                            context,
-                            appWidgetId,
-                            entry.snapshot,
-                            thumbnail,
-                            options
-                        )
-                    );
-                }
-            } finally {
-                if (thumbnail != null && !thumbnail.isRecycled()) {
-                    thumbnail.recycle();
-                }
-            }
-        });
+        for (int appWidgetId : appWidgetIds) {
+            manager.updateAppWidget(
+                appWidgetId,
+                BubbleWidgetRenderer.renderShell(context, appWidgetId)
+            );
+        }
+        manager.notifyAppWidgetViewDataChanged(appWidgetIds, R.id.bubble_widget_stack);
     }
 }

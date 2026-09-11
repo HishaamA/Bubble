@@ -10,6 +10,7 @@ const taskDefinitionsStorageKey = 'kinsphere-plan-tasks:v1'
 const completedPlansStorageKey = 'kinsphere-completed-plans:v1'
 const viewedRecapsStorageKey = 'bubble-widget-viewed-recaps:v1'
 const widgetPrivacyStorageKey = 'bubble-widget-privacy:v1'
+const pendingWidgetOptOutStorageKey = 'bubble-widget-pending-opt-out:v1'
 const maxStoredIds = 100
 
 /** Reads device-local checklist progress without trusting persisted JSON. */
@@ -96,6 +97,7 @@ export function markWidgetRecapViewed(storageSubject: string, capsuleId: string)
 export function readWidgetPrivacy(storageSubject: string): BubbleWidgetPrivacy {
   if (typeof window === 'undefined') return 'hidden'
   try {
+    if (readPendingWidgetOptOut(storageSubject) !== null) return 'hidden'
     return window.localStorage.getItem(
       eventStorageKey(widgetPrivacyStorageKey, storageSubject),
     ) === 'full'
@@ -113,12 +115,57 @@ export function writeWidgetPrivacy(
 ) {
   if (typeof window === 'undefined') return false
   try {
-    window.localStorage.setItem(
-      eventStorageKey(widgetPrivacyStorageKey, storageSubject),
-      privacy,
-    )
+    const key = eventStorageKey(widgetPrivacyStorageKey, storageSubject)
+    const effectivePrivacy = readPendingWidgetOptOut(storageSubject) !== null ? 'hidden' : privacy
+    if (window.localStorage.getItem(key) === effectivePrivacy) return true
+    window.localStorage.setItem(key, effectivePrivacy)
     notifyWidgetDataChanged()
     return true
+  } catch {
+    return false
+  }
+}
+
+/** An unsynced opt-out overrides server hydration for only this account/family. */
+export function readPendingWidgetOptOut(storageSubject: string): string | null {
+  if (typeof window === 'undefined') return null
+  try {
+    return window.localStorage.getItem(eventStorageKey(pendingWidgetOptOutStorageKey, storageSubject))
+  } catch {
+    // Unreadable privacy state must not permit a reveal.
+    return 'unavailable'
+  }
+}
+
+/** Records an explicit choice, retaining opt-out protection until confirmation. */
+export function beginWidgetPrivacyChange(storageSubject: string, privacy: BubbleWidgetPrivacy): string | null {
+  if (typeof window === 'undefined') return null
+  const pending = readPendingWidgetOptOut(storageSubject)
+  if (privacy === 'full' && pending === null) return null
+  try {
+    // Refresh the token even for a newer opt-in. An older row/request must not
+    // clear protection created by a later choice after navigating away/back.
+    const token = window.crypto.randomUUID()
+    window.localStorage.setItem(eventStorageKey(pendingWidgetOptOutStorageKey, storageSubject), token)
+    writeWidgetPrivacy(storageSubject, 'hidden')
+    return token
+  } catch {
+    writeWidgetPrivacy(storageSubject, 'hidden')
+    return pending
+  }
+}
+
+/** Only the latest explicitly confirmed choice may clear local protection. */
+export function confirmWidgetPrivacyChange(
+  storageSubject: string,
+  privacy: BubbleWidgetPrivacy,
+  pendingToken: string | null,
+) {
+  if (typeof window === 'undefined') return false
+  try {
+    if (readPendingWidgetOptOut(storageSubject) !== pendingToken) return false
+    window.localStorage.removeItem(eventStorageKey(pendingWidgetOptOutStorageKey, storageSubject))
+    return writeWidgetPrivacy(storageSubject, privacy)
   } catch {
     return false
   }

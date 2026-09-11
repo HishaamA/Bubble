@@ -5,7 +5,9 @@ import {
   useMemo,
   useRef,
   useState,
+  useSyncExternalStore,
 } from 'react'
+import { createMemberSessionCache } from '../../app/memberSessionCache'
 import { getCapsulePhotoCapturedAt } from '../capsules/capsulePhotoDate'
 import { processCapsuleImage } from '../capsules/processCapsuleImage'
 import type { ProcessedCapsulePhoto } from '../capsules/types'
@@ -165,6 +167,107 @@ const idleImportProgress: JournalPhotoImportProgress = {
   total: 0,
 }
 
+const libraryWarmLifetimeMs = 30_000
+type LibrarySnapshot = { photos: JournalPhoto[]; hydrated: boolean }
+type LibrarySession = {
+  store: JournalPhotoStore
+  snapshot: LibrarySnapshot
+  refreshedAt: number
+  disposed: boolean
+  epoch: number
+  pending: Promise<JournalPhoto[]> | null
+  listeners: Set<() => void>
+  subscribe: (listener: () => void) => () => void
+  getSnapshot: () => LibrarySnapshot
+}
+
+function createLibrarySession(store: JournalPhotoStore): LibrarySession {
+  const session: LibrarySession = {
+    store,
+    snapshot: { photos: [], hydrated: false },
+    refreshedAt: 0,
+    disposed: false,
+    epoch: 0,
+    pending: null,
+    listeners: new Set(),
+    subscribe: (listener) => {
+      session.listeners.add(listener)
+      return () => { session.listeners.delete(listener) }
+    },
+    getSnapshot: () => session.snapshot,
+  }
+  return session
+}
+
+function disposeLibrarySession(session: LibrarySession) {
+  session.disposed = true
+  session.epoch += 1
+  session.pending = null
+  session.snapshot = { photos: [], hydrated: false }
+  session.listeners.forEach((listener) => listener())
+  session.listeners.clear()
+}
+
+/** Isolated test/store sessions can be reused during React's effect replay. */
+function resumeIsolatedLibrarySession(session: LibrarySession) {
+  session.disposed = false
+}
+
+const librarySessions = createMemberSessionCache<LibrarySession>({ dispose: disposeLibrarySession })
+
+function publishLibrary(session: LibrarySession, photos: JournalPhoto[], hydrated = session.snapshot.hydrated) {
+  if (session.disposed) return
+  session.snapshot = { photos, hydrated }
+  session.listeners.forEach((listener) => listener())
+}
+
+/** A single scoped reader survives tab remounts without restarting storage/network work. */
+function refreshLibrarySession(session: LibrarySession, cacheNamespace: string, allowWarm = false): Promise<JournalPhoto[]> {
+  if (session.disposed) return Promise.resolve([])
+  if (session.pending) return session.pending
+  if (allowWarm && session.snapshot.hydrated && Date.now() - session.refreshedAt < libraryWarmLifetimeMs) {
+    return Promise.resolve(session.snapshot.photos)
+  }
+  const epoch = session.epoch
+  const isCurrent = () => !session.disposed && session.epoch === epoch
+  const request = (async () => {
+    let storedPhotos: JournalPhoto[] = []
+    try {
+      storedPhotos = await session.store.list()
+      if (!isCurrent()) return []
+      publishLibrary(session, mergeLocalJournalPhotos(session.snapshot.photos, storedPhotos), true)
+    } catch {
+      // Network hydration can still work when device storage is unavailable.
+    }
+    if (!isCurrent()) return []
+    try {
+      const familyPhotos = await fetchFamilyJournalPhotos(cacheNamespace)
+      if (!isCurrent()) return []
+      if (familyPhotos !== null) {
+        publishLibrary(session, mergeJournalPhotos(session.snapshot.photos, familyPhotos), true)
+        // Never persist expiring remote-only URLs. Retain durable imported Blobs.
+        for (const photo of storedPhotos) {
+          if (!isCurrent()) return []
+          if (photo.syncStatus === 'synced' &&
+            typeof photo.image === 'string' && /^https?:\/\//i.test(photo.image) &&
+            typeof photo.thumbnail === 'string' && /^https?:\/\//i.test(photo.thumbnail)) {
+            await session.store.remove(photo.id).catch(() => undefined)
+          }
+        }
+      }
+    } catch {
+      // Keep the already-published offline library visible.
+    }
+    if (!isCurrent()) return []
+    if (!session.snapshot.hydrated) publishLibrary(session, session.snapshot.photos, true)
+    session.refreshedAt = Date.now()
+    return session.snapshot.photos
+  })()
+  session.pending = request
+  void request.finally(() => { if (session.pending === request) session.pending = null })
+  return request
+}
+
 /**
  * Owns account-scoped photo hydration, serialized imports, background upload,
  * realtime refresh, and expiring signed-URL replacement.
@@ -175,19 +278,28 @@ export function useJournalPhotoLibrary({
   enabled = true,
   store: suppliedStore,
 }: JournalPhotoLibraryOptions) {
-  const store = useMemo(
-    () => suppliedStore ?? createDefaultJournalPhotoStore(cacheNamespace),
+  const session = useMemo(
+    () => {
+      if (suppliedStore) return createLibrarySession(suppliedStore)
+      const cached = librarySessions.get(cacheNamespace)
+      if (cached && !cached.disposed) return cached
+      const next = createLibrarySession(createDefaultJournalPhotoStore(cacheNamespace))
+      librarySessions.set(cacheNamespace, next)
+      return next
+    },
     [cacheNamespace, suppliedStore],
   )
-  const [photos, setPhotos] = useState<JournalPhoto[]>([])
-  const [loading, setLoading] = useState(enabled)
+  const store = session.store
+  const photosRef = useRef(session.snapshot.photos)
+  const subscribe = useCallback((listener: () => void) => session.subscribe(() => {
+    photosRef.current = session.snapshot.photos
+    listener()
+  }), [session])
+  const snapshot = useSyncExternalStore(subscribe, session.getSnapshot, session.getSnapshot)
+  const { photos } = snapshot
+  const loading = enabled && !snapshot.hydrated
   const [importProgress, setImportProgress] = useState(idleImportProgress)
-  const photosRef = useRef(photos)
   const generationRef = useRef(0)
-  const refreshPromiseRef = useRef<{
-    generation: number
-    promise: Promise<JournalPhoto[]>
-  } | null>(null)
   const syncPromiseRef = useRef<{
     generation: number
     promise: Promise<void>
@@ -200,71 +312,13 @@ export function useJournalPhotoLibrary({
   // photo set before React commits its next render.
   const replacePhotos = useCallback((next: JournalPhoto[]) => {
     photosRef.current = next
-    setPhotos(next)
+    publishLibrary(session, next)
     return next
-  }, [])
+  }, [session])
 
   // Coalesce refreshes within an account generation so focus, realtime, and
   // connectivity events cannot fan out duplicate network/storage reads.
-  const refresh = useCallback(() => {
-    const generation = generationRef.current
-    const existing = refreshPromiseRef.current
-    if (existing?.generation === generation) return existing.promise
-
-    /** Rejects async work that crossed an account/cache generation boundary. */
-    const isCurrent = () => generationRef.current === generation
-    /** Hydrates local media first, then overlays authoritative family metadata. */
-    const request = (async () => {
-      let storedPhotos: JournalPhoto[] = []
-      try {
-        storedPhotos = await store.list()
-        if (!isCurrent()) return photosRef.current
-        replacePhotos(mergeLocalJournalPhotos(
-          photosRef.current,
-          storedPhotos,
-        ))
-      } catch {
-        // A family-server refresh can still populate this active session.
-      }
-
-      try {
-        const familyPhotos = await fetchFamilyJournalPhotos(cacheNamespace)
-        if (!isCurrent() || familyPhotos === null) return photosRef.current
-        const latestLocalPhotos = photosRef.current
-        const merged = mergeJournalPhotos(latestLocalPhotos, familyPhotos)
-        replacePhotos(merged)
-
-        const staleRemoteCacheIds = storedPhotos
-          .filter((photo) =>
-            photo.syncStatus === 'synced' &&
-            typeof photo.image === 'string' &&
-            /^https?:\/\//i.test(photo.image) &&
-            typeof photo.thumbnail === 'string' &&
-            /^https?:\/\//i.test(photo.thumbnail),
-          )
-          .map(({ id }) => id)
-        // Signed URLs expire, so never persist a newly fetched remote-only
-        // record and remove URL-only rows written by older app versions.
-        // Locally imported Blob copies remain durable and offline-capable.
-        void (async () => {
-          for (const photoId of staleRemoteCacheIds) {
-            if (!isCurrent()) return
-            await store.remove(photoId).catch(() => undefined)
-          }
-        })()
-        return merged
-      } catch {
-        return photosRef.current
-      }
-    })()
-    refreshPromiseRef.current = { generation, promise: request }
-    void request.finally(() => {
-      if (refreshPromiseRef.current?.promise === request) {
-        refreshPromiseRef.current = null
-      }
-    })
-    return request
-  }, [cacheNamespace, replacePhotos, store])
+  const refresh = useCallback(() => refreshLibrarySession(session, cacheNamespace), [cacheNamespace, session])
 
   // One serialized worker drains durable pending photos. A request arriving
   // mid-pass sets a flag so the same worker loops once more before it exits.
@@ -435,36 +489,31 @@ export function useJournalPhotoLibrary({
   useEffect(() => {
     const generation = generationRef.current + 1
     generationRef.current = generation
-    photosRef.current = []
-    // oxlint-disable-next-line react/set-state-in-effect -- Clear the prior account's photos before asynchronous namespace hydration.
-    setPhotos([])
+    photosRef.current = session.snapshot.photos
+    // oxlint-disable-next-line react/set-state-in-effect -- Reset per-consumer import progress when changing the active account namespace.
     setImportProgress(idleImportProgress)
-    refreshPromiseRef.current = null
     syncPromiseRef.current = null
     syncRequestedRef.current = false
     syncFailureCountsRef.current.clear()
     importQueueRef.current = Promise.resolve()
     if (!enabled) {
-      setLoading(false)
       return () => {
         if (generationRef.current === generation) generationRef.current += 1
       }
     }
     let active = true
-    setLoading(true)
-    void refresh()
+    if (suppliedStore) resumeIsolatedLibrarySession(session)
+    void refreshLibrarySession(session, cacheNamespace, true)
       .then(() => {
         if (!active || generationRef.current !== generation) return undefined
         return syncPending()
       })
-      .finally(() => {
-        if (active && generationRef.current === generation) setLoading(false)
-      })
     return () => {
       active = false
       if (generationRef.current === generation) generationRef.current += 1
+      if (suppliedStore) disposeLibrarySession(session)
     }
-  }, [cacheNamespace, enabled, refresh, store, syncPending])
+  }, [cacheNamespace, enabled, session, suppliedStore, syncPending])
 
   useEffect(() => {
     if (!enabled) return

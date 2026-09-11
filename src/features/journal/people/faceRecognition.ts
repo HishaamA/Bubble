@@ -41,12 +41,59 @@ export class ReferencePortraitError extends Error {
 }
 
 let humanPromise: Promise<HumanRuntime> | null = null
+let humanOperationTail: Promise<void> = Promise.resolve()
+
+/** Internal cancellation marker kept distinct from a failed photo decode. */
+class FaceScanAborted extends Error {
+  constructor() {
+    super('Face scan cancelled')
+    this.name = 'FaceScanAborted'
+  }
+}
+
+/** Distinguishes model startup failures from correctable portrait failures. */
+class FaceRuntimeUnavailable extends Error {
+  constructor() {
+    super('Face recognition runtime unavailable')
+    this.name = 'FaceRuntimeUnavailable'
+  }
+}
 
 /** Internal marker used to decide when WebGL inference may retry on CPU. */
 class FaceDetectionFailure extends Error {
   constructor(message = 'Face detection failed') {
     super(message)
     this.name = 'FaceDetectionFailure'
+  }
+}
+
+/** Stops work at the next safe boundary; an active Human detect cannot be interrupted. */
+function throwIfFaceScanAborted(signal?: AbortSignal) {
+  if (signal?.aborted) throw new FaceScanAborted()
+}
+
+/**
+ * Serializes access to Human's process-global TensorFlow runtime. This keeps a
+ * reference enrollment and an automatic library pass from running inference
+ * concurrently or replacing the WebGL backend while another call is using it.
+ */
+async function withHumanOperation<Result>(
+  signal: AbortSignal | undefined,
+  operation: () => Promise<Result>,
+) {
+  const previous = humanOperationTail.catch(() => undefined)
+  let releaseTurn!: () => void
+  const current = new Promise<void>((resolve) => {
+    releaseTurn = resolve
+  })
+  humanOperationTail = previous.then(() => current)
+
+  await previous
+  try {
+    throwIfFaceScanAborted(signal)
+    return await operation()
+  } finally {
+    releaseTurn()
   }
 }
 
@@ -188,7 +235,7 @@ function switchToCpu(failedRuntime: HumanRuntime) {
 }
 
 /** Loads URL or Blob media and returns an explicit resource-release callback. */
-function loadImage(source: CapsuleImageSource) {
+function loadImage(source: CapsuleImageSource, signal?: AbortSignal) {
   return new Promise<{ image: HTMLImageElement; release: () => void }>(
     (resolve, reject) => {
       const image = new Image()
@@ -196,23 +243,50 @@ function loadImage(source: CapsuleImageSource) {
         ? null
         : URL.createObjectURL(source)
       const sourceUrl = objectUrl ?? source
+      let settled = false
+      let released = false
+      const removeAbortListener = () => signal?.removeEventListener('abort', abortLoad)
+      const release = () => {
+        if (released) return
+        released = true
+        image.onload = null
+        image.onerror = null
+        image.src = ''
+        if (objectUrl) URL.revokeObjectURL(objectUrl)
+      }
+      function abortLoad() {
+        if (settled) return
+        settled = true
+        removeAbortListener()
+        release()
+        reject(new FaceScanAborted())
+      }
       if (typeof sourceUrl !== 'string' || !sourceUrl) {
+        settled = true
+        release()
         reject(new Error('Photo source unavailable'))
         return
       }
       if (/^https?:/i.test(sourceUrl)) image.crossOrigin = 'anonymous'
       image.decoding = 'async'
-      image.onload = () => resolve({
-        image,
-        release: () => {
-          image.src = ''
-          if (objectUrl) URL.revokeObjectURL(objectUrl)
-        },
-      })
+      image.onload = () => {
+        if (settled) return
+        settled = true
+        removeAbortListener()
+        resolve({ image, release })
+      }
       image.onerror = () => {
-        if (objectUrl) URL.revokeObjectURL(objectUrl)
+        if (settled) return
+        settled = true
+        removeAbortListener()
+        release()
         reject(new Error('Photo could not be opened for an on-device scan'))
       }
+      if (signal?.aborted) {
+        abortLoad()
+        return
+      }
+      signal?.addEventListener('abort', abortLoad, { once: true })
       image.src = sourceUrl
     },
   )
@@ -268,15 +342,22 @@ function detectionQuality(
 async function facesForPhoto(
   human: HumanInstance,
   source: CapsuleImageSource,
+  signal?: AbortSignal,
 ) {
-  const { image, release } = await loadImage(source)
+  throwIfFaceScanAborted(signal)
+  const { image, release } = await loadImage(source, signal)
   try {
+    throwIfFaceScanAborted(signal)
     let result
     try {
+      // Human does not expose cancellation for a detect already in progress;
+      // cancellation is observed immediately before and after that call.
       result = await human.detect(image)
     } catch {
+      throwIfFaceScanAborted(signal)
       throw new FaceDetectionFailure()
     }
+    throwIfFaceScanAborted(signal)
     if (result.error) throw new FaceDetectionFailure(result.error)
     const imageWidth = result.width || image.naturalWidth || image.width || TIMELINE_INFERENCE_WIDTH
     const imageHeight = result.height || image.naturalHeight || image.height || TIMELINE_INFERENCE_WIDTH
@@ -325,6 +406,42 @@ async function facesForPhoto(
   }
 }
 
+/** Runs one image through the shared runtime, including serialized CPU fallback. */
+async function detectFaces(
+  source: CapsuleImageSource,
+  signal?: AbortSignal,
+) {
+  return withHumanOperation(signal, async () => {
+    throwIfFaceScanAborted(signal)
+    let runtime: HumanRuntime
+    try {
+      runtime = await getHuman()
+    } catch {
+      throw new FaceRuntimeUnavailable()
+    }
+    throwIfFaceScanAborted(signal)
+
+    try {
+      return await facesForPhoto(runtime.human, source, signal)
+    } catch (error) {
+      if (error instanceof FaceScanAborted) throw error
+      if (!(error instanceof FaceDetectionFailure) || runtime.backend !== 'webgl') {
+        throw error
+      }
+
+      try {
+        throwIfFaceScanAborted(signal)
+        runtime = await switchToCpu(runtime)
+        throwIfFaceScanAborted(signal)
+        return await facesForPhoto(runtime.human, source, signal)
+      } catch (retryError) {
+        if (retryError instanceof FaceScanAborted) throw retryError
+        throw new FaceDetectionFailure()
+      }
+    }
+  })
+}
+
 /** Extracts one high-quality face descriptor from a reference portrait. */
 export async function scanReferencePortrait(source: CapsuleImageSource) {
   let preparedSource = source
@@ -340,33 +457,23 @@ export async function scanReferencePortrait(source: CapsuleImageSource) {
     }
   }
 
-  let runtime: HumanRuntime
-  try {
-    runtime = await getHuman()
-  } catch {
-    throw new ReferencePortraitError(
-      'Face recognition is unavailable on this device right now. Try again or add the person later.',
-    )
-  }
-
   let detection: Awaited<ReturnType<typeof facesForPhoto>>
   try {
-    detection = await facesForPhoto(runtime.human, preparedSource)
+    detection = await detectFaces(preparedSource)
   } catch (error) {
-    if (error instanceof FaceDetectionFailure && runtime.backend === 'webgl') {
-      try {
-        runtime = await switchToCpu(runtime)
-        detection = await facesForPhoto(runtime.human, preparedSource)
-      } catch {
-        throw new ReferencePortraitError(
-          'That photo could not be scanned on this device. Try another clear portrait.',
-        )
-      }
-    } else {
+    if (error instanceof FaceRuntimeUnavailable) {
       throw new ReferencePortraitError(
-        'That photo could not be opened. Try a JPEG, PNG, or WebP portrait.',
+        'Face recognition is unavailable on this device right now. Try again or add the person later.',
       )
     }
+    if (error instanceof FaceDetectionFailure) {
+      throw new ReferencePortraitError(
+        'That photo could not be scanned on this device. Try another clear portrait.',
+      )
+    }
+    throw new ReferencePortraitError(
+      'That photo could not be opened. Try a JPEG, PNG, or WebP portrait.',
+    )
   }
 
   if (detection.detectedFaceCount === 0) {
@@ -408,10 +515,9 @@ export async function scanTimelineFaces(
   signal?: AbortSignal,
 ): Promise<FaceScanResult> {
   const eligiblePhotos = photos.filter(({ canScanFaces }) => canScanFaces)
-  if (!eligiblePhotos.length) {
+  if (!eligiblePhotos.length || signal?.aborted) {
     return { faceScans: {}, failedPhotoCount: 0, completedPhotoCount: 0 }
   }
-  let runtime = await getHuman()
   const faceScans: Record<string, StoredPhotoFaceScan> = {}
   let failedPhotoCount = 0
   let completedPhotoCount = 0
@@ -422,7 +528,7 @@ export async function scanTimelineFaces(
     if (!photo) continue
     let photoScan: StoredPhotoFaceScan | undefined
     try {
-      const detection = await facesForPhoto(runtime.human, photo.scanSource)
+      const detection = await detectFaces(photo.scanSource, signal)
       photoScan = {
         scannedAt: new Date().toISOString(),
         faces: detection.faces.map(({
@@ -432,23 +538,7 @@ export async function scanTimelineFaces(
         }) => face),
       }
     } catch (error) {
-      if (error instanceof FaceDetectionFailure && runtime.backend === 'webgl') {
-        try {
-          runtime = await switchToCpu(runtime)
-          if (signal?.aborted) break
-          const detection = await facesForPhoto(runtime.human, photo.scanSource)
-          photoScan = {
-            scannedAt: new Date().toISOString(),
-            faces: detection.faces.map(({
-              minPixelSize: _minPixelSize,
-              maximumPoseAngle: _maximumPoseAngle,
-              ...face
-            }) => face),
-          }
-        } catch {
-          photoScan = undefined
-        }
-      }
+      if (error instanceof FaceScanAborted || signal?.aborted) break
     }
     if (signal?.aborted) break
     if (photoScan) {
