@@ -11,6 +11,7 @@ import {
 import { createPortal } from 'react-dom'
 import { AppWhimsy } from '../../app/AppWhimsy'
 import { useAuth } from '../auth'
+import { markWidgetRecapViewed } from '../widgets/widgetStorage'
 import '../FeaturePages.css'
 import './CapsulesPage.css'
 import {
@@ -57,6 +58,10 @@ type CapsulesPageProps = {
   now?: Date
   store?: CapsuleStore
   cacheNamespace?: string
+  initialRecapId?: string
+  initialContributionId?: string
+  initialWidgetRequestKey?: string
+  widgetStorageSubject?: string
 }
 
 /** Creates a UUID suitable for both local drafts and later server reconciliation. */
@@ -409,9 +414,11 @@ function blobToDataUrl(blob: Blob) {
 function CapsulePhotoImage({
   source,
   alt,
+  onReady,
 }: {
   source: CapsuleImageSource
   alt: string
+  onReady?: () => void
 }) {
   const [blobPreview, setBlobPreview] = useState<{
     source: Blob
@@ -459,7 +466,10 @@ function CapsulePhotoImage({
         alt={alt}
         aria-hidden={loaded ? undefined : 'true'}
         draggable="false"
-        onLoad={() => setLoadedSource(source)}
+        onLoad={() => {
+          setLoadedSource(source)
+          onReady?.()
+        }}
         onError={() => setFailedSource(source)}
       />
       {!loaded ? (
@@ -709,6 +719,7 @@ function CapsuleCard({
 
   return (
     <article
+      id={`capsule-${capsule.id}`}
       className="capsule-collection"
       data-kind={capsule.kind}
       data-featured={hideHeader ? 'true' : undefined}
@@ -802,11 +813,13 @@ function RecapSheet({
   demoMode,
   onClose,
   onPreparePhotos,
+  onPlaybackReady,
 }: {
   capsule: FamilyCapsule
   demoMode: boolean
   onClose: () => void
   onPreparePhotos: () => Promise<CapsulePhoto[]>
+  onPlaybackReady?: () => void
 }) {
   const orderedPhotos = useMemo(
     () => capsuleRecapPhotos(capsule.photos)
@@ -999,7 +1012,11 @@ function RecapSheet({
 
         <div className="capsule-recap-player" aria-live="off">
           {activePhoto ? (
-            <CapsulePhotoImage source={activePhoto.image} alt={activePhoto.caption || `Photo from ${activePhoto.contributorName}`} />
+            <CapsulePhotoImage
+              source={activePhoto.image}
+              alt={activePhoto.caption || `Photo from ${activePhoto.contributorName}`}
+              onReady={onPlaybackReady}
+            />
           ) : null}
           <span className="capsule-recap-player__credit">{activePhoto?.contributorName}</span>
         </div>
@@ -1028,6 +1045,10 @@ export function CapsulesPage({
   now,
   store: suppliedStore,
   cacheNamespace,
+  initialRecapId,
+  initialContributionId,
+  initialWidgetRequestKey,
+  widgetStorageSubject,
 }: CapsulesPageProps = {}) {
   const { isDevelopmentPreview, user } = useAuth()
   const subject = user?.id ?? 'signed-out'
@@ -1051,6 +1072,7 @@ export function CapsulesPage({
   const [activeRecapId, setActiveRecapId] = useState('')
   const [demoRecapId, setDemoRecapId] = useState('')
   const [demoDayRecapId, setDemoDayRecapId] = useState('')
+  const [widgetContributionId, setWidgetContributionId] = useState('')
   const [specialFormErrors, setSpecialFormErrors] = useState<{
     title?: string
     openDate?: string
@@ -1061,6 +1083,9 @@ export function CapsulesPage({
   const syncPromiseRef = useRef<Promise<CapsuleSyncResult> | null>(null)
   const createSpecialCapsuleInFlightRef = useRef(false)
   const refreshedUnlocksRef = useRef(new Set<string>())
+  const handledInitialRecapRef = useRef('')
+  const handledInitialContributionRef = useRef('')
+  const pendingWidgetRecapAcknowledgementRef = useRef('')
 
   useEffect(() => {
     clockRef.current = clock
@@ -1077,6 +1102,43 @@ export function CapsulesPage({
     }).then((result) => {
       setCapsules(result.capsules)
       setAuthoritativeWeeklyId(result.authoritativeWeeklyId)
+      // A homescreen recap tap waits for authorized family data, then opens once.
+      if (
+        initialRecapId
+        && handledInitialRecapRef.current !== `${initialWidgetRequestKey ?? 'initial'}:${initialRecapId}`
+      ) {
+        handledInitialRecapRef.current = `${initialWidgetRequestKey ?? 'initial'}:${initialRecapId}`
+        const capsule = result.capsules.find(({ id }) => id === initialRecapId)
+        if (
+          capsule?.familySynced === true
+          && isCapsuleUnlocked(capsule.opensAt, clockRef.current)
+          && capsuleRecapPhotos(capsule.photos).length > 0
+        ) {
+          setDemoRecapId('')
+          setDemoDayRecapId('')
+          pendingWidgetRecapAcknowledgementRef.current = capsule.id
+          setActiveRecapId(capsule.id)
+        }
+      }
+      if (
+        initialContributionId
+        && handledInitialContributionRef.current !== `${initialWidgetRequestKey ?? 'initial'}:${initialContributionId}`
+      ) {
+        handledInitialContributionRef.current = `${initialWidgetRequestKey ?? 'initial'}:${initialContributionId}`
+        const capsule = result.capsules.find(({ id }) => id === initialContributionId)
+        const opensAt = capsule ? new Date(capsule.opensAt).getTime() : Number.NaN
+        const closesAt = capsule ? new Date(capsule.closesAt).getTime() : Number.NaN
+        const currentTime = clockRef.current.getTime()
+        if (
+          capsule?.familySynced === true
+          && Number.isFinite(opensAt)
+          && Number.isFinite(closesAt)
+          && opensAt > currentTime
+          && closesAt > currentTime
+        ) {
+          setWidgetContributionId(capsule.id)
+        }
+      }
       return result
     })
     syncPromiseRef.current = request
@@ -1085,7 +1147,31 @@ export function CapsulesPage({
     } finally {
       if (syncPromiseRef.current === request) syncPromiseRef.current = null
     }
-  }, [displayName, store, weekKey])
+  }, [
+    displayName,
+    initialContributionId,
+    initialRecapId,
+    initialWidgetRequestKey,
+    store,
+    weekKey,
+  ])
+
+  // A contribution widget tap lands on the exact authorized Capsule and puts
+  // keyboard/assistive focus on its photo chooser without auto-opening a
+  // system picker outside a trusted user gesture.
+  useEffect(() => {
+    if (!widgetContributionId) return
+    const capsule = capsules.find(({ id }) => id === widgetContributionId)
+    if (!capsule || isCapsuleUnlocked(capsule.opensAt, clock)) return
+    const frame = window.requestAnimationFrame(() => {
+      const card = document.getElementById(`capsule-${widgetContributionId}`)
+      card?.scrollIntoView?.({ behavior: 'smooth', block: 'center' })
+      card?.querySelector<HTMLInputElement>('input[type="file"]')
+        ?.focus({ preventScroll: true })
+      setAnnouncement(`Ready to add a photo to ${capsuleDisplayTitle(capsule)}.`)
+    })
+    return () => window.cancelAnimationFrame(frame)
+  }, [capsules, clock, widgetContributionId])
 
   // A supplied clock makes tests and previews deterministic; production advances
   // once per minute so reveal states change without a page reload.
@@ -1571,6 +1657,14 @@ export function CapsulesPage({
           capsule={activeRecap}
           demoMode={demoRecapId === activeRecap.id || activeRecapUsesDemoDayMedia}
           onClose={closeRecap}
+          onPlaybackReady={() => {
+            if (
+              pendingWidgetRecapAcknowledgementRef.current !== activeRecap.id
+              || !widgetStorageSubject
+            ) return
+            markWidgetRecapViewed(widgetStorageSubject, activeRecap.id)
+            pendingWidgetRecapAcknowledgementRef.current = ''
+          }}
           onPreparePhotos={async () => {
             if (activeRecapUsesDemoDayMedia) return activeRecap.photos
             const refreshed = await refreshCapsules()

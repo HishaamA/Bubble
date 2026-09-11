@@ -39,6 +39,7 @@ import {
   type PlanDoodleName,
   type PlanTask,
 } from './planDetails'
+import { notifyWidgetDataChanged } from '../widgets/widgetStorage'
 
 type FamilyEvent = ReminderEvent & {
   date: string
@@ -1240,6 +1241,7 @@ function readJson(key: string): unknown {
 function writeJson(key: string, value: unknown) {
   try {
     localStorage.setItem(key, JSON.stringify(value))
+    notifyWidgetDataChanged()
     return true
   } catch {
     // Callers decide whether an in-memory-only update is acceptable.

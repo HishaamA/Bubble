@@ -6,6 +6,7 @@ import {
   APP_THEME_STORAGE_KEY,
   setAppTheme,
 } from '../../theme/AppTheme'
+import { eventStorageKey } from '../events/eventStorage'
 
 const persistence = vi.hoisted(() => ({
   readProfilePreferences: vi.fn(),
@@ -30,6 +31,15 @@ vi.mock('../auth', () => ({
 }))
 
 vi.mock('../../services/persistence', () => persistence)
+
+vi.mock('../onboarding/familyOnboardingContext', () => ({
+  useFamilyOnboarding: () => ({
+    snapshot: {
+      kind: 'member',
+      membership: { familyId: 'family-1' },
+    },
+  }),
+}))
 
 // SettingsPage owns the disclosures and summary; FamilySyncPanel's backend states
 // have their own focused suite. Keep this test deterministic even when a local
@@ -77,17 +87,20 @@ import { SettingsPage } from './ProfilePage'
 
 beforeEach(() => {
   vi.clearAllMocks()
+  window.localStorage.clear()
   setAppTheme('plum')
   persistence.readProfilePreferences.mockResolvedValue({
     notificationsEnabled: true,
     quietHoursEnabled: true,
     quietHoursStart: '22:00:00',
     quietHoursEnd: '08:00:00',
+    widgetPreviewsEnabled: false,
   })
   persistence.updateProfilePreferences.mockImplementation(
     async (patch: {
       notificationsEnabled?: boolean
       quietHoursEnabled?: boolean
+      widgetPreviewsEnabled?: boolean
     }) => ({
       notificationsEnabled: patch.notificationsEnabled ?? true,
       quietHoursEnabled: patch.quietHoursEnabled ?? true,
@@ -95,6 +108,7 @@ beforeEach(() => {
         patch.quietHoursEnabled === false ? null : '22:00:00',
       quietHoursEnd:
         patch.quietHoursEnabled === false ? null : '08:00:00',
+      widgetPreviewsEnabled: patch.widgetPreviewsEnabled ?? false,
     }),
   )
 })
@@ -166,6 +180,13 @@ describe('SettingsPage', () => {
     await waitFor(() => {
       expect(persistence.readProfilePreferences).toHaveBeenCalledTimes(1)
     })
+    const widgetPrivacyKey = eventStorageKey(
+      'bubble-widget-privacy:v1',
+      'user_clerk_alice:family:family-1',
+    )
+    await waitFor(() => {
+      expect(window.localStorage.getItem(widgetPrivacyKey)).toBe('hidden')
+    })
     await user.click(updates)
     await waitFor(() => {
       expect(updates).toHaveAttribute('aria-checked', 'false')
@@ -185,6 +206,22 @@ describe('SettingsPage', () => {
       quietHoursEnabled: false,
     })
 
+    const widgetPreviews = screen.getByRole('switch', {
+      name: 'Widget previews',
+    })
+    expect(widgetPreviews).toHaveAttribute('aria-checked', 'false')
+    expect(screen.getByText(
+      'Show task names and family photos on your Home Screen.',
+    )).toBeInTheDocument()
+    await user.click(widgetPreviews)
+    await waitFor(() => {
+      expect(widgetPreviews).toHaveAttribute('aria-checked', 'true')
+      expect(window.localStorage.getItem(widgetPrivacyKey)).toBe('full')
+    })
+    expect(persistence.updateProfilePreferences).toHaveBeenCalledWith({
+      widgetPreviewsEnabled: true,
+    })
+
     await user.click(screen.getByRole('button', { name: 'Manage family sharing' }))
     expect(screen.getByRole('heading', { name: 'Family Sync' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Close family sharing' })).toHaveAttribute('aria-expanded', 'true')
@@ -199,6 +236,109 @@ describe('SettingsPage', () => {
     await user.click(screen.getByRole('button', { name: 'Sign out' }))
     expect(auth.signOut).toHaveBeenCalledTimes(1)
     expect(await screen.findByText('Signed-out destination')).toBeInTheDocument()
+  })
+
+  it('restores an account opt-in into the active family widget partition', async () => {
+    persistence.readProfilePreferences.mockResolvedValueOnce({
+      notificationsEnabled: true,
+      quietHoursEnabled: true,
+      quietHoursStart: '22:00:00',
+      quietHoursEnd: '08:00:00',
+      widgetPreviewsEnabled: true,
+    })
+
+    render(
+      <MemoryRouter initialEntries={['/settings']}>
+        <Routes>
+          <Route path="/settings" element={<SettingsPage />} />
+        </Routes>
+      </MemoryRouter>,
+    )
+
+    const widgetPrivacyKey = eventStorageKey(
+      'bubble-widget-privacy:v1',
+      'user_clerk_alice:family:family-1',
+    )
+    await waitFor(() => {
+      expect(screen.getByRole('switch', {
+        name: 'Widget previews',
+      })).toHaveAttribute('aria-checked', 'true')
+      expect(window.localStorage.getItem(widgetPrivacyKey)).toBe('full')
+    })
+  })
+
+  it('does not reveal widget details when an opt-in cannot be saved', async () => {
+    const user = userEvent.setup()
+    persistence.updateProfilePreferences.mockRejectedValueOnce(
+      new Error('offline'),
+    )
+
+    render(
+      <MemoryRouter initialEntries={['/settings']}>
+        <Routes>
+          <Route path="/settings" element={<SettingsPage />} />
+        </Routes>
+      </MemoryRouter>,
+    )
+
+    const widgetPrivacyKey = eventStorageKey(
+      'bubble-widget-privacy:v1',
+      'user_clerk_alice:family:family-1',
+    )
+    const widgetPreviews = await screen.findByRole('switch', {
+      name: 'Widget previews',
+    })
+    await waitFor(() => {
+      expect(window.localStorage.getItem(widgetPrivacyKey)).toBe('hidden')
+    })
+    await user.click(widgetPreviews)
+
+    expect(await screen.findByText(
+      'Widget previews could not be saved.',
+    )).toBeInTheDocument()
+    expect(widgetPreviews).toHaveAttribute('aria-checked', 'false')
+    expect(window.localStorage.getItem(widgetPrivacyKey)).toBe('hidden')
+  })
+
+  it('hides widget details immediately while an opt-out is still saving', async () => {
+    const user = userEvent.setup()
+    persistence.readProfilePreferences.mockResolvedValueOnce({
+      notificationsEnabled: true,
+      quietHoursEnabled: true,
+      quietHoursStart: '22:00:00',
+      quietHoursEnd: '08:00:00',
+      widgetPreviewsEnabled: true,
+    })
+    persistence.updateProfilePreferences.mockImplementationOnce(
+      () => new Promise(() => undefined),
+    )
+
+    const view = render(
+      <MemoryRouter initialEntries={['/settings']}>
+        <Routes>
+          <Route path="/settings" element={<SettingsPage />} />
+        </Routes>
+      </MemoryRouter>,
+    )
+    const widgetPrivacyKey = eventStorageKey(
+      'bubble-widget-privacy:v1',
+      'user_clerk_alice:family:family-1',
+    )
+    const widgetPreviews = await screen.findByRole('switch', {
+      name: 'Widget previews',
+    })
+    await waitFor(() => {
+      expect(widgetPreviews).toHaveAttribute('aria-checked', 'true')
+      expect(window.localStorage.getItem(widgetPrivacyKey)).toBe('full')
+    })
+
+    await user.click(widgetPreviews)
+
+    expect(persistence.updateProfilePreferences).toHaveBeenCalledWith({
+      widgetPreviewsEnabled: false,
+    })
+    expect(window.localStorage.getItem(widgetPrivacyKey)).toBe('hidden')
+    view.unmount()
   })
 
   it('keeps the old profile address as a redirect to settings', async () => {

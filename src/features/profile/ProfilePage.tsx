@@ -7,6 +7,9 @@ import {
 } from '../../services/persistence'
 import { useAppTheme } from '../../theme/AppTheme'
 import { useAuth } from '../auth'
+import { familyEventStorageSubject } from '../events/eventStorage'
+import { useFamilyOnboarding } from '../onboarding/familyOnboardingContext'
+import { writeWidgetPrivacy } from '../widgets/widgetStorage'
 import '../FeaturePages.css'
 import { FamilySyncPanel, type FamilySyncSnapshot } from './family-sync'
 
@@ -90,11 +93,20 @@ function getFamilySummary(snapshot: FamilySyncSnapshot | null) {
 export function SettingsPage() {
   const navigate = useNavigate()
   const { signOut, user } = useAuth()
+  const { snapshot: familyAccess } = useFamilyOnboarding()
   const { theme: selectedTheme, setTheme, themes } = useAppTheme()
   const [notificationsEnabled, setNotificationsEnabled] = useState(true)
   const [quietHoursEnabled, setQuietHoursEnabled] = useState(true)
+  const [widgetPreviewChoice, setWidgetPreviewChoice] = useState<{
+    userId: string
+    enabled: boolean
+  } | null>(null)
+  const [confirmedWidgetPreference, setConfirmedWidgetPreference] = useState<{
+    userId: string
+    enabled: boolean
+  } | null>(null)
   const [savingPreference, setSavingPreference] = useState<
-    'notifications' | 'quiet-hours' | null
+    'notifications' | 'quiet-hours' | 'widget-previews' | null
   >(null)
   const [preferenceError, setPreferenceError] = useState<string | null>(null)
   const [showProfileSettings, setShowProfileSettings] = useState(false)
@@ -109,6 +121,13 @@ export function SettingsPage() {
   const profileInitial = displayName.slice(0, 1).toUpperCase()
   const accountIdentity = user?.email || user?.phone || 'Signed in'
   const userId = user?.id ?? null
+  const widgetPreviewsEnabled = widgetPreviewChoice?.userId === userId
+    ? widgetPreviewChoice.enabled
+    : false
+  const familyId = familyAccess?.kind === 'member'
+    ? familyAccess.membership.familyId
+    : null
+  const widgetStorageSubject = familyEventStorageSubject(userId, familyId)
 
   useEffect(() => {
     let requestActive = true
@@ -119,6 +138,14 @@ export function SettingsPage() {
         if (!requestActive) return
         setNotificationsEnabled(profilePreferences.notificationsEnabled)
         setQuietHoursEnabled(profilePreferences.quietHoursEnabled)
+        setWidgetPreviewChoice({
+          userId,
+          enabled: profilePreferences.widgetPreviewsEnabled,
+        })
+        setConfirmedWidgetPreference({
+          userId,
+          enabled: profilePreferences.widgetPreviewsEnabled,
+        })
         setPreferenceError(null)
       })
       .catch(() => {
@@ -131,6 +158,17 @@ export function SettingsPage() {
       requestActive = false
     }
   }, [userId])
+
+  // The native publisher intentionally reads a device-local, family-scoped
+  // privacy value. Mirror only server-confirmed choices, including when the
+  // active account moves to a different family partition.
+  useEffect(() => {
+    if (!userId || confirmedWidgetPreference?.userId !== userId) return
+    writeWidgetPrivacy(
+      widgetStorageSubject,
+      confirmedWidgetPreference.enabled ? 'full' : 'hidden',
+    )
+  }, [confirmedWidgetPreference, userId, widgetStorageSubject])
 
   /** Optimistically toggles family updates and rolls back a failed save. */
   async function handleNotificationsChange() {
@@ -165,6 +203,38 @@ export function SettingsPage() {
     } catch {
       setQuietHoursEnabled(!nextQuietHoursEnabled)
       setPreferenceError('Quiet evenings could not be saved.')
+    } finally {
+      setSavingPreference(null)
+    }
+  }
+
+  /** Reveals Home Screen details only after the opt-in is durably confirmed. */
+  async function handleWidgetPreviewsChange() {
+    if (!userId) return
+    const nextWidgetPreviewsEnabled = !widgetPreviewsEnabled
+    setWidgetPreviewChoice({ userId, enabled: nextWidgetPreviewsEnabled })
+    setPreferenceError(null)
+    setSavingPreference('widget-previews')
+    if (!nextWidgetPreviewsEnabled) {
+      // Opt-out is a local privacy boundary, so hide native content before a
+      // potentially slow or offline server save. Opt-in remains confirmed-only.
+      writeWidgetPrivacy(widgetStorageSubject, 'hidden')
+    }
+    try {
+      const savedPreferences = await updateProfilePreferences({
+        widgetPreviewsEnabled: nextWidgetPreviewsEnabled,
+      })
+      setWidgetPreviewChoice({
+        userId,
+        enabled: savedPreferences.widgetPreviewsEnabled,
+      })
+      setConfirmedWidgetPreference({
+        userId,
+        enabled: savedPreferences.widgetPreviewsEnabled,
+      })
+    } catch {
+      setWidgetPreviewChoice({ userId, enabled: !nextWidgetPreviewsEnabled })
+      setPreferenceError('Widget previews could not be saved.')
     } finally {
       setSavingPreference(null)
     }
@@ -343,6 +413,14 @@ export function SettingsPage() {
             checked={quietHoursEnabled}
             disabled={savingPreference !== null}
             onChange={() => void handleQuietHoursChange()}
+          />
+          <ToggleRow
+            id="widget-previews"
+            label="Widget previews"
+            description="Show task names and family photos on your Home Screen."
+            checked={widgetPreviewsEnabled}
+            disabled={savingPreference !== null}
+            onChange={() => void handleWidgetPreviewsChange()}
           />
         </div>
         {preferenceError ? (

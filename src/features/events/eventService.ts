@@ -182,17 +182,23 @@ export async function updateFamilyEventDetails(
 }
 
 /** Fetches and validates all plans visible to the active family. */
-export async function fetchFamilyEvents(): Promise<FamilyEventRecord[]> {
+export async function fetchFamilyEvents(options: {
+  includeEarlierToday?: boolean
+} = {}): Promise<FamilyEventRecord[]> {
   const client = getSupabaseClient()
   if (!client) return []
   const circleId = await currentCircleId()
   if (!circleId) return []
 
+  const now = new Date()
+  const from = options.includeEarlierToday
+    ? new Date(now.getFullYear(), now.getMonth(), now.getDate())
+    : now
   const { data, error } = await client
     .from('events')
     .select('id,title,starts_at,location,details')
     .eq('circle_id', circleId)
-    .gte('starts_at', new Date().toISOString())
+    .gte('starts_at', from.toISOString())
     .order('starts_at', { ascending: true })
     .limit(100)
   if (error) throw error

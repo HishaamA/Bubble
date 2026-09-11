@@ -31,11 +31,13 @@ export type ProfilePreferences = {
   quietHoursEnabled: boolean
   quietHoursStart: string | null
   quietHoursEnd: string | null
+  widgetPreviewsEnabled: boolean
 }
 
 export type ProfilePreferencesPatch = {
   notificationsEnabled?: boolean
   quietHoursEnabled?: boolean
+  widgetPreviewsEnabled?: boolean
 }
 
 export type FamilyMembershipState =
@@ -157,6 +159,10 @@ function parseProfilePreferences(
     quietHoursEnabled: Boolean(quietHoursStart && quietHoursEnd),
     quietHoursStart,
     quietHoursEnd,
+    // Home Screen copy and family photos stay private until the account has
+    // explicitly opted in. Missing or malformed server data therefore fails
+    // closed for clients upgrading from an older schema.
+    widgetPreviewsEnabled: record.widget_previews_enabled === true,
   }
 }
 
@@ -236,7 +242,7 @@ export async function readProfilePreferences(): Promise<ProfilePreferences> {
   const { data, error } = await client
     .from('profile_preferences')
     .select(
-      'notifications_enabled,quiet_hours_start,quiet_hours_end',
+      'notifications_enabled,quiet_hours_start,quiet_hours_end,widget_previews_enabled',
     )
     .eq('user_id', profile.userId)
     .single()
@@ -261,6 +267,9 @@ export async function updateProfilePreferences(
     changes.quiet_hours_start = patch.quietHoursEnabled ? '22:00:00' : null
     changes.quiet_hours_end = patch.quietHoursEnabled ? '08:00:00' : null
   }
+  if (typeof patch.widgetPreviewsEnabled === 'boolean') {
+    changes.widget_previews_enabled = patch.widgetPreviewsEnabled
+  }
   if (Object.keys(changes).length === 0) {
     return readProfilePreferences()
   }
@@ -273,7 +282,7 @@ export async function updateProfilePreferences(
     .update(changes)
     .eq('user_id', profile.userId)
     .select(
-      'notifications_enabled,quiet_hours_start,quiet_hours_end',
+      'notifications_enabled,quiet_hours_start,quiet_hours_end,widget_previews_enabled',
     )
     .single()
   if (error) throw error

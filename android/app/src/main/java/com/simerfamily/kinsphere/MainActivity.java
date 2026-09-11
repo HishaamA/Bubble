@@ -17,6 +17,7 @@ import com.simerfamily.kinsphere.cardboard.CardboardWindowController;
 import com.simerfamily.kinsphere.capsule.CapsuleRecapPlugin;
 import com.simerfamily.kinsphere.debug.DebugAccessPlugin;
 import com.simerfamily.kinsphere.panorama.PanoramaCapturePlugin;
+import com.simerfamily.kinsphere.widget.BubbleWidgetPlugin;
 import java.util.Locale;
 
 /** Hosts the Capacitor bridge and the reversible window state used by Cardboard. */
@@ -36,6 +37,7 @@ public final class MainActivity extends BridgeActivity {
         registerPlugin(CapsuleRecapPlugin.class);
         registerPlugin(DebugAccessPlugin.class);
         registerPlugin(PanoramaCapturePlugin.class);
+        registerPlugin(BubbleWidgetPlugin.class);
         super.onCreate(savedInstanceState);
         // KinSphere's normal app shell owns this baseline. Cardboard temporarily
         // switches it to edge-to-edge and restores this explicit state on exit.
@@ -120,7 +122,7 @@ public final class MainActivity extends BridgeActivity {
 
     /** Cancels delayed WebView callbacks before the Activity and bridge are destroyed. */
     @Override
-    protected void onDestroy() {
+    public void onDestroy() {
         destroying = true;
         viewportHandler.removeCallbacks(publishViewportGeometry);
         super.onDestroy();

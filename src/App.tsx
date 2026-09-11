@@ -1,5 +1,12 @@
 import { lazy, Suspense, type PropsWithChildren } from 'react'
-import { HashRouter, Navigate, Outlet, Route, Routes } from 'react-router-dom'
+import {
+  HashRouter,
+  Navigate,
+  Outlet,
+  Route,
+  Routes,
+  useLocation,
+} from 'react-router-dom'
 import { AccountScopedData } from './app/AccountScopedData'
 import { createAccountCacheNamespace } from './app/accountCacheNamespace'
 import { AppShell } from './app/AppShell'
@@ -8,10 +15,13 @@ import { LegacyRouteRedirect } from './app/LegacyRouteRedirect'
 import { AuthProvider, RequireAuthentication } from './features/auth/AuthProvider'
 import { useAuth } from './features/auth/authContext'
 import { EventReminderCoordinator } from './features/events/EventReminderCoordinator'
+import { familyEventStorageSubject } from './features/events/eventStorage'
 import { FamilyOnboardingProvider } from './features/onboarding/FamilyOnboardingProvider'
 import { useFamilyOnboarding } from './features/onboarding/familyOnboardingContext'
 import { OnboardingPage } from './features/onboarding/OnboardingPage'
 import { RequireFamilyMembership } from './features/onboarding/RequireFamilyMembership'
+import { WidgetDeepLinkHandler } from './features/widgets/WidgetDeepLinkHandler'
+import { WidgetSnapshotPublisher } from './features/widgets/WidgetSnapshotPublisher'
 import './App.css'
 
 // Each screen is a separate dynamic entry. The initial app shell therefore
@@ -100,12 +110,50 @@ function useActiveMemberCacheNamespace() {
   return createAccountCacheNamespace(user?.id ?? 'signed-out', familyId)
 }
 
+/** Returns the same local persistence partition used by Journal checklists. */
+function useActiveMemberStorageSubject() {
+  const { user } = useAuth()
+  const { snapshot } = useFamilyOnboarding()
+  const familyId = snapshot?.kind === 'member'
+    ? snapshot.membership.familyId
+    : null
+  return familyEventStorageSubject(user?.id, familyId)
+}
+
 /** Supplies the active cache partition to the Capsule feature. */
 function CapsuleRoute() {
   const cacheNamespace = useActiveMemberCacheNamespace()
+  const widgetStorageSubject = useActiveMemberStorageSubject()
+  const location = useLocation()
+  const widgetContext = widgetCapsuleContextFromRouteState(location.state)
   return (
-    <CapsulesPage cacheNamespace={cacheNamespace} />
+    <CapsulesPage
+      cacheNamespace={cacheNamespace}
+      initialRecapId={widgetContext?.recapId}
+      initialContributionId={widgetContext?.contributionId}
+      initialWidgetRequestKey={widgetContext ? location.key : undefined}
+      widgetStorageSubject={widgetStorageSubject}
+    />
   )
+}
+
+/** Extracts only bounded Capsule context written by the native-link handler. */
+function widgetCapsuleContextFromRouteState(state: unknown): {
+  recapId?: string
+  contributionId?: string
+} | null {
+  if (!state || typeof state !== 'object' || Array.isArray(state)) return null
+  const context = (state as Record<string, unknown>).capsuleContext
+  if (!context || typeof context !== 'object' || Array.isArray(context)) return null
+  const record = context as Record<string, unknown>
+  if (record.source !== 'widget') return null
+  const safeId = (value: unknown) => typeof value === 'string'
+    && /^[a-z0-9][a-z0-9._~-]{0,159}$/i.test(value)
+    ? value
+    : undefined
+  const recapId = safeId(record.recapId)
+  const contributionId = safeId(record.contributionId)
+  return recapId || contributionId ? { recapId, contributionId } : null
 }
 
 /** Supplies the active cache partition to the Journal feature. */
@@ -126,8 +174,11 @@ function CapsulePhotoMemberRoute() {
 
 /** Wraps every member route in the shell and account-scoped data providers. */
 function MemberApplication() {
+  const storageSubject = useActiveMemberStorageSubject()
   return (
     <AccountScopedData>
+      <WidgetDeepLinkHandler storageSubject={storageSubject} />
+      <WidgetSnapshotPublisher storageSubject={storageSubject} />
       <AppShell>
         <Suspense fallback={<RouteLoading />}>
           <Outlet />

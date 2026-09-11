@@ -30,7 +30,38 @@
 		A20000000000000000000005 /* CoreMotion.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = A20000000000000000000017 /* CoreMotion.framework */; };
 		A20000000000000000000006 /* Metal.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = A20000000000000000000018 /* Metal.framework */; };
 		A20000000000000000000007 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000019 /* PrivacyInfo.xcprivacy */; };
+		B30000000000000000000001 /* BubbleWidgetPlugin.swift in Sources */ = {isa = PBXBuildFile; fileRef = B30000000000000000000011 /* BubbleWidgetPlugin.swift */; };
+		B30000000000000000000002 /* BubbleWidgetShared.swift in Sources */ = {isa = PBXBuildFile; fileRef = B30000000000000000000012 /* BubbleWidgetShared.swift */; };
+		B30000000000000000000003 /* BubbleWidget.swift in Sources */ = {isa = PBXBuildFile; fileRef = B30000000000000000000013 /* BubbleWidget.swift */; };
+		B30000000000000000000004 /* BubbleWidgetShared.swift in Sources */ = {isa = PBXBuildFile; fileRef = B30000000000000000000012 /* BubbleWidgetShared.swift */; };
+		B30000000000000000000005 /* BubbleWidgetExtension.appex in Embed App Extensions */ = {isa = PBXBuildFile; fileRef = B30000000000000000000017 /* BubbleWidgetExtension.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+		B30000000000000000000006 /* WidgetKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = B30000000000000000000018 /* WidgetKit.framework */; };
+		B30000000000000000000007 /* SwiftUI.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = B30000000000000000000019 /* SwiftUI.framework */; };
 /* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		B30000000000000000000051 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 504EC2FC1FED79650016851F /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = B30000000000000000000041;
+			remoteInfo = BubbleWidgetExtension;
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXCopyFilesBuildPhase section */
+		B30000000000000000000024 /* Embed App Extensions */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 13;
+			files = (
+				B30000000000000000000005 /* BubbleWidgetExtension.appex in Embed App Extensions */,
+			);
+			name = "Embed App Extensions";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
 		2FAD9762203C412B000D30F8 /* config.xml */ = {isa = PBXFileReference; lastKnownFileType = text.xml; path = config.xml; sourceTree = "<group>"; };
@@ -60,6 +91,15 @@
 		A20000000000000000000017 /* CoreMotion.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = CoreMotion.framework; path = System/Library/Frameworks/CoreMotion.framework; sourceTree = SDKROOT; };
 		A20000000000000000000018 /* Metal.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Metal.framework; path = System/Library/Frameworks/Metal.framework; sourceTree = SDKROOT; };
 		A20000000000000000000019 /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
+		B30000000000000000000011 /* BubbleWidgetPlugin.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BubbleWidgetPlugin.swift; sourceTree = "<group>"; };
+		B30000000000000000000012 /* BubbleWidgetShared.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BubbleWidgetShared.swift; sourceTree = "<group>"; };
+		B30000000000000000000013 /* BubbleWidget.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BubbleWidget.swift; sourceTree = "<group>"; };
+		B30000000000000000000014 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		B30000000000000000000015 /* BubbleWidgetExtension.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = BubbleWidgetExtension.entitlements; sourceTree = "<group>"; };
+		B30000000000000000000016 /* App.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = App.entitlements; sourceTree = "<group>"; };
+		B30000000000000000000017 /* BubbleWidgetExtension.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = BubbleWidgetExtension.appex; sourceTree = BUILT_PRODUCTS_DIR; };
+		B30000000000000000000018 /* WidgetKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = WidgetKit.framework; path = System/Library/Frameworks/WidgetKit.framework; sourceTree = SDKROOT; };
+		B30000000000000000000019 /* SwiftUI.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = SwiftUI.framework; path = System/Library/Frameworks/SwiftUI.framework; sourceTree = SDKROOT; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -75,6 +115,15 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		B30000000000000000000022 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				B30000000000000000000007 /* SwiftUI.framework in Frameworks */,
+				B30000000000000000000006 /* WidgetKit.framework in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
@@ -83,10 +132,13 @@
 			children = (
 				958DCC722DB07C7200EA8C5F /* debug.xcconfig */,
 				504EC3061FED79650016851F /* App */,
+				B30000000000000000000032 /* BubbleWidgetExtension */,
 				A20000000000000000000014 /* GoogleCardboard.xcframework */,
 				A20000000000000000000016 /* AVFoundation.framework */,
 				A20000000000000000000017 /* CoreMotion.framework */,
 				A20000000000000000000018 /* Metal.framework */,
+				B30000000000000000000018 /* WidgetKit.framework */,
+				B30000000000000000000019 /* SwiftUI.framework */,
 				504EC3051FED79650016851F /* Products */,
 			);
 			sourceTree = "<group>";
@@ -95,6 +147,7 @@
 			isa = PBXGroup;
 			children = (
 				504EC3041FED79650016851F /* App.app */,
+				B30000000000000000000017 /* BubbleWidgetExtension.appex */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -102,6 +155,7 @@
 		504EC3061FED79650016851F /* App */ = {
 			isa = PBXGroup;
 			children = (
+				B30000000000000000000016 /* App.entitlements */,
 				A20000000000000000000012 /* App-Bridging-Header.h */,
 				A20000000000000000000010 /* BubbleCardboardSession.h */,
 				A20000000000000000000011 /* BubbleCardboardSession.mm */,
@@ -114,6 +168,7 @@
 				A10000000000000000000015 /* NativeWebAuthPlugin.swift */,
 				A10000000000000000000011 /* PanoramaCapturePlugin.swift */,
 				A10000000000000000000012 /* PanoramaCaptureViewController.swift */,
+				B30000000000000000000031 /* Widget */,
 				50379B222058CBB4000EE86E /* capacitor.config.json */,
 				504EC3071FED79650016851F /* AppDelegate.swift */,
 				504EC30B1FED79650016851F /* Main.storyboard */,
@@ -127,6 +182,25 @@
 			path = App;
 			sourceTree = "<group>";
 		};
+		B30000000000000000000031 /* Widget */ = {
+			isa = PBXGroup;
+			children = (
+				B30000000000000000000011 /* BubbleWidgetPlugin.swift */,
+				B30000000000000000000012 /* BubbleWidgetShared.swift */,
+			);
+			path = Widget;
+			sourceTree = "<group>";
+		};
+		B30000000000000000000032 /* BubbleWidgetExtension */ = {
+			isa = PBXGroup;
+			children = (
+				B30000000000000000000013 /* BubbleWidget.swift */,
+				B30000000000000000000014 /* Info.plist */,
+				B30000000000000000000015 /* BubbleWidgetExtension.entitlements */,
+			);
+			path = BubbleWidgetExtension;
+			sourceTree = "<group>";
+		};
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
@@ -137,10 +211,12 @@
 				504EC3001FED79650016851F /* Sources */,
 				504EC3011FED79650016851F /* Frameworks */,
 				504EC3021FED79650016851F /* Resources */,
+				B30000000000000000000024 /* Embed App Extensions */,
 			);
 			buildRules = (
 			);
 			dependencies = (
+				B30000000000000000000052 /* PBXTargetDependency */,
 			);
 			name = App;
 			packageProductDependencies = (
@@ -149,6 +225,25 @@
 			productName = App;
 			productReference = 504EC3041FED79650016851F /* App.app */;
 			productType = "com.apple.product-type.application";
+		};
+		B30000000000000000000041 /* BubbleWidgetExtension */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = B30000000000000000000063 /* Build configuration list for PBXNativeTarget "BubbleWidgetExtension" */;
+			buildPhases = (
+				B30000000000000000000021 /* Sources */,
+				B30000000000000000000022 /* Frameworks */,
+				B30000000000000000000023 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = BubbleWidgetExtension;
+			packageProductDependencies = (
+			);
+			productName = BubbleWidgetExtension;
+			productReference = B30000000000000000000017 /* BubbleWidgetExtension.appex */;
+			productType = "com.apple.product-type.app-extension";
 		};
 /* End PBXNativeTarget section */
 
@@ -162,6 +257,10 @@
 					504EC3031FED79650016851F = {
 						CreatedOnToolsVersion = 9.2;
 						LastSwiftMigration = 1100;
+						ProvisioningStyle = Automatic;
+					};
+					B30000000000000000000041 = {
+						CreatedOnToolsVersion = 26.0;
 						ProvisioningStyle = Automatic;
 					};
 				};
@@ -183,6 +282,7 @@
 			projectRoot = "";
 			targets = (
 				504EC3031FED79650016851F /* App */,
+				B30000000000000000000041 /* BubbleWidgetExtension */,
 			);
 		};
 /* End PBXProject section */
@@ -203,6 +303,13 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		B30000000000000000000023 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
@@ -211,6 +318,8 @@
 			buildActionMask = 2147483647;
 			files = (
 				504EC3081FED79650016851F /* AppDelegate.swift in Sources */,
+				B30000000000000000000001 /* BubbleWidgetPlugin.swift in Sources */,
+				B30000000000000000000002 /* BubbleWidgetShared.swift in Sources */,
 				A20000000000000000000001 /* BubbleCardboardSession.mm in Sources */,
 				9582B6832FE993A70072D4E8 /* SceneDelegate.swift in Sources */,
 				A10000000000000000000003 /* CardboardOrientationPlugin.swift in Sources */,
@@ -223,7 +332,24 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		B30000000000000000000021 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				B30000000000000000000003 /* BubbleWidget.swift in Sources */,
+				B30000000000000000000004 /* BubbleWidgetShared.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		B30000000000000000000052 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = B30000000000000000000041 /* BubbleWidgetExtension */;
+			targetProxy = B30000000000000000000051 /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
 
 /* Begin PBXVariantGroup section */
 		504EC30B1FED79650016851F /* Main.storyboard */ = {
@@ -359,6 +485,7 @@
 			baseConfigurationReference = 958DCC722DB07C7200EA8C5F /* debug.xcconfig */;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_ENTITLEMENTS = App/App.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = WHLVT8Y56F;
@@ -389,6 +516,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_ENTITLEMENTS = App/App.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = WHLVT8Y56F;
@@ -414,6 +542,62 @@
 			};
 			name = Release;
 		};
+		B30000000000000000000061 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				APPLICATION_EXTENSION_API_ONLY = YES;
+				CODE_SIGN_ENTITLEMENTS = BubbleWidgetExtension/BubbleWidgetExtension.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = WHLVT8Y56F;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = BubbleWidgetExtension/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 15.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.simerfamily.kinsphere.BubbleWidget;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		B30000000000000000000062 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				APPLICATION_EXTENSION_API_ONLY = YES;
+				CODE_SIGN_ENTITLEMENTS = BubbleWidgetExtension/BubbleWidgetExtension.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = WHLVT8Y56F;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = BubbleWidgetExtension/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 15.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.simerfamily.kinsphere.BubbleWidget;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -431,6 +615,15 @@
 			buildConfigurations = (
 				504EC3171FED79650016851F /* Debug */,
 				504EC3181FED79650016851F /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		B30000000000000000000063 /* Build configuration list for PBXNativeTarget "BubbleWidgetExtension" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				B30000000000000000000061 /* Debug */,
+				B30000000000000000000062 /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;

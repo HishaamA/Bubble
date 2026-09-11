@@ -145,6 +145,7 @@ beforeEach(() => {
       notifications_enabled: true,
       quiet_hours_start: '22:00:00',
       quiet_hours_end: '08:00:00',
+      widget_previews_enabled: false,
     },
     error: null,
   })
@@ -287,6 +288,7 @@ describe('Clerk-backed persistence service', () => {
       quietHoursEnabled: true,
       quietHoursStart: '22:00:00',
       quietHoursEnd: '08:00:00',
+      widgetPreviewsEnabled: false,
     })
     expect(mocks.preferences.eq).toHaveBeenCalledWith(
       'user_id',
@@ -298,6 +300,7 @@ describe('Clerk-backed persistence service', () => {
         notifications_enabled: false,
         quiet_hours_start: null,
         quiet_hours_end: null,
+        widget_previews_enabled: true,
       },
       error: null,
     })
@@ -305,10 +308,12 @@ describe('Clerk-backed persistence service', () => {
       updateProfilePreferences({
         notificationsEnabled: false,
         quietHoursEnabled: false,
+        widgetPreviewsEnabled: true,
       }),
     ).resolves.toEqual({
       notificationsEnabled: false,
       quietHoursEnabled: false,
+      widgetPreviewsEnabled: true,
       quietHoursStart: null,
       quietHoursEnd: null,
     })
@@ -316,6 +321,7 @@ describe('Clerk-backed persistence service', () => {
       notifications_enabled: false,
       quiet_hours_start: null,
       quiet_hours_end: null,
+      widget_previews_enabled: true,
     })
   })
 
@@ -325,6 +331,7 @@ describe('Clerk-backed persistence service', () => {
       quietHoursEnabled: true,
       quietHoursStart: '22:00:00',
       quietHoursEnd: '08:00:00',
+      widgetPreviewsEnabled: false,
     })
 
     expect(mocks.preferences.update).not.toHaveBeenCalled()

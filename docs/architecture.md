@@ -151,6 +151,30 @@ reveal, bounded hotspot coordinates, and unique job idempotency keys.
 3. The installed app schedules the device reminder while the server-backed
    reminder remains the durable cross-device preference.
 
+### Home Screen widget
+
+1. The authenticated app selects one small daily card from already-authorized
+   events and Capsules: due soon, newly opened recap, another item today,
+   contribution prompt, recent weekly memory, then the private empty state.
+2. A member must explicitly enable **Widget previews** before task names or
+   family photos can leave the app surface. The server-confirmed preference is
+   mirrored only into that account-and-family's local partition.
+3. The shared client publishes one bounded, versioned snapshot and an optional
+   freshly resized thumbnail through the native bridge. Android stores it in
+   app-private files; iOS uses the App Group
+   `group.com.simerfamily.kinsphere.widget` shared with WidgetKit.
+4. Native widgets validate every field and local route, render the selected
+   Plum, Forest, or Midnight card, and fail to generic copy without media after
+   sign-out, invalid data, or local-day rollover.
+5. Taps use an allowlisted app deep link. Recap acknowledgement occurs only
+   after the signed-in app re-fetches the requested, unlocked family Capsule
+   and actually opens its recap.
+
+Widget extensions never hold Supabase or Clerk credentials and do not perform
+background family fetches. Native timelines can expire or redraw a stored
+same-day card, but a newly unlocked recap is published after the authenticated
+app next opens or resumes.
+
 ### Family Thread
 
 1. A user selects approved captions or manually approved text alternatives.

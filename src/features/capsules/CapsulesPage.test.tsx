@@ -1,6 +1,7 @@
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { eventStorageKey } from '../events/eventStorage'
 import { createMemoryCapsuleStore } from './capsuleStore'
 import type { FamilyCapsule } from './types'
 
@@ -452,6 +453,57 @@ describe('CapsulesPage', () => {
 
     await user.click(screen.getByRole('button', { name: 'Close recap' }))
     await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+  })
+
+  it('opens an authorized recap directly from a homescreen widget tap', async () => {
+    const unlocked = unlockedCapsule()
+    const widgetStorageSubject = 'user-a:family:a'
+    render(
+      <CapsulesPage
+        now={testNow}
+        store={createMemoryCapsuleStore([unlocked])}
+        initialRecapId={unlocked.id}
+        widgetStorageSubject={widgetStorageSubject}
+      />,
+    )
+
+    const dialog = await screen.findByRole('dialog', {
+      name: previousWeekRange,
+    })
+    expect(dialog).toBeInTheDocument()
+    expect(window.localStorage.getItem(
+      eventStorageKey('bubble-widget-viewed-recaps:v1', widgetStorageSubject),
+    )).toBeNull()
+
+    const firstFrame = dialog.querySelector('img')
+    expect(firstFrame).not.toBeNull()
+    fireEvent.load(firstFrame!)
+    expect(window.localStorage.getItem(
+      eventStorageKey('bubble-widget-viewed-recaps:v1', widgetStorageSubject),
+    )).toContain(unlocked.id)
+  })
+
+  it('focuses the exact authorized Capsule requested by a widget contribution', async () => {
+    const target = {
+      ...lockedSpecialCapsule('special-widget', 'Grandma’s 60th'),
+      familySynced: true,
+    }
+    render(
+      <CapsulesPage
+        now={testNow}
+        store={createMemoryCapsuleStore([target])}
+        initialContributionId={target.id}
+        initialWidgetRequestKey="widget-request-one"
+      />,
+    )
+
+    const heading = await screen.findByRole('heading', { name: target.title })
+    const card = heading.closest('article')
+    const input = card?.querySelector<HTMLInputElement>('input[type="file"]')
+    await waitFor(() => expect(document.activeElement).toBe(input))
+    expect(screen.getByRole('status')).toHaveTextContent(
+      `Ready to add a photo to ${target.title}.`,
+    )
   })
 
   it('places and contains recap focus, closes on Escape, and restores its trigger', async () => {

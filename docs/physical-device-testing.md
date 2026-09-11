@@ -64,6 +64,10 @@ exception, fatal renderer error, or repeated lifecycle callback.
 1. Install a clean build on both phones; do not reuse data from a different
    commit. Keep a second run with an in-place upgrade when release migration is
    in scope.
+   For iOS widget builds, register
+   `group.com.simerfamily.kinsphere.widget` for both the main app and
+   `com.simerfamily.kinsphere.BubbleWidget`, then use provisioning profiles that
+   contain that App Group entitlement.
 2. Prepare a safe room with textured walls, straight vertical lines, nearby and
    distant objects, a bright window, and a clear point about which the tester
    can rotate. Repeat the low-light cases after dark or in a dim room.
@@ -124,6 +128,15 @@ by `CAP-05`. This separates a renderer problem from a stitching problem.
 | VR-04 | iOS + Android | With no saved viewer profile, accept **Scan headset QR**; deny and then grant camera access where the OS asks; scan an invalid/unreadable code and then the headset's real code. Reopen VR. | Cancel/denial leaves a usable standard profile or retry path; valid scan updates calibration and persists across reopen; optical alignment improves or remains correct and the app does not hang on the scanner. | QR flow recording with the code itself obscured, before/after through-lens image, and persisted-reopen evidence. |
 | VR-05 | iOS + Android | While VR is active, background/foreground, lock/unlock, receive an interruption, and repeat enter/exit five times. | Rendering and head tracking pause off-screen and resume once; exit remains responsive; no duplicated sensor response, orientation leak, staged-file leak, black eye, or crash occurs. | Recording, five-cycle count, lifecycle logs, and staged-cache observation when available. |
 | VR-06 | iOS + Android | Run VR continuously for 15 minutes while slowly turning and changing scenes when available. Observe battery/thermal warnings and frame stability. | No crash, runaway brightness/idle timeout, progressively increasing lag, memory warning, or unusable thermal state occurs. Any OS thermal warning is recorded and triaged. | 15-minute start/end timestamps, screen/through-lens clips at start/middle/end, battery delta, thermal state/warning, and native logs. |
+
+## Home Screen widget
+
+| ID | Platform | Action | Pass condition | Required evidence |
+| --- | --- | --- | --- | --- |
+| WIDGET-01 | iOS + Android | Add Bubble as the smallest square/2 x 2 Home Screen widget, then resize it where Android permits. Switch through Plum, Forest, and Midnight in the app. | The widget is discoverable, remains legible at every supported size, follows the selected theme after the app republishes, and has no clipped title, badge, poster, or doodle. | Widget gallery screenshot and one Home Screen screenshot per theme/platform. |
+| WIDGET-02 | iOS + Android | With previews disabled, create a named task and add a family photo. Lock the phone, restart it, and advance past local midnight. Then enable previews and repeat. | Disabled widgets reveal no task name, family caption, or photo. Enabled widgets show only authorized current-family content. Sign-out and day rollover replace private content with generic copy and no image. | Before/after Home Screen recordings covering Settings, lock screen, restart, midnight, and sign-out. |
+| WIDGET-03 | iOS + Android | Exercise the daily order with an item due inside two hours, a newly opened Capsule, another unfinished item today, the 5 PM to 9 PM contribution window, a weekly memory, and no content. | Exactly one state is shown in that priority order. Completed tasks disappear. A due time passing does not hide another unfinished task from the same day. The contribution prompt appears only in its evening window. | Timestamped screenshots for every state plus the matching sanitized in-app records. |
+| WIDGET-04 | iOS + Android | Tap task, capture, memory, and newly opened recap cards from cold and warm app states. Also send malformed/custom widget URLs. | Valid cards open the intended signed-in destination. A recap starts only after the app confirms an unlocked family-synced Capsule with renderable photos. Malformed, cross-origin, locked, missing, or unauthorized IDs do nothing and never mark a recap viewed. | Cold/warm recordings, route observations, and sanitized logs for accepted and rejected links. |
 
 ## Final two-phone acceptance path
 

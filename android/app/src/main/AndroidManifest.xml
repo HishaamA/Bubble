@@ -42,6 +42,19 @@
                     android:scheme="@string/custom_url_scheme" />
             </intent-filter>
 
+            <!-- Widget routes are local app paths encoded as the route query
+                 parameter. Keep this separate from the OAuth callback. -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+
+                <data
+                    android:host="open"
+                    android:scheme="@string/custom_url_scheme" />
+            </intent-filter>
+
         </activity>
 
         <activity
@@ -61,6 +74,23 @@
         <receiver
             android:name=".capsule.CapsuleShareTargetReceiver"
             android:exported="false" />
+
+        <receiver
+            android:name=".widget.BubbleWidgetProvider"
+            android:exported="false"
+            android:label="@string/bubble_widget_name">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+                <action android:name="android.intent.action.TIME_SET" />
+                <action android:name="android.intent.action.TIMEZONE_CHANGED" />
+            </intent-filter>
+
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/bubble_widget_info" />
+        </receiver>
 
         <provider
             android:name="androidx.core.content.FileProvider"
@@ -90,6 +120,7 @@
     <!-- Required on Android 12+ for an exact one-hour local reminder. When the
          user declines, Bubble schedules an inexact fallback instead. -->
     <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
 
     <!-- Panorama capture checks these capabilities at runtime so devices without
          them can still install the app and receive a NOT_SUPPORTED result. -->

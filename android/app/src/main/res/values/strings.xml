@@ -4,4 +4,6 @@
     <string name="title_activity_main">Bubble</string>
     <string name="package_name">com.simerfamily.kinsphere</string>
     <string name="custom_url_scheme">com.simerfamily.kinsphere</string>
+    <string name="bubble_widget_name">Bubble · Today</string>
+    <string name="bubble_widget_description">Tasks, capsule recaps, and little family moments for today.</string>
 </resources>
