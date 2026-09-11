@@ -1580,6 +1580,8 @@ export function PeopleTimeline({
               value={newPersonName}
               maxLength={40}
               autoComplete="off"
+              autoCapitalize="words"
+              autoCorrect="off"
               disabled={addingPersonBusy || importingPhotos || Boolean(scanProgress)}
               onChange={(event) => {
                 setNewPersonName(event.target.value)
@@ -1646,6 +1648,9 @@ export function PeopleTimeline({
                 autoFocus
                 value={renameDraft}
                 maxLength={40}
+                autoCapitalize="words"
+                autoCorrect="off"
+                enterKeyHint="done"
                 disabled={referenceBusy}
                 onChange={(event) => {
                   setRenameDraft(event.target.value)
@@ -1894,6 +1899,8 @@ export function PeopleTimeline({
                 <span>{dateDraft.precision === 'year' ? 'Approximate year' : 'Date'}</span>
                 <input
                   type={dateDraft.precision === 'year' ? 'number' : 'date'}
+                  inputMode={dateDraft.precision === 'year' ? 'numeric' : undefined}
+                  enterKeyHint="done"
                   min={dateDraft.precision === 'year' ? '1800' : '1800-01-01'}
                   max={dateDraft.precision === 'year' ? String(new Date().getFullYear() + 1) : undefined}
                   value={dateDraft.value}

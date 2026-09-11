@@ -117,7 +117,9 @@ describe('OnboardingPage', () => {
 
     await screen.findByRole('heading', { name: 'Find your family.' })
     await user.click(screen.getByRole('button', { name: /Join with a code/ }))
-    await user.type(screen.getByLabelText('Private family code'), shareCode)
+    const codeInput = screen.getByLabelText('Private family code')
+    expect(codeInput).toHaveAttribute('autocorrect', 'off')
+    await user.type(codeInput, shareCode)
     await user.click(screen.getByRole('button', { name: 'Join family' }))
 
     expect(await screen.findByText('Private home')).toBeInTheDocument()

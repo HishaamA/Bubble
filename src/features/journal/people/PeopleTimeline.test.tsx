@@ -225,6 +225,8 @@ describe('PeopleTimeline', () => {
     await user.click(screen.getByRole('button', { name: 'Add person' }))
 
     expect(screen.getByRole('form', { name: 'Add a person' })).toBeInTheDocument()
+    expect(screen.getByRole('textbox', { name: 'Name' })).toHaveAttribute('autocorrect', 'off')
+    expect(screen.getByRole('textbox', { name: 'Name' })).toHaveAttribute('autocapitalize', 'words')
     expect(scanReferencePortrait).not.toHaveBeenCalled()
     expect(scanTimelineFaces).not.toHaveBeenCalled()
   })
@@ -1249,6 +1251,7 @@ describe('PeopleTimeline', () => {
     await user.click(screen.getByRole('button', { name: 'Edit date' }))
     await user.click(screen.getByRole('button', { name: 'Year' }))
     const yearInput = screen.getByRole('spinbutton', { name: 'Approximate year' })
+    expect(yearInput).toHaveAttribute('inputmode', 'numeric')
     await user.clear(yearInput)
     await user.type(yearInput, '1998')
     await user.click(screen.getByRole('button', { name: 'Save date' }))

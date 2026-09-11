@@ -35,10 +35,9 @@
   pointer-events: auto;
 }
 
-/* Primary navigation is hidden while composing on a touch device, so the
-   comments drawer can use the newly visible strip above the keyboard. */
+/* Follow actual keyboard visibility, not retained focus after Android Back. */
 @media (hover: none) and (pointer: coarse) {
-  html[data-text-entry-active='true'] .family-comments-panel {
+  html[data-keyboard-open='true'] .family-comments-panel {
     top: max(calc(var(--app-page-top) + 0.5rem), 0.75rem);
     bottom: max(0.75rem, var(--safe-bottom));
   }

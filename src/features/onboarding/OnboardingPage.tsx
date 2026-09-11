@@ -291,6 +291,7 @@ export function OnboardingPage() {
                         placeholder="BUB-XXXX-XXXX-XXXX-XXXX-XXXX-XXXX"
                         autoCapitalize="characters"
                         autoComplete="off"
+                        autoCorrect="off"
                         enterKeyHint="go"
                         spellCheck={false}
                         disabled={formPending || status === 'unavailable'}

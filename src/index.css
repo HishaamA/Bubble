@@ -92,6 +92,14 @@ select {
   scroll-margin-block: 1.25rem;
 }
 
+/* Readable text also avoids the focus zoom that makes iPhone form entry feel
+   cramped. Never disable user zoom to work around keyboard layout. */
+@media (hover: none) and (pointer: coarse) {
+  :is(input, textarea, select, [contenteditable='true']):not([autocomplete='one-time-code']):focus {
+    font-size: max(1rem, 16px) !important;
+  }
+}
+
 code,
 kbd,
 samp {

@@ -915,6 +915,7 @@ function JournalEventsSectionForFamily({
                         value={taskComposerValue}
                         maxLength={80}
                         placeholder="Bring dessert"
+                        enterKeyHint="done"
                         onChange={(changeEvent) => setTaskComposerValue(changeEvent.target.value)}
                         onKeyDown={(keyEvent) => {
                           if (keyEvent.key === 'Escape') {

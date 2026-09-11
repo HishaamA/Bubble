@@ -1401,10 +1401,20 @@ html[data-keyboard-open='true'] .tab-bar {
   display: none;
 }
 
-@media (hover: none) and (pointer: coarse) {
-  html[data-text-entry-active='true'] .tab-bar {
-    display: none;
-  }
+/* Keep the space above the keyboard for the form, not the normal navigation
+   dock or the native shell's generous resting bottom inset. */
+html[data-keyboard-open='true'] .app-viewport {
+  --bottom-chrome-height: 0px;
+  --safe-bottom: 0.65rem;
+}
+
+html[data-keyboard-open='true'] .app-content > :is(.ks-feature, .journal-page) {
+  padding-bottom: 1.25rem;
+}
+
+html[data-keyboard-open='true'][data-text-entry-active='true'] .family-comments-panel {
+  top: max(0.75rem, env(safe-area-inset-top), var(--native-safe-area-top, 0px));
+  bottom: 0.65rem;
 }
 
 @media (max-width: 22rem) {

@@ -5,6 +5,7 @@ import {
   isTextEntryControl,
   readAppViewportGeometry,
   revealFocusedTextControl,
+  synchronizeAppViewportGeometry,
 } from './appViewportGeometry'
 
 const originalVisualViewport = Object.getOwnPropertyDescriptor(
@@ -12,6 +13,8 @@ const originalVisualViewport = Object.getOwnPropertyDescriptor(
   'visualViewport',
 )
 const originalInnerHeight = Object.getOwnPropertyDescriptor(window, 'innerHeight')
+const originalInnerWidth = Object.getOwnPropertyDescriptor(window, 'innerWidth')
+const originalTouchPoints = Object.getOwnPropertyDescriptor(navigator, 'maxTouchPoints')
 
 function restoreDescriptor(
   target: object,
@@ -49,8 +52,11 @@ function setLayoutHeight(height: number) {
 afterEach(() => {
   vi.useRealTimers()
   vi.restoreAllMocks()
+  vi.unstubAllGlobals()
   restoreDescriptor(window, 'visualViewport', originalVisualViewport)
   restoreDescriptor(window, 'innerHeight', originalInnerHeight)
+  restoreDescriptor(window, 'innerWidth', originalInnerWidth)
+  restoreDescriptor(navigator, 'maxTouchPoints', originalTouchPoints)
   document.body.replaceChildren()
 })
 
@@ -124,7 +130,7 @@ describe('app viewport geometry', () => {
 
     revealFocusedTextControl(input)
     expect(scrollIntoView).toHaveBeenCalledWith({
-      behavior: 'auto',
+      behavior: 'smooth',
       block: 'center',
       inline: 'nearest',
     })
@@ -187,5 +193,141 @@ describe('app viewport geometry', () => {
     button.focus()
     blurActiveTextControl()
     expect(document.activeElement).toBe(button)
+  })
+
+  it('detects Android when both viewports shrink and keeps route resyncs consistent', () => {
+    vi.useFakeTimers()
+    Object.defineProperty(navigator, 'maxTouchPoints', { configurable: true, value: 5 })
+    Object.defineProperty(window, 'innerWidth', { configurable: true, value: 390 })
+    setLayoutHeight(844)
+    const viewport = installVisualViewport({ height: 844 })
+    const shell = document.createElement('div')
+    const input = document.createElement('input')
+    document.body.append(shell, input)
+    const uninstall = installAppViewportGeometrySync(shell)
+    input.focus()
+    setLayoutHeight(444)
+    Object.assign(viewport, { height: 444 })
+    viewport.dispatchEvent(new Event('resize'))
+    expect(shell.dataset.keyboardOpen).toBe('true')
+    expect(shell.style.getPropertyValue('--app-visual-viewport-height')).toBe('444px')
+    synchronizeAppViewportGeometry(shell)
+    expect(shell.dataset.keyboardOpen).toBe('true')
+
+    // Rotation, dismissal and reopening while the same field remains focused.
+    Object.defineProperty(window, 'innerWidth', { configurable: true, value: 844 })
+    setLayoutHeight(230)
+    Object.assign(viewport, { height: 230 })
+    window.dispatchEvent(new Event('resize'))
+    expect(shell.dataset.keyboardOpen).toBe('true')
+    setLayoutHeight(390)
+    Object.assign(viewport, { height: 390 })
+    window.dispatchEvent(new Event('resize'))
+    expect(shell.dataset.keyboardOpen).toBe('false')
+    setLayoutHeight(230)
+    Object.assign(viewport, { height: 230 })
+    window.dispatchEvent(new Event('resize'))
+    expect(shell.dataset.keyboardOpen).toBe('true')
+    uninstall()
+  })
+
+  it('moves a low but uncovered field into a comfortable band only during keyboard entry', () => {
+    setLayoutHeight(844)
+    installVisualViewport({ height: 402 })
+    const input = document.createElement('input')
+    input.scrollIntoView = vi.fn()
+    vi.spyOn(input, 'getBoundingClientRect').mockReturnValue({ top: 315, bottom: 359 } as DOMRect)
+    revealFocusedTextControl(input)
+    expect(input.scrollIntoView).not.toHaveBeenCalled()
+    revealFocusedTextControl(input, window, { keyboardOpen: true })
+    expect(input.scrollIntoView).toHaveBeenCalledWith({ behavior: 'smooth', block: 'center', inline: 'nearest' })
+  })
+
+  it('respects reduced motion and does not pan a pinch-zoomed page', () => {
+    setLayoutHeight(844)
+    const viewport = installVisualViewport({ height: 402 })
+    vi.stubGlobal('matchMedia', vi.fn(() => ({ matches: true })))
+    const input = document.createElement('input')
+    input.scrollIntoView = vi.fn()
+    vi.spyOn(input, 'getBoundingClientRect').mockReturnValue({ top: 500, bottom: 544 } as DOMRect)
+    revealFocusedTextControl(input)
+    expect(input.scrollIntoView).toHaveBeenCalledWith(expect.objectContaining({ behavior: 'instant' }))
+    vi.mocked(input.scrollIntoView).mockClear()
+    Object.assign(viewport, { scale: 2 })
+    revealFocusedTextControl(input)
+    expect(input.scrollIntoView).not.toHaveBeenCalled()
+  })
+
+  it('gives the final field scroll room inside its sheet and restores original inline padding', () => {
+    vi.useFakeTimers()
+    setLayoutHeight(844)
+    installVisualViewport({ height: 402 })
+    const shell = document.createElement('div')
+    const sheet = document.createElement('div')
+    sheet.style.overflowY = 'auto'
+    sheet.style.setProperty('padding-bottom', '12px', 'important')
+    Object.defineProperties(sheet, {
+      clientHeight: { value: 350 }, scrollHeight: { value: 500 }, scrollTop: { value: 100, writable: true },
+    })
+    sheet.scrollTo = vi.fn()
+    vi.spyOn(sheet, 'getBoundingClientRect').mockReturnValue({ top: 20, bottom: 370 } as DOMRect)
+    const input = document.createElement('input')
+    input.scrollIntoView = vi.fn()
+    vi.spyOn(input, 'getBoundingClientRect').mockReturnValue({ top: 330, bottom: 374 } as DOMRect)
+    sheet.append(input)
+    shell.append(sheet)
+    document.body.append(shell)
+    const uninstall = installAppViewportGeometrySync(shell)
+    input.focus()
+    vi.runAllTimers()
+    expect(sheet.scrollTo).toHaveBeenCalledWith({ top: expect.any(Number), behavior: 'smooth' })
+    expect(vi.mocked(sheet.scrollTo).mock.calls[0][0]).toMatchObject({ top: expect.closeTo(281.48) })
+    expect(Number.parseFloat(sheet.style.paddingBottom)).toBeCloseTo(143.48)
+    expect(input.scrollIntoView).not.toHaveBeenCalled()
+    input.blur()
+    // Let the submit-button tap complete before removing temporary scroll room.
+    vi.advanceTimersByTime(100)
+    expect(sheet.style.paddingBottom).not.toBe('12px')
+    vi.runAllTimers()
+    expect(sheet.style.paddingBottom).toBe('12px')
+    expect(sheet.style.getPropertyPriority('padding-bottom')).toBe('important')
+    uninstall()
+  })
+
+  it('debounces animation frames and never recenters in response to viewport scrolling', () => {
+    vi.useFakeTimers()
+    setLayoutHeight(844)
+    const viewport = installVisualViewport({ height: 402 })
+    const shell = document.createElement('div')
+    const input = document.createElement('input')
+    input.scrollIntoView = vi.fn()
+    vi.spyOn(input, 'getBoundingClientRect').mockReturnValue({ top: 500, bottom: 544 } as DOMRect)
+    document.body.append(shell, input)
+    const uninstall = installAppViewportGeometrySync(shell)
+    input.focus()
+    for (let i = 0; i < 4; i++) {
+      vi.advanceTimersByTime(30)
+      viewport.dispatchEvent(new Event('resize'))
+    }
+    expect(input.scrollIntoView).not.toHaveBeenCalled()
+    vi.runAllTimers()
+    expect(input.scrollIntoView).toHaveBeenCalledTimes(1)
+    viewport.dispatchEvent(new Event('scroll'))
+    vi.runAllTimers()
+    expect(input.scrollIntoView).toHaveBeenCalledTimes(1)
+    viewport.dispatchEvent(new Event('resize'))
+    document.dispatchEvent(new Event('touchstart'))
+    vi.runAllTimers()
+    expect(input.scrollIntoView).toHaveBeenCalledTimes(1)
+    uninstall()
+  })
+
+  it('does not treat readonly and disabled fields as keyboard entry', () => {
+    const input = document.createElement('input')
+    input.readOnly = true
+    expect(isTextEntryControl(input)).toBe(false)
+    input.readOnly = false
+    input.disabled = true
+    expect(isTextEntryControl(input)).toBe(false)
   })
 })

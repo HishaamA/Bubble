@@ -122,7 +122,10 @@ describe('FamilySyncPanel', () => {
     })
 
     renderPanel(<FamilySyncPanel adapter={setup.adapter} />)
-    await user.type(await screen.findByLabelText('Family code'), code)
+    const codeInput = await screen.findByLabelText('Family code')
+    expect(codeInput).toHaveAttribute('autocorrect', 'off')
+    expect(codeInput).toHaveAttribute('enterkeyhint', 'go')
+    await user.type(codeInput, code)
     await user.click(screen.getByRole('button', { name: 'Join family' }))
 
     expect(setup.adapter.requestCircleJoin).toHaveBeenCalledWith(code)

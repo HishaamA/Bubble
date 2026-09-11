@@ -375,6 +375,7 @@ export function FamilySyncPanel({
                     value={circleName}
                     onChange={(event) => setCircleName(event.target.value)}
                     maxLength={80}
+                    enterKeyHint="go"
                     required
                     disabled={mutationPending}
                     placeholder="The Ahmed family"
@@ -400,6 +401,8 @@ export function FamilySyncPanel({
                     onChange={(event) => setInviteCode(event.target.value)}
                     autoComplete="off"
                     autoCapitalize="characters"
+                    autoCorrect="off"
+                    enterKeyHint="go"
                     spellCheck={false}
                     required
                     disabled={mutationPending}
