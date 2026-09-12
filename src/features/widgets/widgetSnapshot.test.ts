@@ -192,12 +192,12 @@ describe('selectBubbleWidget', () => {
     const result = select({ authorizedCapsules: [pending, opened] })
     expect(result.snapshot.kind).toBe('memory')
     expect(result.snapshot.route).toBe(
-      '/journal/photo/opened-capsule/opened-photo',
+      '/journal?photo=opened-photo&collection=opened-capsule&source=widget',
     )
     expect(result.thumbnail).toBe('https://example.test/authorized.jpg')
   })
 
-  it('uses last week instead of an older weekly or special Capsule', () => {
+  it('can reminisce across every opened week and special Capsule in the Journal', () => {
     const lastWeek = capsule({
       id: 'last-week',
       kind: 'weekly',
@@ -221,9 +221,15 @@ describe('selectBubbleWidget', () => {
       photos: [photo({ id: 'birthday-photo', capsuleId: 'birthday' })],
     })
 
-    expect(select({ authorizedCapsules: [special, older, lastWeek] }).snapshot.route).toBe(
-      '/journal/photo/last-week/weekly-photo',
-    )
+    const routes = [0, 1, 2].map((hours) => select({
+      now: new Date(now.getTime() + hours * 60 * 60 * 1_000),
+      authorizedCapsules: [special, older, lastWeek],
+    }).snapshot.route)
+    expect(new Set(routes)).toEqual(new Set([
+      '/journal?photo=weekly-photo&collection=last-week&source=widget',
+      '/journal?photo=older-photo&collection=older-weekly&source=widget',
+      '/journal?photo=birthday-photo&collection=birthday&source=widget',
+    ]))
   })
 
   it.each(['image', 'photo', 'IMG_4065.PNG', 'FullSizeRender.jpg'])('replaces generic caption %s with readable widget copy', (caption) => {
@@ -235,13 +241,13 @@ describe('selectBubbleWidget', () => {
     })
     expect(select({ authorizedCapsules: [lastWeek] }).snapshot).toMatchObject({
       kind: 'memory',
-      eyebrow: 'Last week',
+      eyebrow: 'From your Journal',
       title: 'A little memory',
       subtitle: 'Mum',
     })
   })
 
-  it('falls through to calm empty when last week has no synced photo', () => {
+  it('still surfaces older Journal memories when last week has no synced photo', () => {
     const older = capsule({
       id: 'older-weekly',
       weekStart: '2026-08-24',
@@ -256,7 +262,7 @@ describe('selectBubbleWidget', () => {
       photos: [photo({ syncStatus: 'pending' })],
     })
 
-    expect(select({ authorizedCapsules: [older, lastWeek] }).snapshot.kind).toBe('empty')
+    expect(select({ authorizedCapsules: [older, lastWeek] }).snapshot.kind).toBe('memory')
   })
 
   it('never reveals a photo from a locked or local-only Capsule', () => {
@@ -501,7 +507,7 @@ describe('widget browsing pages', () => {
         group: 'tasks', title: 'Bring the cake', route: '/journal?section=plans',
       }),
       expect.objectContaining({
-        group: 'photos', title: 'Sunday dinner', route: '/journal/photo/last-week/photo-1',
+        group: 'photos', title: 'Sunday dinner', route: '/journal?photo=photo-1&collection=last-week&source=widget',
       }),
     ])
     const photoPage = selection.snapshot.pages?.find((page) => page.group === 'photos')
@@ -590,7 +596,7 @@ describe('widget browsing pages', () => {
     })
 
     expect(selection.snapshot.pages).toEqual([
-      expect.objectContaining({ group: 'photos', route: '/journal/photo/last-week/allowed' }),
+      expect.objectContaining({ group: 'photos', route: '/journal?photo=allowed&collection=last-week&source=widget' }),
     ])
     expect(Object.values(selection.pageThumbnails ?? {})).toEqual(['https://example.test/allowed.jpg'])
     expect(JSON.stringify(selection)).not.toMatch(/Locked secret|Local secret|locked\.jpg|local-only\.jpg|pending\.jpg|undated\.jpg/)

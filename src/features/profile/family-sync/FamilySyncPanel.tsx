@@ -1,37 +1,28 @@
-import {
-  useCallback,
-  useEffect,
-  useId,
-  useRef,
-  useState,
-  type FormEvent,
-} from 'react'
+import { useId, useState } from 'react'
 import { Link } from 'react-router-dom'
 import {
-  announceFamilySyncChange,
-  familySyncAdapter,
-  toFamilySyncErrorMessage,
-} from './familySyncAdapter'
-import type {
-  FamilySyncAdapter,
-  FamilySyncSnapshot,
-} from './types'
-import {
-  shareFamilyCode,
-  type ShareFamilyCode,
-} from './shareFamilyInvite'
+  useFamilySyncController,
+  type FamilySyncControllerOptions,
+} from './useFamilySyncController'
 import './FamilySyncPanel.css'
 
-type FamilySyncPanelProps = {
-  adapter?: FamilySyncAdapter
-  onSnapshotChange?: (snapshot: FamilySyncSnapshot) => void
-  shareCode?: ShareFamilyCode
-  copyCode?: (code: string) => Promise<void>
+type FamilySyncPanelProps = FamilySyncControllerOptions
+
+function initials(name: string) {
+  return name.trim().split(/\s+/).slice(0, 2).map((part) => part[0]).join('').toUpperCase() || '?'
 }
 
-type ChangeResult<T> =
-  | { ok: true; value: T }
-  | { ok: false; value?: never }
+/** A failed/missing portrait still has a useful, non-identifying fallback. */
+function MemberAvatar({ name, url }: { name: string; url: string | null }) {
+  const [failedUrl, setFailedUrl] = useState<string | null>(null)
+  return (
+    <span className="family-sync__member-avatar" aria-hidden="true">
+      {url && url !== failedUrl ? (
+        <img src={url} alt="" loading="lazy" decoding="async" referrerPolicy="no-referrer" onError={() => setFailedUrl(url)} />
+      ) : initials(name)}
+    </span>
+  )
+}
 
 /** Formats server timestamps defensively for request activity copy. */
 function formatDate(dateValue: string) {
@@ -43,15 +34,6 @@ function formatDate(dateValue: string) {
     hour: 'numeric',
     minute: '2-digit',
   }).format(date)
-}
-
-/** Identifies the account/family pair whose destructive UI state is visible. */
-function getSnapshotIdentity(snapshot: FamilySyncSnapshot) {
-  if (snapshot.kind === 'connected') {
-    return `${snapshot.person.id}:${snapshot.circle.id}`
-  }
-  if (snapshot.kind === 'unjoined') return `${snapshot.person.id}:unjoined`
-  return snapshot.kind
 }
 
 /** Explains why family sync is unavailable without implying data is connected. */
@@ -74,214 +56,52 @@ function LocalOnlyState() {
 }
 
 /**
- * Renders family membership, invitation, and owner workflows from one snapshot.
- * Adapters and sharing functions are injectable so the UI can be tested without
- * browser capabilities or a live backend.
+ * Presents membership, invitations, and owner controls from one family snapshot.
+ * The controller owns asynchronous workflows while this component owns markup,
+ * accessible labels, and the small display-only avatar/date helpers.
  */
-export function FamilySyncPanel({
-  adapter = familySyncAdapter,
-  onSnapshotChange,
-  shareCode = shareFamilyCode,
-  copyCode = async (code) => {
-    if (!navigator.clipboard) throw new Error('clipboard_unavailable')
-    await navigator.clipboard.writeText(code)
-  },
-}: FamilySyncPanelProps) {
+export function FamilySyncPanel(props: FamilySyncPanelProps) {
   const headingId = useId()
   const messageId = useId()
-  const snapshotRequestVersionRef = useRef(0)
-  const loadedIdentityRef = useRef<string | null>(null)
-  const manualRefreshInFlightRef = useRef(false)
-  const [snapshot, setSnapshot] = useState<FamilySyncSnapshot | null>(null)
-  const [loading, setLoading] = useState(true)
-  const [refreshing, setRefreshing] = useState(false)
-  const [mutationPending, setMutationPending] = useState(false)
-  const [sharePending, setSharePending] = useState(false)
-  const [confirmingRotation, setConfirmingRotation] = useState(false)
-  const [error, setError] = useState('')
-  const [message, setMessage] = useState('')
-  const [circleName, setCircleName] = useState('')
-  const [inviteCode, setInviteCode] = useState('')
-
-  // A monotonically increasing request version prevents a superseded auth or
-  // manual refresh response from overwriting the latest family snapshot.
-  const refreshSnapshot = useCallback(
-    async () => {
-      const requestVersion = ++snapshotRequestVersionRef.current
-      try {
-        const nextSnapshot = await adapter.loadSnapshot()
-        if (requestVersion !== snapshotRequestVersionRef.current) return
-        const nextIdentity = getSnapshotIdentity(nextSnapshot)
-        if (
-          loadedIdentityRef.current !== null &&
-          loadedIdentityRef.current !== nextIdentity
-        ) {
-          setConfirmingRotation(false)
-        }
-        loadedIdentityRef.current = nextIdentity
-        setSnapshot(nextSnapshot)
-        onSnapshotChange?.(nextSnapshot)
-        setError('')
-      } catch (reason) {
-        if (requestVersion !== snapshotRequestVersionRef.current) return
-        setError(toFamilySyncErrorMessage(reason))
-      } finally {
-        if (requestVersion === snapshotRequestVersionRef.current) {
-          setLoading(false)
-        }
-      }
-    },
-    [adapter, onSnapshotChange],
-  )
-
-  useEffect(() => {
-    const initialLoad = window.setTimeout(() => void refreshSnapshot(), 0)
-    const unsubscribe = adapter.subscribeToAuthChanges?.(() => {
-      void refreshSnapshot()
-    })
-    return () => {
-      window.clearTimeout(initialLoad)
-      snapshotRequestVersionRef.current += 1
-      unsubscribe?.()
-    }
-  }, [adapter, refreshSnapshot])
-
-  /** Runs a mutation, revalidates the snapshot, and owns shared result messaging. */
-  async function runMutation<T>(
-    operation: () => Promise<T>,
-    successMessage: string | ((value: T) => string),
-  ): Promise<ChangeResult<T>> {
-    setMutationPending(true)
-    setError('')
-    setMessage('')
-    try {
-      const operationResult = await operation()
-      announceFamilySyncChange()
-      await refreshSnapshot()
-      setMessage(
-        typeof successMessage === 'function'
-          ? successMessage(operationResult)
-          : successMessage,
-      )
-      return { ok: true, value: operationResult }
-    } catch (reason) {
-      setError(toFamilySyncErrorMessage(reason))
-      return { ok: false }
-    } finally {
-      setMutationPending(false)
-    }
-  }
-
-  /** Validates the display name before delegating family creation. */
-  async function handleCreateCircle(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault()
-    const name = circleName.trim()
-    if (!name) {
-      setError('Give your family group a name.')
-      return
-    }
-    const mutationResult = await runMutation(
-      () => adapter.createCircle(name),
-      `${name} is ready. Your family code is saved below.`,
-    )
-    if (mutationResult.ok) setCircleName('')
-  }
-
-  /** Normalizes and validates both current and legacy family-code formats. */
-  async function handleJoinCircle(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault()
-    const enteredCode = inviteCode.trim()
-    const persistentCode = enteredCode.toUpperCase()
-    const legacyCode = enteredCode.toLowerCase()
-    const isPersistentCode = /^BUB-[0-9A-F]{4}(-[0-9A-F]{4}){5}$/.test(
-      persistentCode,
-    )
-    const isLegacyCode = /^ks1_[0-9a-f]{64}$/.test(legacyCode)
-    if (!isPersistentCode && !isLegacyCode) {
-      setError('Enter the complete family code, including the dashes.')
-      return
-    }
-    const code = isPersistentCode ? persistentCode : legacyCode
-    const mutationResult = await runMutation(
-      () => adapter.requestCircleJoin(code),
-      isPersistentCode
-        ? 'You are now connected to your family.'
-        : 'Your request was sent. A family owner can approve it in Settings.',
-    )
-    if (mutationResult.ok) setInviteCode('')
-  }
-
-  /** Owns pending and result state around native-share or clipboard fallback. */
-  async function handleShareCode(code: string, circleName: string) {
-    setSharePending(true)
-    setError('')
-    setMessage('')
-    try {
-      const shareResult = await shareCode(code, circleName)
-      if (shareResult === 'shared') {
-        setMessage('Your family code is ready in the share sheet.')
-      } else if (shareResult === 'copied') {
-        setMessage('Your family code was copied.')
-      }
-    } catch {
-      setError('Sharing is unavailable here. Select the code and copy it manually.')
-    } finally {
-      setSharePending(false)
-    }
-  }
-
-  /** Copies a code directly when the person chooses the explicit copy action. */
-  async function handleCopyCode(code: string) {
-    setSharePending(true)
-    setError('')
-    setMessage('')
-    try {
-      await copyCode(code)
-      setMessage('Your family code was copied.')
-    } catch {
-      setError('Copying is unavailable here. Press and hold the code to copy it.')
-    } finally {
-      setSharePending(false)
-    }
-  }
-
-  /** Rotates a confirmed family code and closes the confirmation on success. */
-  async function handleRotateCode(circleId: string) {
-    const mutationResult = await runMutation(
-      () => adapter.rotateFamilyCode(circleId),
-      'A new family code is ready. The previous code no longer works.',
-    )
-    if (mutationResult.ok) setConfirmingRotation(false)
-  }
-
-  /** Applies an owner decision to one pending family request. */
-  async function handleDecision(
-    requestId: string,
-    decision: 'approved' | 'rejected',
-  ) {
-    await runMutation(
-      () => adapter.decideJoinRequest(requestId, decision),
-      decision === 'approved'
-        ? 'The family member is now connected.'
-        : 'The join request was declined.',
-    )
-  }
-
-  /** Coalesces rapid refresh activation into one in-flight snapshot request. */
-  async function handleManualRefresh() {
-    if (mutationPending || manualRefreshInFlightRef.current) return
-    // State alone does not close the tiny gap between two rapid taps and React's
-    // next render. The ref is the synchronous request latch; the state exists so
-    // assistive technology and the button label expose the pending refresh.
-    manualRefreshInFlightRef.current = true
-    setRefreshing(true)
-    try {
-      await refreshSnapshot()
-    } finally {
-      manualRefreshInFlightRef.current = false
-      setRefreshing(false)
-    }
-  }
+  const {
+    snapshot,
+    status,
+    membership,
+    invitation,
+    refresh: handleManualRefresh,
+  } = useFamilySyncController(props)
+  const {
+    loading,
+    refreshing,
+    pendingAction,
+    mutationPending,
+    sharePending,
+    error,
+    message,
+  } = status
+  const {
+    circleName,
+    inviteCode,
+    setCircleName,
+    setInviteCode,
+    createCircle: handleCreateCircle,
+    joinCircle: handleJoinCircle,
+    decideRequest: handleDecision,
+  } = membership
+  const {
+    copy: handleCopyCode,
+    share: handleShareCode,
+    rotation,
+  } = invitation
+  const {
+    confirming: confirmingRotation,
+    pending: rotationPending,
+    error: rotationError,
+    message: rotationMessage,
+    request: requestCodeRotation,
+    cancel: cancelCodeRotation,
+    confirm: handleRotateCode,
+  } = rotation
 
   const describedBy = error || message ? messageId : undefined
 
@@ -290,7 +110,7 @@ export function FamilySyncPanel({
       className="family-sync"
       aria-labelledby={headingId}
       aria-describedby={describedBy}
-      aria-busy={mutationPending || loading || refreshing}
+      aria-busy={loading}
     >
       <header className="family-sync__header">
         <h2 className="screen-reader-only" id={headingId}>Family Sync</h2>
@@ -310,6 +130,12 @@ export function FamilySyncPanel({
         <div className="family-sync__loading" role="status">
           <span aria-hidden="true" /> Checking secure connection…
         </div>
+      ) : null}
+
+      {error && !loading && !mutationPending ? (
+        <button className="family-sync__secondary" type="button" onClick={() => void handleManualRefresh()} disabled={refreshing || sharePending}>
+          {refreshing ? 'Checking…' : 'Check again'}
+        </button>
       ) : null}
 
       {!loading && snapshot?.kind === 'local-only' ? <LocalOnlyState /> : null}
@@ -440,6 +266,36 @@ export function FamilySyncPanel({
             </div>
           </article>
 
+          <section className="family-sync__members" aria-labelledby={`${headingId}-members`}>
+            <div className="family-sync__subheading">
+              <div>
+                <h3 id={`${headingId}-members`}>Your family</h3>
+                <p>People connected to this private group.</p>
+              </div>
+              <button className="family-sync__text-button" type="button" disabled={mutationPending || sharePending || refreshing} onClick={() => void handleManualRefresh()}>
+                {refreshing ? 'Checking…' : 'Refresh'}
+              </button>
+            </div>
+            {snapshot.members.length ? (
+              <ul className="family-sync__member-list">
+                {snapshot.members.map((member) => (
+                  <li key={member.id}>
+                    <MemberAvatar name={member.displayName} url={member.avatarUrl} />
+                    <div className="family-sync__member-details">
+                      <strong>{member.displayName}</strong>
+                      <div className="family-sync__member-badges">
+                        <span>{member.role === 'owner' ? 'Owner' : 'Member'}</span>
+                        {member.isCurrentUser ? <span className="family-sync__you-badge">You</span> : null}
+                      </div>
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p className="family-sync__roster-empty">The member list is unavailable. Refresh to try again.</p>
+            )}
+          </section>
+
           <section className="family-sync__owner-tools" aria-labelledby={`${headingId}-invite`}>
             <div className="family-sync__subheading">
               <div>
@@ -457,15 +313,15 @@ export function FamilySyncPanel({
                 <button
                   className="family-sync__secondary"
                   type="button"
-                  disabled={mutationPending || sharePending}
+                  disabled={mutationPending || sharePending || refreshing}
                   onClick={() => void handleCopyCode(snapshot.circle.shareCode)}
                 >
-                  Copy code
+                  {pendingAction === 'copy' ? 'Copying…' : 'Copy code'}
                 </button>
                 <button
                   className="family-sync__share"
                   type="button"
-                  disabled={mutationPending || sharePending}
+                  disabled={mutationPending || sharePending || refreshing}
                   aria-label={`Share family code for ${snapshot.circle.name}`}
                   onClick={() =>
                     void handleShareCode(
@@ -475,7 +331,7 @@ export function FamilySyncPanel({
                   }
                 >
                   <span aria-hidden="true">↗</span>
-                  {sharePending ? 'Opening…' : 'Share code'}
+                  {pendingAction === 'share' ? 'Opening…' : 'Share code'}
                 </button>
               </div>
               {snapshot.circle.role === 'owner' ? (
@@ -484,40 +340,44 @@ export function FamilySyncPanel({
                     className="family-sync__rotation-confirmation"
                     role="group"
                     aria-label="Confirm family code rotation"
+                    aria-busy={rotationPending}
                   >
                     <p>
-                      Replace this code? The old code will stop working immediately.
+                      Create a new family code? The old one will stop working. Your family members will stay connected.
                     </p>
                     <div>
                       <button
-                        className="family-sync__text-button"
-                        type="button"
-                        disabled={mutationPending || sharePending}
-                        onClick={() => setConfirmingRotation(false)}
-                      >
-                        Keep current code
-                      </button>
-                      <button
                         className="family-sync__secondary"
                         type="button"
-                        disabled={mutationPending || sharePending}
+                        disabled={mutationPending || sharePending || refreshing}
+                        onClick={cancelCodeRotation}
+                      >
+                        Keep code
+                      </button>
+                      <button
+                        className="family-sync__primary"
+                        type="button"
+                        disabled={mutationPending || sharePending || refreshing}
                         onClick={() => void handleRotateCode(snapshot.circle.id)}
                       >
-                        Create new code
+                        {rotationPending ? 'Creating…' : 'Create new code'}
                       </button>
                     </div>
+                    {rotationError ? <p className="family-sync__rotation-error" role="alert">{rotationError}</p> : null}
+                    {rotationPending ? <p className="family-sync__rotation-status" role="status">Creating your new code. This may take a moment.</p> : null}
                   </div>
                 ) : (
                   <button
                     className="family-sync__rotate-code"
                     type="button"
-                    disabled={mutationPending || sharePending}
-                    onClick={() => setConfirmingRotation(true)}
+                    disabled={mutationPending || sharePending || refreshing}
+                    onClick={requestCodeRotation}
                   >
                     Replace family code
                   </button>
                 )
               ) : null}
+              {rotationMessage ? <p className="family-sync__rotation-status" role="status">{rotationMessage}</p> : null}
               <small>
                 Anyone with this code can join. Share it only with your family.
               </small>

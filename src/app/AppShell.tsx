@@ -9,10 +9,10 @@ import {
   synchronizeAppViewportGeometry,
 } from './appViewportGeometry'
 import { AppTabBar } from './AppTabBar'
-import { schedulePrimaryRoutePreloads } from './primaryRoutePreload'
+import { loadJournalPreparation, loadJournalRoute, preloadPrimaryRoute, schedulePrimaryRoutePreloads } from './primaryRoutePreload'
 
 /** Owns member-route navigation, global shortcuts, and route focus cleanup. */
-export function AppShell({ children }: PropsWithChildren) {
+export function AppShell({ children, memberCacheNamespace }: PropsWithChildren<{ memberCacheNamespace?: string }>) {
   const { status: authStatus } = useAuth()
   const location = useLocation()
   const navigate = useNavigate()
@@ -27,8 +27,20 @@ export function AppShell({ children }: PropsWithChildren) {
 
   useEffect(() => {
     if (!showPrimaryNavigation) return
-    return schedulePrimaryRoutePreloads(location.pathname)
-  }, [location.pathname, showPrimaryNavigation])
+    let active = true
+    const cancel = schedulePrimaryRoutePreloads(location.pathname, async (route) => {
+      if (route !== '/journal' || !memberCacheNamespace) {
+        await preloadPrimaryRoute(route)
+        return
+      }
+      const [, journal] = await Promise.all([loadJournalRoute(), loadJournalPreparation()])
+      // The import can finish after sign-out/navigation. Only a still-active
+      // member shell may warm its private, local People metadata; no face scan
+      // or remote synchronization is started by this preparation.
+      if (active) await journal.preloadPeopleTimelineSession(memberCacheNamespace)
+    })
+    return () => { active = false; cancel() }
+  }, [location.pathname, memberCacheNamespace, showPrimaryNavigation])
 
   useEffect(() => {
     // iOS can keep the software keyboard attached to an input after a route
@@ -56,6 +68,9 @@ export function AppShell({ children }: PropsWithChildren) {
       data-app-shell={nativeApp ? 'native' : 'web'}
     >
       <main className="app-content">{children}</main>
+      {nativeApp && showPrimaryNavigation ? (
+        <div className="app-status-bar-backdrop" aria-hidden="true" />
+      ) : null}
       {showMomentsShortcuts ? (
         <div
           className="moments-shortcuts"

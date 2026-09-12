@@ -114,6 +114,23 @@
   overflow-x: clip;
 }
 
+/* Scrolling pages must never paint their text behind the native clock/notch.
+   Paint the same full-height canvas at the same origin as the shell, then crop
+   it to the safe area. A flat fill (or a gradient scaled to this short strip)
+   creates a visible banner. This remains opaque and never intercepts taps.
+   Capture and signed-out flows keep their own full-screen safe-area treatment. */
+.app-status-bar-backdrop {
+  position: absolute;
+  z-index: 50;
+  inset: 0 0 auto;
+  height: max(env(safe-area-inset-top, 0px), var(--native-safe-area-top, 0px));
+  pointer-events: none;
+  background: var(--theme-page-background, var(--theme-canvas-deep, #180611));
+  background-size: 100% var(--app-visual-viewport-height, 100dvh);
+  background-position: center top;
+  background-repeat: no-repeat;
+}
+
 /* Route chunks load inside the persistent shell so navigation never jumps. */
 .app-route-loading {
   display: grid;

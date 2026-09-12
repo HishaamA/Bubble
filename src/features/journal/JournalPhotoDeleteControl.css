@@ -1,0 +1,103 @@
+.journal-photo-delete {
+  --photo-delete-paper: var(--journal-paper, #fff2d2);
+  --photo-delete-ink: var(--journal-paper-ink, #35152b);
+  --photo-delete-line: color-mix(in srgb, var(--photo-delete-ink) 45%, transparent);
+  min-width: 0;
+  margin-block: 1rem;
+}
+
+.journal-photo-delete__confirmation {
+  box-sizing: border-box;
+  min-width: 0;
+  max-width: 100%;
+  padding: 1rem;
+  border: 1px solid var(--photo-delete-line);
+  border-radius: 1rem;
+  background: var(--photo-delete-paper);
+  color: var(--photo-delete-ink);
+  overflow-wrap: anywhere;
+}
+
+.journal-photo-delete__confirmation h3,
+.journal-photo-delete__confirmation p {
+  color: var(--photo-delete-ink);
+  margin: 0 0 .75rem;
+}
+
+.journal-photo-delete button {
+  box-sizing: border-box;
+  min-width: 0;
+  max-width: 100%;
+  min-height: 44px;
+  padding: .65rem 1rem;
+  border: 1px solid var(--photo-delete-line);
+  border-radius: .8rem;
+  background: var(--photo-delete-paper);
+  color: var(--photo-delete-ink);
+  font: inherit;
+  font-size: .9rem;
+  white-space: normal;
+}
+
+.journal-photo-delete__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: .65rem;
+}
+
+.journal-photo-delete__actions button { flex: 1 1 8rem; }
+.journal-photo-delete button.journal-photo-delete__confirm { background: var(--theme-action, #e8b6c6); }
+.journal-photo-delete button:disabled { opacity: .65; cursor: wait; }
+.journal-photo-delete button:focus-visible { outline: 3px solid var(--photo-delete-ink); outline-offset: 3px; }
+
+/* A quiet mark without sacrificing the touch target or the explicit confirmation. */
+.journal-photo-delete--compact {
+  display: flex;
+  justify-content: flex-end;
+  margin-block: .25rem;
+}
+
+.journal-photo-delete--compact .journal-photo-delete__confirmation { width: 100%; }
+
+.journal-photo-delete button.journal-photo-delete__compact-trigger {
+  display: inline-grid;
+  place-items: center;
+  flex: 0 0 44px;
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: inherit;
+  line-height: 1;
+  box-shadow: none;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+
+.journal-photo-delete__compact-trigger > span {
+  display: grid;
+  place-items: center;
+  box-sizing: border-box;
+  width: 28px;
+  height: 28px;
+  border: 1px solid color-mix(in srgb, currentColor 30%, transparent);
+  border-radius: 50%;
+  background: color-mix(in srgb, currentColor 8%, transparent);
+  font-family: system-ui, sans-serif;
+  font-size: 20px;
+  font-weight: 400;
+  line-height: 1;
+}
+
+.journal-photo-delete button.journal-photo-delete__compact-trigger:focus-visible {
+  outline-color: currentColor;
+  outline-offset: 1px;
+}
+
+@media (hover: hover) {
+  .journal-photo-delete__compact-trigger:hover > span {
+    background: color-mix(in srgb, currentColor 15%, transparent);
+  }
+}

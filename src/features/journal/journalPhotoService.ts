@@ -48,11 +48,14 @@ function displayNameFromRelation(value: unknown, fallback: string) {
 }
 
 /** Resolves the approved family and rejects stale callers from another namespace. */
-async function currentFamilyContext(expectedCacheNamespace?: string) {
+export async function getJournalFamilyContext(expectedCacheNamespace?: string) {
   const client = getSupabaseClient()
   const identity = getClerkSupabaseIdentity()
   if (!client || !identity) return null
   const profile = await bootstrapCurrentClerkProfile()
+  const isCurrent = () => getClerkSupabaseIdentity()?.subject === identity.subject
+    && getSupabaseClient() === client
+  if (!isCurrent()) return null
   const { data, error } = await client
     .from('circle_members')
     .select('circle_id')
@@ -62,6 +65,7 @@ async function currentFamilyContext(expectedCacheNamespace?: string) {
     .limit(1)
     .maybeSingle()
   if (error) throw error
+  if (!isCurrent()) return null
   if (typeof data?.circle_id !== 'string') return null
   if (
     expectedCacheNamespace &&
@@ -71,6 +75,7 @@ async function currentFamilyContext(expectedCacheNamespace?: string) {
     client,
     circleId: data.circle_id,
     userId: profile.userId,
+    isCurrent,
   }
 }
 
@@ -109,6 +114,9 @@ function normalizePhoto(
     caption: typeof row.caption === 'string' ? row.caption : '',
     capturedAt: capturedAt.toISOString(),
     contributorName: displayNameFromRelation(row.uploader, 'Family'),
+    ...(typeof row.uploader_id === 'string' && isUuid(row.uploader_id)
+      ? { uploaderId: row.uploader_id }
+      : {}),
     ownedByCurrentUser: row.uploader_id === currentUserId,
     syncStatus: 'synced',
   }
@@ -118,7 +126,7 @@ function normalizePhoto(
 export async function fetchFamilyJournalPhotos(
   expectedCacheNamespace?: string,
 ): Promise<JournalPhoto[] | null> {
-  const context = await currentFamilyContext(expectedCacheNamespace)
+  const context = await getJournalFamilyContext(expectedCacheNamespace)
   if (!context) return null
 
   // Read in bounded pages because a long-running family can exceed the server's
@@ -175,7 +183,7 @@ export async function uploadFamilyJournalPhoto(input: {
   capturedAt: string
   expectedCacheNamespace?: string
 }) {
-  const context = await currentFamilyContext(input.expectedCacheNamespace)
+  const context = await getJournalFamilyContext(input.expectedCacheNamespace)
   if (!context) return null
   const photoId = input.photoId && isUuid(input.photoId)
     ? input.photoId
@@ -246,7 +254,7 @@ export async function subscribeToFamilyJournalPhotos(
   onChange: () => void,
   expectedCacheNamespace?: string,
 ) {
-  const context = await currentFamilyContext(expectedCacheNamespace)
+  const context = await getJournalFamilyContext(expectedCacheNamespace)
   if (!context) return () => undefined
   const channel = context.client
     .channel(`family-journal-photos:${context.circleId}`)

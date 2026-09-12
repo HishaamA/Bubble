@@ -10,6 +10,7 @@ const mocks = vi.hoisted(() => ({
   archiveStore: vi.fn(), libraryStore: vi.fn(),
   archiveFetch: vi.fn(), libraryFetch: vi.fn(),
   archiveSubscribe: vi.fn(), librarySubscribe: vi.fn(), upload: vi.fn(),
+  capsuleDeletions: vi.fn(), capsuleDeletionsSubscribe: vi.fn(),
 }))
 vi.mock('@capacitor/app', () => ({ App: { addListener: vi.fn(async () => ({ remove: vi.fn() })) } }))
 vi.mock('../capsules/capsuleStore', () => ({
@@ -20,6 +21,10 @@ vi.mock('./journalPhotoStore', () => ({ createDefaultJournalPhotoStore: mocks.li
 vi.mock('../capsules/capsuleService', () => ({
   fetchFamilyCapsules: mocks.archiveFetch,
   subscribeToFamilyCapsules: mocks.archiveSubscribe,
+}))
+vi.mock('../capsules/capsuleDeletionService', () => ({
+  fetchFamilyCapsuleDeletions: mocks.capsuleDeletions,
+  subscribeToFamilyCapsuleDeletions: mocks.capsuleDeletionsSubscribe,
 }))
 vi.mock('./journalPhotoService', () => ({
   fetchFamilyJournalPhotos: mocks.libraryFetch,
@@ -77,6 +82,8 @@ describe.each(['archive', 'library'] as const)('Journal %s warm session', (kind)
     mocks.archiveSubscribe.mockResolvedValue(() => undefined)
     mocks.librarySubscribe.mockResolvedValue(() => undefined)
     mocks.upload.mockResolvedValue(null)
+    mocks.capsuleDeletions.mockResolvedValue(null)
+    mocks.capsuleDeletionsSubscribe.mockResolvedValue(() => undefined)
   })
   afterEach(() => {
     cleanup()

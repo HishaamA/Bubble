@@ -6,7 +6,7 @@ import type { UnlockedCapsulePhoto } from '../capsuleJournalArchive'
 import type { JournalPhoto } from '../journalPhotoTypes'
 import { scanReferencePortrait, scanTimelineFaces } from './faceRecognition'
 import { PeopleTimeline } from './PeopleTimeline'
-import { emptyPeopleTimelineState } from './peopleTimelineStore'
+import { emptyPeopleTimelineState, loadPeopleTimelineState } from './peopleTimelineStore'
 import type {
   FaceProfile,
   PeopleTimelineState,
@@ -205,6 +205,257 @@ describe('PeopleTimeline', () => {
         completedPhotoCount: photos.length,
       }
     })
+  })
+
+  it('only deletes the selected owned Journal upload after explicit confirmation', async () => {
+    const onDeletePhoto = vi.fn().mockResolvedValue(undefined)
+    const user = userEvent.setup()
+    render(<MemoryRouter><PeopleTimeline
+      photos={[]} journalPhotos={[journalPhoto('my-upload')]}
+      cacheNamespace="delete-owner:family-a" initialPersonId="review-uploads"
+      onDeletePhoto={onDeletePhoto}
+    /></MemoryRouter>)
+    await screen.findByRole('img', { name: 'Direct family upload' })
+    await user.click(screen.getByRole('button', { name: 'Delete my photo' }))
+    expect(onDeletePhoto).not.toHaveBeenCalled()
+    expect(screen.getByRole('group', { name: 'Delete this photo?' }))
+      .toHaveAccessibleDescription(/for everyone in your family/)
+    await user.click(screen.getByRole('button', { name: 'Delete photo' }))
+    expect(onDeletePhoto).toHaveBeenCalledExactlyOnceWith('my-upload')
+  })
+
+  it('offers confirmed deletion for an owned Capsule photo at the exact timeline selection', async () => {
+    const remove = vi.fn().mockResolvedValue(undefined)
+    const ownPhoto = { ...capsulePhoto('owned-capsule', '2024-01-01T12:00:00Z', 'My memory'), ownedByCurrentUser: true }
+    render(<MemoryRouter><PeopleTimeline photos={[ownPhoto]} cacheNamespace="capsule-owner:family"
+      initialPersonId="review-uploads" onDeleteCapsulePhoto={remove} /></MemoryRouter>)
+    await screen.findByRole('slider')
+    fireEvent.click(screen.getByRole('button', { name: 'Delete photo' }))
+    expect(remove).not.toHaveBeenCalled()
+    expect(screen.getByRole('group', { name: 'Delete this photo?' })).toHaveTextContent('family recap')
+    fireEvent.click(within(screen.getByRole('group', { name: 'Delete this photo?' })).getByRole('button', { name: 'Delete photo' }))
+    await waitFor(() => expect(remove).toHaveBeenCalledExactlyOnceWith('family-week', 'owned-capsule'))
+  })
+
+  it('can hide and restore someone else’s photo without calling shared deletion', async () => {
+    const remove = vi.fn().mockResolvedValue(undefined)
+    const photo = capsulePhoto('foreign-hide', '2024-01-01T12:00:00Z', 'Shared memory')
+    render(<MemoryRouter><PeopleTimeline photos={[photo]} cacheNamespace="hide-foreign:family"
+      initialPersonId="review-uploads" onDeleteCapsulePhoto={remove} /></MemoryRouter>)
+    await screen.findByRole('slider')
+    fireEvent.click(screen.getByRole('button', { name: 'Hide photo for me' }))
+    fireEvent.click(within(screen.getByRole('group', { name: 'Hide this photo?' })).getByRole('button', { name: 'Hide photo' }))
+    await waitFor(() => expect(screen.queryByRole('slider')).not.toBeInTheDocument())
+    expect(remove).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByRole('button', { name: 'Restore hidden items (1)' }))
+    await screen.findByRole('slider')
+    expect(screen.getByRole('button', { name: 'Hide photo for me' })).toBeInTheDocument()
+  })
+
+  it.each(['another member', 'missing delete capability', 'Capsule copy'] as const)(
+    'does not expose Journal deletion for %s', async (caseName) => {
+      const onDeletePhoto = vi.fn().mockResolvedValue(undefined)
+      const direct = { ...journalPhoto('same-id'), ownedByCurrentUser: caseName !== 'another member' }
+      const capsule = { ...capsulePhoto('same-id', '2000-01-01T12:00:00.000Z', 'Owned Capsule copy'), ownedByCurrentUser: true }
+      render(<MemoryRouter><PeopleTimeline
+        photos={caseName === 'Capsule copy' ? [capsule] : []}
+        journalPhotos={[direct]} cacheNamespace="delete-gating:family-a"
+        initialPersonId="review-uploads"
+        focusPhotoKey={caseName === 'Capsule copy' ? 'photo:same-id' : 'journal-photo:same-id'}
+        onDeletePhoto={caseName === 'missing delete capability' ? undefined : onDeletePhoto}
+      /></MemoryRouter>)
+      await screen.findByRole('img', { name: caseName === 'Capsule copy' ? 'Owned Capsule copy' : 'Direct family upload' })
+      expect(screen.queryByRole('button', { name: 'Delete my photo' })).not.toBeInTheDocument()
+      expect(onDeletePhoto).not.toHaveBeenCalled()
+    },
+  )
+
+  it('dismisses deletion confirmation when the slider changes photos, including when returning', async () => {
+    const first = { ...journalPhoto('first'), caption: 'First upload', capturedAt: '2000-01-01T12:00:00.000Z' }
+    const second = { ...journalPhoto('second'), caption: 'Second upload', capturedAt: '2001-01-01T12:00:00.000Z' }
+    const onDeletePhoto = vi.fn().mockResolvedValue(undefined)
+    render(<MemoryRouter><PeopleTimeline
+      photos={[]} journalPhotos={[first, second]} cacheNamespace="delete-slider:family-a"
+      initialPersonId="review-uploads" onDeletePhoto={onDeletePhoto}
+    /></MemoryRouter>)
+    await screen.findByRole('img', { name: 'First upload' })
+    fireEvent.click(screen.getByRole('button', { name: 'Delete my photo' }))
+    const slider = screen.getByRole('slider', { name: 'Timeline position for All photos' })
+    fireEvent.change(slider, { target: { value: '1' } })
+    expect(screen.getByRole('img', { name: 'Second upload' })).toBeInTheDocument()
+    expect(screen.queryByRole('group', { name: 'Delete this photo?' })).not.toBeInTheDocument()
+    fireEvent.change(slider, { target: { value: '0' } })
+    expect(screen.getByRole('img', { name: 'First upload' })).toBeInTheDocument()
+    expect(screen.queryByRole('group', { name: 'Delete this photo?' })).not.toBeInTheDocument()
+    expect(onDeletePhoto).not.toHaveBeenCalled()
+  })
+
+  it('resets confirmation when a photo disappears or its ownership is revoked', async () => {
+    const first = { ...journalPhoto('first'), caption: 'First upload' }
+    const second = { ...journalPhoto('second'), caption: 'Second upload' }
+    const onDeletePhoto = vi.fn().mockResolvedValue(undefined)
+    const renderView = (photos: JournalPhoto[]) => <MemoryRouter><PeopleTimeline
+      photos={[]} journalPhotos={photos} cacheNamespace="delete-replaced:family-a"
+      initialPersonId="review-uploads" onDeletePhoto={onDeletePhoto}
+    /></MemoryRouter>
+    const view = render(renderView([first]))
+    await screen.findByRole('img', { name: 'First upload' })
+    fireEvent.click(screen.getByRole('button', { name: 'Delete my photo' }))
+    view.rerender(renderView([second]))
+    await screen.findByRole('img', { name: 'Second upload' })
+    expect(screen.queryByRole('group', { name: 'Delete this photo?' })).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Delete my photo' }))
+    view.rerender(renderView([{ ...second, ownedByCurrentUser: false }]))
+    expect(screen.queryByRole('region', { name: 'Manage your photo' })).not.toBeInTheDocument()
+    view.rerender(renderView([second]))
+    expect(screen.getByRole('button', { name: 'Delete my photo' })).toBeInTheDocument()
+    expect(screen.queryByRole('group', { name: 'Delete this photo?' })).not.toBeInTheDocument()
+    expect(onDeletePhoto).not.toHaveBeenCalled()
+  })
+
+  it('does not carry confirmation across accounts even when both photos have the same ID', async () => {
+    const oldDelete = deferred<void>()
+    const onDeleteOld = vi.fn().mockReturnValue(oldDelete.promise)
+    const onDeleteNew = vi.fn().mockResolvedValue(undefined)
+    const renderView = (namespace: string, onDeletePhoto: (id: string) => Promise<void>) => <MemoryRouter><PeopleTimeline
+      photos={[]} journalPhotos={[journalPhoto('same-id')]} cacheNamespace={namespace}
+      initialPersonId="review-uploads" onDeletePhoto={onDeletePhoto}
+    /></MemoryRouter>
+    const view = render(renderView('account-a:family-a', onDeleteOld))
+    await screen.findByRole('img', { name: 'Direct family upload' })
+    fireEvent.click(screen.getByRole('button', { name: 'Delete my photo' }))
+    view.rerender(renderView('account-b:family-b', onDeleteNew))
+    await screen.findByRole('img', { name: 'Direct family upload' })
+    expect(screen.queryByRole('group', { name: 'Delete this photo?' })).not.toBeInTheDocument()
+    expect(onDeleteOld).not.toHaveBeenCalled()
+
+    // A late completion from an already-started old-account request must also
+    // leave the new account's confirmation and action state untouched.
+    view.rerender(renderView('account-a:family-a', onDeleteOld))
+    await screen.findByRole('img', { name: 'Direct family upload' })
+    fireEvent.click(screen.getByRole('button', { name: 'Delete my photo' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Delete photo' }))
+    view.rerender(renderView('account-b:family-b', onDeleteNew))
+    await screen.findByRole('img', { name: 'Direct family upload' })
+    fireEvent.click(screen.getByRole('button', { name: 'Delete my photo' }))
+    await act(async () => oldDelete.resolve(undefined))
+    expect(screen.getByRole('group', { name: 'Delete this photo?' })).toHaveAttribute('aria-busy', 'false')
+    expect(screen.getByRole('button', { name: 'Keep photo' })).toHaveFocus()
+    expect(onDeleteOld).toHaveBeenCalledExactlyOnceWith('same-id')
+    expect(onDeleteNew).not.toHaveBeenCalled()
+  })
+
+  it('focuses the exact widget photo at its corrected All photos position and restores only on a new tap', async () => {
+    const namespace = 'widget-exact-journal-photo'
+    const sharedCapsulePhoto = capsulePhoto('same-id', '2023-01-01T12:00:00.000Z', 'Capsule with the same ID')
+    const oldest = capsulePhoto('oldest', '2000-01-01T12:00:00.000Z', 'Oldest memory')
+    const direct = journalPhoto('same-id')
+    storedStates.set(namespace, stateWith({ dateOverrides: {
+      'journal-photo:same-id': { precision: 'day', value: '2010-07-16' },
+    } }))
+    const renderView = (requestKey: string) => <MemoryRouter>
+      <PeopleTimeline
+        photos={[oldest, sharedCapsulePhoto]}
+        journalPhotos={[direct]}
+        cacheNamespace={namespace}
+        initialPersonId="review-uploads"
+        focusPhotoKey="journal-photo:same-id"
+        focusMemoryId="journal-photo-same-id"
+        focusRequestKey={requestKey}
+        scrollToFocusedPhoto
+      />
+    </MemoryRouter>
+    const view = render(renderView('tap-1'))
+    await screen.findByRole('img', { name: 'Direct family upload' })
+    const slider = screen.getByRole('slider', { name: 'Timeline position for All photos' })
+    expect(slider).toHaveAttribute('aria-valuetext', '2 of 3, July 16, 2010')
+    expect(timelineChip('All photos')).toHaveAttribute('aria-pressed', 'true')
+    fireEvent.change(slider, { target: { value: '0' } })
+    expect(screen.getByRole('img', { name: 'Oldest memory' })).toBeInTheDocument()
+    view.rerender(renderView('tap-1'))
+    expect(screen.getByRole('img', { name: 'Oldest memory' })).toBeInTheDocument()
+
+    view.rerender(renderView('tap-2'))
+    await screen.findByRole('img', { name: 'Direct family upload' })
+    expect(slider).toHaveValue('1')
+    const user = userEvent.setup()
+    await user.click(screen.getByRole('button', { name: 'Edit date' }))
+    expect(screen.getByRole('form', { name: 'Edit photo date' })).toBeInTheDocument()
+  })
+
+  it('waits for a widget photo to hydrate without opening a separate viewer', async () => {
+    const namespace = 'widget-delayed-journal-photo'
+    const renderView = (photos: JournalPhoto[]) => <MemoryRouter>
+      <PeopleTimeline
+        photos={[]}
+        journalPhotos={photos}
+        cacheNamespace={namespace}
+        initialPersonId="review-uploads"
+        focusPhotoKey="journal-photo:later"
+        focusRequestKey="tap-1"
+      />
+    </MemoryRouter>
+    const view = render(renderView([]))
+    await screen.findByText('Add your family photos')
+    view.rerender(renderView([journalPhoto('later')]))
+    expect(await screen.findByRole('img', { name: 'Direct family upload' })).toBeInTheDocument()
+    expect(screen.getByRole('slider', { name: 'Timeline position for All photos' })).toHaveValue('0')
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+    expect(screen.queryByText('Photo memory')).not.toBeInTheDocument()
+  })
+
+  it('keeps a person filter chosen before local cache hydration instead of restoring the widget’s All request', async () => {
+    const pendingCache = deferred<PeopleTimelineState>()
+    vi.mocked(loadPeopleTimelineState).mockReturnValueOnce(pendingCache.promise)
+    render(<MemoryRouter><PeopleTimeline
+      photos={[capsulePhoto('memory', '2000-01-01T12:00:00.000Z', 'A memory')]}
+      cacheNamespace="widget-person-choice-before-cache"
+      initialPersonId="review-uploads"
+      focusPhotoKey="photo:memory"
+      focusRequestKey="tap-1"
+    /></MemoryRouter>)
+    expect(timelineChip('All photos')).toHaveAttribute('aria-pressed', 'true')
+    fireEvent.click(timelineChip('Family'))
+    expect(timelineChip('Family')).toHaveAttribute('aria-pressed', 'true')
+    await act(async () => pendingCache.resolve(emptyPeopleTimelineState()))
+    expect(timelineChip('Family')).toHaveAttribute('aria-pressed', 'true')
+    expect(timelineChip('All photos')).toHaveAttribute('aria-pressed', 'false')
+  })
+
+  it('does not hijack browsing if the requested widget photo arrives after the user moves the slider', async () => {
+    const first = capsulePhoto('first', '2000-01-01T12:00:00.000Z', 'First photo')
+    const second = capsulePhoto('second', '2001-01-01T12:00:00.000Z', 'Second photo')
+    const later = capsulePhoto('later', '2002-01-01T12:00:00.000Z', 'Late widget photo')
+    const renderView = (photos: UnlockedCapsulePhoto[]) => <MemoryRouter>
+      <PeopleTimeline
+        photos={photos}
+        cacheNamespace="widget-user-browsing-wins"
+        initialPersonId="review-uploads"
+        focusPhotoKey="photo:later"
+        focusRequestKey="tap-1"
+      />
+    </MemoryRouter>
+    const view = render(renderView([first, second]))
+    const slider = await screen.findByRole('slider', { name: 'Timeline position for All photos' })
+    fireEvent.change(slider, { target: { value: '1' } })
+    expect(screen.getByRole('img', { name: 'Second photo' })).toBeInTheDocument()
+    view.rerender(renderView([first, second, later]))
+    expect(slider).toHaveAttribute('max', '2')
+    expect(screen.getByRole('img', { name: 'Second photo' })).toBeInTheDocument()
+    expect(screen.queryByRole('img', { name: 'Late widget photo' })).not.toBeInTheDocument()
+  })
+
+  it('resolves capsule widget photos by stable photo key after the capsule ID changes', async () => {
+    render(<MemoryRouter><PeopleTimeline
+      photos={[{ ...capsulePhoto('retained-photo', '2022-01-01T12:00:00.000Z', 'Synced memory'), capsuleId: 'server-capsule' }]}
+      cacheNamespace="widget-stable-capsule-photo"
+      initialPersonId="review-uploads"
+      focusPhotoKey="photo:retained-photo"
+      focusMemoryId="capsule-old-local-capsule-retained-photo"
+      focusRequestKey="tap-1"
+    /></MemoryRouter>)
+    expect(await screen.findByRole('img', { name: 'Synced memory' })).toBeInTheDocument()
+    expect(screen.getByRole('slider', { name: 'Timeline position for All photos' })).toHaveValue('0')
   })
 
   it('presents people onboarding and opens the existing add-person form', async () => {

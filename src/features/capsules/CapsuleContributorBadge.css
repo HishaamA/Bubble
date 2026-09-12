@@ -1,0 +1,34 @@
+.capsule-contributor-badge {
+  position: absolute;
+  z-index: 3;
+  top: 0.3rem;
+  right: 0.3rem;
+  display: grid;
+  width: 1.65rem;
+  height: 1.65rem;
+  box-sizing: border-box;
+  overflow: hidden;
+  place-items: center;
+  border: 2px solid #fff3d4;
+  border-radius: 50%;
+  color: #351126;
+  background: #e9b4c6;
+  box-shadow: 0 1px 5px #21091666;
+  font: 700 0.58rem/1 var(--font-ui, system-ui, sans-serif);
+  pointer-events: none;
+}
+
+.capsule-contributor-badge > img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.capsule-recap-player > .capsule-contributor-badge {
+  top: 0.7rem;
+  right: 0.7rem;
+  width: 2.6rem;
+  height: 2.6rem;
+  font-size: 0.85rem;
+}

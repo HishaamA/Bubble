@@ -1,4 +1,5 @@
 import type { UnlockedCapsulePhoto } from '../capsuleJournalArchive'
+import { canonicalCapsulePhotos } from '../canonicalCapsulePhotos'
 import {
   JOURNAL_LIBRARY_ID,
   type JournalPhoto,
@@ -32,7 +33,7 @@ export function toPeopleTimelinePhotos(
   photos: readonly UnlockedCapsulePhoto[],
   journalPhotos: readonly JournalPhoto[] = [],
 ): PeopleTimelinePhoto[] {
-  const capsulePhotos: PeopleTimelinePhoto[] = photos.map((photo) => ({
+  const capsulePhotos: PeopleTimelinePhoto[] = canonicalCapsulePhotos(photos).map((photo) => ({
     key: `photo:${photo.id}`,
     id: photo.id,
     kind: 'capsule-photo',

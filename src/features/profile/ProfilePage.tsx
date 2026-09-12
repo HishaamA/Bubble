@@ -1,13 +1,13 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { AppWhimsy } from '../../app/AppWhimsy'
-import { useAppTheme } from '../../theme/AppTheme'
 import { useAuth } from '../auth'
 import { familyEventStorageSubject } from '../events/eventStorage'
 import { useFamilyOnboarding } from '../onboarding/familyOnboardingContext'
 import '../FeaturePages.css'
 import { FamilySyncPanel, type FamilySyncSnapshot } from './family-sync'
 import { ProfilePreferences } from './ProfilePreferences'
+import { AppearanceSettings } from './AppearanceSettings'
 
 /** Reduces the full family snapshot to the copy shown in the settings row. */
 function getFamilySummary(snapshot: FamilySyncSnapshot | null) {
@@ -50,7 +50,6 @@ export function SettingsPage() {
   const navigate = useNavigate()
   const { signOut, user } = useAuth()
   const { snapshot: familyAccess } = useFamilyOnboarding()
-  const { theme: selectedTheme, setTheme, themes } = useAppTheme()
   const [showProfileSettings, setShowProfileSettings] = useState(false)
   const [showFamilySync, setShowFamilySync] = useState(false)
   // The compact settings row needs the same authoritative snapshot as the full
@@ -187,39 +186,7 @@ export function SettingsPage() {
         </div>
       </section>
 
-      <section className="ks-section" aria-labelledby="appearance-title">
-        <div className="ks-section__heading">
-          <h2 id="appearance-title">Appearance</h2>
-        </div>
-        <fieldset className="theme-picker">
-          <legend className="theme-picker__legend">Colour scheme</legend>
-          <div
-            className="theme-picker__options"
-            role="radiogroup"
-            aria-labelledby="appearance-title"
-          >
-            {themes.map((theme) => (
-              <button
-                key={theme.id}
-                className="theme-option"
-                type="button"
-                role="radio"
-                aria-checked={selectedTheme === theme.id}
-                aria-label={`${theme.name}: ${theme.description}`}
-                onClick={() => setTheme(theme.id)}
-              >
-                <span className="theme-option__swatches" aria-hidden="true">
-                  {theme.swatches.map((swatch) => (
-                    <span key={swatch} style={{ backgroundColor: swatch }} />
-                  ))}
-                </span>
-                <strong>{theme.name}</strong>
-                <small>{theme.description}</small>
-              </button>
-            ))}
-          </div>
-        </fieldset>
-      </section>
+      <AppearanceSettings />
 
       <ProfilePreferences
         key={userId ?? 'signed-out'}

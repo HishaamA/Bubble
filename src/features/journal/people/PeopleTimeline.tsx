@@ -10,27 +10,38 @@ import {
   type FormEvent,
   type MouseEvent,
 } from 'react'
-import { Link } from 'react-router-dom'
 import { TimelinePhotoImage } from './TimelinePhotoImage'
 import { PersonScrapbookPage } from './PersonScrapbookPage'
+import { PeopleTimelineAlbums, PeopleTimelinePeople } from './PeopleTimelinePeople'
+import { PeopleTimelinePersonForm, PeopleTimelinePersonManager } from './PeopleTimelinePersonForm'
+import { PeopleTimelineViewer } from './PeopleTimelineViewer'
+import { JournalPhotoDeleteControl } from '../JournalPhotoDeleteControl'
+import { PeopleTimelineDateEditor, PeopleTimelinePhotoTags } from './PeopleTimelinePhotoDetails'
+import { PeopleTimelineScanStatus } from './PeopleTimelineScanStatus'
 import { scanReferencePortrait, scanTimelineFaces } from './faceRecognition'
 import {
   createFaceReviewCandidates,
   createFaceSuggestions,
-  effectivePeopleForPhoto,
-  formatTimelinePhotoDate,
   migrateLegacyPeopleTimelineState,
   sortTimelinePhotos,
   toPeopleTimelinePhotos,
 } from './peopleTimelineHelpers'
 import {
-  emptyPeopleTimelineState,
-  loadPeopleTimelineState,
-  savePeopleTimelineState,
-} from './peopleTimelineStore'
+  FACE_REVIEW_PERSON_ID,
+  faceReviewKey,
+  selectEffectivePeopleByPhoto,
+  selectEnrolledPersonIds,
+  selectFaceReviewPreviews,
+  selectFamilyPhotoKeys,
+  selectPeoplePhotoAlbums,
+  selectVisibleTimelinePhotos,
+  type FaceReviewPreview,
+} from './peopleTimelineSelectors'
+import { usePeopleTimelineSession } from './peopleTimelineSession'
 import { removePersonScrapbookProfile } from './personScrapbookStore'
 import {
   FACE_SCAN_REVISION,
+  ALL_PHOTOS_PERSON_ID,
   FAMILY_PERSON_ID,
   type FaceSuggestion,
   type PeopleTimelinePhoto,
@@ -39,9 +50,10 @@ import {
   type TimelineDatePrecision,
 } from './types'
 import './PeopleTimeline.css'
+import { ContentRemovalControl } from '../ContentRemovalControl'
+import { useHiddenContent, photoVisibilityKey, setContentHidden, restoreHiddenContent } from '../contentVisibility'
 
-const REVIEW_PERSON_ID = 'review-uploads'
-const FACE_REVIEW_PERSON_ID = 'review-face-matches'
+const REVIEW_PERSON_ID = ALL_PHOTOS_PERSON_ID
 const MAX_REFERENCE_PHOTO_BYTES = 25 * 1024 * 1024
 const MAX_REFERENCE_PHOTOS_AT_ONCE = 5
 const MAX_FACE_REFERENCES_PER_PERSON = 12
@@ -58,30 +70,12 @@ type ScanProgress = {
   saved: number
 }
 
-type FaceReviewPreview = {
-  match: FaceSuggestion
-  photo: PeopleTimelinePhoto
-  person: PeopleTimelineState['people'][number]
-  faceCenter: [x: number, y: number]
-  faceScale: number
-}
-
 /** Generates a collision-resistant local identifier for people and references. */
 function createLocalId() {
   if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) {
     return crypto.randomUUID()
   }
   return `person-${Date.now()}-${Math.random().toString(36).slice(2)}`
-}
-
-/** Derives a compact avatar label from a person's display name. */
-function personInitials(name: string) {
-  return name
-    .trim()
-    .split(/\s+/)
-    .slice(0, 2)
-    .map((part) => part[0]?.toLocaleUpperCase() ?? '')
-    .join('') || '?'
 }
 
 /** Formats a local calendar day for date inputs without UTC day drift. */
@@ -142,11 +136,6 @@ function automaticScanSignature(
   return `${FACE_SCAN_REVISION}\u0003${profileSignature.join('\u0000')}\u0001${pendingPhotoKeys.join('\u0000')}`
 }
 
-/** Gives one face/person suggestion a stable review-dialog identity. */
-function faceReviewKey(suggestion: FaceSuggestion) {
-  return `${suggestion.photoKey}\u0000${suggestion.faceId}\u0000${suggestion.personId}`
-}
-
 /** Scans reference files sequentially to bound model and image memory use. */
 async function scanReferencePhotos(files: readonly File[]) {
   /*
@@ -177,26 +166,6 @@ function originalDateDraft(photo: PeopleTimelinePhoto): DateDraft {
   return { precision: 'day', value: localIsoDate(capturedDate) }
 }
 
-/** Builds the correct viewer route for direct-library and Capsule photos. */
-function photoDestination(photo: PeopleTimelinePhoto) {
-  if (photo.kind === 'journal-photo') {
-    return `/journal/library/${encodeURIComponent(photo.id)}`
-  }
-  return `/journal/photo/${encodeURIComponent(photo.capsuleId)}/${encodeURIComponent(photo.id)}`
-}
-
-/** Captures enough Journal state to restore the person and photo on return. */
-function photoRouteState(photo: PeopleTimelinePhoto, personId: string) {
-  return {
-    returnTo: '/journal',
-    sourceMemoryId: photo.id,
-    journalContext: {
-      section: 'people',
-      personId,
-      focusMemoryId: photo.memoryId,
-    },
-  }
-}
 
 /**
  * Coordinates people profiles, face scans, review decisions, manual tagging,
@@ -209,15 +178,25 @@ export function PeopleTimeline({
   className,
   initialPersonId,
   focusMemoryId,
+  focusPhotoKey,
+  focusRequestKey,
+  scrollToFocusedPhoto = false,
   onUploadPhotos,
+  onDeletePhoto,
+  onDeleteCapsulePhoto,
   photoImportProgress,
   personAlbumOpen = false,
   onOpenPersonAlbum,
   onClosePersonAlbum,
 }: PeopleTimelineProps) {
-  const [timelineState, setTimelineState] = useState(emptyPeopleTimelineState)
-  const [cacheReady, setCacheReady] = useState(false)
-  const [selectedPersonId, setSelectedPersonId] = useState(FAMILY_PERSON_ID)
+  const {
+    state: timelineState,
+    ready: cacheReady,
+    replace: setTimelineState,
+    save: queueTimelineStateSave,
+  } = usePeopleTimelineSession(cacheNamespace)
+  const hidden = useHiddenContent(cacheNamespace)
+  const [selectedPersonId, setSelectedPersonId] = useState(initialPersonId ?? FAMILY_PERSON_ID)
   const [activePhotoKey, setActivePhotoKey] = useState<string | null>(null)
   const [addingPerson, setAddingPerson] = useState(false)
   const [newPersonName, setNewPersonName] = useState('')
@@ -248,13 +227,10 @@ export function PeopleTimeline({
   const [showAllFaceMatchedAlbums, setShowAllFaceMatchedAlbums] = useState(false)
   const faceMatchedAlbumsId = useId()
 
-  // React state snapshots can be produced faster than IndexedDB completes.
-  // Chaining writes preserves intent order so an older, slower save cannot
-  // overwrite a newer tag, reference, or scan checkpoint on this device.
-  const saveQueue = useRef(Promise.resolve())
   const scanController = useRef<AbortController | null>(null)
   const scanSavedPhotoCount = useRef(0)
   const timelineStateRef = useRef(timelineState)
+  const initialTimelineSelection = useRef(initialPersonId ?? FAMILY_PERSON_ID)
   const photoLinkRef = useRef<HTMLAnchorElement>(null)
   const photoFigureRef = useRef<HTMLElement>(null)
 
@@ -273,6 +249,9 @@ export function PeopleTimeline({
   const addPersonOpenerRef = useRef<HTMLButtonElement | null>(null)
   const addPersonFocusFrameRef = useRef<number | null>(null)
   const importingPhotos = photoImportProgress?.importing ?? false
+  const requestedPersonId = initialPersonId ?? FAMILY_PERSON_ID
+  const personRequestSignature = `${cacheNamespace}\u0000${focusRequestKey ?? ''}\u0000${requestedPersonId}`
+  const focusRequestSignature = `${personRequestSignature}\u0000${focusPhotoKey ?? focusMemoryId ?? ''}`
   const photoPickerBusy = importingPhotos ||
     Boolean(scanProgress) ||
     addingPersonBusy ||
@@ -280,8 +259,8 @@ export function PeopleTimeline({
     faceDataClearing
 
   const timelinePhotos = useMemo(
-    () => toPeopleTimelinePhotos(photos, journalPhotos),
-    [journalPhotos, photos],
+    () => toPeopleTimelinePhotos(photos, journalPhotos).filter((photo) => !hidden.includes(photoVisibilityKey(photo.id, photo.kind))),
+    [hidden, journalPhotos, photos],
   )
   const selectedPerson = timelineState.people.find(
     ({ id }) => id === selectedPersonId,
@@ -305,50 +284,17 @@ export function PeopleTimeline({
     const postponed = new Set(postponedFaceReviews)
     return reviewMatches.filter((match) => !postponed.has(faceReviewKey(match)))
   }, [postponedFaceReviews, reviewMatches])
-  const faceReviewPreviews = useMemo(() => {
-    const previews: FaceReviewPreview[] = []
-    const usedPhotos = new Set<string>()
-    for (const match of actionableReviewMatches) {
-      if (usedPhotos.has(match.photoKey)) continue
-      const photo = timelinePhotos.find(({ key }) => key === match.photoKey)
-      const person = timelineState.people.find(({ id }) => id === match.personId)
-      const face = timelineState.faceScans[match.photoKey]?.faces.find(
-        ({ id }) => id === match.faceId,
-      )
-      if (!photo || !person || !face) continue
-      usedPhotos.add(match.photoKey)
-      previews.push({
-        match,
-        photo,
-        person,
-        faceCenter: [
-          face.box[0] + face.box[2] / 2,
-          face.box[1] + face.box[3] / 2,
-        ],
-        faceScale: Math.min(
-          2.8,
-          Math.max(1.25, 0.7 / Math.max(face.box[2], face.box[3])),
-        ),
-      })
-      if (previews.length === 3) break
-    }
-    return previews
-  }, [
+  const faceReviewPreviews = useMemo(() => selectFaceReviewPreviews(
     actionableReviewMatches,
     timelinePhotos,
-    timelineState.faceScans,
     timelineState.people,
-  ])
-  const effectivePeopleByPhoto = useMemo(() => new Map(
-    timelinePhotos.map((photo) => [
-      photo.key,
-      new Set(effectivePeopleForPhoto(timelineState, photo.key, automaticMatches)),
-    ]),
+    timelineState.faceScans,
+  ), [actionableReviewMatches, timelinePhotos, timelineState.faceScans, timelineState.people])
+  const effectivePeopleByPhoto = useMemo(() => selectEffectivePeopleByPhoto(
+    timelineState, timelinePhotos, automaticMatches,
   ), [automaticMatches, timelinePhotos, timelineState])
   const enrolledPersonIds = useMemo(
-    () => new Set(Object.entries(timelineState.faceProfiles)
-      .filter(([, profile]) => profile.references.length > 0)
-      .map(([personId]) => personId)),
+    () => selectEnrolledPersonIds(timelineState.faceProfiles),
     [timelineState.faceProfiles],
   )
   const setupComplete = enrolledPersonIds.size >= 2
@@ -356,58 +302,21 @@ export function PeopleTimeline({
     .sort((first, second) => (
       Number(enrolledPersonIds.has(second.id)) - Number(enrolledPersonIds.has(first.id))
     )), [enrolledPersonIds, timelineState.people])
-  const emptySetupSlotCount = Math.max(1, 3 - setupPeople.length)
-  const personPreviewById = useMemo(() => {
-    const previews = new Map<string, PeopleTimelinePhoto>()
-    for (const person of timelineState.people) {
-      const photo = timelinePhotos.find(({ key }) =>
-        effectivePeopleByPhoto.get(key)?.has(person.id),
-      )
-      if (photo) previews.set(person.id, photo)
-    }
-    return previews
-  }, [effectivePeopleByPhoto, timelinePhotos, timelineState.people])
-  const faceMatchedAlbums = useMemo(() => timelineState.people.flatMap((person) => {
-    const matchingPhotos = timelinePhotos.filter(({ key }) =>
-      effectivePeopleByPhoto.get(key)?.has(person.id),
-    )
-    const preview = matchingPhotos[0]
-    return preview
-      ? [{ person, preview, photoCount: matchingPhotos.length }]
-      : []
-  }), [effectivePeopleByPhoto, timelinePhotos, timelineState.people])
-  const displayedFaceMatchedAlbums = showAllFaceMatchedAlbums
-    ? faceMatchedAlbums
-    : faceMatchedAlbums.slice(0, 2)
-  const familyPhotoKeys = useMemo(() => new Set(
-    timelinePhotos
-      .filter((photo) => {
-        const effectivePeople = effectivePeopleByPhoto.get(photo.key)
-        if (!effectivePeople) return false
-        let enrolledCount = 0
-        for (const personId of effectivePeople) {
-          if (enrolledPersonIds.has(personId)) enrolledCount += 1
-          if (enrolledCount >= 2) return true
-        }
-        return false
-      })
-      .map(({ key }) => key),
+  const { albums: faceMatchedAlbums, previews: personPreviewById } = useMemo(
+    () => selectPeoplePhotoAlbums(timelineState.people, timelinePhotos, effectivePeopleByPhoto),
+    [effectivePeopleByPhoto, timelinePhotos, timelineState.people],
+  )
+  const familyPhotoKeys = useMemo(() => selectFamilyPhotoKeys(
+    timelinePhotos, effectivePeopleByPhoto, enrolledPersonIds,
   ), [effectivePeopleByPhoto, enrolledPersonIds, timelinePhotos])
-  const visiblePhotos = useMemo(() => {
-    const reviewPhotoKeys = selectedPersonId === FACE_REVIEW_PERSON_ID
-      ? new Set(actionableReviewMatches.map(({ photoKey }) => photoKey))
-      : null
-    const relevantPhotos = selectedPersonId === REVIEW_PERSON_ID
-      ? timelinePhotos
-      : selectedPersonId === FACE_REVIEW_PERSON_ID
-        ? timelinePhotos.filter(({ key }) => reviewPhotoKeys?.has(key))
-      : selectedPersonId === FAMILY_PERSON_ID
-        ? timelinePhotos.filter(({ key }) => familyPhotoKeys.has(key))
-        : timelinePhotos.filter((photo) =>
-          effectivePeopleByPhoto.get(photo.key)?.has(selectedPersonId),
-        )
-    return sortTimelinePhotos(relevantPhotos, timelineState.dateOverrides)
-  }, [actionableReviewMatches, effectivePeopleByPhoto, familyPhotoKeys, selectedPersonId, timelinePhotos, timelineState.dateOverrides])
+  const visiblePhotos = useMemo(() => selectVisibleTimelinePhotos({
+    selectedPersonId,
+    photos: timelinePhotos,
+    reviewMatches: actionableReviewMatches,
+    effectivePeople: effectivePeopleByPhoto,
+    familyPhotoKeys,
+    dateOverrides: timelineState.dateOverrides,
+  }), [actionableReviewMatches, effectivePeopleByPhoto, familyPhotoKeys, selectedPersonId, timelinePhotos, timelineState.dateOverrides])
   const scrapbookPerson = personAlbumOpen && initialPersonId
     ? timelineState.people.find(({ id }) => id === initialPersonId)
     : undefined
@@ -449,10 +358,9 @@ export function PeopleTimeline({
 
   /** Keeps render state and async scan/save readers on the same snapshot. */
   const replaceTimelineState = useCallback((nextState: typeof timelineState) => {
-    timelineStateRef.current = nextState
-    setTimelineState(nextState)
+    if (setTimelineState(nextState)) timelineStateRef.current = nextState
     return nextState
-  }, [])
+  }, [setTimelineState])
 
   /** Applies one functional update against the latest timeline ref. */
   const updateTimelineState = useCallback((
@@ -461,28 +369,16 @@ export function PeopleTimeline({
     return replaceTimelineState(update(timelineStateRef.current))
   }, [replaceTimelineState])
 
-  /** Serializes IndexedDB writes so an older snapshot cannot finish last. */
-  const queueTimelineStateSave = useCallback((state: typeof timelineState) => {
-    // `savePeopleTimelineState` is an account-namespaced local persistence
-    // boundary. Keeping the queue here also makes it harder for a future caller
-    // to accidentally treat private descriptors as family-sync payload data.
-    const result = saveQueue.current
-      .catch(() => undefined)
-      .then(() => savePeopleTimelineState(cacheNamespace, state))
-      .catch(() => false)
-    saveQueue.current = result.then(() => undefined)
-    return result
-  }, [cacheNamespace])
+  useEffect(() => {
+    timelineStateRef.current = timelineState
+  }, [timelineState])
 
   useEffect(() => {
-    let active = true
     scanController.current?.abort()
     scanController.current = null
-    // oxlint-disable-next-line react/set-state-in-effect -- Reset private face data synchronously at the account namespace boundary.
+    // oxlint-disable-next-line react/set-state-in-effect -- Reset transient scan UI at the account namespace boundary; private state belongs to the scoped session.
     setScanProgress(null)
-    setCacheReady(false)
-    replaceTimelineState(emptyPeopleTimelineState())
-    setSelectedPersonId(FAMILY_PERSON_ID)
+    setSelectedPersonId(initialTimelineSelection.current)
     setActivePhotoKey(null)
     setPostponedFaceReviews([])
     setShowAllFaceMatchedAlbums(false)
@@ -491,18 +387,7 @@ export function PeopleTimeline({
     restoredLinkFocusSignature.current = ''
     manageAfterRouteClosePersonId.current = ''
     lastAutomaticScanSignature.current = ''
-    // Cache reads can finish after the signed-in family namespace changes.
-    // The active flag prevents that stale local snapshot from crossing the
-    // identity boundary and replacing the new family's empty/loading state.
-    void loadPeopleTimelineState(cacheNamespace).then((storedState) => {
-      if (!active) return
-      replaceTimelineState(storedState)
-      setCacheReady(true)
-    })
-    return () => {
-      active = false
-    }
-  }, [cacheNamespace, replaceTimelineState])
+  }, [cacheNamespace])
 
   useEffect(() => {
     if (!cacheReady) return
@@ -564,7 +449,7 @@ export function PeopleTimeline({
     )
     if (pendingManagePersonExists && selectedPersonId === pendingManagePersonId) {
       manageAfterRouteClosePersonId.current = ''
-      restoredPersonSignature.current = `${cacheNamespace}\u0000${initialPersonId ?? FAMILY_PERSON_ID}`
+      restoredPersonSignature.current = personRequestSignature
       return
     }
     if (!personAlbumOpen && manageAfterRouteClosePersonId.current) {
@@ -574,8 +459,7 @@ export function PeopleTimeline({
     // Person and memory IDs arrive from router state after returning from a
     // photo. Restore each tuple once; otherwise local chip/scrubber choices
     // would be undone every time a scan checkpoint updates timelineState.
-    const requestedPersonId = initialPersonId ?? FAMILY_PERSON_ID
-    const personSignature = `${cacheNamespace}\u0000${requestedPersonId}`
+    const personSignature = personRequestSignature
     const restoredPersonId = requestedPersonId === FAMILY_PERSON_ID ||
       requestedPersonId === REVIEW_PERSON_ID ||
       requestedPersonId === FACE_REVIEW_PERSON_ID ||
@@ -591,10 +475,12 @@ export function PeopleTimeline({
       }
     }
 
-    if (!focusMemoryId) return
-    const focusSignature = `${cacheNamespace}\u0000${restoredPersonId}\u0000${focusMemoryId}`
+    if (!focusMemoryId && !focusPhotoKey) return
+    const focusSignature = focusRequestSignature
     if (restoredFocusSignature.current === focusSignature) return
-    const focusedPhoto = timelinePhotos.find(({ memoryId }) => memoryId === focusMemoryId)
+    const focusedPhoto = timelinePhotos.find(({ key, memoryId }) =>
+      focusPhotoKey ? key === focusPhotoKey : memoryId === focusMemoryId,
+    )
     const belongsToPerson = Boolean(focusedPhoto) && (
       restoredPersonId === REVIEW_PERSON_ID ||
       restoredPersonId === FACE_REVIEW_PERSON_ID ||
@@ -612,6 +498,10 @@ export function PeopleTimeline({
     effectivePeopleByPhoto,
     familyPhotoKeys,
     focusMemoryId,
+    focusPhotoKey,
+    focusRequestSignature,
+    personRequestSignature,
+    requestedPersonId,
     initialPersonId,
     personAlbumOpen,
     selectedPersonId,
@@ -620,12 +510,12 @@ export function PeopleTimeline({
   ])
 
   useEffect(() => {
-    if (!focusMemoryId || !displayedPhoto) return
-    const focusSignature = `${cacheNamespace}\u0000${selectedPersonId}\u0000${focusMemoryId}`
+    if ((!focusMemoryId && !focusPhotoKey) || !displayedPhoto) return
+    const focusSignature = focusRequestSignature
     if (
       restoredFocusSignature.current !== focusSignature ||
       restoredLinkFocusSignature.current === focusSignature ||
-      displayedPhoto.memoryId !== focusMemoryId
+      (focusPhotoKey ? displayedPhoto.key !== focusPhotoKey : displayedPhoto.memoryId !== focusMemoryId)
     ) return
 
     // Wait until the restored photo surface has replaced the prior route's
@@ -635,9 +525,16 @@ export function PeopleTimeline({
       restoredLinkFocusSignature.current = focusSignature
       const photoSurface = photoLinkRef.current ?? photoFigureRef.current
       photoSurface?.focus({ preventScroll: true })
+      if (scrollToFocusedPhoto && photoSurface) {
+        const chrome = photoSurface.closest('.journal-page')
+          ?.querySelector('.journal-page__chrome')
+        const chromeHeight = chrome?.getBoundingClientRect().height ?? 0
+        photoSurface.style.scrollMarginTop = `${chromeHeight + 16}px`
+        photoSurface.scrollIntoView?.({ block: 'start', behavior: 'instant' })
+      }
     })
     return () => window.cancelAnimationFrame(frame)
-  }, [cacheNamespace, displayedPhoto, focusMemoryId, selectedPersonId])
+  }, [displayedPhoto, focusMemoryId, focusPhotoKey, focusRequestSignature, scrollToFocusedPhoto])
 
   useEffect(() => {
     // oxlint-disable-next-line react/set-state-in-effect -- Editors are scoped to the externally selected photo record.
@@ -660,6 +557,11 @@ export function PeopleTimeline({
 
   /** Selects a person and their first matched photo without changing routes. */
   function choosePerson(personId: string) {
+    // A later network refresh must not yank the user back to a widget photo
+    // after they have already started browsing a different timeline.
+    restoredPersonSignature.current = personRequestSignature
+    restoredFocusSignature.current = focusRequestSignature
+    restoredLinkFocusSignature.current = focusRequestSignature
     setSelectedPersonId(personId)
     setActivePhotoKey(null)
     setManagingPerson(false)
@@ -1376,81 +1278,17 @@ export function PeopleTimeline({
       ) : null}
 
       {cacheReady ? (
-        <section
-          className="people-timeline__setup"
-          aria-label={setupComplete ? 'Family people' : undefined}
-          aria-labelledby={setupComplete ? undefined : 'people-setup-title'}
-        >
-          <div
-            className="people-timeline__setup-slots"
-            role="group"
-            aria-label="Family face setup"
-          >
-            {setupPeople.map((person) => {
-              const preview = person ? personPreviewById.get(person.id) : undefined
-              const ready = enrolledPersonIds.has(person.id)
-              const hasAlbum = Boolean(preview)
-              return (
-                <button
-                  key={person.id}
-                  type="button"
-                  className="people-timeline__setup-person"
-                  data-ready={ready ? 'true' : 'false'}
-                  data-needs-face={ready ? 'false' : 'true'}
-                  aria-label={ready || hasAlbum ? person.name : `${person.name}, face photo needed`}
-                  aria-pressed={selectedPersonId === person.id}
-                  onClick={() => ready || hasAlbum
-                    ? openPersonAlbum(person.id)
-                    : startManagingPerson(person)}
-                >
-                  <span className="people-timeline__setup-circle">
-                    {preview ? (
-                      <TimelinePhotoImage source={preview.source} alt="" />
-                    ) : (
-                      <span className="people-timeline__initials" aria-hidden="true">
-                        {personInitials(person.name)}
-                      </span>
-                    )}
-                  </span>
-                  <strong>{person.name}</strong>
-                </button>
-              )
-            })}
-
-            {Array.from({ length: emptySetupSlotCount }, (_, slotIndex) => {
-              const slotIsAvailable = slotIndex === 0
-              const label = slotIsAvailable
-                ? 'Add person'
-                : `Empty family slot ${slotIndex}`
-              return (
-                <button
-                  key={`setup-slot-${slotIndex}`}
-                  type="button"
-                  className={`people-timeline__setup-person people-timeline__setup-person--empty ${
-                    slotIsAvailable
-                      ? 'people-timeline__setup-person--add'
-                      : 'people-timeline__setup-person--placeholder'
-                  }`}
-                  aria-label={label}
-                  disabled={!slotIsAvailable || photoPickerBusy}
-                  onClick={openAddPerson}
-                >
-                  <span className="people-timeline__setup-circle" aria-hidden="true">
-                    {slotIsAvailable ? '＋' : ''}
-                  </span>
-                  {slotIsAvailable ? <strong>Add person</strong> : null}
-                </button>
-              )
-            })}
-          </div>
-
-          {!setupComplete ? (
-            <div className="people-timeline__setup-copy">
-              <h3 id="people-setup-title">Create your people</h3>
-              <p>Add two family members to start grouping the photos they share.</p>
-            </div>
-          ) : null}
-        </section>
+        <PeopleTimelinePeople
+          people={setupPeople}
+          previews={personPreviewById}
+          enrolledPersonIds={enrolledPersonIds}
+          selectedPersonId={selectedPersonId}
+          setupComplete={setupComplete}
+          addDisabled={photoPickerBusy}
+          onOpenAlbum={openPersonAlbum}
+          onManagePerson={startManagingPerson}
+          onAddPerson={openAddPerson}
+        />
       ) : null}
 
       <div className="people-timeline__chips" role="group" aria-label="Choose a person timeline">
@@ -1504,76 +1342,16 @@ export function PeopleTimeline({
       </div>
 
       {cacheReady ? (
-        <section
-          className="people-timeline__albums"
-          aria-labelledby="people-albums-title"
-        >
-          <header className="people-timeline__albums-header">
-            <div>
-              <h3 id="people-albums-title">Face-matched albums</h3>
-              <p>
-                <span aria-hidden="true">♙</span>
-                On-device · private
-              </p>
-            </div>
-            {faceMatchedAlbums.length > displayedFaceMatchedAlbums.length ? (
-              <button
-                type="button"
-                aria-controls={faceMatchedAlbumsId}
-                aria-expanded={showAllFaceMatchedAlbums}
-                onClick={() => setShowAllFaceMatchedAlbums(true)}
-              >
-                See all <span aria-hidden="true">›</span>
-              </button>
-            ) : null}
-          </header>
-
-          {faceMatchedAlbums.length ? (
-            <div id={faceMatchedAlbumsId} className="people-timeline__album-grid">
-              {displayedFaceMatchedAlbums.map(({ person, preview, photoCount }, index) => (
-                <button
-                  key={person.id}
-                  type="button"
-                  className="people-timeline__album-tile"
-                  data-tint={index % 3}
-                  aria-label={`Open ${person.name}'s scrapbook, ${photoCount} matched ${photoCount === 1 ? 'photo' : 'photos'}`}
-                  onClick={() => openPersonAlbum(person.id)}
-                >
-                  <span className="people-timeline__album-tile-image">
-                    <TimelinePhotoImage
-                      source={preview.source}
-                      alt=""
-                      width={preview.displayWidth}
-                      height={preview.displayHeight}
-                    />
-                  </span>
-                  <span className="people-timeline__album-tile-copy">
-                    <strong>{person.name}</strong>
-                    <small>{photoCount} matched {photoCount === 1 ? 'photo' : 'photos'}</small>
-                  </span>
-                  <span className="people-timeline__album-tile-doodle" aria-hidden="true">
-                    {index % 3 === 0 ? '✦' : index % 3 === 1 ? '⌁' : '♡'}
-                  </span>
-                </button>
-              ))}
-            </div>
-          ) : (
-            <button
-              type="button"
-              className="people-timeline__albums-empty"
-              onClick={setupPeople.length ? () => choosePerson(REVIEW_PERSON_ID) : openAddPerson}
-            >
-              <span className="people-timeline__albums-empty-icon" aria-hidden="true">✦</span>
-              <span className="people-timeline__albums-empty-copy">
-                <strong>Your first scrapbook starts here</strong>
-                <small>{setupPeople.length
-                  ? 'Matched family photos will collect here.'
-                  : 'Add a person to begin matching photos.'}</small>
-              </span>
-              <span className="people-timeline__albums-empty-arrow" aria-hidden="true">›</span>
-            </button>
-          )}
-        </section>
+        <PeopleTimelineAlbums
+          albums={faceMatchedAlbums}
+          expanded={showAllFaceMatchedAlbums}
+          id={faceMatchedAlbumsId}
+          hasPeople={setupPeople.length > 0}
+          onExpand={() => setShowAllFaceMatchedAlbums(true)}
+          onOpenAlbum={openPersonAlbum}
+          onShowAllPhotos={() => choosePerson(REVIEW_PERSON_ID)}
+          onAddPerson={openAddPerson}
+        />
       ) : null}
 
       {importingPhotos && photoImportProgress ? (
@@ -1601,161 +1379,49 @@ export function PeopleTimeline({
       ) : null}
 
       {addingPerson ? (
-        <form ref={addPersonFormRef} className="people-timeline__inline-form people-timeline__person-form" aria-label="Add a person" onSubmit={(event) => void addPerson(event)}>
-          <label>
-            <span>Name</span>
-            <input
-              autoFocus
-              value={newPersonName}
-              maxLength={40}
-              autoComplete="off"
-              autoCapitalize="words"
-              autoCorrect="off"
-              disabled={addingPersonBusy || importingPhotos || Boolean(scanProgress)}
-              onChange={(event) => {
-                setNewPersonName(event.target.value)
-                setAddPersonError('')
-              }}
-            />
-          </label>
-          <label>
-            <span>Face photos</span>
-            <input
-              type="file"
-              accept="image/*"
-              multiple
-              disabled={addingPersonBusy || importingPhotos || Boolean(scanProgress)}
-              onChange={(event) => {
-                setNewPersonPortraits(Array.from(event.currentTarget.files ?? []).slice(0, MAX_REFERENCE_PHOTOS_AT_ONCE))
-                setAddPersonError('')
-              }}
-            />
-            <small>Choose 1–5 clear solo photos. Different ages or slight angles improve matching. The photos are scanned once and never stored.</small>
-          </label>
-          <div className="people-timeline__form-actions">
-            <button type="submit" disabled={addingPersonBusy || importingPhotos || Boolean(scanProgress)}>
-              {addingPersonBusy ? 'Scanning…' : 'Add person'}
-            </button>
-            <button
-              type="button"
-              disabled={addingPersonBusy}
-              onClick={closeAddPerson}
-            >
-              Cancel
-            </button>
-          </div>
-          {addPersonError ? <p role="alert">{addPersonError}</p> : null}
-        </form>
+        <PeopleTimelinePersonForm
+          formRef={addPersonFormRef}
+          name={newPersonName}
+          disabled={addingPersonBusy || importingPhotos || Boolean(scanProgress)}
+          scanning={addingPersonBusy}
+          error={addPersonError}
+          onNameChange={(name) => {
+            setNewPersonName(name)
+            setAddPersonError('')
+          }}
+          onPortraitsChange={(files) => {
+            setNewPersonPortraits(files.slice(0, MAX_REFERENCE_PHOTOS_AT_ONCE))
+            setAddPersonError('')
+          }}
+          onSubmit={(event) => void addPerson(event)}
+          onCancel={closeAddPerson}
+        />
       ) : null}
 
       {managingPerson && selectedPerson ? (
-        <section
-          className="people-timeline__manage-panel"
-          aria-label={`Manage ${selectedPerson.name}`}
-        >
-          <header className="people-timeline__manage-header">
-            <div>
-              <span>Person details</span>
-              <h3>Manage {selectedPerson.name}</h3>
-            </div>
-            <button
-              type="button"
-              className="people-timeline__manage-done"
-              onClick={() => setManagingPerson(false)}
-            >
-              Done
-            </button>
-          </header>
-          <form
-            className="people-timeline__inline-form people-timeline__rename-form"
-            aria-label={`Rename ${selectedPerson.name}`}
-            onSubmit={renamePerson}
-          >
-            <label>
-              <span>Name</span>
-              <input
-                autoFocus
-                value={renameDraft}
-                maxLength={40}
-                autoCapitalize="words"
-                autoCorrect="off"
-                enterKeyHint="done"
-                disabled={referenceBusy}
-                onChange={(event) => {
-                  setRenameDraft(event.target.value)
-                  setManageError('')
-                }}
-              />
-            </label>
-            <div className="people-timeline__form-actions">
-              <button type="submit" disabled={referenceBusy}>Save name</button>
-            </div>
-          </form>
-          <form
-            className="people-timeline__reference-form"
-            aria-label={`Add face photos for ${selectedPerson.name}`}
-            onSubmit={(event) => void saveReferencePortrait(event)}
-          >
-            <div className="people-timeline__reference-copy">
-              <strong>
-                {timelineState.faceProfiles[selectedPerson.id]?.references.length
-                  ? `${timelineState.faceProfiles[selectedPerson.id]?.references.length} face ${timelineState.faceProfiles[selectedPerson.id]?.references.length === 1 ? 'view' : 'views'} ready`
-                  : 'Face photo needed'}
-              </strong>
-              <span>
-                {timelineState.faceProfiles[selectedPerson.id]?.references.length
-                  ? 'Add a different age or angle to improve difficult matches.'
-                  : `Add one clear portrait to organize ${selectedPerson.name}’s photos automatically.`}
-              </span>
-            </div>
-            <div className="people-timeline__reference-controls">
-              <label
-                className="people-timeline__face-picker"
-                data-disabled={referenceBusy || importingPhotos || Boolean(scanProgress) ? 'true' : 'false'}
-              >
-                <input
-                  className="people-timeline__sr-only"
-                  type="file"
-                  accept="image/*"
-                  multiple
-                  aria-label={`Face photo for ${selectedPerson.name}`}
-                  disabled={referenceBusy || importingPhotos || Boolean(scanProgress)}
-                  onChange={(event) => {
-                    setReferencePortraits(Array.from(event.currentTarget.files ?? []).slice(0, MAX_REFERENCE_PHOTOS_AT_ONCE))
-                    setManageError('')
-                  }}
-                />
-                <span className="people-timeline__face-picker-action" aria-hidden="true">
-                  Choose photos
-                </span>
-                <span className="people-timeline__face-picker-summary" aria-live="polite">
-                  {referencePortraits.length
-                    ? `${referencePortraits.length} ${referencePortraits.length === 1 ? 'photo' : 'photos'} selected`
-                    : 'Up to 5 photos'}
-                </span>
-              </label>
-              <button type="submit" disabled={referenceBusy || importingPhotos || Boolean(scanProgress) || !referencePortraits.length}>
-                {referenceBusy
-                  ? 'Scanning…'
-                  : timelineState.faceProfiles[selectedPerson.id]?.references.length
-                    ? 'Add face views'
-                    : 'Add face photo'}
-              </button>
-            </div>
-          </form>
-          {manageError ? <p className="people-timeline__manage-error" role="alert">{manageError}</p> : null}
-          {confirmingDelete ? (
-            <div className="people-timeline__delete-confirm" role="group" aria-label={`Remove ${selectedPerson.name}`}>
-              <p>Remove this person and their photo tags?</p>
-              <button type="button" onClick={deleteSelectedPerson}>Remove</button>
-              <button type="button" onClick={() => setConfirmingDelete(false)}>Keep</button>
-            </div>
-          ) : (
-            <button type="button" className="people-timeline__delete-button" disabled={referenceBusy} onClick={() => setConfirmingDelete(true)}>
-              Remove person
-            </button>
-          )}
-        </section>
+        <PeopleTimelinePersonManager
+          personName={selectedPerson.name}
+          name={renameDraft}
+          referenceCount={timelineState.faceProfiles[selectedPerson.id]?.references.length ?? 0}
+          selectedPortraitCount={referencePortraits.length}
+          scanning={referenceBusy}
+          referenceDisabled={referenceBusy || importingPhotos || Boolean(scanProgress)}
+          error={manageError}
+          confirmingDelete={confirmingDelete}
+          onNameChange={(name) => {
+            setRenameDraft(name)
+            setManageError('')
+          }}
+          onPortraitsChange={(files) => {
+            setReferencePortraits(files.slice(0, MAX_REFERENCE_PHOTOS_AT_ONCE))
+            setManageError('')
+          }}
+          onRename={renamePerson}
+          onSavePortraits={(event) => void saveReferencePortrait(event)}
+          onDelete={deleteSelectedPerson}
+          onConfirmDelete={setConfirmingDelete}
+          onDone={() => setManagingPerson(false)}
+        />
       ) : null}
 
       {cacheReady && faceReviewPreviews.length ? (
@@ -1800,199 +1466,80 @@ export function PeopleTimeline({
           <p>Opening your people timeline…</p>
         </div>
       ) : displayedPhoto ? (
-        <div
-          className="people-timeline__viewer"
-          data-layout={isNamedPersonAlbum ? 'scrapbook' : isFaceReview ? 'review' : 'album'}
+        <PeopleTimelineViewer
+          photo={displayedPhoto}
+          layout={isNamedPersonAlbum ? 'scrapbook' : isFaceReview ? 'review' : 'album'}
+          personId={selectedPersonId}
+          personName={personName}
+          dateOverride={timelineState.dateOverrides[displayedPhoto.key]}
+          position={{ index: activeIndex, total: visiblePhotos.length }}
+          review={displayedReviewMatch ? {
+            match: displayedReviewMatch,
+            face: displayedReviewFace,
+            person: displayedReviewPerson,
+          } : undefined}
+          photoLinkRef={photoLinkRef}
+          photoFigureRef={photoFigureRef}
+          onReview={reviewFaceMatch}
+          onPositionChange={(index) => {
+            const photo = visiblePhotos[index]
+            if (photo) {
+              restoredFocusSignature.current = focusRequestSignature
+              restoredLinkFocusSignature.current = focusRequestSignature
+              setActivePhotoKey(photo.key)
+            }
+          }}
+          onEditDate={beginDateEdit}
         >
-          {isFaceReview ? (
-            <Link
-              ref={photoLinkRef}
-              className="people-timeline__photo-link"
-              data-face-review={displayedReviewFace ? 'true' : 'false'}
-              to={photoDestination(displayedPhoto)}
-              state={photoRouteState(displayedPhoto, selectedPersonId)}
-              aria-label={`Open ${displayedPhoto.caption}, shared by ${displayedPhoto.contributorName}`}
-            >
-              <TimelinePhotoImage
-                key={displayedPhoto.key}
-                source={displayedPhoto.scanSource}
-                alt={displayedPhoto.caption}
-                width={displayedPhoto.displayWidth}
-                height={displayedPhoto.displayHeight}
-              />
-              {displayedReviewFace ? (
-                <span
-                  className="people-timeline__face-focus"
-                  aria-hidden="true"
-                  style={{
-                    left: `${displayedReviewFace.box[0] * 100}%`,
-                    top: `${displayedReviewFace.box[1] * 100}%`,
-                    width: `${displayedReviewFace.box[2] * 100}%`,
-                    height: `${displayedReviewFace.box[3] * 100}%`,
-                  }}
-                />
-              ) : null}
-            </Link>
-          ) : isNamedPersonAlbum ? (
-            <figure
-              ref={photoFigureRef}
-              className="people-timeline__scrapbook-photo"
-              tabIndex={-1}
-              aria-label={`${displayedPhoto.caption}, shared by ${displayedPhoto.contributorName}`}
-            >
-              <span className="people-timeline__scrapbook-tape" aria-hidden="true" />
-              <span className="people-timeline__scrapbook-doodle" aria-hidden="true">♡</span>
-              <span className="people-timeline__scrapbook-image">
-                <TimelinePhotoImage
-                  key={displayedPhoto.key}
-                  source={displayedPhoto.scanSource}
-                  alt={displayedPhoto.caption}
-                  width={displayedPhoto.displayWidth}
-                  height={displayedPhoto.displayHeight}
-                />
-              </span>
-              <figcaption>
-                <strong>{displayedPhoto.caption}</strong>
-                <span>{formatTimelinePhotoDate(displayedPhoto, timelineState.dateOverrides[displayedPhoto.key])}</span>
-              </figcaption>
-            </figure>
-          ) : (
-            <figure
-              ref={photoFigureRef}
-              className="people-timeline__album-photo"
-              tabIndex={-1}
-              aria-label={`${displayedPhoto.caption}, shared by ${displayedPhoto.contributorName}`}
-            >
-              <TimelinePhotoImage
-                key={displayedPhoto.key}
-                source={displayedPhoto.scanSource}
-                alt={displayedPhoto.caption}
-                width={displayedPhoto.displayWidth}
-                height={displayedPhoto.displayHeight}
-              />
-            </figure>
-          )}
-
-          {displayedReviewMatch && displayedReviewPerson ? (
-            <section className="people-timeline__face-review" aria-live="polite">
-              <div>
-                <span>Quick review</span>
-                <strong>Is the outlined face {displayedReviewPerson.name}?</strong>
-                <small>Your answer improves future matches only on this device.</small>
-              </div>
-              <div className="people-timeline__face-review-actions">
-                <button type="button" onClick={() => reviewFaceMatch(displayedReviewMatch, 'yes')}>Yes</button>
-                <button type="button" onClick={() => reviewFaceMatch(displayedReviewMatch, 'no')}>No</button>
-                <button type="button" onClick={() => reviewFaceMatch(displayedReviewMatch, 'unsure')}>Not sure</button>
-              </div>
-            </section>
-          ) : null}
-
-          <div className="people-timeline__timeline-meta" aria-live="polite">
-            <div>
-              <time dateTime={timelineState.dateOverrides[displayedPhoto.key]?.value ?? displayedPhoto.capturedAt}>
-                {formatTimelinePhotoDate(displayedPhoto, timelineState.dateOverrides[displayedPhoto.key])}
-              </time>
-              <span>{activeIndex + 1} of {visiblePhotos.length}</span>
-            </div>
-            <button type="button" onClick={beginDateEdit}>Edit date</button>
-          </div>
-
-          <label className="people-timeline__scrubber">
-            <span className="people-timeline__sr-only">Timeline position for {personName}</span>
-            <input
-              type="range"
-              min="0"
-              max={Math.max(0, visiblePhotos.length - 1)}
-              step="1"
-              value={activeIndex}
-              disabled={visiblePhotos.length < 2}
-              aria-valuetext={`${activeIndex + 1} of ${visiblePhotos.length}, ${formatTimelinePhotoDate(displayedPhoto, timelineState.dateOverrides[displayedPhoto.key])}`}
-              onChange={(event) => {
-                const photo = visiblePhotos[Number(event.target.value)]
-                if (photo) setActivePhotoKey(photo.key)
-              }}
-            />
-            <span className="people-timeline__scrubber-ends" aria-hidden="true">
-              <span>Oldest</span><span>Latest</span>
-            </span>
-          </label>
-
           {dateEditorOpen ? (
-            <form className="people-timeline__date-editor" aria-label="Edit photo date" onSubmit={saveDate}>
-              <div className="people-timeline__date-kind" role="group" aria-label="Date detail">
-                <button type="button" aria-pressed={dateDraft.precision === 'year'} onClick={() => changeDatePrecision('year')}>Year</button>
-                <button type="button" aria-pressed={dateDraft.precision === 'day'} onClick={() => changeDatePrecision('day')}>Date</button>
-              </div>
-              <label>
-                <span>{dateDraft.precision === 'year' ? 'Approximate year' : 'Date'}</span>
-                <input
-                  type={dateDraft.precision === 'year' ? 'number' : 'date'}
-                  inputMode={dateDraft.precision === 'year' ? 'numeric' : undefined}
-                  enterKeyHint="done"
-                  min={dateDraft.precision === 'year' ? '1800' : '1800-01-01'}
-                  max={dateDraft.precision === 'year' ? String(new Date().getFullYear() + 1) : undefined}
-                  value={dateDraft.value}
-                  onChange={(event) => {
-                    setDateDraft((current) => ({ ...current, value: event.target.value }))
-                    setDateError('')
-                  }}
-                />
-              </label>
-              <div className="people-timeline__form-actions">
-                <button type="submit">Save date</button>
-                <button type="button" onClick={() => setDateEditorOpen(false)}>Cancel</button>
-                {timelineState.dateOverrides[displayedPhoto.key] ? (
-                  <button type="button" onClick={restoreCapturedDate}>Use original</button>
-                ) : null}
-              </div>
-              {dateError ? <p role="alert">{dateError}</p> : null}
-            </form>
+            <PeopleTimelineDateEditor
+              draft={dateDraft}
+              error={dateError}
+              hasOverride={Boolean(timelineState.dateOverrides[displayedPhoto.key])}
+              onPrecisionChange={changeDatePrecision}
+              onValueChange={(value) => {
+                setDateDraft((current) => ({ ...current, value }))
+                setDateError('')
+              }}
+              onSave={saveDate}
+              onCancel={() => setDateEditorOpen(false)}
+              onRestoreOriginal={restoreCapturedDate}
+            />
           ) : null}
-
-          <div className="people-timeline__tagging">
-            <button
-              type="button"
-              className="people-timeline__tag-toggle"
-              aria-expanded={tagEditorOpen}
-              onClick={() => setTagEditorOpen((current) => !current)}
-            >
-              People in this photo
-              <span aria-hidden="true">{tagEditorOpen ? '−' : '+'}</span>
-            </button>
-            {tagEditorOpen ? (
-              <div className="people-timeline__tag-panel">
-                {timelineState.people.length ? timelineState.people.map((person) => {
-                  const checked = effectivePeopleByPhoto
-                    .get(displayedPhoto.key)
-                    ?.has(person.id) ?? false
-                  const manuallyTagged = timelineState.assignments.some((assignment) =>
-                    assignment.photoKey === displayedPhoto.key &&
-                    assignment.personId === person.id &&
-                    assignment.source === 'manual',
-                  )
-                  return (
-                    <label key={person.id}>
-                      <input
-                        type="checkbox"
-                        checked={checked}
-                        onChange={(event) => setPhotoTag(person.id, event.target.checked)}
-                      />
-                      <span>
-                        {person.name}
-                        {checked
-                          ? <small>{manuallyTagged ? 'Confirmed by you' : 'Matched automatically'}</small>
-                          : null}
-                      </span>
-                    </label>
-                  )
-                }) : (
-                  <p>Add a person with a face photo above, then review or correct matches here.</p>
-                )}
-              </div>
-            ) : null}
-          </div>
-        </div>
+          {displayedPhoto.kind === 'journal-photo' && onDeletePhoto &&
+            journalPhotos.some((photo) => photo.id === displayedPhoto.id && photo.ownedByCurrentUser) ? (
+            <JournalPhotoDeleteControl
+              key={`${cacheNamespace}:${displayedPhoto.id}`}
+              photoId={displayedPhoto.id}
+              shared={!cacheNamespace.endsWith(':no-family')}
+              onDelete={onDeletePhoto}
+            />
+          ) : <ContentRemovalControl compact
+            key={`${cacheNamespace}:${displayedPhoto.kind}:${displayedPhoto.id}`}
+            noun="photo"
+            hideOnly={!(displayedPhoto.kind === 'capsule-photo' && onDeleteCapsulePhoto && photos.some((photo) =>
+              photo.id === displayedPhoto.id && photo.capsuleId === displayedPhoto.capsuleId && photo.ownedByCurrentUser))}
+            description={displayedPhoto.kind === 'capsule-photo' && onDeleteCapsulePhoto && photos.some((photo) =>
+              photo.id === displayedPhoto.id && photo.capsuleId === displayedPhoto.capsuleId && photo.ownedByCurrentUser)
+              ? 'This deletes your photo from this Capsule, its family recap, and its Journal entry for everyone. Separate uploads and videos already saved to a phone stay unchanged.'
+              : 'This hides the photo from your Journal and widget on this device. Your family keeps the original. You can restore hidden items below.'}
+            onRemove={async () => {
+              if (displayedPhoto.kind === 'capsule-photo' && onDeleteCapsulePhoto && photos.some((photo) =>
+                photo.id === displayedPhoto.id && photo.capsuleId === displayedPhoto.capsuleId && photo.ownedByCurrentUser)) {
+                await onDeleteCapsulePhoto(displayedPhoto.capsuleId, displayedPhoto.id)
+              } else setContentHidden(cacheNamespace, photoVisibilityKey(displayedPhoto.id, displayedPhoto.kind), true)
+            }}
+          />}
+          <PeopleTimelinePhotoTags
+            photoKey={displayedPhoto.key}
+            people={timelineState.people}
+            assignments={timelineState.assignments}
+            effectivePersonIds={effectivePeopleByPhoto.get(displayedPhoto.key)}
+            open={tagEditorOpen}
+            onToggle={() => setTagEditorOpen((current) => !current)}
+            onTagChange={setPhotoTag}
+          />
+        </PeopleTimelineViewer>
       ) : selectedPerson ? (
         <div className="people-timeline__empty">
           <p className="people-timeline__empty-title">
@@ -2056,67 +1603,23 @@ export function PeopleTimeline({
         </div>
       )}
 
-      <aside className="people-timeline__privacy" aria-label="Face matching privacy">
-        <svg viewBox="0 0 24 24" aria-hidden="true">
-          <path d="M7.5 10V7.7a4.5 4.5 0 0 1 9 0V10M5.5 10h13v10h-13zM12 14v2.5" />
-        </svg>
-        <div>
-          <p>Face matching stays on this device</p>
-          <span>Reference photos are scanned once and never stored. Your private face profiles never leave this phone.</span>
-        </div>
-        <div className="people-timeline__privacy-actions">
-          <button
-            type="button"
-            disabled={
-              faceDataClearing ||
-              importingPhotos ||
-              Boolean(scanProgress) ||
-              addingPersonBusy ||
-              referenceBusy ||
-              !pendingScanKey ||
-              enrolledPersonIds.size === 0
-            }
-            onClick={() => void scanPhotos()}
-          >
-            {scanProgress
-              ? `${scanProgress.completed}/${scanProgress.total}`
-              : pendingScanKey
-                ? 'Check new photos'
-                : 'Up to date'}
-          </button>
-          {scanProgress ? (
-            <button type="button" onClick={cancelFaceScan}>Cancel</button>
-          ) : null}
-          <button
-            type="button"
-            className="people-timeline__clear-face-button"
-            disabled={
-              faceDataClearing ||
-              importingPhotos ||
-              addingPersonBusy ||
-              referenceBusy ||
-              !hasFaceData ||
-              Boolean(scanProgress)
-            }
-            aria-expanded={confirmingClearFaceData}
-            onClick={() => setConfirmingClearFaceData((current) => !current)}
-          >
-            {faceDataClearing ? 'Clearing…' : 'Clear face data'}
-          </button>
-        </div>
-      </aside>
-      {confirmingClearFaceData ? (
-        <div className="people-timeline__clear-confirm" role="group" aria-label="Confirm clear face data">
-          <p>Clear face references and detections? Names and manual photo tags will stay.</p>
-          <button type="button" onClick={() => void clearFaceData()}>Clear</button>
-          <button type="button" onClick={() => setConfirmingClearFaceData(false)}>Keep</button>
-        </div>
-      ) : null}
-      {scanMessage ? (
-        <p className="people-timeline__scan-status" role="status" data-error={scanError ? 'true' : 'false'}>
-          {scanMessage}
-        </p>
-      ) : null}
+      {hidden.length > 0 ? <button type="button" className="ks-secondary-button"
+        onClick={() => restoreHiddenContent(cacheNamespace)}>Restore hidden items ({hidden.length})</button> : null}
+      <PeopleTimelineScanStatus
+        progress={scanProgress}
+        hasPendingPhotos={Boolean(pendingScanKey)}
+        scanDisabled={photoPickerBusy || !pendingScanKey || enrolledPersonIds.size === 0}
+        clearDisabled={photoPickerBusy || !hasFaceData}
+        clearing={faceDataClearing}
+        confirmingClear={confirmingClearFaceData}
+        message={scanMessage}
+        error={scanError}
+        onScan={() => void scanPhotos()}
+        onCancelScan={cancelFaceScan}
+        onToggleClear={() => setConfirmingClearFaceData((current) => !current)}
+        onClear={() => void clearFaceData()}
+        onKeep={() => setConfirmingClearFaceData(false)}
+      />
     </section>
   )
 }

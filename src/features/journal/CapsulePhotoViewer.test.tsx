@@ -61,6 +61,7 @@ function JournalStateProbe() {
     journalContext?: {
       selectedDayKey?: string
       focusMemoryId?: string
+      focusPhotoKey?: string
       weekOffset?: number
     }
   } | null
@@ -70,12 +71,13 @@ function JournalStateProbe() {
       <span>Journal route</span>
       <span>Selected {state?.journalContext?.selectedDayKey}</span>
       <span>Focus {state?.journalContext?.focusMemoryId}</span>
+      <span>Photo key {state?.journalContext?.focusPhotoKey}</span>
       <span>Week offset {state?.journalContext?.weekOffset}</span>
     </div>
   )
 }
 
-function renderViewer(opensAt?: string, includeAdjacentPhoto = false) {
+function renderViewer(opensAt?: string, includeAdjacentPhoto = false, extraCapsules: FamilyCapsule[] = []) {
   return render(
     <MemoryRouter
       initialEntries={[{
@@ -97,7 +99,7 @@ function renderViewer(opensAt?: string, includeAdjacentPhoto = false) {
           path="/journal/photo/:capsuleId/:photoId"
           element={(
             <CapsulePhotoViewer
-              capsules={[capsule(opensAt, includeAdjacentPhoto)]}
+              capsules={[capsule(opensAt, includeAdjacentPhoto), ...extraCapsules]}
               now={new Date('2026-08-29T12:00:00.000Z')}
             />
           )}
@@ -139,6 +141,7 @@ describe('CapsulePhotoViewer', () => {
       screen.getByText('Focus capsule-family-week-garden-photo'),
     ).toBeInTheDocument()
     expect(screen.getByText('Week offset -1')).toBeInTheDocument()
+    expect(screen.getByText('Photo key photo:garden-photo')).toBeInTheDocument()
   })
 
   it('returns focus context for the photo currently shown after paging', async () => {
@@ -155,6 +158,24 @@ describe('CapsulePhotoViewer', () => {
     expect(
       screen.getByText('Focus capsule-family-week-patio-photo'),
     ).toBeInTheDocument()
+    expect(screen.getByText('Photo key photo:patio-photo')).toBeInTheDocument()
+  })
+
+  it('returns a canonical content key after paging to a duplicate special-Capsule membership', async () => {
+    const user = userEvent.setup()
+    const original = capsule()
+    const duplicate: FamilyCapsule = {
+      ...original, id: 'z-special', kind: 'special', title: 'Special gathering',
+      photos: original.photos.map((photo) => ({ ...photo, capsuleId: 'z-special' })),
+    }
+    renderViewer(undefined, false, [duplicate])
+    await user.click(screen.getByRole('button', { name: 'Next' }))
+    expect(screen.getByText('Special gathering')).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Back to Journal' }))
+    expect(screen.getByText('Focus capsule-z-special-garden-photo')).toBeInTheDocument()
+    // Journal deduplication may choose family-week, but this exact content key
+    // still resolves the photo without depending on its Capsule membership.
+    expect(screen.getByText('Photo key photo:garden-photo')).toBeInTheDocument()
   })
 
   it('does not expose a direct-linked photo before its real unlock time', () => {
@@ -169,7 +190,8 @@ describe('CapsulePhotoViewer', () => {
     expect(screen.getByRole('button', { name: 'Back to Journal' })).toBeInTheDocument()
   })
 
-  it('opens a direct Journal-library photo without Capsule semantics', () => {
+  it('opens a direct Journal-library photo and returns its distinct content key without Capsule semantics', async () => {
+    const user = userEvent.setup()
     const directPhoto: JournalPhoto = {
       id: 'direct-photo',
       image: '/direct-full.jpg',
@@ -195,6 +217,7 @@ describe('CapsulePhotoViewer', () => {
               />
             )}
           />
+          <Route path="/journal" element={<JournalStateProbe />} />
         </Routes>
       </MemoryRouter>,
     )
@@ -205,5 +228,7 @@ describe('CapsulePhotoViewer', () => {
     expect(screen.getAllByText('Family photos')).not.toHaveLength(0)
     expect(screen.getByText(/added to/i)).toBeInTheDocument()
     expect(screen.queryByText(/opened from/i)).not.toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Back to Journal' }))
+    expect(screen.getByText('Photo key journal-photo:direct-photo')).toBeInTheDocument()
   })
 })

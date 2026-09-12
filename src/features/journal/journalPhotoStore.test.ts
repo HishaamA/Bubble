@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   createMemoryJournalPhotoStore,
   journalPhotoDatabaseNameForSubject,
+  parseStoredJournalPhoto,
 } from './journalPhotoStore'
 import type { JournalPhoto } from './journalPhotoTypes'
 
@@ -48,6 +49,19 @@ describe('journalPhotoStore', () => {
       journalPhotoDatabaseNameForSubject('user-a:family-two'),
     )
     expect(journalPhotoDatabaseNameForSubject('')).toContain('signed-out')
+  })
+
+  it('preserves authenticated uploader identity across durable writes without requiring it on legacy imports', async () => {
+    const store = createMemoryJournalPhotoStore()
+    const legacy = photo('legacy', '2020-01-01T00:00:00.000Z')
+    const hydrated = { ...legacy, id: 'hydrated', uploaderId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa' }
+    await store.save(legacy)
+    await store.save(hydrated)
+    expect(await store.list()).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: 'hydrated', uploaderId: hydrated.uploaderId }),
+      expect.objectContaining({ id: 'legacy', ownedByCurrentUser: true }),
+    ]))
+    expect(parseStoredJournalPhoto({ ...legacy, uploaderId: 'invalid' })).toEqual(legacy)
   })
 
   it('rejects malformed records instead of feeding them into the face queue', async () => {

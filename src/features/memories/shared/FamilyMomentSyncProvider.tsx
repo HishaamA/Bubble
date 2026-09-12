@@ -8,6 +8,7 @@ import {
 } from 'react'
 import type { Capture360Submission } from '../../capture'
 import { subscribeToSupabaseAuthChanges } from '../../../lib/supabase'
+import { subscribeToAppResume } from '../../../lib/appResume'
 import {
   deleteFamilyMoment,
   fetchFamilyMomentDeletionIds,
@@ -223,8 +224,9 @@ export function FamilyMomentSyncProvider({ children }: PropsWithChildren) {
           continue
         }
       }
-      setError(null)
+      if (connectionRef.current === connection) setError(null)
     } catch (reason) {
+      if (connectionRef.current !== connection) return
       setError(
         reason instanceof Error
           ? reason
@@ -268,6 +270,7 @@ export function FamilyMomentSyncProvider({ children }: PropsWithChildren) {
     async function connect() {
       const requestedConnection = ++connectionVersion
       let requestedSubscription: FamilyMomentSubscription | null = null
+      let initialRefreshStarted = false
       /** Releases only the subscription created by this connection attempt. */
       const releaseRequestedSubscription = () => {
         requestedSubscription?.unsubscribe()
@@ -297,41 +300,59 @@ export function FamilyMomentSyncProvider({ children }: PropsWithChildren) {
         }
         if (!active || requestedConnection !== connectionVersion) return
 
-        requestedSubscription = subscribeToFamilyMoments(
-          connection.circleId,
-          (deletedMomentId) => {
-            if (deletedMomentId) {
-              deletedIdsRef.current.add(deletedMomentId)
-              void removeMoments([deletedMomentId])
+        try {
+          requestedSubscription = subscribeToFamilyMoments(
+            connection.circleId,
+            (deletedMomentId) => {
+              if (!active || requestedConnection !== connectionVersion) return
+              if (deletedMomentId) {
+                deletedIdsRef.current.add(deletedMomentId)
+                void removeMoments([deletedMomentId])
+              }
+              void refreshFamilyMoments()
+            },
+          )
+          familySubscription = requestedSubscription
+          // Load the common family space immediately. Realtime is an update
+          // transport, not permission to read: a blocked websocket must never
+          // hide everyone else's moments. Refresh again on readiness to close
+          // the initial-fetch/subscription gap without losing intervening posts.
+          void requestedSubscription.ready.then(() => {
+            if (active && requestedConnection === connectionVersion && initialRefreshStarted) {
+              void refreshFamilyMoments()
             }
-            void refreshFamilyMoments()
-          },
-        )
-        familySubscription = requestedSubscription
-        await requestedSubscription.ready
-        if (!active || requestedConnection !== connectionVersion) {
-          releaseRequestedSubscription()
-          return
+          }).catch(() => {
+            releaseRequestedSubscription()
+          })
+        } catch {
+          // A failed live channel still leaves authenticated reads/publishing
+          // available; resume and explicit refresh retry the connection later.
         }
 
-        const window = await getFamilyDailyCaptureWindow(connection)
-        if (!active || requestedConnection !== connectionVersion) {
-          releaseRequestedSubscription()
-          return
-        }
-        setDailyWindow(window)
+        // The scheduled-camera window is independent of the shared gallery.
+        // A temporary window-service failure must not hide existing panoramas.
+        void getFamilyDailyCaptureWindow(connection).then((captureWindow) => {
+          if (active && requestedConnection === connectionVersion) {
+            setDailyWindow(captureWindow)
+          }
+        }).catch(() => {
+          if (active && requestedConnection === connectionVersion) setDailyWindow(null)
+        })
         setStatus('connected')
         setError(null)
+        // Give an already-connected channel its readiness microtask before
+        // starting the first read, avoiding duplicate panorama downloads in
+        // the common case. A later readiness signal still triggers the gap read.
+        await Promise.resolve()
+        if (!active || requestedConnection !== connectionVersion) return
+        initialRefreshStarted = true
         await refreshFamilyMoments()
       } catch (reason) {
         if (!active || requestedConnection !== connectionVersion) {
           releaseRequestedSubscription()
           return
         }
-        if (familySubscription === requestedSubscription) {
-          requestedSubscription?.unsubscribe()
-          familySubscription = null
-        }
+        releaseRequestedSubscription()
         connectionRef.current = null
         setDailyWindow(null)
         setStatus('error')
@@ -349,22 +370,15 @@ export function FamilyMomentSyncProvider({ children }: PropsWithChildren) {
       familySubscription?.unsubscribe()
       familySubscription = null
       connectionRef.current = null
+      setDailyWindow(null)
       refreshRequestedRef.current = false
       void connect()
     }
 
-    // Reconnects on foregrounding, when mobile browsers may have suspended the
-    // realtime transport while the document was hidden.
-    /** Avoids reconnecting a backgrounded WebView until it becomes visible. */
-    function reconnectWhenVisible() {
-      if (document.visibilityState === 'visible') reconnect()
-    }
-
     void connect()
     const unsubscribeFromAuth = subscribeToSupabaseAuthChanges(reconnect)
+    const stopResume = subscribeToAppResume(reconnect)
     window.addEventListener('kinsphere:family-sync-refresh', reconnect)
-    window.addEventListener('focus', reconnect)
-    document.addEventListener('visibilitychange', reconnectWhenVisible)
 
     return () => {
       active = false
@@ -374,9 +388,8 @@ export function FamilyMomentSyncProvider({ children }: PropsWithChildren) {
       connectionRef.current = null
       refreshRequestedRef.current = false
       unsubscribeFromAuth()
+      stopResume()
       window.removeEventListener('kinsphere:family-sync-refresh', reconnect)
-      window.removeEventListener('focus', reconnect)
-      document.removeEventListener('visibilitychange', reconnectWhenVisible)
     }
   }, [cacheHydrated, refreshFamilyMoments, removeMoments])
 

@@ -1,26 +1,10 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
-import {
-  fetchFamilyCapsules,
-  subscribeToFamilyCapsules,
-} from '../capsules/capsuleService'
-import type { CapsuleImageSource, FamilyCapsule } from '../capsules/types'
-import { toLocalDateInput } from '../capsules/capsuleDates'
-import {
-  fetchFamilyEvents,
-  subscribeToFamilyEvents,
-  type FamilyEventRecord,
-} from '../events/eventService'
-import { decodePlanDetails } from '../events/planDetails'
+import { useEffect, useMemo } from 'react'
 import { useAppTheme } from '../../theme/AppTheme'
-import {
-  clearNativeBubbleWidget,
-  isNativeBubbleWidgetAvailable,
-  updateNativeBubbleWidget,
-} from './nativeBubbleWidget'
-import {
-  selectBubbleWidgetTimeline,
-  type WidgetEvent,
-} from './widgetSnapshot'
+import { isNativeBubbleWidgetAvailable } from './nativeBubbleWidget'
+import { useNativeWidgetPublication } from './useNativeWidgetPublication'
+import { useWidgetFamilyData } from './useWidgetFamilyData'
+import { projectWidgetEvents } from './widgetEventProjection'
+import { selectBubbleWidgetTimeline } from './widgetSnapshot'
 import {
   BUBBLE_WIDGET_DATA_CHANGED_EVENT,
   readViewedWidgetRecaps,
@@ -30,220 +14,29 @@ import {
   readWidgetPrivacy,
   readWidgetTaskDefinitions,
 } from './widgetStorage'
-import { materializeWidgetThumbnail } from './widgetThumbnail'
-import { widgetThumbnailCacheKey } from './widgetThumbnailCacheKey'
 
-type WidgetData = {
-  storageSubject: string
-  events: FamilyEventRecord[]
-  capsules: FamilyCapsule[]
-  refreshedAt: Date
-  localRevision: number
-}
-
-/** Keeps the native homescreen widget synchronized while a member is signed in. */
-export function WidgetSnapshotPublisher({
-  storageSubject,
-}: {
-  storageSubject: string
-}) {
+/** Connects family data, pure widget selection, and the native publication boundary. */
+export function WidgetSnapshotPublisher({ storageSubject }: { storageSubject: string }) {
   const { theme } = useAppTheme()
-  const [data, setData] = useState<WidgetData>(() => ({
-    storageSubject,
-    events: [],
-    capsules: [],
-    refreshedAt: new Date(),
-    localRevision: 0,
-  }))
-  const publishQueueRef = useRef(Promise.resolve())
-  const publishVersionRef = useRef(0)
-  const lastPayloadRef = useRef('')
-  const thumbnailCacheRef = useRef(new Map<CapsuleImageSource, string>())
+  const data = useWidgetFamilyData(storageSubject)
+  const selection = useMemo(() => selectBubbleWidgetTimeline({
+    now: data.refreshedAt,
+    theme,
+    privacy: readWidgetPrivacy(storageSubject),
+    events: projectWidgetEvents({
+      remoteEvents: data.events,
+      localEvents: readWidgetLocalEvents(storageSubject),
+      taskDefinitions: readWidgetTaskDefinitions(storageSubject),
+      checklist: readWidgetChecklistProgress(storageSubject),
+      completedPlanIds: readWidgetCompletedPlanIds(storageSubject),
+    }),
+    authorizedCapsules: data.capsules,
+    authorizedJournalPhotos: data.journalPhotos,
+    viewedRecapIds: readViewedWidgetRecaps(storageSubject),
+    contributionPromptsEnabled: true,
+  }), [data, storageSubject, theme])
 
-  useEffect(() => {
-    if (!isNativeBubbleWidgetAvailable()) return
-    let active = true
-    let stopEvents: () => void = () => undefined
-    let stopCapsules: () => void = () => undefined
-    let refreshVersion = 0
-    const thumbnailCache = thumbnailCacheRef.current
-
-    async function refresh() {
-      const version = ++refreshVersion
-      const [events, capsules] = await Promise.allSettled([
-        fetchFamilyEvents({ includeEarlierToday: true }),
-        fetchFamilyCapsules(),
-      ])
-      if (!active || version !== refreshVersion) return
-      setData((current) => ({
-        storageSubject,
-        events: events.status === 'fulfilled'
-          ? events.value
-          : current.storageSubject === storageSubject ? current.events : [],
-        capsules: capsules.status === 'fulfilled'
-          ? capsules.value
-          : current.storageSubject === storageSubject ? current.capsules : [],
-        refreshedAt: new Date(),
-        localRevision: current.localRevision + 1,
-      }))
-    }
-
-    function refreshWhenVisible() {
-      if (document.visibilityState !== 'hidden') void refresh()
-    }
-
-    function republishFromMemoryThenRefresh() {
-      if (!active) return
-      // Privacy and local checklist changes must reach native storage without
-      // waiting for either family-service request to settle.
-      setData((current) => ({
-        ...current,
-        refreshedAt: new Date(),
-        localRevision: current.localRevision + 1,
-      }))
-      void refresh()
-    }
-
-    void refresh()
-    void subscribeToFamilyEvents(() => void refresh())
-      .then((stop) => {
-        if (active) stopEvents = stop
-        else stop()
-      })
-      .catch(() => undefined)
-    void subscribeToFamilyCapsules(() => void refresh())
-      .then((stop) => {
-        if (active) stopCapsules = stop
-        else stop()
-      })
-      .catch(() => undefined)
-    window.addEventListener('online', refresh)
-    window.addEventListener('storage', refresh)
-    window.addEventListener(
-      BUBBLE_WIDGET_DATA_CHANGED_EVENT,
-      republishFromMemoryThenRefresh,
-    )
-    document.addEventListener('visibilitychange', refreshWhenVisible)
-
-    return () => {
-      active = false
-      publishVersionRef.current += 1
-      stopEvents()
-      stopCapsules()
-      window.removeEventListener('online', refresh)
-      window.removeEventListener('storage', refresh)
-      window.removeEventListener(
-        BUBBLE_WIDGET_DATA_CHANGED_EVENT,
-        republishFromMemoryThenRefresh,
-      )
-      document.removeEventListener('visibilitychange', refreshWhenVisible)
-      lastPayloadRef.current = ''
-      thumbnailCache.clear()
-      void clearNativeBubbleWidget().catch(() => undefined)
-    }
-  }, [storageSubject])
-
-  const selection = useMemo(() => {
-    const scopedData = data.storageSubject === storageSubject
-      ? data
-      : { ...data, events: [], capsules: [], refreshedAt: new Date() }
-    const checklist = readWidgetChecklistProgress(storageSubject)
-    const taskDefinitions = readWidgetTaskDefinitions(storageSubject)
-    const completedPlans = readWidgetCompletedPlanIds(storageSubject)
-    const eventsById = new Map<string, WidgetEvent>()
-
-    scopedData.events.forEach((event) => {
-      if (completedPlans.has(event.id)) return
-      const encodedTasks = decodePlanDetails(event.details)?.tasks ?? []
-      eventsById.set(event.id, {
-        id: event.id,
-        title: event.title,
-        startsAt: event.startsAt,
-        location: event.location,
-        tasks: taskDefinitions[event.id] ?? encodedTasks,
-        completedTaskIds: checklist[event.id] ?? [],
-      })
-    })
-    readWidgetLocalEvents(storageSubject).forEach((event) => {
-      if (completedPlans.has(event.id)) return
-      eventsById.set(event.id, {
-        ...event,
-        tasks: taskDefinitions[event.id] ?? event.tasks,
-        completedTaskIds: checklist[event.id] ?? [],
-      })
-    })
-
-    return selectBubbleWidgetTimeline({
-      now: scopedData.refreshedAt,
-      theme,
-      privacy: readWidgetPrivacy(storageSubject),
-      events: [...eventsById.values()],
-      authorizedCapsules: scopedData.capsules,
-      viewedRecapIds: readViewedWidgetRecaps(storageSubject),
-      contributionPromptsEnabled: true,
-    })
-  }, [data, storageSubject, theme])
-
-  useEffect(() => {
-    if (!isNativeBubbleWidgetAvailable()) return
-    const version = ++publishVersionRef.current
-    const controller = new AbortController()
-    if (selection.snapshot.privacy === 'hidden') thumbnailCacheRef.current.clear()
-    const timer = window.setTimeout(() => {
-      void (async () => {
-        const pageSources = Object.entries(selection.pageThumbnails ?? {}).slice(0, 8)
-        const sources = new Map([
-          ...(selection.thumbnail ? [selection.thumbnail] : []),
-          ...pageSources.map(([, source]) => source),
-        ].map((source) => [widgetThumbnailCacheKey(source), source]))
-        const cache = thumbnailCacheRef.current
-        for (const source of cache.keys()) {
-          if (!sources.has(source)) cache.delete(source)
-        }
-        for (const [key, source] of sources) {
-          if (controller.signal.aborted) return
-          if (cache.has(key)) continue
-          // Small, sequential thumbnails leave the UI free between images.
-          await new Promise<void>((resolve) => window.setTimeout(resolve, 0))
-          if (controller.signal.aborted) return
-          const image = await materializeWidgetThumbnail(source, controller.signal)
-          if (controller.signal.aborted || version !== publishVersionRef.current) return
-          if (image) cache.set(key, image)
-        }
-        if (version !== publishVersionRef.current) return
-
-        const thumbnailBase64 = selection.thumbnail ? cache.get(widgetThumbnailCacheKey(selection.thumbnail)) : undefined
-        const pageThumbnails = Object.fromEntries(pageSources.flatMap(([id, source]) => {
-          const image = cache.get(widgetThumbnailCacheKey(source))
-          return image ? [[id, image]] : []
-        }))
-        // A foreground refresh must not reset the user's chosen native page
-        // solely because the clock advanced. Midnight is still a hard boundary.
-        const signature = JSON.stringify([
-          { ...selection.snapshot, generatedAt: toLocalDateInput(new Date(selection.snapshot.generatedAt)) },
-          thumbnailBase64,
-          pageThumbnails,
-        ])
-        if (signature === lastPayloadRef.current) return
-        publishQueueRef.current = publishQueueRef.current
-          .catch(() => undefined)
-          .then(async () => {
-            if (version !== publishVersionRef.current) return
-            if (Object.keys(pageThumbnails).length > 0) {
-              await updateNativeBubbleWidget(selection.snapshot, thumbnailBase64, pageThumbnails)
-            } else {
-              await updateNativeBubbleWidget(selection.snapshot, thumbnailBase64)
-            }
-            lastPayloadRef.current = signature
-          })
-          .catch(() => undefined)
-      })()
-    }, selection.snapshot.privacy === 'hidden' ? 0 : 180)
-    return () => {
-      controller.abort()
-      window.clearTimeout(timer)
-    }
-  }, [selection])
+  useNativeWidgetPublication(storageSubject, selection)
 
   // Re-fetch at the next urgency, reveal, close, or day boundary while open.
   useEffect(() => {

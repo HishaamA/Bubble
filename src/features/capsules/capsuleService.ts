@@ -3,6 +3,7 @@ import {
   getSupabaseClient,
 } from '../../lib/supabase'
 import { bootstrapCurrentClerkProfile } from '../../services/persistence'
+import { capsuleContributorAvatarUrl } from './capsuleContributor'
 import type {
   CapsulePhoto,
   FamilyCapsule,
@@ -18,6 +19,7 @@ type CapsuleRow = {
   closes_at?: unknown
   item_count?: unknown
   created_at?: unknown
+  created_by?: unknown
   creator?: unknown
 }
 
@@ -66,11 +68,22 @@ function displayNameFromRelation(value: unknown, fallback: string) {
     : fallback
 }
 
+/** Optional profile photos are read only from the joined, RLS-visible uploader. */
+function avatarFromRelation(value: unknown) {
+  const relation = Array.isArray(value) ? value[0] : value
+  if (!relation || typeof relation !== 'object') return undefined
+  return capsuleContributorAvatarUrl((relation as { avatar_path?: unknown }).avatar_path)
+}
+
 /** Resolves the signed-in user's earliest approved family membership. */
-async function currentFamilyContext() {
+export async function getCapsuleFamilyContext(expectedCacheNamespace?: string) {
   const client = getSupabaseClient()
-  if (!client || !getClerkSupabaseIdentity()) return null
+  const identity = getClerkSupabaseIdentity()
+  if (!client || !identity) return null
   const profile = await bootstrapCurrentClerkProfile()
+  const isCurrent = () => getClerkSupabaseIdentity()?.subject === identity.subject
+    && getSupabaseClient() === client
+  if (!isCurrent()) return null
   const { data, error } = await client
     .from('circle_members')
     .select('circle_id')
@@ -80,11 +93,14 @@ async function currentFamilyContext() {
     .limit(1)
     .maybeSingle()
   if (error) throw error
+  if (!isCurrent()) return null
   if (typeof data?.circle_id !== 'string') return null
+  if (expectedCacheNamespace && `${identity.subject}:${data.circle_id}` !== expectedCacheNamespace) return null
   return {
     client,
     circleId: data.circle_id,
     userId: profile.userId,
+    isCurrent,
   }
 }
 
@@ -92,6 +108,7 @@ async function currentFamilyContext() {
 function normalizeCapsule(
   row: CapsuleRow,
   photos: CapsulePhoto[],
+  currentUserId: string,
 ): FamilyCapsule | null {
   if (
     typeof row.id !== 'string' || !isUuid(row.id) ||
@@ -116,6 +133,9 @@ function normalizeCapsule(
     closesAt: closesAt.toISOString(),
     createdAt: createdAt.toISOString(),
     createdByName: displayNameFromRelation(row.creator, 'Family'),
+    ...(typeof row.created_by === 'string' && isUuid(row.created_by)
+      ? { createdById: row.created_by, ownedByCurrentUser: row.created_by === currentUserId }
+      : {}),
     photos,
     totalPhotoCount: typeof row.item_count === 'number' ? row.item_count : photos.length,
     familySynced: true,
@@ -154,6 +174,8 @@ function normalizeItem(
     caption: typeof row.caption === 'string' ? row.caption : '',
     capturedAt: row.captured_at,
     contributorName: displayNameFromRelation(row.uploader, 'Family'),
+    contributorAvatarUrl: avatarFromRelation(row.uploader),
+    ...(typeof row.uploader_id === 'string' && isUuid(row.uploader_id) ? { uploaderId: row.uploader_id } : {}),
     ownedByCurrentUser: row.uploader_id === currentUserId,
     syncStatus: 'synced',
   }
@@ -161,7 +183,7 @@ function normalizeItem(
 
 /** Returns the current family's weekly Capsule, creating it when necessary. */
 export async function ensureFamilyWeeklyCapsule() {
-  const context = await currentFamilyContext()
+  const context = await getCapsuleFamilyContext()
   if (!context) return null
   const { data, error } = await context.client.rpc('get_or_create_weekly_capsule', {
     p_circle_id: context.circleId,
@@ -179,11 +201,11 @@ export async function ensureFamilyWeeklyCapsule() {
 
 /** Fetches Capsule metadata and signed media URLs for the active family. */
 export async function fetchFamilyCapsules(): Promise<FamilyCapsule[]> {
-  const context = await currentFamilyContext()
+  const context = await getCapsuleFamilyContext()
   if (!context) return []
   const capsuleResult = await context.client
     .from('family_capsules')
-    .select('id,kind,title,week_start,opens_at,closes_at,item_count,created_at,creator:profiles!family_capsules_created_by_fkey(display_name)')
+    .select('id,kind,title,week_start,opens_at,closes_at,item_count,created_at,created_by,creator:profiles!family_capsules_created_by_fkey(display_name)')
     .eq('circle_id', context.circleId)
     .order('created_at', { ascending: false })
     .limit(100)
@@ -201,10 +223,11 @@ export async function fetchFamilyCapsules(): Promise<FamilyCapsule[]> {
     for (let offset = 0; ; offset += pageSize) {
       const itemResult = await context.client
         .from('family_capsule_items')
-        .select('id,capsule_id,image_path,thumbnail_path,image_width,image_height,thumbnail_width,thumbnail_height,caption,captured_at,uploader_id,uploader:profiles!family_capsule_items_uploader_id_fkey(display_name)')
+        .select('id,capsule_id,image_path,thumbnail_path,image_width,image_height,thumbnail_width,thumbnail_height,caption,captured_at,uploader_id,uploader:profiles!family_capsule_items_uploader_id_fkey(display_name,avatar_path)')
         .eq('circle_id', context.circleId)
         .in('capsule_id', capsuleIds)
         .order('captured_at', { ascending: true })
+        .order('id', { ascending: true })
         .range(offset, offset + pageSize - 1)
       if (itemResult.error) throw itemResult.error
       const page = (itemResult.data ?? []) as CapsuleItemRow[]
@@ -244,6 +267,7 @@ export async function fetchFamilyCapsules(): Promise<FamilyCapsule[]> {
     .map((row) => normalizeCapsule(
       row,
       typeof row.id === 'string' ? photosByCapsule.get(row.id) ?? [] : [],
+      context.userId,
     ))
     .filter((capsule): capsule is FamilyCapsule => capsule !== null)
 }
@@ -254,7 +278,7 @@ export async function createFamilySpecialCapsule(
   opensAt: string,
   capsuleId = createUuid(),
 ) {
-  const context = await currentFamilyContext()
+  const context = await getCapsuleFamilyContext()
   if (!context) return null
   const { data, error } = await context.client.rpc('create_special_capsule', {
     p_circle_id: context.circleId,
@@ -275,7 +299,7 @@ export async function uploadFamilyCapsulePhoto(input: {
   capturedAt: string
 }) {
   if (!isUuid(input.capsuleId)) return null
-  const context = await currentFamilyContext()
+  const context = await getCapsuleFamilyContext()
   if (!context) return null
   const itemId = input.itemId && isUuid(input.itemId) ? input.itemId : createUuid()
   const imagePath = `${context.circleId}/capsule-images/${context.userId}/${itemId}.jpg`
@@ -340,7 +364,7 @@ export async function uploadFamilyCapsulePhoto(input: {
 
 /** Subscribes to family Capsule changes and returns an async unsubscribe handle. */
 export async function subscribeToFamilyCapsules(onChange: () => void) {
-  const context = await currentFamilyContext()
+  const context = await getCapsuleFamilyContext()
   if (!context) return () => undefined
   const channel = context.client
     .channel(`family-capsules:${context.circleId}`)

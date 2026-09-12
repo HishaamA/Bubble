@@ -14,6 +14,9 @@ export type CapsulePhoto = {
   caption: string
   capturedAt: string
   contributorName: string
+  /** Approved-family profile photo; legacy and offline records may lack it. */
+  contributorAvatarUrl?: string
+  uploaderId?: string
   ownedByCurrentUser: boolean
   syncStatus?: 'pending' | 'synced'
 }
@@ -27,6 +30,8 @@ export type FamilyCapsule = {
   opensAt: string
   weekStart?: string
   createdByName: string
+  createdById?: string
+  ownedByCurrentUser?: boolean
   photos: CapsulePhoto[]
   totalPhotoCount?: number
   familySynced?: boolean

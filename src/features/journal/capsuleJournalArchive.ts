@@ -14,6 +14,9 @@ import type {
   CapsuleStore,
   FamilyCapsule,
 } from '../capsules/types'
+import { fetchFamilyCapsuleDeletions, subscribeToFamilyCapsuleDeletions } from '../capsules/capsuleDeletionService'
+import { applyCapsuleRemovals, retainCapsuleRemovals } from '../capsules/capsuleRemovalState'
+import { sameCapsulePhotoOwner } from '../capsules/capsulePhotoOwnership'
 
 export type UnlockedCapsulePhoto = CapsulePhoto & {
   capsuleTitle: string
@@ -40,7 +43,7 @@ function mergePhotos(
   )
   const durableFamilyPhotos = familyCapsule.photos.map((familyPhoto) => {
     const localPhoto = localPhotos.get(familyPhoto.id)
-    if (!localPhoto) return familyPhoto
+    if (!localPhoto || !sameCapsulePhotoOwner(localPhoto, familyPhoto)) return familyPhoto
     return {
       ...familyPhoto,
       image: typeof localPhoto.image === 'string'
@@ -120,6 +123,7 @@ const archiveWarmLifetimeMs = 30_000
 
 type ArchiveSnapshot = { capsules: FamilyCapsule[]; clock: Date; loading: boolean }
 type ArchiveSession = {
+  scope: string
   store: CapsuleStore
   snapshot: ArchiveSnapshot
   refreshedAt: number
@@ -132,8 +136,9 @@ type ArchiveSession = {
   getSnapshot: () => ArchiveSnapshot
 }
 
-function createArchiveSession(store: CapsuleStore): ArchiveSession {
+function createArchiveSession(store: CapsuleStore, scope: string): ArchiveSession {
   const session: ArchiveSession = {
+    scope,
     store,
     snapshot: { capsules: [], clock: new Date(), loading: true },
     refreshedAt: 0,
@@ -184,7 +189,7 @@ function listenForCapsuleChanges() {
 
 function publishArchive(session: ArchiveSession, capsules: FamilyCapsule[]) {
   if (session.disposed) return
-  session.snapshot = { capsules, clock: new Date(), loading: false }
+  session.snapshot = { capsules: applyCapsuleRemovals(capsules, session.scope), clock: new Date(), loading: false }
   session.listeners.forEach((listener) => listener())
 }
 
@@ -229,9 +234,13 @@ function refreshArchive(session: ArchiveSession, allowWarm = false): Promise<Fam
     }
     if (!isCurrent()) return []
     try {
+      const markers = await fetchFamilyCapsuleDeletions(session.scope)
+      if (!isCurrent()) return []
+      if (markers) retainCapsuleRemovals(session.scope, markers)
+      localCapsules = applyCapsuleRemovals(localCapsules, session.scope)
       const family = await fetchFamilyCapsules()
       if (!isCurrent()) return []
-      const merged = mergeJournalCapsules(localCapsules, family)
+      const merged = applyCapsuleRemovals(mergeJournalCapsules(localCapsules, family), session.scope)
       publishArchive(session, merged)
       const localById = new Map(localCapsules.map((capsule) => [capsule.id, capsule]))
       for (const capsule of merged) {
@@ -270,12 +279,12 @@ export function useJournalCapsuleArchive({
 }: JournalCapsuleArchiveOptions) {
   const session = useMemo(
     () => {
-      if (suppliedStore) return createArchiveSession(suppliedStore)
+      if (suppliedStore) return createArchiveSession(suppliedStore, cacheNamespace)
       const cached = archiveSessions.get(cacheNamespace)
       if (cached && !cached.disposed) return cached
       const next = createArchiveSession(typeof window === 'undefined'
         ? createMemoryCapsuleStore()
-        : createDefaultCapsuleStore(cacheNamespace))
+        : createDefaultCapsuleStore(cacheNamespace), cacheNamespace)
       archiveSessions.set(cacheNamespace, next)
       return next
     },
@@ -293,6 +302,7 @@ export function useJournalCapsuleArchive({
     if (suppliedStore) resumeIsolatedArchiveSession(session)
     let active = true
     let unsubscribe: () => void = () => undefined
+    let unsubscribeDeletions: () => void = () => undefined
     // Realtime callbacks may outlive this hook by one task; the active flag
     // prevents those late responses from writing into an unmounted consumer.
     const refreshWhileActive = () => { if (active) void refreshArchive(session) }
@@ -304,6 +314,12 @@ export function useJournalCapsuleArchive({
         else stop()
       })
       .catch(() => undefined)
+    void subscribeToFamilyCapsuleDeletions(() => {
+      if (active) { session.dirty = true; refreshWhileActive() }
+    }, cacheNamespace).then((stop) => {
+      if (active) unsubscribeDeletions = stop
+      else stop()
+    }).catch(() => undefined)
 
     /** Reconciles immediately when browser connectivity returns. */
     const refreshWhenOnline = () => void refreshWhileActive()
@@ -318,12 +334,13 @@ export function useJournalCapsuleArchive({
     return () => {
       active = false
       unsubscribe()
+      unsubscribeDeletions()
       window.clearInterval(signedUrlRefresh)
       window.removeEventListener('online', refreshWhenOnline)
       document.removeEventListener('visibilitychange', refreshWhenVisible)
       if (suppliedStore) disposeArchiveSession(session)
     }
-  }, [enabled, session, suppliedStore])
+  }, [cacheNamespace, enabled, session, suppliedStore])
 
   useEffect(() => {
     if (!enabled || capsules.length === 0) return

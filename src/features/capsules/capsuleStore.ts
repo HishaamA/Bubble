@@ -4,6 +4,7 @@ import type {
   CapsuleStore,
   FamilyCapsule,
 } from './types'
+import { withCapsuleRemovals } from './capsuleRemovalState'
 
 const DATABASE_PREFIX = 'kinsphere-family-capsules'
 const DATABASE_VERSION = 2
@@ -352,9 +353,9 @@ export function createResilientCapsuleStore(
 /** Selects the resilient IndexedDB store, or memory storage during SSR. */
 export function createDefaultCapsuleStore(subject: string): CapsuleStore {
   if (typeof window === 'undefined' || !window.indexedDB) {
-    return createMemoryCapsuleStore()
+    return withCapsuleRemovals(createMemoryCapsuleStore(), subject)
   }
-  return createResilientCapsuleStore(
+  return withCapsuleRemovals(createResilientCapsuleStore(
     createIndexedDbCapsuleStore(window.indexedDB, subject),
-  )
+  ), subject)
 }

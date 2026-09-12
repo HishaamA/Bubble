@@ -5,6 +5,7 @@ export type ClerkSupabaseIdentity = {
   subject: string
   displayName?: string | null
   email?: string | null
+  imageUrl?: string | null
 }
 
 export type ClerkSupabaseSession = {

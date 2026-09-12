@@ -12,6 +12,12 @@ struct BubbleWidgetEntry: TimelineEntry {
     var selectedPageID: String? = nil
 }
 
+/// One thumbnail instance per authorized page, shared by that page's future
+/// hourly entries so a small widget does not decode the same photo all day.
+private final class BubbleWidgetTimelineImages {
+    var images: [URL: UIImage] = [:]
+}
+
 struct BubbleWidgetProvider: TimelineProvider {
     var lane: BubbleWidgetLane = .automatic
     func placeholder(in context: Context) -> BubbleWidgetEntry {
@@ -33,27 +39,32 @@ struct BubbleWidgetProvider: TimelineProvider {
         let nextMidnight = calendar.date(byAdding: .day, value: 1, to: startOfToday)
             ?? now.addingTimeInterval(24 * 60 * 60)
         let storedSnapshot = BubbleWidgetStorage.loadSnapshot()
-        let current = entry(at: now, storedSnapshot: storedSnapshot)
+        let timelineImages = BubbleWidgetTimelineImages()
+        let current = entry(at: now, storedSnapshot: storedSnapshot, timelineImages: timelineImages)
         var entries = [current]
+        var futureDates = Set<Date>()
 
         if let storedSnapshot,
            storedSnapshot.wasGenerated(onSameLocalDayAs: now, calendar: calendar),
            lane == .automatic,
            BubbleWidgetStorage.selectedPageID(for: lane, snapshot: storedSnapshot, at: now) == nil {
-            let scheduledEntries = (storedSnapshot.schedule ?? [])
-                .compactMap { scheduled -> BubbleWidgetEntry? in
+            let scheduledDates = (storedSnapshot.schedule ?? [])
+                .compactMap { scheduled -> Date? in
                     guard let effectiveDate = scheduled.effectiveDate,
                           effectiveDate > now,
                           effectiveDate < nextMidnight else {
                         return nil
                     }
-                    // Scheduled cards are deliberately text-only. A future
-                    // reveal poster waits for an authenticated app republish.
-                    return entry(at: effectiveDate, storedSnapshot: storedSnapshot)
+                    return effectiveDate
                 }
-                .sorted { $0.date < $1.date }
-            entries.append(contentsOf: scheduledEntries)
+            futureDates.formUnion(scheduledDates)
         }
+        if let storedSnapshot, lane == .automatic || lane == .photos {
+            futureDates.formUnion(storedSnapshot.photoRotationDates(after: now, calendar: calendar))
+        }
+        entries.append(contentsOf: futureDates.sorted().map {
+            entry(at: $0, storedSnapshot: storedSnapshot, timelineImages: timelineImages)
+        })
 
         // Make the privacy boundary part of the timeline itself, even if iOS
         // delays the requested reload while the app remains suspended.
@@ -66,13 +77,14 @@ struct BubbleWidgetProvider: TimelineProvider {
         let requestedRefresh = current.snapshot.nextRefreshDate.flatMap { requested in
             requested > now ? requested : nil
         }
-        let refreshDate = min(requestedRefresh ?? nextMidnight, nextMidnight)
+        let refreshDate = min(requestedRefresh ?? nextMidnight, futureDates.min() ?? nextMidnight, nextMidnight)
         completion(Timeline(entries: entries, policy: .after(refreshDate)))
     }
 
     private func entry(
         at date: Date,
-        storedSnapshot: BubbleWidgetSnapshot?
+        storedSnapshot: BubbleWidgetSnapshot?,
+        timelineImages: BubbleWidgetTimelineImages = BubbleWidgetTimelineImages()
     ) -> BubbleWidgetEntry {
         let calendar = Calendar.autoupdatingCurrent
         let snapshot: BubbleWidgetSnapshot
@@ -85,7 +97,9 @@ struct BubbleWidgetProvider: TimelineProvider {
             pageIDs = pages.map(\.id)
             let savedPageID = BubbleWidgetStorage.selectedPageID(for: lane, snapshot: storedSnapshot, at: date)
             let selectedPage = pages.first { $0.id == savedPageID }
-                ?? (lane == .automatic ? nil : pages.first)
+                ?? (lane == .photos
+                    ? storedSnapshot.rotatingPhotoPage(at: date, calendar: calendar)
+                    : lane == .automatic ? nil : pages.first)
             if let selectedPage {
                 snapshot = selectedPage.snapshot(in: storedSnapshot)
                 pageID = selectedPage.id
@@ -98,8 +112,18 @@ struct BubbleWidgetProvider: TimelineProvider {
                     at: date,
                     calendar: calendar
                 )
-                snapshot = resolved.snapshot
-                mayLoadThumbnail = resolved.mayUseCurrentThumbnail
+                if resolved.snapshot.kind == .memory,
+                   resolved.snapshot.privacy == .full,
+                   let photo = storedSnapshot.rotatingPhotoPage(at: date, calendar: calendar) {
+                    // A future memory state must use the authorized page's
+                    // matching poster and route, not the prior primary image.
+                    snapshot = photo.snapshot(in: storedSnapshot)
+                    pageID = photo.id
+                    mayLoadThumbnail = true
+                } else {
+                    snapshot = resolved.snapshot
+                    mayLoadThumbnail = resolved.mayUseCurrentThumbnail
+                }
             }
         } else {
             snapshot = .privateFallback(theme: storedSnapshot?.theme ?? .plum)
@@ -108,10 +132,15 @@ struct BubbleWidgetProvider: TimelineProvider {
         var thumbnail: UIImage?
         if mayLoadThumbnail,
            snapshot.privacy == .full,
-           let thumbnailURL = BubbleWidgetStorage.thumbnailURL(for: snapshot, pageID: pageID),
-           let data = try? Data(contentsOf: thumbnailURL),
-           data.count <= 5 * 1_024 * 1_024 {
-            thumbnail = UIImage(data: data)
+           let thumbnailURL = BubbleWidgetStorage.thumbnailURL(for: snapshot, pageID: pageID) {
+            if let cached = timelineImages.images[thumbnailURL] {
+                thumbnail = cached
+            } else if let data = try? Data(contentsOf: thumbnailURL),
+                      data.count <= 5 * 1_024 * 1_024,
+                      let image = UIImage(data: data) {
+                timelineImages.images[thumbnailURL] = image
+                thumbnail = image
+            }
         }
         let displayedPageID = pageID ?? storedSnapshot?.pages?.first(where: {
             $0.route == snapshot.route && $0.title == snapshot.title
@@ -149,8 +178,12 @@ struct BrowseBubbleWidgetIntent: AppIntent {
             WidgetCenter.shared.reloadAllTimelines()
             return .result()
         }
-        let currentID = BubbleWidgetStorage.selectedPageID(for: lane, snapshot: snapshot, at: now)
-            ?? currentPageID
+        // Advance from the card the member actually tapped. WidgetKit may
+        // render an hourly rotation a little late, so a clock-derived stored
+        // selection can already be ahead of that visible card.
+        let currentID = pages.contains(where: { $0.id == currentPageID })
+            ? currentPageID
+            : BubbleWidgetStorage.selectedPageID(for: lane, snapshot: snapshot, at: now)
         guard let nextID = snapshot.adjacentPageID(
             for: lane, currentPageID: currentID, direction: direction, at: now
         ) else { return .result() }

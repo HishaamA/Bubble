@@ -20,7 +20,15 @@ const nativeClickTargets = new Set([
 const integrationCoverage = new Map([
   ['src/features/auth/EmailCodeAuthFlow.tsx', 'src/features/auth/AuthPage.test.tsx'],
   ['src/features/capture/Capture360Shortcut.tsx', 'src/app/AppShell.test.tsx'],
+  ['src/features/capsules/recap/CapsuleRecapSheet.tsx', 'src/features/capsules/CapsulesPage.test.tsx'],
   ['src/features/events/JournalEventsSection.tsx', 'src/features/events/EventsPage.test.tsx'],
+  ['src/features/flights/FlightTicket.tsx', 'src/features/flights/FlightTrackerSection.test.tsx'],
+  ['src/features/flights/FlightLookupSheet.tsx', 'src/features/flights/FlightTrackerSection.test.tsx'],
+  ['src/features/journal/people/PeopleTimelinePeople.tsx', 'src/features/journal/people/PeopleTimeline.test.tsx'],
+  ['src/features/journal/people/PeopleTimelinePersonForm.tsx', 'src/features/journal/people/PeopleTimeline.test.tsx'],
+  ['src/features/journal/people/PeopleTimelineViewer.tsx', 'src/features/journal/people/PeopleTimelinePresentation.test.tsx'],
+  ['src/features/journal/people/PeopleTimelinePhotoDetails.tsx', 'src/features/journal/people/PeopleTimelinePresentation.test.tsx'],
+  ['src/features/journal/people/PeopleTimelineScanStatus.tsx', 'src/features/journal/people/PeopleTimelinePresentation.test.tsx'],
   ['src/features/memories/MemoryBubble.tsx', 'src/features/memories/MemoryConstellation.test.tsx'],
   ['src/features/memories/SharedMomentBubble.tsx', 'src/features/memories/MemoryConstellation.test.tsx'],
 ])
@@ -158,6 +166,9 @@ describe('interactive control markup', () => {
   it('keeps every button-bearing component attached to behavioral coverage', () => {
     const audit = auditInteractiveMarkup()
     const uncovered = audit.controlFiles.filter((componentFile) => {
+      // Manual QA harness controls are not shipped. Their markup is still
+      // audited above; the production components they mount need real tests.
+      if (componentFile.startsWith('src/test/manual/')) return false
       const testFile = fs.existsSync(directTestFor(componentFile))
         ? directTestFor(componentFile)
         : integrationCoverage.get(componentFile)

@@ -48,8 +48,47 @@ describe('parseBubbleWidgetDeepLink', () => {
     })
     expect(parseBubbleWidgetDeepLink(
       link('/journal/photo/capsule-1/photo-2'),
-    )).toEqual({ to: '/journal/photo/capsule-1/photo-2' })
+    )).toEqual({
+      to: '/journal',
+      state: { journalContext: {
+        section: 'people', personId: 'review-uploads', source: 'widget',
+        focusMemoryId: 'capsule-capsule-1-photo-2',
+        focusPhotoKey: 'photo:photo-2',
+        focusPhotoId: 'photo-2', focusCollectionId: 'capsule-1',
+      } },
+    })
     expect(parseBubbleWidgetDeepLink(link('/settings'))).toBeNull()
+  })
+
+  it.each([
+    ['family-photo-library', 'journal-photo-photo-2'],
+    ['capsule-1', 'capsule-capsule-1-photo-2'],
+  ])('focuses %s photos in the normal Journal timeline', (collection, memoryId) => {
+    expect(parseBubbleWidgetDeepLink(
+      link(`/journal?photo=photo-2&collection=${collection}&source=widget`),
+    )).toEqual({
+      to: '/journal',
+      state: { journalContext: {
+        section: 'people', personId: 'review-uploads', source: 'widget',
+        focusMemoryId: memoryId,
+        focusPhotoKey: collection === 'family-photo-library'
+          ? 'journal-photo:photo-2' : 'photo:photo-2',
+        focusPhotoId: 'photo-2', focusCollectionId: collection,
+      } },
+    })
+  })
+
+  it.each([
+    '/journal?photo=&collection=week',
+    '/journal?photo=photo',
+    '/journal?collection=week',
+    '/journal?photo=a&photo=b&collection=week',
+    '/journal?photo=photo&collection=week&section=plans',
+    '/journal?photo=photo&collection=week&source=other',
+    '/journal?photo=%2Fprivate&collection=week',
+    '/journal?photo=photo&collection=%2E%2E',
+  ])('rejects unsafe or conflicting photo destination %s', (route) => {
+    expect(parseBubbleWidgetDeepLink(link(route))).toBeNull()
   })
 
   it('rejects external, malformed, traversal, and unexpected-query URLs', () => {
@@ -58,5 +97,20 @@ describe('parseBubbleWidgetDeepLink', () => {
     expect(parseBubbleWidgetDeepLink(link('/../settings'))).toBeNull()
     expect(parseBubbleWidgetDeepLink(link('/journal?section=plans&next=https://evil.test'))).toBeNull()
     expect(parseBubbleWidgetDeepLink(link('//evil.test'))).toBeNull()
+  })
+
+  it('rejects duplicate and empty route controls instead of choosing the first value', () => {
+    expect(parseBubbleWidgetDeepLink(
+      link('/journal?section=plans&section=photos'),
+    )).toBeNull()
+    expect(parseBubbleWidgetDeepLink(
+      link('/capsule?recap=first&recap=second&source=widget'),
+    )).toBeNull()
+    expect(parseBubbleWidgetDeepLink(
+      link('/capture?mode=manual&mode=manual'),
+    )).toBeNull()
+    expect(parseBubbleWidgetDeepLink(
+      link('/capsule?recap=&source=widget'),
+    )).toBeNull()
   })
 })

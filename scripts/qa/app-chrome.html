@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <title>Bubble · isolated app chrome QA</title>
+    <link rel="stylesheet" href="/src/index.css" />
+    <link rel="stylesheet" href="/src/App.css" />
+    <link rel="stylesheet" href="/src/features/journal/JournalPage.css" />
+    <link rel="stylesheet" href="/src/theme/AppTheme.css" />
+    <style>
+      .app-viewport { --native-safe-area-top: 59px; }
+      .qa-clock { position: absolute; z-index: 51; inset: 18px auto auto 28px; font: 600 16px/1 system-ui; pointer-events: none; }
+      .qa-controls { position: absolute; z-index: 51; inset: auto 16px 20px; display: flex; align-items: center; gap: 8px; padding: 8px; border-radius: 8px; color: var(--theme-ink); background: var(--theme-paper); font-size: 12px; }
+      .qa-controls select { min-width: 0; color: inherit; background: var(--theme-paper); font-size: 14px; }
+      .qa-content { display: grid; gap: 24px; padding-block: 24px 120px; }
+      .qa-content article { min-height: 220px; padding: 24px; border-radius: 12px; color: var(--theme-ink); background: var(--theme-paper); }
+      .qa-content article:nth-child(even) { background: var(--theme-action); }
+      /* The comparison removes only overlay paint, leaving identical content
+         and geometry. At scroll zero the color should be unchanged apart from
+         isolated subpixel gradient-rasterization rounding. */
+      :root[data-overlays='off'] .app-status-bar-backdrop { visibility: hidden; }
+      :root[data-overlays='off'] .journal-page__chrome { background: none; }
+    </style>
+  </head>
+  <body>
+    <div id="root">
+      <div class="app-viewport app-viewport--native" data-app-shell="native">
+        <main class="app-content">
+          <section class="journal-page" aria-label="Fake Journal chrome test">
+            <div class="journal-page__chrome">
+              <header class="journal-page__header">
+                <div>
+                  <p class="journal-page__eyebrow">OUR FAMILY</p>
+                  <h1>Journal</h1>
+                  <p class="journal-page__subtitle">A seamless backdrop for every memory.</p>
+                </div>
+              </header>
+            </div>
+            <div class="qa-content">
+              <article>Fake memory one · no real photos or account data</article>
+              <article>Fake memory two</article>
+              <article>Fake memory three</article>
+              <article>Fake memory four</article>
+            </div>
+          </section>
+        </main>
+        <div class="app-status-bar-backdrop" aria-hidden="true"></div>
+        <span class="qa-clock" aria-hidden="true">9:41</span>
+        <aside class="qa-controls">
+          <label for="theme">Theme</label>
+          <select id="theme"><option value="plum">Plum</option><option value="forest">Forest</option><option value="midnight">Midnight</option></select>
+          <span>Isolated visual check</span>
+        </aside>
+      </div>
+    </div>
+    <script type="module">
+      const query = new URLSearchParams(location.search)
+      const theme = ['plum', 'forest', 'midnight'].includes(query.get('theme')) ? query.get('theme') : 'plum'
+      document.documentElement.dataset.bubbleTheme = theme
+      document.documentElement.dataset.overlays = query.get('overlays') === 'off' ? 'off' : 'on'
+      const select = document.querySelector('#theme')
+      select.value = theme
+      select.addEventListener('change', () => { document.documentElement.dataset.bubbleTheme = select.value })
+    </script>
+  </body>
+</html>

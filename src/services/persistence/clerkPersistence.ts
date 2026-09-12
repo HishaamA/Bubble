@@ -2,6 +2,7 @@ import {
   getClerkSupabaseIdentity,
   getSupabaseClient,
 } from '../../lib/supabase'
+import { syncCurrentProfileAvatar } from './profileAvatarPersistence'
 
 // This module is the only UI-facing boundary for authenticated profile and
 // family RPCs. Every server payload is narrowed before it leaves the service.
@@ -199,8 +200,11 @@ export async function bootstrapCurrentClerkProfile(): Promise<PersistentProfile>
     throw new Error('The authenticated profile did not match the Clerk session.')
   }
 
+  const userId = requireStringField(record, 'user_id')
+  await syncCurrentProfileAvatar(client, userId, identity)
+
   return {
-    userId: requireStringField(record, 'user_id'),
+    userId,
     subject,
     displayName: requireStringField(record, 'display_name'),
     email: readOptionalStringField(record, 'email'),
@@ -308,11 +312,12 @@ export async function updateProfilePreferences(
 
 /** Returns either the approved family membership or its pending join request. */
 export async function readFamilyMembership(): Promise<FamilyMembershipState> {
-  const { client } = requireAuthenticatedClient()
-  const profile = await bootstrapCurrentClerkProfile()
+  const { client, profile, requireCurrentAccount } = await authenticatedFamilyContext()
+  requireCurrentAccount()
   const { data: familyData, error: familyError } = await client.rpc(
     'get_current_family',
   )
+  requireCurrentAccount()
   if (familyError) throw familyError
 
   const familyRecord = firstRecord(familyData)
@@ -325,6 +330,7 @@ export async function readFamilyMembership(): Promise<FamilyMembershipState> {
       .order('created_at', { ascending: false })
       .limit(1)
       .maybeSingle()
+    requireCurrentAccount()
     if (pendingError) throw pendingError
     const pending = asRecord(pendingData)
     return {
@@ -348,6 +354,20 @@ export async function readFamilyMembership(): Promise<FamilyMembershipState> {
   }
 }
 
+/** Bind multi-step family operations to the account that started them. */
+async function authenticatedFamilyContext() {
+  const { client, identity } = requireAuthenticatedClient()
+  const profile = await bootstrapCurrentClerkProfile()
+  const requireCurrentAccount = () => {
+    if (getClerkSupabaseIdentity()?.subject !== identity.subject ||
+      getSupabaseClient() !== client || profile.subject !== identity.subject) {
+      throw new Error('account_changed')
+    }
+  }
+  requireCurrentAccount()
+  return { client, profile, requireCurrentAccount }
+}
+
 /** Creates a family and returns the reusable owner-managed share code. */
 export async function createFamily(name: string): Promise<CreatedFamily> {
   const normalizedName = name.trim()
@@ -355,12 +375,13 @@ export async function createFamily(name: string): Promise<CreatedFamily> {
     throw new Error('Give your family a name of 80 characters or fewer.')
   }
 
-  const { client } = requireAuthenticatedClient()
-  await bootstrapCurrentClerkProfile()
+  const { client, requireCurrentAccount } = await authenticatedFamilyContext()
+  requireCurrentAccount()
   const { data, error } = await client.rpc(
     'create_family_with_share_code',
     { p_name: normalizedName },
   )
+  requireCurrentAccount()
   if (error) throw error
   const record = firstRecord(data)
   if (!record) throw new Error('The family group could not be created.')
@@ -390,14 +411,15 @@ export async function joinFamilyByCode(
     throw new Error('invalid_family_code')
   }
 
-  const { client } = requireAuthenticatedClient()
-  await bootstrapCurrentClerkProfile()
+  const { client, requireCurrentAccount } = await authenticatedFamilyContext()
+  requireCurrentAccount()
 
   if (isCurrentCode) {
     const { data, error } = await client.rpc(
       'join_family_by_share_code',
       { p_share_code: normalizedCode },
     )
+    requireCurrentAccount()
     if (error) throw error
     const record = firstRecord(data)
     if (!record) throw new Error('The family could not be joined.')
@@ -416,6 +438,7 @@ export async function joinFamilyByCode(
   const { data, error } = await client.rpc('request_circle_join', {
     p_invite_code: legacyCode,
   })
+  requireCurrentAccount()
   if (error) throw error
   if (typeof data !== 'string') {
     throw new Error('The family join request could not be saved.')
@@ -424,21 +447,24 @@ export async function joinFamilyByCode(
 }
 
 /** Lists approved members of the current account's family. */
-export async function readFamilyMembers(): Promise<FamilyMember[]> {
-  const { client } = requireAuthenticatedClient()
-  await bootstrapCurrentClerkProfile()
+export async function readFamilyMembers(expectedCircleId?: string): Promise<FamilyMember[]> {
+  const { client, requireCurrentAccount } = await authenticatedFamilyContext()
+  requireCurrentAccount()
   const { data, error } = await client.rpc(
     'list_current_family_members',
   )
+  requireCurrentAccount()
   if (error) throw error
 
-  if (!Array.isArray(data)) return []
+  if (!Array.isArray(data)) throw new Error('The family roster could not be loaded.')
   return data.map((memberRow) => {
     const member = asRecord(memberRow)
     if (!member) throw new Error('A family member could not be loaded.')
     const role = readFamilyRole(member)
+    const familyId = requireStringField(member, 'family_id')
+    if (expectedCircleId && familyId !== expectedCircleId) throw new Error('family_access_changed')
     return {
-      familyId: requireStringField(member, 'family_id'),
+      familyId,
       userId: requireStringField(member, 'user_id'),
       displayName: requireStringField(member, 'display_name'),
       avatarPath: readOptionalStringField(member, 'avatar_path'),
@@ -453,14 +479,15 @@ export async function readFamilyShareCode(circleId: string): Promise<string> {
   if (!UUID_PATTERN.test(circleId)) {
     throw new TypeError('Choose a valid family before loading its share code.')
   }
-  const { client } = requireAuthenticatedClient()
-  await bootstrapCurrentClerkProfile()
+  const { client, requireCurrentAccount } = await authenticatedFamilyContext()
+  requireCurrentAccount()
   const { data, error } = await client.rpc(
     'get_or_create_family_share_code',
     { p_circle_id: circleId },
   )
+  requireCurrentAccount()
   if (error) throw error
-  if (typeof data !== 'string' || !data) {
+  if (typeof data !== 'string' || !FAMILY_SHARE_CODE_PATTERN.test(data)) {
     throw new Error('The family share code could not be loaded.')
   }
   return data
@@ -471,13 +498,22 @@ export async function rotateFamilyShareCode(circleId: string): Promise<string> {
   if (!UUID_PATTERN.test(circleId)) {
     throw new TypeError('Choose a valid family before rotating its share code.')
   }
-  const { client } = requireAuthenticatedClient()
-  await bootstrapCurrentClerkProfile()
+  const { client, requireCurrentAccount } = await authenticatedFamilyContext()
+  requireCurrentAccount()
+  // The server remains the authority, but never send a destructive code change
+  // for a stale screen's family after a membership change.
+  const membership = await client.rpc('get_current_family')
+  requireCurrentAccount()
+  if (membership.error) throw membership.error
+  const currentFamily = firstRecord(membership.data)
+  if (!currentFamily || currentFamily.family_id !== circleId) throw new Error('family_access_changed')
+  if (readFamilyRole(currentFamily) !== 'owner') throw new Error('circle_owner_required')
   const { data, error } = await client.rpc('rotate_family_share_code', {
     p_circle_id: circleId,
   })
+  requireCurrentAccount()
   if (error) throw error
-  if (typeof data !== 'string' || !data) {
+  if (typeof data !== 'string' || !FAMILY_SHARE_CODE_PATTERN.test(data)) {
     throw new Error('The family share code could not be rotated.')
   }
   return data
@@ -485,9 +521,10 @@ export async function rotateFamilyShareCode(circleId: string): Promise<string> {
 
 /** Removes the current account from its family when server policy permits it. */
 export async function leaveFamily(): Promise<boolean> {
-  const { client } = requireAuthenticatedClient()
-  await bootstrapCurrentClerkProfile()
+  const { client, requireCurrentAccount } = await authenticatedFamilyContext()
+  requireCurrentAccount()
   const { data, error } = await client.rpc('leave_current_family')
+  requireCurrentAccount()
   if (error) throw error
   if (typeof data !== 'boolean') {
     throw new Error('The family membership could not be updated.')

@@ -1,5 +1,13 @@
-import { useEffect, useRef, useState } from 'react'
+import { createContext, useContext, useEffect, useRef, useState, type PropsWithChildren } from 'react'
 import type { CapsuleImageSource } from '../../capsules/types'
+import { acquireTimelinePhotoPreview, peekTimelinePhotoPreview } from './timelinePhotoPreviewCache'
+
+const PreviewNamespace = createContext<string | null>(null)
+
+/** Limits warm photo URLs to the active account/family, never persisted storage. */
+export function TimelinePhotoPreviewScope({ namespace, children }: PropsWithChildren<{ namespace: string }>) {
+  return <PreviewNamespace.Provider value={namespace}>{children}</PreviewNamespace.Provider>
+}
 
 type TimelinePhotoImageProps = {
   source: CapsuleImageSource
@@ -68,22 +76,27 @@ function BlobPhoto({
 }) {
   const imageRef = useRef<HTMLImageElement>(null)
   const [failedSource, setFailedSource] = useState<Blob | null>(null)
+  const namespace = useContext(PreviewNamespace)
+  const warmUrl = namespace ? peekTimelinePhotoPreview(namespace, source) : undefined
 
   useEffect(() => {
-    // This mounted image exclusively owns the process-local URL for its Blob.
-    // Assigning through the ref keeps URL allocation out of render/SSR, and the
-    // cleanup releases the previous Blob when a timeline slide changes as well
-    // as when the image unmounts. Object URLs must never enter persisted People
-    // state because they are invalid after an app restart.
+    if (namespace) {
+      const preview = acquireTimelinePhotoPreview(namespace, source)
+      if (imageRef.current) imageRef.current.src = preview.url
+      return preview.release
+    }
+    // Standalone images still own their URL. Scoped Journal images reuse a
+    // bounded warm preview across route changes; neither path allocates in render.
     const objectUrl = URL.createObjectURL(source)
     if (imageRef.current) imageRef.current.src = objectUrl
     return () => URL.revokeObjectURL(objectUrl)
-  }, [source])
+  }, [namespace, source])
 
   if (failedSource === source) return <UnavailablePhoto alt={alt} />
   return (
     <img
       ref={imageRef}
+      src={warmUrl}
       className="people-timeline__photo-image"
       alt={alt}
       width={width}
@@ -96,7 +109,7 @@ function BlobPhoto({
   )
 }
 
-/** Renders a timeline thumbnail while owning temporary Blob object URLs. */
+/** Renders a thumbnail with bounded session reuse or standalone URL ownership. */
 export function TimelinePhotoImage({
   source,
   alt,

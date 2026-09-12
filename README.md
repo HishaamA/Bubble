@@ -1003,6 +1003,7 @@ what is implemented today.
 
 | Document | Purpose |
 | --- | --- |
+| [`docs/codebase-guide.md`](./docs/codebase-guide.md) | where to change code, workflow ownership, refactoring rules and remaining seams |
 | [`docs/architecture.md`](./docs/architecture.md) | system boundaries, invariants, and target data flows |
 | [`docs/testing.md`](./docs/testing.md) | automated, database, accessibility, and two-phone release gates |
 | [`docs/physical-device-testing.md`](./docs/physical-device-testing.md) | evidence checklist for camera, VR, lifecycle, and native behavior |

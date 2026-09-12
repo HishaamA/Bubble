@@ -281,6 +281,7 @@ export function ClerkAuthBridge({
         subject: authUser.id,
         displayName: authUser.displayName,
         email: authUser.email,
+        imageUrl: authUser.imageUrl,
       }),
       signOut,
     })

@@ -1,5 +1,10 @@
 .family-sync {
   --family-sync-accent: #f5f5f7;
+  --family-sync-body-size: max(0.875rem, 14px);
+  --family-sync-detail-size: max(0.8125rem, 13px);
+  --family-sync-heading-size: max(0.9375rem, 15px);
+  --family-sync-action-size: max(0.875rem, 14px);
+  container: family-sync / inline-size;
   position: relative;
   display: grid;
   gap: 0.7rem;
@@ -20,15 +25,22 @@
 .family-sync *::before,
 .family-sync *::after {
   box-sizing: border-box;
+  min-width: 0;
 }
 
 .family-sync button,
 .family-sync input {
-  font: inherit;
+  font-family: inherit;
 }
 
 .family-sync button {
   -webkit-tap-highlight-color: transparent;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+}
+
+.family-sync :is(p, h3, strong, small, label, output) {
+  overflow-wrap: anywhere;
 }
 
 .family-sync__header,
@@ -37,7 +49,7 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 1rem;
+  gap: min(1rem, 16px);
 }
 
 .family-sync__header h2,
@@ -61,7 +73,7 @@
   border-radius: 0;
   color: rgba(255, 255, 255, 0.72);
   background: transparent;
-  font-size: 0.75rem;
+  font-size: var(--family-sync-body-size);
   line-height: 1.45;
 }
 
@@ -78,7 +90,7 @@
   justify-content: center;
   gap: 0.65rem;
   color: rgba(255, 255, 255, 0.52);
-  font-size: 0.75rem;
+  font-size: var(--family-sync-body-size);
 }
 
 .family-sync__loading > span {
@@ -109,7 +121,8 @@
 .family-sync__pending-card h3,
 .family-sync__subheading h3 {
   color: #f5f5f7;
-  font-size: 0.9rem;
+  font-size: var(--family-sync-heading-size);
+  line-height: 1.35;
   font-weight: 610;
   letter-spacing: -0.02em;
 }
@@ -125,7 +138,7 @@
 .family-sync__subheading p,
 .family-sync__privacy-note {
   color: rgba(255, 255, 255, 0.5);
-  font-size: 0.72rem;
+  font-size: var(--family-sync-body-size);
   line-height: 1.55;
 }
 
@@ -161,13 +174,13 @@
 .family-sync__invite > span {
   padding-left: 0.12rem;
   color: rgba(255, 255, 255, 0.58);
-  font-size: 0.66rem;
+  font-size: var(--family-sync-body-size);
   font-weight: 600;
 }
 
 .family-sync input {
   width: 100%;
-  min-height: 2.9rem;
+  min-height: max(2.9rem, 44px);
   padding: 0.68rem 0.82rem;
   border: 1px solid rgba(255, 255, 255, 0.14);
   border-radius: 0.72rem;
@@ -175,7 +188,7 @@
   color: rgba(255, 255, 255, 0.94);
   background: #0a0a0a;
   caret-color: #fff;
-  font-size: 0.8rem;
+  font-size: max(1rem, 16px);
   transition: border-color 160ms ease;
 }
 
@@ -200,15 +213,16 @@
 .family-sync__reject,
 .family-sync__share,
 .family-sync__text-button {
-  min-height: 2.75rem;
+  min-height: max(2.75rem, 44px);
   border-radius: 0.75rem;
-  font-size: 0.75rem;
+  font-size: var(--family-sync-action-size);
+  line-height: 1.35;
   font-weight: 620;
   cursor: pointer;
 }
 
 .family-sync__primary {
-  padding: 0.65rem 1rem;
+  padding: min(0.65rem, 10px) min(1rem, 16px);
   border: 1px solid #f5f5f7;
   color: #000;
   background: #f5f5f7;
@@ -216,7 +230,7 @@
 }
 
 .family-sync__secondary {
-  padding: 0.58rem 0.85rem;
+  padding: min(0.58rem, 10px) min(0.85rem, 14px);
   border: 1px solid rgba(255, 255, 255, 0.16);
   color: rgba(255, 255, 255, 0.82);
   background: #0a0a0a;
@@ -224,25 +238,27 @@
 
 .family-sync__share {
   display: inline-flex;
-  padding: 0.58rem 0.9rem;
+  padding: min(0.58rem, 10px) min(0.9rem, 14px);
   align-items: center;
   justify-content: center;
-  gap: 0.42rem;
+  gap: min(0.42rem, 7px);
   border: 1px solid #f5f5f7;
   color: #050505;
   background: #f5f5f7;
 }
 
 .family-sync__share > span {
+  flex: 0 0 auto;
   padding: 0;
   color: currentColor;
-  font-size: 1rem;
+  font-size: min(1rem, 18px);
+  line-height: 1;
   font-weight: 500;
 }
 
 .family-sync__text-button {
   justify-self: center;
-  padding: 0.6rem 0.75rem;
+  padding: min(0.6rem, 10px) min(0.75rem, 12px);
   border: 0;
   color: rgba(255, 255, 255, 0.5);
   background: transparent;
@@ -267,21 +283,21 @@
 .family-sync__identity {
   display: flex;
   align-items: center;
-  gap: 0.72rem;
+  gap: min(0.72rem, 12px);
 }
 
 .family-sync__identity > span,
 .family-sync__mini-avatar {
   display: grid;
   flex: 0 0 auto;
-  width: 2.6rem;
-  height: 2.6rem;
+  width: min(2.6rem, 42px);
+  height: min(2.6rem, 42px);
   place-items: center;
   border: 1px solid rgba(255, 255, 255, 0.18);
   border-radius: 50%;
   color: #000;
   background: #f5f5f7;
-  font-size: 0.8rem;
+  font-size: min(0.8rem, 16px);
   font-weight: 700;
 }
 
@@ -295,16 +311,16 @@
 .family-sync__identity strong,
 .family-sync__account-row strong {
   color: #f5f5f7;
-  font-size: 0.8rem;
+  font-size: var(--family-sync-heading-size);
+  line-height: 1.35;
 }
 
 .family-sync__identity small,
 .family-sync__account-row span {
-  overflow: hidden;
   color: rgba(255, 255, 255, 0.44);
-  font-size: 0.67rem;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  font-size: var(--family-sync-detail-size);
+  line-height: 1.45;
+  overflow-wrap: anywhere;
 }
 
 .family-sync__pending-card {
@@ -357,8 +373,8 @@
 
 .family-sync__circle-card {
   display: grid;
-  grid-template-columns: auto 1fr auto;
-  gap: 0.8rem;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: min(0.8rem, 12px);
   padding: 0.95rem 0;
   align-items: center;
   border: 0;
@@ -370,14 +386,14 @@
 
 .family-sync__circle-mark {
   display: grid;
-  width: 2.5rem;
-  height: 2.5rem;
+  width: min(2.5rem, 40px);
+  height: min(2.5rem, 40px);
   place-items: center;
   border: 1px solid rgba(255, 255, 255, 0.15);
   border-radius: 0.72rem;
   color: rgba(255, 255, 255, 0.75);
   background: #0a0a0a;
-  font-size: 1.3rem;
+  font-size: min(1.3rem, 22px);
 }
 
 .family-sync__circle-copy {
@@ -386,36 +402,36 @@
 
 .family-sync__circle-copy > span {
   color: rgba(255, 255, 255, 0.43);
-  font-size: 0.62rem;
+  font-size: var(--family-sync-detail-size);
   font-weight: 600;
   text-transform: uppercase;
 }
 
 .family-sync__circle-copy h3 {
   margin-top: 0.08rem;
-  overflow: hidden;
   color: #f5f5f7;
-  font-size: 1rem;
+  font-size: max(1rem, 16px);
+  line-height: 1.3;
   font-weight: 620;
   letter-spacing: -0.025em;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  overflow-wrap: anywhere;
 }
 
 .family-sync__circle-copy p {
   margin-top: 0.18rem;
   color: rgba(255, 255, 255, 0.48);
-  font-size: 0.67rem;
+  font-size: var(--family-sync-detail-size);
+  line-height: 1.45;
 }
 
 .family-sync__mini-avatar {
-  width: 2.25rem;
-  height: 2.25rem;
+  width: min(2.25rem, 36px);
+  height: min(2.25rem, 36px);
 }
 
 .family-sync__owner-tools,
 .family-sync__requests {
-  padding: 0.95rem 0;
+  padding: 0.45rem 0 0.85rem;
   border: 0;
   border-bottom: 1px solid rgba(255, 255, 255, 0.1);
   border-radius: 0;
@@ -432,26 +448,25 @@
 
 .family-sync__invite {
   display: grid;
-  gap: 0.42rem;
-  padding: 0.82rem 0;
+  gap: 0.65rem;
+  padding: 0.15rem 0;
   border: 0;
-  border-top: 1px solid rgba(255, 255, 255, 0.1);
-  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
   border-radius: 0;
   background: transparent;
 }
 
 .family-sync__invite output {
   display: block;
-  padding: 0.9rem 0.72rem;
-  overflow-wrap: anywhere;
+  padding: min(0.9rem, 14px) min(0.72rem, 12px);
+  overflow-wrap: normal;
+  word-break: normal;
   border: 1px solid rgba(255, 255, 255, 0.12);
   border-radius: 0.65rem;
   color: rgba(255, 255, 255, 0.94);
   background: #0a0a0a;
-  font-size: clamp(0.67rem, 2.6vw, 0.78rem);
+  font-size: var(--family-sync-body-size);
   font-weight: 650;
-  letter-spacing: 0.035em;
+  letter-spacing: 0;
   line-height: 1.5;
   text-align: center;
   user-select: all;
@@ -459,8 +474,8 @@
 
 .family-sync__code-actions {
   display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 0.5rem;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: min(0.5rem, 8px);
 }
 
 .family-sync__code-actions > button {
@@ -469,66 +484,180 @@
 
 .family-sync__rotate-code {
   width: fit-content;
-  min-height: 2.25rem;
+  max-width: 100%;
+  min-height: max(2.75rem, 44px);
   padding: 0.35rem 0;
   border: 0;
   border-bottom: 1px solid rgba(255, 255, 255, 0.3);
   border-radius: 0;
   color: rgba(255, 255, 255, 0.6);
   background: transparent;
-  font-size: 0.66rem;
+  font-size: var(--family-sync-action-size);
+  line-height: 1.35;
   font-weight: 600;
   cursor: pointer;
 }
 
 .family-sync__rotation-confirmation {
   display: grid;
-  gap: 0.6rem;
-  padding: 0.75rem 0;
+  gap: min(0.6rem, 10px);
+  padding: min(0.85rem, 12px);
+  border-radius: 0.7rem;
+  background: color-mix(in srgb, currentColor 5%, transparent);
   border-top: 1px solid rgba(255, 255, 255, 0.1);
   border-bottom: 1px solid rgba(255, 255, 255, 0.1);
 }
 
 .family-sync__rotation-confirmation > p {
-  color: rgba(255, 255, 255, 0.68);
-  font-size: 0.68rem;
+  color: inherit;
+  font-size: var(--family-sync-body-size);
   line-height: 1.5;
 }
 
 .family-sync__rotation-confirmation > div {
   display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 0.5rem;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 9rem), 1fr));
+  gap: min(0.5rem, 8px);
 }
 
 .family-sync__rotation-confirmation .family-sync__text-button {
   justify-self: stretch;
 }
 
+.family-sync__rotation-confirmation button {
+  width: 100%;
+  padding-inline: min(0.55rem, 10px);
+  line-height: 1.35;
+}
+
+.family-sync__rotation-status,
+.family-sync__roster-empty {
+  margin: 0;
+  color: inherit;
+  font-size: var(--family-sync-body-size);
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.family-sync__rotation-confirmation > .family-sync__rotation-error {
+  margin: 0;
+  padding: min(0.65rem, 10px);
+  border: 1px solid #974235;
+  border-radius: 0.5rem;
+  color: #6f241c;
+  background: #fff0e9;
+}
+
+.family-sync__members {
+  display: grid;
+  gap: 0.65rem;
+}
+
+.family-sync__members .family-sync__subheading {
+  flex-wrap: wrap;
+  gap: min(0.4rem, 7px);
+}
+
+.family-sync__members .family-sync__subheading > div {
+  flex: 1 1 10rem;
+}
+
+.family-sync__member-list {
+  display: grid;
+  gap: 0.45rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.family-sync__member-list li {
+  display: flex;
+  align-items: center;
+  gap: min(0.7rem, 11px);
+  padding: min(0.65rem, 10px);
+  border: 1px solid color-mix(in srgb, currentColor 18%, transparent);
+  border-radius: 0.65rem;
+  background: color-mix(in srgb, currentColor 4%, transparent);
+}
+
+.family-sync__member-avatar {
+  display: grid;
+  flex: 0 0 min(2.65rem, 42px);
+  width: min(2.65rem, 42px);
+  height: min(2.65rem, 42px);
+  place-items: center;
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, currentColor 30%, transparent);
+  border-radius: 50%;
+  background: color-mix(in srgb, currentColor 10%, transparent);
+  font-size: var(--family-sync-body-size);
+  font-weight: 700;
+}
+
+.family-sync__member-avatar img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.family-sync__member-details {
+  display: grid;
+  gap: 0.3rem;
+  flex: 1;
+}
+
+.family-sync__member-details strong {
+  color: inherit;
+  font-size: var(--family-sync-heading-size);
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+.family-sync__member-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: min(0.35rem, 6px);
+  font-size: var(--family-sync-detail-size);
+  line-height: 1.3;
+}
+
+.family-sync__member-badges span {
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  padding: min(0.15rem, 3px) min(0.4rem, 7px);
+  border: 1px solid color-mix(in srgb, currentColor 18%, transparent);
+  border-radius: 999px;
+}
+
+.family-sync__you-badge {
+  font-weight: 700;
+  background: color-mix(in srgb, currentColor 10%, transparent);
+}
+
 .family-sync__invite small {
   color: rgba(255, 255, 255, 0.42);
-  font-size: 0.62rem;
+  font-size: var(--family-sync-detail-size);
   line-height: 1.45;
 }
 
 .family-sync__count {
   display: grid;
-  min-width: 1.75rem;
-  height: 1.75rem;
+  min-width: max(1.75rem, 28px);
+  min-height: max(1.75rem, 28px);
   padding: 0 0.4rem;
   place-items: center;
   border: 1px solid rgba(255, 255, 255, 0.14);
   border-radius: 999px;
   color: rgba(255, 255, 255, 0.72);
   background: #0a0a0a;
-  font-size: 0.7rem;
+  font-size: var(--family-sync-detail-size);
   font-weight: 650;
 }
 
 .family-sync__auth-link {
   display: inline-flex;
   width: fit-content;
-  min-height: 2.75rem;
+  min-height: max(2.75rem, 44px);
   margin-top: 0.7rem;
   padding: 0.62rem 0.9rem;
   align-items: center;
@@ -536,7 +665,8 @@
   border-radius: 999px;
   color: #050505;
   background: #f5f5f7;
-  font-size: 0.72rem;
+  font-size: var(--family-sync-action-size);
+  line-height: 1.35;
   font-weight: 700;
   text-decoration: none;
 }
@@ -566,23 +696,25 @@
 
 .family-sync__requests li strong {
   color: rgba(255, 255, 255, 0.9);
-  font-size: 0.76rem;
+  font-size: var(--family-sync-heading-size);
+  line-height: 1.35;
 }
 
 .family-sync__requests li span {
   color: rgba(255, 255, 255, 0.42);
-  font-size: 0.62rem;
+  font-size: var(--family-sync-detail-size);
+  line-height: 1.45;
 }
 
 .family-sync__decision-buttons {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 0.5rem;
 }
 
 .family-sync__approve,
 .family-sync__reject {
-  padding: 0.58rem 0.75rem;
+  padding: min(0.58rem, 10px) min(0.75rem, 12px);
 }
 
 .family-sync__approve {
@@ -599,17 +731,65 @@
 
 .family-sync__empty-requests {
   display: flex;
-  min-height: 4.4rem;
+  padding-block: 0.25rem;
   align-items: center;
-  justify-content: center;
+  justify-content: flex-start;
   gap: 0.55rem;
-  border-top: 1px solid rgba(255, 255, 255, 0.1);
-  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
   color: rgba(255, 255, 255, 0.43);
 }
 
 .family-sync__empty-requests p {
-  font-size: 0.7rem;
+  font-size: var(--family-sync-body-size);
+  line-height: 1.45;
+}
+
+@media (max-width: 24rem) {
+  .family-sync__circle-card {
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+
+  .family-sync__circle-card > .family-sync__mini-avatar {
+    display: none;
+  }
+}
+
+/* Text zoom changes the usable space even when the viewport is unchanged.
+   These rem-based thresholds respond to that, unlike viewport-only rules. */
+@container family-sync (max-width: 17.5rem) {
+  .family-sync__code-actions,
+  .family-sync__rotation-confirmation > div,
+  .family-sync__decision-buttons {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .family-sync__subheading {
+    flex-wrap: wrap;
+  }
+
+  .family-sync__circle-card {
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+
+  .family-sync__circle-card > .family-sync__mini-avatar {
+    display: none;
+  }
+}
+
+@container family-sync (max-width: 10rem) {
+  .family-sync__circle-card,
+  .family-sync__member-list li {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    justify-items: start;
+  }
+
+  .family-sync__member-details {
+    width: 100%;
+  }
+
+  .family-sync__circle-mark {
+    display: none;
+  }
 }
 
 .family-sync__account-row {

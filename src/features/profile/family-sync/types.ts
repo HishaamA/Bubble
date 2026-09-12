@@ -12,6 +12,15 @@ export type FamilySyncPendingRequest = {
   createdAt: string
 }
 
+/** An approved member of this family, with no other member's contact details. */
+export type FamilySyncMember = {
+  id: string
+  displayName: string
+  avatarUrl: string | null
+  role: 'owner' | 'member'
+  isCurrentUser: boolean
+}
+
 /** Every backend state the family-sync panel can render. */
 export type FamilySyncSnapshot =
   | { kind: 'local-only' }
@@ -35,6 +44,7 @@ export type FamilySyncSnapshot =
         shareCode: string
       }
       pendingRequests: FamilySyncPendingRequest[]
+      members: FamilySyncMember[]
     }
 
 /** Legacy one-use invite metadata retained for backward-compatible sharing. */

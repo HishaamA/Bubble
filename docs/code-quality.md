@@ -4,6 +4,27 @@ These conventions apply to first-party web, native, Edge Function, and database
 code. Generated Capacitor files and vendored dependencies follow their upstream
 projects and should not be reformatted merely to match this guide.
 
+For the current module map and state owners, start with
+[`codebase-guide.md`](./codebase-guide.md).
+
+## Give each responsibility one owner
+
+- Keep pure selection and reconciliation separate from I/O and React effects.
+  Pass authorized data, local overrides and the clock explicitly.
+- Keep request guards, cancellation and teardown with the workflow they protect.
+  Splitting one lifecycle across multiple hooks can create competing owners.
+- Use controlled presentation components with explicit props; avoid passing an
+  entire page controller when a small group of values and callbacks will do.
+- Share domain rules, not vaguely similar implementations. Journal uploads,
+  Capsule reveal and face-analysis caches have different ownership contracts.
+- Refactors retain existing integration tests and add characterization coverage
+  for races before moving the corresponding code.
+- The architecture tests enforce selected runtime dependency boundaries in the
+  normal test suite. Fully erased `import type`/`export type` contracts are
+  allowed. Inline `import { type T }` can still cause a runtime load with our
+  compiler settings; runtime UI imports do not belong in pure selectors or
+  backend-facing services.
+
 ## Names describe roles
 
 - Use `camelCase` for values and functions, `PascalCase` for components and

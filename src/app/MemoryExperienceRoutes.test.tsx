@@ -139,9 +139,9 @@ describe('JournalRoute', () => {
 
     const journalProps = routeMocks.journalPage.mock.lastCall?.[0] as {
       journalPhotos: JournalPhoto[]
-      openAllPhotosByDefault: boolean
     }
-    expect(journalProps.openAllPhotosByDefault).toBe(true)
+    // All photos is now Journal's universal default, not a preview-only flag.
+    expect(journalProps).not.toHaveProperty('openAllPhotosByDefault')
     expect(journalProps.journalPhotos).toEqual([directPhoto])
   })
 

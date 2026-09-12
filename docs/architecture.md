@@ -36,6 +36,14 @@ scheduled or privileged work -> Edge Functions -> Postgres / providers
 - Client services may use the authenticated Supabase client. Privileged workflows belong in SQL functions or Edge Functions.
 - UI visibility is never evidence of authorization. The database and Storage policies decide access.
 
+The [codebase guide](./codebase-guide.md) maps these boundaries to current
+modules. Feature controllers own asynchronous workflows; controlled components
+own presentation; pure selectors/reconciliation own derived data. Runtime import
+guards run with the normal test suite for viewer/service isolation and selected
+pure modules. Fully erased `import type`/`export type` contracts do not create
+runtime dependencies; inline type specifiers can retain a module load under
+the current compiler settings.
+
 ## Non-negotiable invariants
 
 ### Security and membership
@@ -154,12 +162,13 @@ reveal, bounded hotspot coordinates, and unique job idempotency keys.
 ### Home Screen widget
 
 1. The authenticated app selects an automatic daily card from already-authorized
-   events and Capsules: due soon, newly opened recap, another item today,
-   contribution prompt, recent weekly memory, then the private empty state.
+   events, Capsules and Journal photos: due soon, newly opened recap, another
+   item today, contribution prompt, Journal memory, then the private empty state.
    It also builds a bounded browsing deck: up to four unfinished tasks or plans today,
-   two Capsules unlocked today, six real photos from the immediately previous
-   week's opened Capsule, and a contribution/empty card when applicable and
-   space remains. Future or still-locked media never enters this deck.
+   two Capsules unlocked today, six real photos from the synced Journal library
+   and opened Capsule archive, and a contribution/empty card when applicable and
+   space remains. The stable shuffled photo order advances hourly so older
+   uploads can resurface. Still-locked Capsule media never enters this deck.
 2. A member must explicitly enable **Widget previews** before task names or
    family photos can leave the app surface. The server-confirmed preference is
    mirrored only into that account-and-family's local partition.
@@ -183,7 +192,10 @@ reveal, bounded hotspot coordinates, and unique job idempotency keys.
    preview opt-out, sign-out, invalid data, or local-day rollover. Media filenames
    are native-generated, never page IDs or caller-supplied paths. Removing private
    content also clears saved page selections.
-6. Taps use an allowlisted app deep link. Recap acknowledgement occurs only
+6. Taps use an allowlisted app deep link. Photo taps select the exact stable ID
+   in Journal's normal All timeline; they do not open a second photo page.
+   Hydration must not reapply consumed focus after the member starts browsing.
+   Recap acknowledgement occurs only
    after the signed-in app re-fetches the requested, unlocked family Capsule
    and actually opens its recap.
 

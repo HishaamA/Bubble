@@ -121,6 +121,7 @@ describe('AppShell', () => {
     const shell = container.querySelector('[data-app-shell="native"]')
 
     expect(shell).toHaveClass('app-viewport--native')
+    expect(container.querySelector('.app-status-bar-backdrop')).toHaveAttribute('aria-hidden', 'true')
 
     for (const route of [
       'Journal',
@@ -132,9 +133,20 @@ describe('AppShell', () => {
     ]) {
       await user.click(screen.getByRole('button', { name: route }))
       expect(container.querySelector('[data-app-shell="native"]')).toBe(shell)
+      expect(Boolean(container.querySelector('.app-status-bar-backdrop'))).toBe(route !== 'Capture')
     }
 
     expect(screen.getByLabelText('Current route')).toHaveTextContent('/')
+  })
+
+  it('does not cover browser pages or signed-out native screens with a status strip', () => {
+    vi.spyOn(Capacitor, 'isNativePlatform').mockReturnValue(false)
+    const web = renderShell('/settings', 'Settings')
+    expect(web.container.querySelector('.app-status-bar-backdrop')).toBeNull()
+    web.unmount()
+    vi.spyOn(Capacitor, 'isNativePlatform').mockReturnValue(true)
+    const login = renderShell('/login', 'Sign in', 'signed-out')
+    expect(login.container.querySelector('.app-status-bar-backdrop')).toBeNull()
   })
 
   it('publishes the current visual viewport before a member route renders', () => {

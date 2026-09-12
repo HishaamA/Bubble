@@ -1,6 +1,7 @@
 /** The same import functions serve lazy rendering and quiet-time preloading. */
 export const loadMomentsRoute = () => import('./routes/MemoriesRoutes')
 export const loadJournalRoute = () => import('./routes/JournalRoutes')
+export const loadJournalPreparation = () => import('../features/journal/people/peopleTimelineSession')
 export const loadCapsulesRoute = () => import('../features/capsules/CapsulesPage')
 
 export function preloadPrimaryRoute(pathname: string): Promise<unknown> {

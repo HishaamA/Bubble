@@ -86,6 +86,26 @@ describe('PersonScrapbookPage', () => {
     expect(screen.getByText('1 little moment, gathered together.')).toBeInTheDocument()
   })
 
+  it('keeps the complete caption, date and uploader in separate flowing rows', () => {
+    const caption = 'Our wonderfully long afternoon together at the family reunion'
+    const contributorName = 'Alexandra-Christina LongFamilyNameWithoutSpaces'
+    const { container } = render(
+      <PersonScrapbookPage
+        person={maya}
+        photos={[{ ...timelinePhoto('reunion', caption), contributorName }]}
+        cacheNamespace="family-a"
+      />,
+    )
+    const footer = container.querySelector('figcaption')!
+
+    expect(footer.querySelector('strong')).toHaveTextContent(caption)
+    expect(footer.querySelector('time')).toHaveAttribute('datetime', '2020-06-03T12:00:00.000Z')
+    expect(footer.querySelector('time')).toHaveTextContent('June 3, 2020')
+    expect(footer.querySelector('.person-scrapbook__photo-contributor'))
+      .toHaveTextContent(`Shared by ${contributorName}`)
+    expect(footer.children).toHaveLength(3)
+  })
+
   it('persists editable details and restores them on the next visit', async () => {
     const user = userEvent.setup()
     const props = {

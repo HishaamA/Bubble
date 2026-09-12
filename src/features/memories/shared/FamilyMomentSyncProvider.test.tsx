@@ -261,7 +261,7 @@ describe('FamilyMomentSyncProvider', () => {
     ])
   })
 
-  it('waits for realtime to subscribe before its initial family fetch', async () => {
+  it('loads the common family space before realtime is ready and closes the subscription gap', async () => {
     const store = createMemoryMomentStore()
     let markRealtimeReady: () => void = () => {}
     const ready = new Promise<void>((resolve) => {
@@ -290,14 +290,61 @@ describe('FamilyMomentSyncProvider', () => {
     await waitFor(() =>
       expect(familyService.subscribeToFamilyMoments).toHaveBeenCalledOnce(),
     )
-    expect(familyService.fetchFamilyMoments).not.toHaveBeenCalled()
+    await waitFor(() => expect(familyService.fetchFamilyMoments).toHaveBeenCalledOnce())
+    expect(await screen.findByText('Sync: connected')).toBeInTheDocument()
 
     markRealtimeReady()
 
     await waitFor(() =>
-      expect(familyService.fetchFamilyMoments).toHaveBeenCalledOnce(),
+      expect(familyService.fetchFamilyMoments).toHaveBeenCalledTimes(2),
     )
     expect(await screen.findByText('Sync: connected')).toBeInTheDocument()
+  })
+
+  it('receives another member’s panorama when realtime and the daily window are unavailable', async () => {
+    const store = createMemoryMomentStore()
+    familyService.getFamilyMomentConnection.mockResolvedValue({
+      circleId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+      userId: '10000000-0000-4000-8000-000000000001',
+    })
+    familyService.subscribeToFamilyMoments.mockImplementation(() => ({
+      ready: Promise.reject(new Error('Websocket unavailable')),
+      unsubscribe: vi.fn(),
+    }))
+    familyService.getFamilyDailyCaptureWindow.mockRejectedValue(new Error('Window offline'))
+    familyService.fetchFamilyMoments.mockResolvedValue([{
+      ...syncedOwnedMoment,
+      uploaderDisplayName: 'Mum',
+      ownedByCurrentUser: false,
+    }])
+    render(
+      <SharedMomentsProvider store={store} notifierFactory={createSilentNotifier}>
+        <FamilyMomentSyncProvider><SyncHarness /></FamilyMomentSyncProvider>
+      </SharedMomentsProvider>,
+    )
+    expect(await screen.findByText('1 shared moments')).toBeInTheDocument()
+    expect(screen.getByText('Sync: connected')).toBeInTheDocument()
+    await expect(store.list()).resolves.toEqual([expect.objectContaining({
+      uploaderDisplayName: 'Mum', ownedByCurrentUser: false, familySynced: true,
+    })])
+  })
+
+  it('ignores a late realtime callback after the family session is gone', async () => {
+    familyService.getFamilyMomentConnection.mockResolvedValue({
+      circleId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+      userId: '10000000-0000-4000-8000-000000000001',
+    })
+    const view = render(
+      <SharedMomentsProvider store={createMemoryMomentStore()} notifierFactory={createSilentNotifier}>
+        <FamilyMomentSyncProvider><SyncHarness /></FamilyMomentSyncProvider>
+      </SharedMomentsProvider>,
+    )
+    await screen.findByText('Sync: connected')
+    const callback = familyService.subscribeToFamilyMoments.mock.calls[0][1] as () => void
+    view.unmount()
+    const calls = familyService.fetchFamilyMoments.mock.calls.length
+    await act(async () => callback())
+    expect(familyService.fetchFamilyMoments).toHaveBeenCalledTimes(calls)
   })
 
   it('does not subscribe a stale connection after deletion recovery finishes', async () => {

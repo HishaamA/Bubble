@@ -7,6 +7,7 @@ import type {
 } from '../journalPhotoTypes'
 
 export const FAMILY_PERSON_ID = 'family'
+export const ALL_PHOTOS_PERSON_ID = 'review-uploads'
 export const FACE_MODEL_REVISION = 'human-3.3.6-faceres-v1'
 export const FACE_SCAN_REVISION = 'human-3.3.6-faceres-rotation-equalized-v2'
 
@@ -116,10 +117,15 @@ export type PeopleTimelineProps = {
   className?: string
   initialPersonId?: string
   focusMemoryId?: string
+  focusPhotoKey?: string
+  focusRequestKey?: string
+  scrollToFocusedPhoto?: boolean
   onUploadPhotos?: (
     files: readonly File[],
   ) => Promise<JournalPhotoImportResult>
   photoImportProgress?: JournalPhotoImportProgress
+  onDeletePhoto?: (photoId: string) => Promise<void>
+  onDeleteCapsulePhoto?: (capsuleId: string, photoId: string) => Promise<void>
   personAlbumOpen?: boolean
   onOpenPersonAlbum?: (personId: string) => void
   onClosePersonAlbum?: () => void

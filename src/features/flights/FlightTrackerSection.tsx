@@ -4,11 +4,11 @@ import {
   useId,
   useRef,
   useState,
-  type CSSProperties,
   type FormEvent,
 } from 'react'
 import { createPortal } from 'react-dom'
 import { App as CapacitorApp } from '@capacitor/app'
+import { subscribeToAppResume } from '../../lib/appResume'
 import { useAuth } from '../auth'
 import { useFamilyOnboarding } from '../onboarding'
 import {
@@ -39,30 +39,21 @@ import {
 import { takeAutomaticRefreshCandidates } from './flightAutomaticRefresh'
 import { readOrSeedDemoTrackedFlights } from './demoFlightData'
 import {
-  calculateFlightProgress,
-  effectiveFlightDataQuality,
-  flightArrivalTime,
-  flightDepartureTime,
-  formatFlightDateTime,
   isFlightCancelled,
   localCalendarDate,
-  shiftLocalCalendarDate,
   validateFlightForm,
-  type FlightFormValidation,
 } from './flightValidation'
-import type {
-  FlightCoordinates,
-  FlightStatusSnapshot,
-  TrackedFlight,
-} from './types'
+import type { TrackedFlight } from './types'
+import { FlightDoodleHeader, PlaneIcon } from './FlightArtwork'
+import { FlightTicket } from './FlightTicket'
+import { FlightLookupSheet, type FlightLookupFormError } from './FlightLookupSheet'
+import { formatUpdatedAt } from './flightPresentation'
 import './FlightTrackerSection.css'
 
 export type FlightTrackerSectionProps = {
   now?: Date
 }
 
-type FieldError = Extract<FlightFormValidation, { valid: false }>
-type FormError = { field: FieldError['field'] | null; message: string }
 type FlightCreateIdentity = {
   travelerName: string
   flightNumber: string
@@ -74,293 +65,6 @@ type PendingFlightChoices = {
   choices: FlightLookupChoice[]
 }
 
-/** Maps provider quality codes to compact card labels. */
-function qualityLabel(quality: FlightStatusSnapshot['dataQuality']) {
-  if (quality === 'live') return 'Live'
-  if (quality === 'estimated') return 'Estimated'
-  return 'Scheduled'
-}
-
-/** Formats the local travel date without UTC rollover. */
-function formatDayMonth(value: string) {
-  return new Intl.DateTimeFormat('en', {
-    day: 'numeric',
-    month: 'short',
-  }).format(new Date(`${value}T12:00:00`))
-}
-
-/** Formats a provider timestamp in the relevant airport's time zone. */
-function formatTicketTime(value: string | null, timeZone: string) {
-  if (!value) return null
-  return new Intl.DateTimeFormat('en', {
-    hour: '2-digit',
-    minute: '2-digit',
-    hourCycle: 'h23',
-    timeZone,
-  }).format(new Date(value))
-}
-
-/** Formats the last-refresh timestamp in the viewer's local time. */
-function formatUpdatedAt(value: string) {
-  return new Intl.DateTimeFormat('en', {
-    hour: 'numeric',
-    minute: '2-digit',
-  }).format(new Date(value))
-}
-
-/** Labels an ambiguous provider choice in its origin airport's time zone. */
-function formatChoiceDeparture(choice: FlightLookupChoice) {
-  return new Intl.DateTimeFormat('en', {
-    weekday: 'short',
-    month: 'short',
-    day: 'numeric',
-    hour: 'numeric',
-    minute: '2-digit',
-    ...(choice.origin.timeZone ? { timeZone: choice.origin.timeZone } : {}),
-  }).format(new Date(choice.scheduledDeparture))
-}
-
-/** Derives a rounded route duration from provider timestamps. */
-function formatDuration(departure: string | null, arrival: string | null) {
-  if (!departure || !arrival) return 'Duration unavailable'
-  const minutes = Math.max(0, Math.round(
-    (new Date(arrival).getTime() - new Date(departure).getTime()) / 60_000,
-  ))
-  const hours = Math.floor(minutes / 60)
-  const remainder = minutes % 60
-  return `${hours}h ${remainder}m`
-}
-
-/** Renders decorative travel artwork outside the accessibility tree. */
-function FlightDoodleHeader() {
-  return (
-    <div className="flight-doodle-header" aria-hidden="true">
-      <svg className="flight-doodle-header__cloud flight-doodle-header__cloud--large" viewBox="0 0 72 30" aria-hidden="true">
-        <path d="M6 23c-4-1-4-8 1-10 2-1 4 0 5 1 1-6 6-9 11-7 2-6 10-8 14-3 3-2 8-1 10 3 6-1 11 3 11 8 8-1 11 9 4 12H6Z" />
-      </svg>
-      <svg className="flight-doodle-header__journey" viewBox="0 0 208 58" aria-hidden="true">
-        <path className="flight-doodle-header__route" d="M2 42c14-11 29-9 36 2 5 8-6 13-12 6-9-11 4-31 23-26 22 7 28 19 51 19C123 43 139 41 160 38" />
-        <circle className="flight-doodle-header__route-join" cx="160" cy="38" r="1.4" />
-        <path className="flight-doodle-header__plane" d="M160 38 154 23 202 5l-28 47-6-20-8 6Zm8-6 34-27m-28 47-6-20" />
-      </svg>
-      <svg className="flight-doodle-header__cloud flight-doodle-header__cloud--small" viewBox="0 0 72 30" aria-hidden="true">
-        <path d="M6 23c-4-1-4-8 1-10 2-1 4 0 5 1 1-6 6-9 11-7 2-6 10-8 14-3 3-2 8-1 10 3 6-1 11 3 11 8 8-1 11 9 4 12H6Z" />
-      </svg>
-    </div>
-  )
-}
-
-/** Prefers city, then airport name, while always retaining a code fallback. */
-function airportPlace(snapshot: FlightStatusSnapshot, side: 'origin' | 'destination') {
-  const airport = snapshot[side]
-  return airport.city ?? airport.name ?? airport.code
-}
-
-/** Renders the shared plane glyph with optional accessible naming. */
-function PlaneIcon({ title }: { title?: string }) {
-  return (
-    <svg
-      className="flight-plane-icon"
-      viewBox="0 0 24 24"
-      aria-hidden={title ? undefined : 'true'}
-      role={title ? 'img' : undefined}
-    >
-      {title ? <title>{title}</title> : null}
-      <path d="M21.4 13.2 14 10.4V4.7c0-1.1-.9-2.7-2-2.7s-2 1.6-2 2.7v5.7l-7.4 2.8c-.4.2-.7.6-.6 1.1l.2 1.1c.1.4.5.7.9.6l6.9-1.1v4l-2.1 1.5c-.3.2-.4.5-.3.8l.2.7c.1.3.4.5.8.4l3.4-.8 3.4.8c.4.1.7-.1.8-.4l.2-.7c.1-.3 0-.6-.3-.8L14 18.9v-4l6.9 1.1c.4.1.8-.2.9-.6l.2-1.1c.1-.5-.2-.9-.6-1.1Z" />
-    </svg>
-  )
-}
-
-/** Renders the alert-control glyph. */
-function BellIcon() {
-  return (
-    <svg viewBox="0 0 24 24" aria-hidden="true">
-      <path d="M18 9a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9ZM10 21h4" />
-    </svg>
-  )
-}
-
-/** Renders the provider-refresh glyph. */
-function RefreshIcon() {
-  return (
-    <svg viewBox="0 0 24 24" aria-hidden="true">
-      <path d="M20 7v5h-5M4 17v-5h5M6.1 9A7 7 0 0 1 18 6l2 1M17.9 15A7 7 0 0 1 6 18l-2-1" />
-    </svg>
-  )
-}
-
-/** Renders the stop-tracking glyph. */
-function CloseIcon() {
-  return (
-    <svg viewBox="0 0 24 24" aria-hidden="true">
-      <path d="m7 7 10 10M17 7 7 17" />
-    </svg>
-  )
-}
-
-/** Renders the ticket-style route separator at regular or compact scale. */
-function FlightRouteMark({ compact = false }: { compact?: boolean }) {
-  return (
-    <svg
-      className={compact ? 'flight-route-mark flight-route-mark--compact' : 'flight-route-mark'}
-      viewBox="0 0 100 24"
-      aria-hidden="true"
-    >
-      <line className="flight-route-mark__dots" x1="2" y1="12" x2="98" y2="12" />
-      <circle className="flight-route-mark__mask" cx="50" cy="12" r={compact ? 7.5 : 9} />
-      <g className="flight-route-mark__plane" transform="translate(50 12) rotate(90) scale(.62) translate(-12 -12)">
-        <path d="M21.4 13.2 14 10.4V4.7c0-1.1-.9-2.7-2-2.7s-2 1.6-2 2.7v5.7l-7.4 2.8c-.4.2-.7.6-.6 1.1l.2 1.1c.1.4.5.7.9.6l6.9-1.1v4l-2.1 1.5c-.3.2-.4.5-.3.8l.2.7c.1.3.4.5.8.4l3.4-.8 3.4.8c.4.1.7-.1.8-.4l.2-.7c.1-.3 0-.6-.3-.8L14 18.9v-4l6.9 1.1c.4.1.8-.2.9-.6l.2-1.1c.1-.5-.2-.9-.6-1.1Z" />
-      </g>
-    </svg>
-  )
-}
-
-/** Presents bounded journey progress or an explicit cancelled state. */
-function FlightProgress({ flight, now }: { flight: TrackedFlight; now: Date }) {
-  if (isFlightCancelled(flight.snapshot)) {
-    return (
-      <div className="flight-progress flight-progress--cancelled" role="status">
-        Journey cancelled · no progress shown
-      </div>
-    )
-  }
-  const progress = calculateFlightProgress(flight.snapshot, now)
-  const style = { '--flight-progress': progress } as CSSProperties
-  return (
-    <div
-      className="flight-progress"
-      role="progressbar"
-      aria-label={`${flight.flightNumber} journey progress`}
-      aria-valuemin={0}
-      aria-valuemax={100}
-      aria-valuenow={progress}
-      style={style}
-    >
-      <span className="flight-progress__fill" aria-hidden="true" />
-      <span className="flight-progress__plane" aria-hidden="true">
-        <PlaneIcon />
-      </span>
-    </div>
-  )
-}
-
-/** Projects latitude/longitude into the lightweight 360×176 route map. */
-function project({ latitude, longitude }: FlightCoordinates) {
-  return {
-    x: (longitude + 180) / 360 * 360,
-    y: (90 - latitude) / 180 * 172 + 4,
-  }
-}
-
-/** Evaluates the route's quadratic Bézier at a normalized progress value. */
-function pointOnQuadratic(
-  start: { x: number; y: number },
-  control: { x: number; y: number },
-  end: { x: number; y: number },
-  progress: number,
-) {
-  const inverse = 1 - progress
-  return {
-    x: inverse * inverse * start.x
-      + 2 * inverse * progress * control.x
-      + progress * progress * end.x,
-    y: inverse * inverse * start.y
-      + 2 * inverse * progress * control.y
-      + progress * progress * end.y,
-  }
-}
-
-/** Draws a wrapped world route with a live or time-derived aircraft marker. */
-function FlightRouteMap({ flight, now }: { flight: TrackedFlight; now: Date }) {
-  const { snapshot } = flight
-  if (isFlightCancelled(snapshot)) {
-    return (
-      <div className="flight-map flight-map--cancelled" role="status">
-        <strong>Flight cancelled</strong>
-        <span>No aircraft position or route progress is shown.</span>
-      </div>
-    )
-  }
-  const quality = effectiveFlightDataQuality(snapshot, now)
-  const start = project(snapshot.origin)
-  const projectedEnd = project(snapshot.destination)
-  const end = { ...projectedEnd }
-  if (end.x - start.x > 180) end.x -= 360
-  if (end.x - start.x < -180) end.x += 360
-  const control = {
-    x: (start.x + end.x) / 2,
-    y: Math.max(12, Math.min(start.y, end.y) - Math.min(48, Math.abs(end.x - start.x) * 0.18)),
-  }
-  const timelineProgress = calculateFlightProgress(snapshot, now) / 100
-  const liveMarker = snapshot.position && quality === 'live'
-    ? project(snapshot.position)
-    : null
-  if (liveMarker && liveMarker.x - start.x > 180) liveMarker.x -= 360
-  if (liveMarker && liveMarker.x - start.x < -180) liveMarker.x += 360
-  const marker = liveMarker
-    ? liveMarker
-    : pointOnQuadratic(start, control, end, timelineProgress)
-  const markerDescription = liveMarker
-    ? 'The airplane marker is the latest reported live position.'
-    : `The airplane marker is ${quality === 'estimated' ? 'an estimated' : 'a scheduled'} timeline position, not live GPS.`
-  const tangent = {
-    x: 2 * (1 - timelineProgress) * (control.x - start.x)
-      + 2 * timelineProgress * (end.x - control.x),
-    y: 2 * (1 - timelineProgress) * (control.y - start.y)
-      + 2 * timelineProgress * (end.y - control.y),
-  }
-  const rotation = quality === 'live'
-    && typeof snapshot.position?.headingDegrees === 'number'
-    ? snapshot.position.headingDegrees - 90
-    : Math.atan2(tangent.y, tangent.x) * 180 / Math.PI
-  const shifts = [-360, 0, 360]
-
-  return (
-    <figure className="flight-map">
-      <svg
-        viewBox="0 0 360 180"
-        role="img"
-        aria-labelledby={`flight-map-title-${flight.id}`}
-      >
-        <title id={`flight-map-title-${flight.id}`}>
-          {flight.flightNumber} route from {snapshot.origin.code} to {snapshot.destination.code}
-        </title>
-        <g className="flight-map__land" aria-hidden="true">
-          <path d="M8 55 22 41l22-8 23 7 13 17-8 15-20 4-12 22-18 5-9-20Zm73 68 16 8 9 24-5 18-10-19-12-12Zm61-82 22-17 29-5 18 9 28-4 24 10 17 18-7 12-25-5-16 12-20-6-15 15-17-7-10-21-22 2Zm89 65 15-14 24 5 19 24-12 26-18 8-13-19-19-7Zm68-43 19-14 24 3 10 13-9 10-26-1Z" />
-        </g>
-        {shifts.map((shift) => (
-          <path
-            key={`route-${shift}`}
-            className="flight-map__route"
-            d={`M ${start.x + shift} ${start.y} Q ${control.x + shift} ${control.y} ${end.x + shift} ${end.y}`}
-            aria-hidden="true"
-          />
-        ))}
-        {shifts.map((shift) => (
-          <g key={`airports-${shift}`} aria-hidden="true">
-            <circle className="flight-map__airport" cx={start.x + shift} cy={start.y} r="3" />
-            <circle className="flight-map__airport" cx={end.x + shift} cy={end.y} r="3" />
-          </g>
-        ))}
-        {shifts.map((shift) => (
-          <g
-            key={`plane-${shift}`}
-            className="flight-map__plane"
-            transform={`translate(${marker.x + shift} ${marker.y}) rotate(${rotation})`}
-            aria-hidden="true"
-          >
-            <path d="M7 1.5 2.4-.3V-4c0-.7-.6-1.7-1.3-1.7S-.2-4.7-.2-4v3.7l-4.7 1.8c-.3.1-.4.4-.4.7l.2.7c.1.3.3.4.6.4l4.4-.7v2.5l-1.4 1c-.2.1-.3.3-.2.5l.1.5c.1.2.3.3.5.3l2.2-.5 2.2.5c.2 0 .4-.1.5-.3l.1-.5c.1-.2 0-.4-.2-.5l-1.4-1V2.6l4.4.7c.3 0 .5-.1.6-.4l.2-.7c0-.3-.2-.6-.5-.7Z" />
-          </g>
-        ))}
-      </svg>
-      <div className="flight-map__codes" aria-hidden="true">
-        <span>{snapshot.origin.code}</span>
-        <span>{snapshot.destination.code}</span>
-      </div>
-      <figcaption>{markerDescription}</figcaption>
-    </figure>
-  )
-}
 
 /**
  * Coordinates family flight lookup, local caching, automatic refresh budgets,
@@ -433,7 +137,7 @@ function FlightTrackerBody({
   const [deletingId, setDeletingId] = useState<string | null>(null)
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null)
   const [pendingFlightChoices, setPendingFlightChoices] = useState<PendingFlightChoices | null>(null)
-  const [formError, setFormError] = useState<FormError | null>(null)
+  const [formError, setFormError] = useState<FlightLookupFormError | null>(null)
   const [statusMessage, setStatusMessage] = useState('')
   const portalTarget = document.querySelector<HTMLElement>('.app-viewport')
     ?? document.body
@@ -548,6 +252,7 @@ function FlightTrackerBody({
     }
 
     void refreshFamily()
+    const stopResume = subscribeToAppResume(() => void refreshFamily())
     void subscribeToFamilyFlights(() => void refreshFamily())
       .then((stop) => {
         if (active) unsubscribe = stop
@@ -557,6 +262,7 @@ function FlightTrackerBody({
 
     return () => {
       active = false
+      stopResume()
       unsubscribe()
     }
   }, [flightSubject, updateFlights])
@@ -1109,133 +815,20 @@ function FlightTrackerBody({
     setConfirmDeleteId(flightId)
   }
 
-  /** Renders mutually exclusive alert, refresh, and removal controls. */
-  function flightToolbar(flight: TrackedFlight, cancelled: boolean) {
-    const changingAlerts = notificationPendingId === flight.id
-    const refreshing = refreshingId === flight.id
-    const userMutationPending = notificationPendingId !== null
-      || refreshingId !== null
-      || deletingId !== null
-    return (
-      <div className="flight-card__toolbar" aria-label={`${flight.flightNumber} controls`}>
-        <button
-          type="button"
-          className="flight-card__icon-action flight-card__icon-action--notify"
-          aria-label={cancelled
-            ? `Alerts unavailable for cancelled ${flight.flightNumber}`
-            : changingAlerts
-              ? `Changing alerts for ${flight.flightNumber}`
-              : `${flight.notificationEnabled ? 'Turn off' : 'Turn on'} alerts for ${flight.flightNumber}`}
-          aria-pressed={flight.notificationEnabled}
-          disabled={userMutationPending || cancelled}
-          onClick={() => void toggleNotifications(flight)}
-        >
-          <BellIcon />
-        </button>
-        <button
-          type="button"
-          className="flight-card__icon-action"
-          aria-label={refreshing ? `Refreshing ${flight.flightNumber}` : `Refresh ${flight.flightNumber}`}
-          disabled={userMutationPending}
-          onClick={() => void refreshFlight(flight)}
-        >
-          <RefreshIcon />
-        </button>
-        <button
-          type="button"
-          className="flight-card__icon-action flight-card__icon-action--remove"
-          aria-label={`Stop tracking ${flight.flightNumber}`}
-          disabled={userMutationPending}
-          onClick={() => openDeleteConfirmation(flight.id)}
-        >
-          <CloseIcon />
-        </button>
-      </div>
-    )
+  /** Retains the synchronous deletion latch behind the controlled Keep action. */
+  function keepFlight() {
+    if (deleteRequestRef.current) return
+    setConfirmDeleteId(null)
   }
 
-  /** Renders expanded route, time-zone, provider, and deletion details. */
-  function flightDetails(
-    flight: TrackedFlight,
-    quality: FlightStatusSnapshot['dataQuality'],
-    cancelled: boolean,
-  ) {
-    const departure = formatFlightDateTime(
-      flightDepartureTime(flight.snapshot),
-      flight.snapshot.origin.timeZone,
-    )
-    const arrival = formatFlightDateTime(
-      flightArrivalTime(flight.snapshot),
-      flight.snapshot.destination.timeZone,
-    )
-    return (
-      <section
-        className="flight-card__details"
-        id={`flight-details-${flight.id}`}
-        aria-label={`${flight.flightNumber} full flight information`}
-      >
-        <div className="flight-detail__quality">
-          <span className="flight-quality" data-quality={cancelled ? 'cancelled' : quality}>
-            {cancelled ? 'Cancelled' : qualityLabel(quality)}
-          </span>
-          <span>{flight.snapshot.status}</span>
-          {flight.snapshot.operatingFlightNumber ? (
-            <span>Operated as {flight.snapshot.operatingFlightNumber}</span>
-          ) : null}
-        </div>
-        <FlightRouteMap flight={flight} now={now} />
-        <dl className="flight-detail__times">
-          <div>
-            <dt>Departure</dt>
-            <dd>{departure?.time ?? 'Not available'}</dd>
-            <span>{departure?.date ?? 'Date unavailable'} · {flight.snapshot.origin.code}</span>
-            <small>{flight.snapshot.origin.timeZone}</small>
-          </div>
-          <div>
-            <dt>{flight.snapshot.actualArrival ? 'Arrived' : 'Arrival'}</dt>
-            <dd>{cancelled ? 'Not applicable' : arrival?.time ?? 'Not available'}</dd>
-            <span>{cancelled
-              ? `No arrival estimate · ${flight.snapshot.destination.code}`
-              : `${arrival?.date ?? 'Date unavailable'} · ${flight.snapshot.destination.code}`}</span>
-            <small>{flight.snapshot.destination.timeZone}</small>
-          </div>
-        </dl>
-        <p className="flight-detail__updated">
-          Updated {formatUpdatedAt(flight.snapshot.updatedAt)} · {flight.snapshot.provider === 'aerodatabox'
-            ? 'AeroDataBox'
-            : 'FlightAware AeroAPI'}
-        </p>
-        {confirmDeleteId === flight.id ? (
-          <div className="flight-detail__delete-confirm" role="group" aria-label={`Confirm stop tracking ${flight.flightNumber}`}>
-            <p>Stop sharing this flight with the family?</p>
-            <div>
-              <button
-                type="button"
-                disabled={deletingId === flight.id}
-                onClick={() => {
-                  if (deleteRequestRef.current) return
-                  setConfirmDeleteId(null)
-                }}
-              >
-                Keep flight
-              </button>
-              <button
-                type="button"
-                className="flight-detail__delete-confirm-action"
-                disabled={
-                  deletingId !== null
-                  || refreshingId !== null
-                  || notificationPendingId !== null
-                }
-                onClick={() => void stopTracking(flight)}
-              >
-                {deletingId === flight.id ? 'Stopping…' : 'Yes, stop tracking'}
-              </button>
-            </div>
-          </div>
-        ) : null}
-      </section>
-    )
+  const ticketActivity = { notificationPendingId, refreshingId, deletingId }
+  const ticketActions = {
+    toggleNotifications,
+    refreshFlight,
+    openDeleteConfirmation,
+    keepFlight,
+    stopTracking,
+    toggleFlightActions,
   }
 
   return (
@@ -1268,198 +861,37 @@ function FlightTrackerBody({
         </div>
       ) : (
         <ul className="flight-list">
-          {flights.map((flight) => {
-            const departure = flightDepartureTime(flight.snapshot)
-            const arrival = flightArrivalTime(flight.snapshot)
-            const quality = effectiveFlightDataQuality(flight.snapshot, now)
-            const cancelled = isFlightCancelled(flight.snapshot)
-            const duration = formatDuration(departure, arrival)
-            const expanded = expandedFlightId === flight.id
-            return (
-              <li className="flight-list__featured" key={flight.id}>
-                <article
-                  className="flight-card flight-card--featured"
-                  data-cancelled={cancelled ? 'true' : 'false'}
-                  data-expanded={expanded ? 'true' : 'false'}
-                >
-                  {flightToolbar(flight, cancelled)}
-                  <>
-                    <div className="flight-card__topline">
-                      <div className="flight-card__identity">
-                        <span className="flight-card__traveler">{flight.travelerName}</span>
-                        <span className="flight-card__number">{flight.flightNumber}</span>
-                        {!cancelled ? <span className="flight-tracker__sr-only">{qualityLabel(quality)}</span> : null}
-                        <span className="flight-card__status" data-quality={cancelled ? 'cancelled' : quality}>
-                          <i aria-hidden="true" />
-                          {cancelled ? 'Cancelled' : flight.snapshot.status}
-                        </span>
-                      </div>
-                    </div>
-                    <div className="flight-card__route">
-                      <div>
-                        <strong>{flight.snapshot.origin.code}</strong>
-                        <span>{airportPlace(flight.snapshot, 'origin')}</span>
-                      </div>
-                      <FlightRouteMark />
-                      <div>
-                        <strong>{flight.snapshot.destination.code}</strong>
-                        <span>{airportPlace(flight.snapshot, 'destination')}</span>
-                      </div>
-                    </div>
-                    <div className="flight-card__times">
-                      <div>
-                        <span>Depart</span>
-                        <strong>{formatTicketTime(departure, flight.snapshot.origin.timeZone) ?? 'Not available'}</strong>
-                        <small>{formatDayMonth(flight.travelDate)}</small>
-                      </div>
-                      <span className="flight-card__duration">{duration} · Direct</span>
-                      <div>
-                        <span>{flight.snapshot.actualArrival ? 'Arrived' : 'Arrive'}</span>
-                        <strong>{cancelled ? 'Not applicable' : formatTicketTime(arrival, flight.snapshot.destination.timeZone) ?? 'Not available'}</strong>
-                        <small>{cancelled ? 'No estimate' : formatDayMonth(flight.travelDate)}</small>
-                        {cancelled ? <span className="flight-tracker__sr-only">No ETA</span> : null}
-                      </div>
-                    </div>
-                    <FlightProgress flight={flight} now={now} />
-                    <div
-                      className="flight-card__progress-codes"
-                      data-origin={flight.snapshot.origin.code}
-                      data-destination={flight.snapshot.destination.code}
-                      aria-hidden="true"
-                    />
-                  </>
-                  <button
-                    type="button"
-                    className="flight-card__expand"
-                    aria-label={`${expanded ? 'Hide' : 'Show'} all info for ${flight.flightNumber}`}
-                    aria-expanded={expanded}
-                    aria-controls={`flight-details-${flight.id}`}
-                    disabled={deletingId === flight.id}
-                    onClick={() => toggleFlightActions(flight.id)}
-                  >
-                    <svg viewBox="0 0 24 24" aria-hidden="true">
-                      <path d="m6 9 6 6 6-6" />
-                    </svg>
-                  </button>
-                  {expanded ? flightDetails(flight, quality, cancelled) : null}
-                </article>
-              </li>
-            )
-          })}
+          {flights.map((flight) => (
+            <li className="flight-list__featured" key={flight.id}>
+              <FlightTicket
+                flight={flight}
+                now={now}
+                expanded={expandedFlightId === flight.id}
+                confirmingDelete={confirmDeleteId === flight.id}
+                activity={ticketActivity}
+                actions={ticketActions}
+              />
+            </li>
+          ))}
         </ul>
       )}
 
       {statusMessage ? <p className="flight-tracker__status" role="status">{statusMessage}</p> : null}
 
       {showAddFlight ? createPortal(
-        <div className="flight-sheet" role="dialog" aria-modal="true" aria-labelledby="add-flight-title" aria-describedby={formDescriptionId}>
-          <form className="flight-sheet__panel" onSubmit={(event) => void addFlight(event)}>
-            <header className="flight-sheet__header">
-              <div>
-                <p>Travel</p>
-                <h2 id="add-flight-title">Track a flight</h2>
-              </div>
-              <button
-                ref={addCloseRef}
-                type="button"
-                aria-label="Close add flight"
-                onClick={closeAddFlight}
-              >×</button>
-            </header>
-            <p className="flight-sheet__intro" id={formDescriptionId}>
-              Use the airline flight number and the departure date in the airport’s local time. Codeshares are matched automatically.
-            </p>
-            <label className="flight-field">
-              <span>Header <small>(optional)</small></span>
-              <input
-                name="travelerName"
-                maxLength={60}
-                placeholder="Family trip"
-                disabled={saving || pendingFlightChoices !== null}
-                aria-invalid={formError?.field === 'travelerName'}
-                aria-describedby={formError?.field === 'travelerName' ? formErrorId : undefined}
-              />
-            </label>
-            <label className="flight-field">
-              <span>Flight number</span>
-              <input
-                name="flightNumber"
-                aria-label="Flight number"
-                maxLength={20}
-                placeholder="EK202"
-                autoCapitalize="characters"
-                autoCorrect="off"
-                spellCheck={false}
-                disabled={saving || pendingFlightChoices !== null}
-                aria-invalid={formError?.field === 'flightNumber'}
-                aria-describedby={formError?.field === 'flightNumber' ? formErrorId : undefined}
-                required
-              />
-              <small>Ticket numbers cannot be tracked and are never saved.</small>
-            </label>
-            <label className="flight-field">
-              <span>Departure date</span>
-              <input
-                name="travelDate"
-                type="date"
-                aria-label="Departure date"
-                min={shiftLocalCalendarDate(now, -1)}
-                max={shiftLocalCalendarDate(now, 365)}
-                disabled={saving || pendingFlightChoices !== null}
-                aria-invalid={formError?.field === 'travelDate'}
-                aria-describedby={formError?.field === 'travelDate' ? formErrorId : undefined}
-                required
-              />
-              <small>Choose the calendar date where the flight leaves, in the departure airport’s local time.</small>
-            </label>
-            {pendingFlightChoices ? (
-              <section className="flight-choice" aria-labelledby="flight-choice-title">
-                <div className="flight-choice__header">
-                  <div>
-                    <p>Double-check the departure</p>
-                    <h3 id="flight-choice-title">
-                      We found {pendingFlightChoices.choices.length} flights that day
-                    </h3>
-                  </div>
-                  <button
-                    type="button"
-                    disabled={saving}
-                    onClick={() => setPendingFlightChoices(null)}
-                  >
-                    Change search
-                  </button>
-                </div>
-                <div className="flight-choice__list">
-                  {pendingFlightChoices.choices.map((choice) => (
-                    <button
-                      type="button"
-                      key={choice.providerFlightId}
-                      disabled={saving}
-                      aria-label={`Choose ${choice.origin.code} to ${choice.destination.code}, departing ${formatChoiceDeparture(choice)}`}
-                      onClick={() => void chooseFlight(choice)}
-                    >
-                      <span className="flight-choice__route">
-                        <strong>{choice.origin.code}</strong>
-                        <FlightRouteMark compact />
-                        <strong>{choice.destination.code}</strong>
-                      </span>
-                      <span>{formatChoiceDeparture(choice)}</span>
-                      {choice.operatingFlightNumber ? (
-                        <small>Operated as {choice.operatingFlightNumber}</small>
-                      ) : null}
-                    </button>
-                  ))}
-                </div>
-              </section>
-            ) : null}
-            {formError ? <p className="flight-sheet__error" id={formErrorId} role="alert">{formError.message}</p> : null}
-            {!pendingFlightChoices ? (
-              <button className="flight-sheet__submit" type="submit" disabled={saving}>
-                {saving ? 'Finding flight…' : 'Track flight'}
-              </button>
-            ) : null}
-          </form>
-        </div>,
+        <FlightLookupSheet
+          now={now}
+          formDescriptionId={formDescriptionId}
+          formErrorId={formErrorId}
+          addCloseRef={addCloseRef}
+          saving={saving}
+          choices={pendingFlightChoices?.choices ?? null}
+          formError={formError}
+          addFlight={addFlight}
+          closeAddFlight={closeAddFlight}
+          chooseFlight={chooseFlight}
+          onChangeSearch={() => setPendingFlightChoices(null)}
+        />,
         portalTarget,
       ) : null}
     </section>

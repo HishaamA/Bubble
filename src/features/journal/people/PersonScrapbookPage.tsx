@@ -162,15 +162,17 @@ function PersonScrapbookContent({
                   </span>
                   <figcaption>
                     <strong>{description}</strong>
-                    <span>
-                      <time dateTime={dateOverrides?.[photo.key]?.value ?? photo.capturedAt}>
-                        {formatTimelinePhotoDate(
-                          photo,
-                          dateOverrides?.[photo.key],
-                        )}
-                      </time>
-                      {photo.contributorName ? ` · ${photo.contributorName}` : ''}
-                    </span>
+                    <time dateTime={dateOverrides?.[photo.key]?.value ?? photo.capturedAt}>
+                      {formatTimelinePhotoDate(
+                        photo,
+                        dateOverrides?.[photo.key],
+                      )}
+                    </time>
+                    {photo.contributorName ? (
+                      <span className="person-scrapbook__photo-contributor">
+                        Shared by {photo.contributorName}
+                      </span>
+                    ) : null}
                   </figcaption>
                   <span className="person-scrapbook__photo-doodle" aria-hidden="true">
                     {CARD_DOODLES[index % CARD_DOODLES.length]}

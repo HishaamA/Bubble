@@ -198,6 +198,24 @@ beforeEach(() => {
 afterEach(() => localStorage.clear())
 
 describe('FlightTrackerSection', () => {
+  it('receives a relative’s flight after mobile resume and stops refreshing after unmount', async () => {
+    const view = render(<FlightTrackerSection now={new Date('2026-08-29T12:00:00Z')} />)
+    await waitFor(() => expect(serviceMocks.fetchFamilyFlights).toHaveBeenCalledOnce())
+    serviceMocks.fetchFamilyFlights.mockResolvedValue([{
+      id: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
+      travelerName: 'Mum', flightNumber: 'EK202', travelDate: '2026-09-10',
+      createdAt: '2026-08-29T12:00:00.000Z', notificationEnabled: false,
+      synced: true, snapshot: status,
+    }])
+    await act(async () => window.dispatchEvent(new Event('focus')))
+    expect(await screen.findByRole('button', { name: 'Show all info for EK202' })).toBeInTheDocument()
+    expect(screen.getByText('Mum')).toBeInTheDocument()
+    view.unmount()
+    const calls = serviceMocks.fetchFamilyFlights.mock.calls.length
+    await act(async () => window.dispatchEvent(new Event('online')))
+    expect(serviceMocks.fetchFamilyFlights).toHaveBeenCalledTimes(calls)
+  })
+
   it('starts with a real empty state and no example flight cards', () => {
     render(<FlightTrackerSection now={new Date('2026-08-29T12:00:00Z')} />)
     expect(screen.getByRole('heading', { name: 'Family flights' })).toBeInTheDocument()

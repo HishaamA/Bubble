@@ -114,6 +114,34 @@ function addScan(
 }
 
 describe('people timeline helpers', () => {
+  it('deduplicates one upload across revealed Capsules with stable collection identity and offline media', () => {
+    const image = new Blob(['offline full'], { type: 'image/jpeg' })
+    const thumbnail = new Blob(['offline thumbnail'], { type: 'image/jpeg' })
+    const weekly: UnlockedCapsulePhoto = {
+      id: 'same-upload', capsuleId: 'z-weekly', image, thumbnail,
+      width: 1200, height: 900, caption: 'Together', capturedAt: '2026-01-01T12:00:00.000Z',
+      contributorName: 'Maya', ownedByCurrentUser: true, syncStatus: 'synced',
+      capsuleTitle: 'Weekly Capsule', capsuleOpensAt: '2026-01-05T00:00:00.000Z',
+    }
+    const special: UnlockedCapsulePhoto = {
+      ...weekly, capsuleId: 'a-special', capsuleTitle: 'Special Capsule',
+      image: 'https://example.test/full.jpg', thumbnail: 'https://example.test/thumb.jpg',
+    }
+    const [entry] = toPeopleTimelinePhotos([weekly, special])
+    expect(toPeopleTimelinePhotos([weekly, special])).toHaveLength(1)
+    expect(toPeopleTimelinePhotos([special, weekly])).toEqual([entry])
+    expect(entry).toMatchObject({
+      key: 'photo:same-upload', capsuleId: 'a-special',
+      memoryId: 'capsule-a-special-same-upload', source: thumbnail, scanSource: image,
+    })
+    expect(weekly.capsuleId).toBe('z-weekly')
+    expect(special.image).toBe('https://example.test/full.jpg')
+
+    const directPhoto: JournalPhoto = { ...weekly, caption: 'A distinct Journal upload', syncStatus: 'synced' }
+    const mixed = toPeopleTimelinePhotos([weekly, special], [directPhoto])
+    expect(mixed.map(({ key }) => key)).toEqual(['photo:same-upload', 'journal-photo:same-upload'])
+  })
+
   it('displays the thumbnail while scanning the sanitized full image', () => {
     const fullImage = new Blob(['metadata-free full image'], { type: 'image/jpeg' })
     const thumbnail = new Blob(['thumbnail'], { type: 'image/jpeg' })

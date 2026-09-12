@@ -47,11 +47,15 @@ public final class BubbleWidgetProvider extends AppWidgetProvider {
             Intent.ACTION_TIME_CHANGED.equals(action) ||
             Intent.ACTION_TIMEZONE_CHANGED.equals(action)
         ) {
-            boolean deckUnchanged = ACTION_REFRESH.equals(action) &&
+            boolean preserveSwipePosition = ACTION_REFRESH.equals(action) &&
                 snapshot != null &&
                 !snapshot.pages.isEmpty() &&
                 snapshot.isCurrentLocalDay(System.currentTimeMillis());
-            if (!deckUnchanged) {
+            if (preserveSwipePosition) {
+                // Updating only collection rows keeps the current stable slot:
+                // a planner stays put while photo slots receive fresh images.
+                refreshCollection(context);
+            } else {
                 if (
                     snapshot != null &&
                     !snapshot.isCurrentLocalDay(System.currentTimeMillis())
@@ -62,6 +66,17 @@ public final class BubbleWidgetProvider extends AppWidgetProvider {
                 }
             }
             BubbleWidgetScheduler.replace(context, snapshot);
+        }
+    }
+
+    private static void refreshCollection(Context context) {
+        Context appContext = context.getApplicationContext();
+        AppWidgetManager manager = AppWidgetManager.getInstance(appContext);
+        int[] ids = manager.getAppWidgetIds(
+            new ComponentName(appContext, BubbleWidgetProvider.class)
+        );
+        if (ids.length > 0) {
+            manager.notifyAppWidgetViewDataChanged(ids, R.id.bubble_widget_stack);
         }
     }
 

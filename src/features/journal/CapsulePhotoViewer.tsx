@@ -26,6 +26,7 @@ type JournalViewerState = {
     scrollTop?: number
     weekOffset?: number
     focusMemoryId?: string
+    focusPhotoKey?: string
   }
 }
 
@@ -35,6 +36,17 @@ type CapsulePhotoViewerProps = {
   now?: Date
   journalPhotos?: readonly JournalPhoto[]
   reactionStorageScope?: string
+}
+
+/** Membership may change, but the Journal content key must survive returning. */
+function journalPhotoFocus(photo: { id: string; capsuleId: string }) {
+  const isLibraryPhoto = photo.capsuleId === JOURNAL_LIBRARY_ID
+  return {
+    focusMemoryId: isLibraryPhoto
+      ? `journal-photo-${photo.id}`
+      : `capsule-${photo.capsuleId}-${photo.id}`,
+    focusPhotoKey: isLibraryPhoto ? `journal-photo:${photo.id}` : `photo:${photo.id}`,
+  }
 }
 
 /** Derives a short, stable avatar label from a contributor display name. */
@@ -125,7 +137,10 @@ export function CapsulePhotoViewer({
   function returnToJournal() {
     navigate('/journal', {
       replace: true,
-      state: { journalContext: routeState?.journalContext },
+      state: { journalContext: photo ? {
+        ...routeState?.journalContext,
+        ...journalPhotoFocus(photo),
+      } : routeState?.journalContext },
       viewTransition: true,
     })
   }
@@ -134,16 +149,13 @@ export function CapsulePhotoViewer({
   function openAdjacentPhoto(nextIndex: number) {
     const nextPhoto = photos[nextIndex]
     if (!nextPhoto) return
-    const nextMemoryId = nextPhoto.capsuleId === JOURNAL_LIBRARY_ID
-      ? `journal-photo-${nextPhoto.id}`
-      : `capsule-${nextPhoto.capsuleId}-${nextPhoto.id}`
     // Replace rather than push: Previous/Next is one viewer session, so the
     // device Back gesture should leave the viewer instead of replaying photos.
     const nextState: JournalViewerState = {
       ...(routeState ?? { returnTo: '/journal' }),
       journalContext: {
         ...routeState?.journalContext,
-        focusMemoryId: nextMemoryId,
+        ...journalPhotoFocus(nextPhoto),
       },
     }
     navigate(

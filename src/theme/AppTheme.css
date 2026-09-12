@@ -11,7 +11,7 @@
   --theme-paper: #fff1d2;
   --theme-paper-deep: #f2dcb6;
   --theme-ink: #301027;
-  --theme-muted: #856f79;
+  --theme-muted: #583e4a;
   --theme-accent: #efb43d;
   --theme-action: #e6b5c4;
   --theme-action-soft: #f0d0d9;
@@ -35,7 +35,7 @@
   --theme-paper: #f5eed6;
   --theme-paper-deep: #dfd2ad;
   --theme-ink: #123c32;
-  --theme-muted: #657a71;
+  --theme-muted: #2e4739;
   --theme-accent: #a88960;
   --theme-action: #a8b97d;
   --theme-action-soft: #cbd6ae;
@@ -59,7 +59,7 @@
   --theme-paper: #fff0d3;
   --theme-paper-deep: #ead6ad;
   --theme-ink: #14203f;
-  --theme-muted: #73798a;
+  --theme-muted: #33405a;
   --theme-accent: #f0b94f;
   --theme-action: #f0b94f;
   --theme-action-soft: #f4d48e;
@@ -115,11 +115,6 @@
       var(--theme-canvas) 48%,
       color-mix(in srgb, var(--theme-canvas) 78%, var(--theme-canvas-deep))
     );
-  --theme-page-chrome: color-mix(
-    in srgb,
-    var(--theme-canvas) 94%,
-    transparent
-  );
   /* Compatibility aliases used throughout the existing feature styles. */
   --plum-950: var(--theme-canvas-deep);
   --plum-900: var(--theme-canvas);
@@ -389,7 +384,7 @@
 
 .theme-picker__options {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 6rem), 1fr));
   gap: clamp(0.42rem, 2vw, 0.65rem);
 }
 
@@ -455,18 +450,40 @@
 
 .theme-option strong {
   max-width: 100%;
-  overflow: hidden;
-  font-size: clamp(0.68rem, 3vw, 0.78rem);
-  line-height: 1.1;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  font-size: 0.85rem;
+  line-height: 1.25;
+  overflow-wrap: anywhere;
 }
 
 .theme-option small {
   color: var(--theme-muted);
-  font-size: clamp(0.53rem, 2.25vw, 0.62rem);
-  line-height: 1.15;
+  font-size: 0.72rem;
+  line-height: 1.4;
   text-align: center;
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 22rem) {
+  .theme-picker__options {
+    grid-template-columns: 1fr;
+  }
+
+  .theme-option {
+    grid-template-columns: min(3.35rem, 54px) minmax(0, 1fr);
+    min-height: 3.5rem;
+    padding: min(0.65rem, 12px) min(2rem, 40px) min(0.65rem, 12px) min(1rem, 16px);
+    place-items: center start;
+    column-gap: min(0.8rem, 12px);
+  }
+
+  .theme-option__swatches {
+    grid-row: span 2;
+    width: 100%;
+  }
+
+  .theme-option small {
+    text-align: start;
+  }
 }
 
 /* Shared bottom navigation follows the selected cover colour. */
@@ -1908,23 +1925,22 @@
   .theme-picker__options {
     gap: 0.34rem;
   }
-
-  .theme-option {
-    min-height: 5.65rem;
-    padding-inline: 0.34rem;
-  }
-
-  .theme-option__swatches {
-    width: 2.85rem;
-  }
 }
 
 /* Final page-surface contract -------------------------------------------
  * Keep this last. Feature styles may define local paper, cards, and doodles,
  * but every primary route sits on the exact same selected-theme canvas.
  */
-:root[data-bubble-theme] .app-viewport {
+:root[data-bubble-theme] .app-viewport,
+:root[data-bubble-theme] .app-status-bar-backdrop,
+:root[data-bubble-theme] .journal-page__chrome {
   background: var(--theme-page-background);
+  /* Chrome is a crop of the shell canvas, not a new short gradient. Matching
+   * size and origin makes status bar, sticky heading, and body seamless in
+   * every theme, including after scroll and native viewport resizing. */
+  background-size: 100% var(--app-visual-viewport-height, 100dvh);
+  background-position: center top;
+  background-repeat: no-repeat;
 }
 
 :root[data-bubble-theme] .app-content > .memories-screen,
@@ -1937,11 +1953,10 @@
   background-image: none;
 }
 
-/* Journal's sticky heading needs a quiet scrim while content moves beneath
- * it. It uses the same canvas token instead of inventing another gradient.
- */
+/* The shared canvas is opaque, so moving photos/text cannot bleed into the
+ * sticky heading. A backdrop blur would change that canvas at the boundary. */
 :root[data-bubble-theme] .journal-page__chrome {
-  background: var(--theme-page-chrome);
+  backdrop-filter: none;
 }
 
 /* The family row is an action, not a green status. This resolves to pink in

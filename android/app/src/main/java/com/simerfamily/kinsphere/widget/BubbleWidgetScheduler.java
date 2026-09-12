@@ -31,6 +31,10 @@ final class BubbleWidgetScheduler {
         if (requested > now && requested <= now + MAXIMUM_HORIZON_MILLIS) {
             boundary = Math.min(boundary, requested);
         }
+        long nextPhoto = BubbleWidgetPhotoRotation.nextRefreshAtMillis(snapshot, now);
+        if (nextPhoto > now) {
+            boundary = Math.min(boundary, nextPhoto);
+        }
         if (boundary <= now || boundary > now + MAXIMUM_HORIZON_MILLIS) {
             return;
         }

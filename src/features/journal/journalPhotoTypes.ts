@@ -13,8 +13,16 @@ export type JournalPhoto = {
   caption: string
   capturedAt: string
   contributorName: string
+  /** Server profile identity; older local-only imports may not have it yet. */
+  uploaderId?: string
   ownedByCurrentUser: boolean
   syncStatus: 'pending' | 'synced'
+}
+
+export type JournalPhotoDeletion = {
+  photoId: string
+  uploaderId: string
+  ownedByCurrentUser: boolean
 }
 
 export type JournalPhotoStore = {

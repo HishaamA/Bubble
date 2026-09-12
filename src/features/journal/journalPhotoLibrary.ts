@@ -22,11 +22,17 @@ import {
 import {
   JOURNAL_LIBRARY_ID,
   type JournalPhoto,
+  type JournalPhotoDeletion,
   type JournalPhotoImportProgress,
   type JournalPhotoImportResult,
   type JournalPhotoStore,
 } from './journalPhotoTypes'
 import type { UnlockedCapsulePhoto } from './capsuleJournalArchive'
+import {
+  deleteFamilyJournalPhoto,
+  fetchDeletedJournalPhotos,
+  subscribeToJournalPhotoDeletions,
+} from './journalPhotoDeletionService'
 
 /** Produces an RFC 4122 version-4 identifier even in older WebViews. */
 function createPhotoId() {
@@ -75,6 +81,12 @@ function preferDurableImageSource(
   return current
 }
 
+/** UUID reuse must not carry another uploader's cached bytes into a new row. */
+function isSameJournalUpload(left: JournalPhoto, right: JournalPhoto) {
+  if (left.uploaderId && right.uploaderId) return left.uploaderId === right.uploaderId
+  return left.ownedByCurrentUser && right.ownedByCurrentUser
+}
+
 /** Merges a store refresh without replacing durable Blobs with expiring URLs. */
 export function mergeLocalJournalPhotos(
   currentPhotos: readonly JournalPhoto[],
@@ -84,6 +96,7 @@ export function mergeLocalJournalPhotos(
   const mergedStored = storedPhotos.map((storedPhoto) => {
     const currentPhoto = currentById.get(storedPhoto.id)
     if (!currentPhoto) return storedPhoto
+    if (!isSameJournalUpload(currentPhoto, storedPhoto)) return currentPhoto
     return {
       ...storedPhoto,
       ...currentPhoto,
@@ -123,7 +136,7 @@ export function mergeJournalPhotos(
   const localById = new Map(localPhotos.map((photo) => [photo.id, photo]))
   const mergedFamily = familyPhotos.map((familyPhoto) => {
     const localPhoto = localById.get(familyPhoto.id)
-    if (!localPhoto) return familyPhoto
+    if (!localPhoto || !isSameJournalUpload(localPhoto, familyPhoto)) return familyPhoto
     return {
       ...familyPhoto,
       image: typeof localPhoto.image === 'string'
@@ -176,6 +189,11 @@ type LibrarySession = {
   disposed: boolean
   epoch: number
   pending: Promise<JournalPhoto[]> | null
+  refreshAfterPending: boolean
+  removedPhotoIds: Set<string>
+  deletionMarkers: Map<string, JournalPhotoDeletion[]>
+  deletions: Map<string, Promise<void>>
+  uploads: Map<string, Promise<string | null>>
   listeners: Set<() => void>
   subscribe: (listener: () => void) => () => void
   getSnapshot: () => LibrarySnapshot
@@ -189,6 +207,11 @@ function createLibrarySession(store: JournalPhotoStore): LibrarySession {
     disposed: false,
     epoch: 0,
     pending: null,
+    refreshAfterPending: false,
+    removedPhotoIds: new Set(),
+    deletionMarkers: new Map(),
+    deletions: new Map(),
+    uploads: new Map(),
     listeners: new Set(),
     subscribe: (listener) => {
       session.listeners.add(listener)
@@ -203,6 +226,7 @@ function disposeLibrarySession(session: LibrarySession) {
   session.disposed = true
   session.epoch += 1
   session.pending = null
+  session.refreshAfterPending = false
   session.snapshot = { photos: [], hydrated: false }
   session.listeners.forEach((listener) => listener())
   session.listeners.clear()
@@ -215,16 +239,30 @@ function resumeIsolatedLibrarySession(session: LibrarySession) {
 
 const librarySessions = createMemberSessionCache<LibrarySession>({ dispose: disposeLibrarySession })
 
+/** Match remote cancellations by uploader; legacy local imports can match self only. */
+function isRemovedJournalPhoto(session: LibrarySession, photo: JournalPhoto) {
+  if (photo.ownedByCurrentUser && session.removedPhotoIds.has(photo.id)) return true
+  return session.deletionMarkers.get(photo.id)?.some((marker) => photo.uploaderId
+    ? marker.uploaderId === photo.uploaderId
+    : photo.ownedByCurrentUser && marker.ownedByCurrentUser) ?? false
+}
+
 function publishLibrary(session: LibrarySession, photos: JournalPhoto[], hydrated = session.snapshot.hydrated) {
   if (session.disposed) return
-  session.snapshot = { photos, hydrated }
+  session.snapshot = { photos: photos.filter((photo) => !isRemovedJournalPhoto(session, photo)), hydrated }
   session.listeners.forEach((listener) => listener())
 }
 
 /** A single scoped reader survives tab remounts without restarting storage/network work. */
-function refreshLibrarySession(session: LibrarySession, cacheNamespace: string, allowWarm = false): Promise<JournalPhoto[]> {
+function refreshLibrarySession(session: LibrarySession, cacheNamespace: string, allowWarm = false, queueAfterPending = false): Promise<JournalPhoto[]> {
   if (session.disposed) return Promise.resolve([])
-  if (session.pending) return session.pending
+  if (session.pending) {
+    // A deletion can arrive after this request already read tombstones. Keep
+    // that hint until a fresh pass can observe it rather than losing it to
+    // normal request coalescing.
+    if (queueAfterPending) session.refreshAfterPending = true
+    return session.pending
+  }
   if (allowWarm && session.snapshot.hydrated && Date.now() - session.refreshedAt < libraryWarmLifetimeMs) {
     return Promise.resolve(session.snapshot.photos)
   }
@@ -241,6 +279,23 @@ function refreshLibrarySession(session: LibrarySession, cacheNamespace: string, 
     }
     if (!isCurrent()) return []
     try {
+      // Absence from a media response is not proof of deletion (URLs may fail
+      // to sign). Only explicit family tombstones remove durable offline copies.
+      const deletions = await fetchDeletedJournalPhotos(cacheNamespace).catch(() => null)
+      if (!isCurrent()) return []
+      if (deletions) {
+        for (const deletion of deletions) {
+          const markers = session.deletionMarkers.get(deletion.photoId) ?? []
+          if (!markers.some(({ uploaderId }) => uploaderId === deletion.uploaderId)) {
+            session.deletionMarkers.set(deletion.photoId, [...markers, deletion])
+          }
+        }
+        publishLibrary(session, session.snapshot.photos, true)
+        for (const photo of storedPhotos) {
+          if (!isCurrent()) return []
+          if (isRemovedJournalPhoto(session, photo)) await session.store.remove(photo.id).catch(() => undefined)
+        }
+      }
       const familyPhotos = await fetchFamilyJournalPhotos(cacheNamespace)
       if (!isCurrent()) return []
       if (familyPhotos !== null) {
@@ -264,8 +319,49 @@ function refreshLibrarySession(session: LibrarySession, cacheNamespace: string, 
     return session.snapshot.photos
   })()
   session.pending = request
-  void request.finally(() => { if (session.pending === request) session.pending = null })
+  void request.finally(() => {
+    if (session.pending !== request) return
+    session.pending = null
+    if (session.refreshAfterPending && isCurrent()) {
+      session.refreshAfterPending = false
+      void refreshLibrarySession(session, cacheNamespace).catch(() => undefined)
+    }
+  }).catch(() => undefined)
   return request
+}
+
+/**
+ * One operation owns both the upload and its durable acknowledgement across
+ * every consumer/tab mount of this family session. Deletion waits for this
+ * whole operation, including a slow IndexedDB write, before removing the ID.
+ */
+function syncJournalPhoto(session: LibrarySession, cacheNamespace: string, photo: JournalPhoto, prepared: ProcessedCapsulePhoto) {
+  const existing = session.uploads.get(photo.id)
+  if (existing) return existing
+  const epoch = session.epoch
+  const isCurrent = () => !session.disposed && session.epoch === epoch
+  const operation = (async () => {
+    const syncedId = await uploadFamilyJournalPhoto({
+      photoId: photo.id,
+      photo: prepared,
+      caption: photo.caption,
+      capturedAt: photo.capturedAt,
+      expectedCacheNamespace: cacheNamespace,
+    })
+    if (!syncedId || !isCurrent()) return syncedId
+    if (session.deletions.has(photo.id) || isRemovedJournalPhoto(session, photo)) return syncedId
+    const latest = session.snapshot.photos.find(({ id }) => id === photo.id)
+    if (!latest) return syncedId
+    const acknowledged = { ...latest, syncStatus: 'synced' as const }
+    publishLibrary(session, upsertJournalPhoto(session.snapshot.photos, acknowledged))
+    await session.store.save(acknowledged).catch(() => undefined)
+    return syncedId
+  })()
+  session.uploads.set(photo.id, operation)
+  void operation.finally(() => {
+    if (session.uploads.get(photo.id) === operation) session.uploads.delete(photo.id)
+  }).catch(() => undefined)
+  return operation
 }
 
 /**
@@ -311,9 +407,9 @@ export function useJournalPhotoLibrary({
   // State and ref move together because queued sync work must read the latest
   // photo set before React commits its next render.
   const replacePhotos = useCallback((next: JournalPhoto[]) => {
-    photosRef.current = next
+    photosRef.current = next.filter((photo) => !isRemovedJournalPhoto(session, photo))
     publishLibrary(session, next)
-    return next
+    return photosRef.current
   }, [session])
 
   // Coalesce refreshes within an account generation so focus, realtime, and
@@ -337,6 +433,7 @@ export function useJournalPhotoLibrary({
         syncRequestedRef.current = false
         const pending = photosRef.current
           .filter((photo) =>
+            !session.deletions.has(photo.id) && !isRemovedJournalPhoto(session, photo) &&
             photo.syncStatus === 'pending' &&
             photo.image instanceof Blob &&
             photo.thumbnail instanceof Blob &&
@@ -350,6 +447,7 @@ export function useJournalPhotoLibrary({
         let consecutiveFailures = 0
         for (const photo of pending) {
           if (!isCurrent()) return
+          if (session.deletions.has(photo.id) || isRemovedJournalPhoto(session, photo)) continue
           const prepared: ProcessedCapsulePhoto = {
             image: photo.image as Blob,
             thumbnail: photo.thumbnail as Blob,
@@ -360,13 +458,7 @@ export function useJournalPhotoLibrary({
           }
           let syncedId: string | null
           try {
-            syncedId = await uploadFamilyJournalPhoto({
-              photoId: photo.id,
-              photo: prepared,
-              caption: photo.caption,
-              capturedAt: photo.capturedAt,
-              expectedCacheNamespace: cacheNamespace,
-            })
+            syncedId = await syncJournalPhoto(session, cacheNamespace, photo, prepared)
           } catch {
             syncFailureCountsRef.current.set(
               photo.id,
@@ -380,18 +472,10 @@ export function useJournalPhotoLibrary({
             continue
           }
           if (!syncedId || !isCurrent()) break
+          if (session.deletions.has(photo.id) || isRemovedJournalPhoto(session, photo)) continue
           consecutiveFailures = 0
           syncFailureCountsRef.current.delete(photo.id)
           syncedAny = true
-          const next = photosRef.current.map((candidate) =>
-            candidate.id === photo.id
-              ? { ...candidate, syncStatus: 'synced' as const }
-              : candidate,
-          )
-          replacePhotos(next)
-          await store.save(
-            next.find(({ id }) => id === photo.id) ?? photo,
-          ).catch(() => undefined)
         }
       } while (syncRequestedRef.current && isCurrent())
 
@@ -407,7 +491,37 @@ export function useJournalPhotoLibrary({
       }
     })
     return request
-  }, [cacheNamespace, refresh, replacePhotos, store])
+  }, [cacheNamespace, refresh, session])
+
+  /** One deletion per stable photo ID, serialized behind any upload of that ID. */
+  const deletePhoto = useCallback((photoId: string): Promise<void> => {
+    const existing = session.deletions.get(photoId)
+    if (existing) return existing
+    const photo = session.snapshot.photos.find(({ id }) => id === photoId)
+    if (!photo?.ownedByCurrentUser) return Promise.reject(new Error('Only your own Journal uploads can be deleted.'))
+    const generation = generationRef.current
+    const request = (async () => {
+      // Block another sync pass synchronously before waiting. If an upload's
+      // response was lost, the authenticated RPC still resolves its true state.
+      await session.uploads.get(photoId)?.catch(() => undefined)
+      if (generationRef.current !== generation || session.disposed) throw new Error('The active family changed. Please try again.')
+      await deleteFamilyJournalPhoto(photoId, cacheNamespace)
+      if (cacheNamespace.endsWith(':no-family')) {
+        // A local-only deletion is not successful until durable removal succeeds.
+        await store.remove(photoId)
+      }
+      session.removedPhotoIds.add(photoId)
+      publishLibrary(session, session.snapshot.photos)
+      // Family deletion is already authoritative. A failed device cleanup is
+      // retried when server tombstones are read on the next refresh.
+      if (!cacheNamespace.endsWith(':no-family')) await store.remove(photoId).catch(() => undefined)
+    })()
+    session.deletions.set(photoId, request)
+    void request.finally(() => {
+      if (session.deletions.get(photoId) === request) session.deletions.delete(photoId)
+    }).catch(() => undefined)
+    return request
+  }, [cacheNamespace, session, store])
 
   // Imports are serialized to preserve file order and keep peak image-decoding
   // memory bounded on mobile devices.
@@ -520,6 +634,15 @@ export function useJournalPhotoLibrary({
     const generation = generationRef.current
     let active = true
     let unsubscribe: () => void = () => undefined
+    let unsubscribeDeletions: () => void = () => undefined
+    void subscribeToJournalPhotoDeletions(() => {
+      if (active && generationRef.current === generation) {
+        void refreshLibrarySession(session, cacheNamespace, false, true)
+      }
+    }, cacheNamespace).then((stop) => {
+      if (active) unsubscribeDeletions = stop
+      else stop()
+    }).catch(() => undefined)
     void subscribeToFamilyJournalPhotos(() => {
       if (active && generationRef.current === generation) void refresh()
     }, cacheNamespace)
@@ -563,18 +686,20 @@ export function useJournalPhotoLibrary({
     return () => {
       active = false
       unsubscribe()
+      unsubscribeDeletions()
       window.clearInterval(signedUrlRefresh)
       window.removeEventListener('online', refreshAndSync)
       document.removeEventListener('visibilitychange', refreshWhenVisible)
       void removeNativeListener?.()
     }
-  }, [cacheNamespace, enabled, refresh, syncPending])
+  }, [cacheNamespace, enabled, refresh, session, syncPending])
 
   return {
     photos,
     loading,
     importProgress,
     importPhotos,
+    deletePhoto,
     refresh,
   }
 }

@@ -122,6 +122,7 @@ describe('journalPhotoService', () => {
         image: 'https://private.test/full',
         thumbnail: 'https://private.test/thumb',
         contributorName: 'Maya',
+        uploaderId: userId,
         ownedByCurrentUser: true,
         syncStatus: 'synced',
       }),

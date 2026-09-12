@@ -46,6 +46,13 @@ beforeEach(() => {
 })
 
 describe('ProfilePreferences responsive saves', () => {
+  it('does not show a load error before a signed-out member has requested preferences', () => {
+    render(<ProfilePreferences userId={null} widgetStorageSubject="signed-out" />)
+
+    expect(screen.queryByRole('status')).not.toBeInTheDocument()
+    expect(persistence.readProfilePreferences).not.toHaveBeenCalled()
+  })
+
   it('keeps every switch responsive while another preference is saving', async () => {
     const user = userEvent.setup()
     const updatesSave = deferredPreferences()
@@ -111,6 +118,44 @@ describe('ProfilePreferences responsive saves', () => {
     await act(async () => { save.resolve({ ...initial, quietHoursEnabled: false }) })
     expect(quiet).toHaveAttribute('aria-checked', 'false')
     expect(persistence.updateProfilePreferences).toHaveBeenCalledTimes(1)
+  })
+
+  it('serializes same-tick taps before React can paint an updated switch', async () => {
+    const firstSave = deferredPreferences()
+    persistence.updateProfilePreferences.mockReturnValueOnce(firstSave.promise)
+    renderPreferences()
+    await waitForInitialPreferences()
+    const updates = screen.getByRole('switch', { name: 'Family updates' })
+
+    act(() => {
+      updates.click()
+      updates.click()
+      updates.click()
+      updates.click()
+    })
+    expect(updates).toHaveAttribute('aria-checked', 'true')
+    expect(persistence.updateProfilePreferences).toHaveBeenCalledTimes(1)
+    await act(async () => { firstSave.resolve({ ...initial, notificationsEnabled: false }) })
+    await waitFor(() => expect(updates).toHaveAttribute('aria-busy', 'false'))
+    expect(persistence.updateProfilePreferences.mock.calls).toEqual([
+      [{ notificationsEnabled: false }, { expectedSubject: 'alice' }],
+      [{ notificationsEnabled: true }, { expectedSubject: 'alice' }],
+    ])
+    expect(updates).toHaveAttribute('aria-checked', 'true')
+  })
+
+  it('ignores an old account load failure after the new account has hydrated', async () => {
+    const oldRead = deferredPreferences()
+    persistence.readProfilePreferences
+      .mockReturnValueOnce(oldRead.promise)
+      .mockResolvedValueOnce({ ...initial, notificationsEnabled: false })
+    const view = renderPreferences()
+    view.rerender(<ProfilePreferences userId="bob" widgetStorageSubject="bob:family:family-2" />)
+    await waitFor(() => expect(screen.getByRole('switch', { name: 'Family updates' }))
+      .toHaveAttribute('aria-checked', 'false'))
+    await act(async () => { oldRead.reject(new Error('old account request failed')) })
+    expect(screen.queryByText('Preferences could not be synced right now.')).not.toBeInTheDocument()
+    expect(screen.getByRole('switch', { name: 'Family updates' })).toHaveAttribute('aria-checked', 'false')
   })
 
   it('ignores stale initial preferences after the member has made and saved a choice', async () => {
@@ -266,6 +311,31 @@ describe('ProfilePreferences responsive saves', () => {
     ])
     await act(async () => { second.resolve(initial) })
     expect(persistence.updateProfilePreferences).toHaveBeenCalledTimes(2)
+  })
+
+  it('does not hydrate a new account from the previous account while its read is pending', async () => {
+    const bobPreferences = deferredPreferences()
+    persistence.readProfilePreferences
+      .mockResolvedValueOnce({ ...initial, widgetPreviewsEnabled: true })
+      .mockReturnValueOnce(bobPreferences.promise)
+    const bobStorageSubject = 'bob:family:family-2'
+    const view = render(
+      <ProfilePreferences userId="alice" widgetStorageSubject={storageSubject} />,
+    )
+    await waitFor(() => expect(readWidgetPrivacy(storageSubject)).toBe('full'))
+
+    view.rerender(
+      <ProfilePreferences userId="bob" widgetStorageSubject={bobStorageSubject} />,
+    )
+
+    expect(screen.getByRole('switch', { name: 'Widget previews' }))
+      .toHaveAttribute('aria-checked', 'false')
+    expect(readWidgetPrivacy(bobStorageSubject)).toBe('hidden')
+
+    await act(async () => { bobPreferences.resolve(initial) })
+    expect(screen.getByRole('switch', { name: 'Widget previews' }))
+      .toHaveAttribute('aria-checked', 'false')
+    expect(readWidgetPrivacy(bobStorageSubject)).toBe('hidden')
   })
 
   it('keeps the old account guard on queued changes when the account view is replaced', async () => {

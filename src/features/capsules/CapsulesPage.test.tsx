@@ -20,6 +20,12 @@ const capsuleServiceMocks = vi.hoisted(() => ({
   subscribeToFamilyCapsules: vi.fn(),
   uploadFamilyCapsulePhoto: vi.fn(),
 }))
+const capsuleDeletionMocks = vi.hoisted(() => ({
+  fetchFamilyCapsuleDeletions: vi.fn(),
+  subscribeToFamilyCapsuleDeletions: vi.fn(),
+  deleteFamilyCapsule: vi.fn(),
+  deleteFamilyCapsulePhoto: vi.fn(),
+}))
 const nativeRecapMocks = vi.hoisted(() => ({
   discardNativeCapsuleRecapArtifacts: vi.fn(),
   isNativeCapsuleRecapAvailable: vi.fn(),
@@ -34,7 +40,13 @@ const authMocks = vi.hoisted(() => ({
 vi.mock('./processCapsuleImage', () => capsuleImageMocks)
 vi.mock('./capsulePhotoDate', () => capsulePhotoDateMocks)
 vi.mock('./capsuleService', () => capsuleServiceMocks)
+vi.mock('./capsuleDeletionService', () => capsuleDeletionMocks)
 vi.mock('./recap/nativeCapsuleRecap', () => nativeRecapMocks)
+// Pixel composition has dedicated canvas tests; these tests exercise source
+// selection, native staging order, cleanup, and the export mutex.
+vi.mock('./recap/recapAttribution', () => ({
+  prepareAttributedRecapFrame: async (blob: Blob) => blob,
+}))
 vi.mock('../auth', () => ({
   useAuth: () => ({
     isDevelopmentPreview: authMocks.isDevelopmentPreview,
@@ -120,6 +132,10 @@ beforeEach(() => {
   capsuleServiceMocks.subscribeToFamilyCapsules.mockResolvedValue(() => undefined)
   capsuleServiceMocks.uploadFamilyCapsulePhoto.mockResolvedValue(null)
   capsuleServiceMocks.createFamilySpecialCapsule.mockResolvedValue(null)
+  capsuleDeletionMocks.fetchFamilyCapsuleDeletions.mockResolvedValue(null)
+  capsuleDeletionMocks.subscribeToFamilyCapsuleDeletions.mockResolvedValue(() => undefined)
+  capsuleDeletionMocks.deleteFamilyCapsule.mockResolvedValue(undefined)
+  capsuleDeletionMocks.deleteFamilyCapsulePhoto.mockResolvedValue(undefined)
   capsulePhotoDateMocks.getCapsulePhotoCapturedAt.mockResolvedValue(
     '2011-05-06T07:08:09.000Z',
   )
@@ -520,8 +536,8 @@ describe('CapsulesPage', () => {
 
     const pastHeading = await screen.findByRole('heading', { name: previousWeekRange })
     const pastCard = pastHeading.closest('article')
-    expect(screen.getByRole('heading', { name: 'Past weeks' })).toBeInTheDocument()
-    expect(screen.getByRole('list', { name: 'Past weekly recaps' })).toContainElement(pastCard)
+    expect(screen.getByRole('heading', { name: 'Past Capsules' })).toBeInTheDocument()
+    expect(screen.getByRole('list', { name: 'Past Capsules' })).toContainElement(pastCard)
     expect(screen.getByText('Swipe · play · download')).toBeInTheDocument()
     expect(screen.queryByText('Last week')).not.toBeInTheDocument()
     expect(pastCard).toHaveTextContent('Open')
@@ -563,6 +579,51 @@ describe('CapsulesPage', () => {
     expect(window.localStorage.getItem(
       eventStorageKey('bubble-widget-viewed-recaps:v1', widgetStorageSubject),
     )).toContain(unlocked.id)
+  })
+
+  it.each([
+    { kind: 'weekly', offset: -1 }, { kind: 'weekly', offset: 0 }, { kind: 'weekly', offset: 1 },
+    { kind: 'special', offset: -1 }, { kind: 'special', offset: 0 }, { kind: 'special', offset: 1 },
+  ] as const)('moves a $kind capsule to Past only beyond the three-day boundary ($offset ms)', async ({ kind, offset }) => {
+    const selected = kind === 'weekly'
+      ? unlockedCapsule()
+      : { ...lockedSpecialCapsule('anniversary', 'Our anniversary'), familySynced: true }
+    selected.opensAt = new Date(testNow.getTime() - 3 * 24 * 60 * 60 * 1000 - offset).toISOString()
+    selected.closesAt = selected.opensAt
+    const store = createMemoryCapsuleStore([selected])
+    render(<CapsulesPage now={testNow} store={store} />)
+    const title = kind === 'weekly' ? previousWeekRange : selected.title
+    const card = (await screen.findByRole('heading', { name: title })).closest('article')!
+
+    if (offset > 0) {
+      expect(screen.getByRole('list', { name: 'Past Capsules' })).toContainElement(card)
+      expect(screen.queryByRole('list', { name: 'Recently opened Capsules' })).not.toBeInTheDocument()
+    } else {
+      expect(screen.queryByRole('list', { name: 'Past Capsules' })).not.toBeInTheDocument()
+      if (kind === 'weekly') {
+        expect(screen.getByRole('heading', { name: 'Just opened' })).toBeInTheDocument()
+        expect(screen.getByRole('list', { name: 'Recently opened Capsules' })).toContainElement(card)
+      } else {
+        expect(screen.getByRole('heading', { name: 'Special Capsules' }).closest('section')).toContainElement(card)
+      }
+    }
+    expect(within(card).getByRole('button', { name: 'Play recap' })).toBeEnabled()
+    expect(screen.getAllByRole('heading', { name: title })).toHaveLength(1)
+    expect((await store.list()).find(({ id }) => id === selected.id)?.photos).toHaveLength(selected.photos.length)
+  })
+
+  it('combines past weekly and special Capsules while retaining an empty authored special', async () => {
+    const special = {
+      ...lockedSpecialCapsule('old-birthday', 'Family birthday'),
+      opensAt: unlockedCapsule().opensAt, closesAt: unlockedCapsule().closesAt,
+      photos: [], totalPhotoCount: 0, familySynced: true,
+    }
+    render(<CapsulesPage now={testNow} store={createMemoryCapsuleStore([unlockedCapsule(), special])} />)
+    const past = await screen.findByRole('list', { name: 'Past Capsules' })
+    expect(past.children).toHaveLength(2)
+    expect(within(past).getByRole('heading', { name: previousWeekRange })).toBeInTheDocument()
+    expect(within(past).getByRole('heading', { name: 'Family birthday' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'Special Capsules' }).closest('section')).not.toHaveTextContent('Family birthday')
   })
 
   it('focuses the exact authorized Capsule requested by a widget contribution', async () => {
@@ -620,11 +681,12 @@ describe('CapsulesPage', () => {
     expect(trigger).toHaveFocus()
   })
 
-  it('renders a one-photo Past Capsule as one accessible recap card', async () => {
-    const store = createMemoryCapsuleStore([unlockedCapsule()])
+  it('previews a one-photo Past Capsule while it is within four days of unlock', async () => {
+    const recent = { ...unlockedCapsule(), opensAt: new Date(testNow.getTime() - 3.5 * 24 * 60 * 60 * 1000).toISOString() }
+    const store = createMemoryCapsuleStore([recent])
     render(<CapsulesPage now={testNow} store={store} />)
 
-    const slider = await screen.findByRole('list', { name: 'Past weekly recaps' })
+    const slider = await screen.findByRole('list', { name: 'Past Capsules' })
     expect(slider).toHaveAttribute('data-single', 'true')
     expect(slider.children).toHaveLength(1)
 
@@ -657,7 +719,49 @@ describe('CapsulesPage', () => {
     })).toBe(image)
   })
 
-  it('does not show Past weeks before the family has an uploaded weekly photo', async () => {
+  it('keeps older recap photos covered until the user opens the recap', async () => {
+    const user = userEvent.setup()
+    render(<CapsulesPage now={testNow} store={createMemoryCapsuleStore([unlockedCapsule()])} />)
+    const card = (await screen.findByRole('heading', { name: previousWeekRange })).closest('article')!
+    expect(card.querySelector('img[src="/photo-one-thumb.jpg"]')).toBeNull()
+    expect(card.querySelector('img[src="/photo-one.jpg"]')).toBeNull()
+    await user.click(within(card).getByRole('button', { name: 'Play recap' }))
+    const dialog = screen.getByRole('dialog', { name: previousWeekRange })
+    expect(dialog.querySelector('img[src="/photo-one.jpg"]')).not.toBeNull()
+    await user.click(within(dialog).getByRole('button', { name: 'Close recap' }))
+    expect(card.querySelector('img[src="/photo-one-thumb.jpg"]')).toBeNull()
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+  })
+
+  it('protects the ongoing weekly Capsule while keeping its own photos manageable', async () => {
+    const current: FamilyCapsule = { ...unlockedCapsule(), id: 'weekly-2026-08-24',
+      weekStart: '2026-08-24', createdAt: '2026-08-24T00:00:00Z',
+      closesAt: '2026-08-31T00:00:00Z', opensAt: '2026-08-31T00:00:00Z',
+      ownedByCurrentUser: true, familySynced: false }
+    const special = lockedSpecialCapsule('special-one', 'Our special day')
+    render(<CapsulesPage now={testNow} store={createMemoryCapsuleStore([current, special])} />)
+    const weekSection = (await screen.findByRole('heading', { name: currentWeekRange })).closest('section')!
+    expect(within(weekSection).queryByRole('button', { name: /(?:Delete|Hide) Capsule/ })).not.toBeInTheDocument()
+    expect(within(weekSection).getByRole('button', { name: 'Manage my photos (1)' })).toBeInTheDocument()
+    const specialCard = screen.getByRole('heading', { name: special.title }).closest('article')!
+    expect(within(specialCard).getByRole('button', { name: 'Delete Capsule' })).toHaveTextContent('×')
+  })
+
+  it('requires confirmation behind a special Capsule cross and never opens its recap', async () => {
+    const user = userEvent.setup()
+    const special = lockedSpecialCapsule('special-one', 'Keep this special day')
+    const store = createMemoryCapsuleStore([special])
+    render(<CapsulesPage now={testNow} store={store} />)
+    const card = (await screen.findByRole('heading', { name: special.title })).closest('article')!
+    await user.click(within(card).getByRole('button', { name: 'Delete Capsule' }))
+    expect(within(card).getByRole('heading', { name: 'Delete this Capsule?' })).toBeInTheDocument()
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+    await user.click(within(card).getByRole('button', { name: 'Keep Capsule' }))
+    expect((await store.list()).find(({ id }) => id === special.id)).toBeDefined()
+    expect(capsuleDeletionMocks.deleteFamilyCapsule).not.toHaveBeenCalled()
+  })
+
+  it('does not show Past Capsules before the family has an uploaded weekly photo', async () => {
     const emptyPastWeek: FamilyCapsule = {
       ...unlockedCapsule(),
       photos: [],
@@ -667,12 +771,12 @@ describe('CapsulesPage', () => {
     render(<CapsulesPage now={testNow} store={store} />)
 
     await screen.findByRole('heading', { name: currentWeekRange })
-    expect(screen.queryByRole('heading', { name: 'Past weeks' })).not.toBeInTheDocument()
-    expect(screen.queryByRole('list', { name: 'Past weekly recaps' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: 'Past Capsules' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('list', { name: 'Past Capsules' })).not.toBeInTheDocument()
     expect(screen.queryByRole('heading', { name: previousWeekRange })).not.toBeInTheDocument()
   })
 
-  it('keeps a locally saved family photo in Past weeks while it waits to sync', async () => {
+  it('keeps a locally saved family photo in Past Capsules while it waits to sync', async () => {
     const pendingPastWeek = unlockedCapsule()
     pendingPastWeek.photos = pendingPastWeek.photos.map((photo) => ({
       ...photo,
@@ -683,7 +787,7 @@ describe('CapsulesPage', () => {
     const store = createMemoryCapsuleStore([pendingPastWeek])
     render(<CapsulesPage now={testNow} store={store} />)
 
-    expect(await screen.findByRole('heading', { name: 'Past weeks' })).toBeInTheDocument()
+    expect(await screen.findByRole('heading', { name: 'Past Capsules' })).toBeInTheDocument()
     expect(screen.getByRole('heading', { name: previousWeekRange })).toBeInTheDocument()
   })
 
@@ -705,7 +809,7 @@ describe('CapsulesPage', () => {
     const store = createMemoryCapsuleStore([older, latest])
     render(<CapsulesPage now={testNow} store={store} />)
 
-    const slider = await screen.findByRole('list', { name: 'Past weekly recaps' })
+    const slider = await screen.findByRole('list', { name: 'Past Capsules' })
     expect(slider).toHaveAttribute('data-single', 'false')
     expect(slider.children).toHaveLength(2)
     const cards = Array.from(slider.children) as HTMLElement[]
@@ -846,9 +950,12 @@ describe('CapsulesPage', () => {
       'datetime',
       capsule.opensAt,
     )
-    expect(card.querySelector('.capsule-photo-strip')).toHaveAttribute('aria-hidden', 'true')
-    expect(card.querySelectorAll('.capsule-photo-strip__concealed')).toHaveLength(3)
-    expect(card.querySelector('img')).toBeNull()
+    expect(card.querySelector('.capsule-empty-polaroids--teasers')).toHaveAttribute('aria-hidden', 'true')
+    expect(card.querySelector('.capsule-envelope')).toHaveAttribute('data-photo-state', 'multiple')
+    expect(card.querySelectorAll('img')).toHaveLength(4)
+    card.querySelectorAll('img').forEach((image) => {
+      expect(image).toHaveAttribute('src', '/assets/capsules/demo-locked-capsule-photos.png')
+    })
     expect(within(card).queryByRole('img', {
       name: /Lea’s wedding breakfast from Simreen/i,
     })).not.toBeInTheDocument()
@@ -880,7 +987,9 @@ describe('CapsulesPage', () => {
     const card = (await screen.findByRole('heading', {
       name: capsule.title,
     })).closest('article')!
-    expect(card.querySelector('img')).toBeNull()
+    expect(card.querySelectorAll('img')).toHaveLength(4)
+    expect(card.querySelector('.capsule-envelope')).toHaveAttribute('data-locked', 'true')
+    expect(card.innerHTML).not.toContain('/uploads/smac-week-photo')
     expect(within(card).getByText('Add photo')).toBeInTheDocument()
     expect(card.querySelector<HTMLInputElement>('input[type="file"]')).toBeEnabled()
     expect(within(card).queryByRole('button', { name: /sample recap/i })).not.toBeInTheDocument()
@@ -1022,6 +1131,7 @@ describe('CapsulesPage', () => {
 
   it('uses an intentional placeholder for an unrecoverable legacy object URL', async () => {
     const staleCapsule = unlockedCapsule()
+    staleCapsule.opensAt = new Date(testNow.getTime() - 3.5 * 24 * 60 * 60 * 1000).toISOString()
     staleCapsule.photos[0] = {
       ...staleCapsule.photos[0],
       image: 'blob:from-an-older-app-session',
@@ -1040,7 +1150,8 @@ describe('CapsulesPage', () => {
   })
 
   it('keeps an expired signed thumbnail behind a placeholder instead of a broken icon', async () => {
-    const store = createMemoryCapsuleStore([unlockedCapsule()])
+    const recent = { ...unlockedCapsule(), opensAt: new Date(testNow.getTime() - 3.5 * 24 * 60 * 60 * 1000).toISOString() }
+    const store = createMemoryCapsuleStore([recent])
     render(<CapsulesPage now={testNow} store={store} />)
 
     const card = (await screen.findByRole('heading', {

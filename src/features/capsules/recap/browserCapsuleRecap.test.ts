@@ -103,11 +103,17 @@ beforeEach(() => {
       fillStyle: '',
       fillRect: vi.fn(),
       drawImage: vi.fn(),
+      save: vi.fn(), restore: vi.fn(), beginPath: vi.fn(), arc: vi.fn(),
+      fill: vi.fn(), clip: vi.fn(), fillText: vi.fn(), stroke: vi.fn(),
     })),
   })
-  vi.spyOn(window, 'setTimeout').mockImplementation(((handler: TimerHandler) => {
-    if (typeof handler === 'function') handler()
-    return 1
+  const originalSetTimeout = window.setTimeout.bind(window)
+  vi.spyOn(window, 'setTimeout').mockImplementation(((handler: TimerHandler, delay?: number) => {
+    if (delay === 200 && typeof handler === 'function') {
+      handler()
+      return 1
+    }
+    return originalSetTimeout(handler, delay)
   }) as typeof window.setTimeout)
 })
 
@@ -121,6 +127,33 @@ afterEach(() => {
 })
 
 describe('renderBrowserCapsuleRecap', () => {
+  it('records the contributor avatar into the video frame and releases its decoded URL', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true, blob: async () => new Blob(['image'], { type: 'image/jpeg' }),
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    await renderBrowserCapsuleRecap([{
+      ...photo('1', 'https://storage.example/photo.jpg'),
+      contributorName: 'Simreen', contributorAvatarUrl: 'https://images.example/simreen.jpg',
+    }])
+    expect(fetchMock).toHaveBeenCalledWith('https://images.example/simreen.jpg', {
+      referrerPolicy: 'no-referrer', signal: expect.any(AbortSignal),
+    })
+    expect(loadedSources).toEqual(['blob:capsule-recap-1', 'blob:capsule-recap-2'])
+    const context = vi.mocked(HTMLCanvasElement.prototype.getContext).mock.results[0].value
+    expect(context.drawImage).toHaveBeenCalledTimes(2)
+    expect(context.fillText).not.toHaveBeenCalled()
+    expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:capsule-recap-2')
+  })
+
+  it('rejects an oversized film before loading photos rather than dropping later contributors', async () => {
+    const fetchMock = vi.fn()
+    vi.stubGlobal('fetch', fetchMock)
+    await expect(renderBrowserCapsuleRecap(Array.from({ length: 151 }, () => photo('1', 'https://storage.example/photo.jpg'))))
+      .rejects.toThrow('Video export supports up to 150')
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
+
   it('fetches a signed remote image into a same-origin object URL before drawing', async () => {
     const remoteBlob = new Blob(['photo'], { type: 'image/jpeg' })
     const fetchMock = vi.fn().mockResolvedValue({

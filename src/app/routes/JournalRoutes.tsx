@@ -1,4 +1,5 @@
 import { useMemo } from 'react'
+import { removeCapsuleContent } from '../../features/capsules/capsuleRemovalActions'
 import type {
   CapsuleStore,
   FamilyCapsule,
@@ -63,7 +64,6 @@ function useJournalRouteData({
       (suppliedCapsules === undefined && archive.loading) ||
       (suppliedJournalPhotos === undefined && photoLibrary.loading),
     now: now ?? archive.clock,
-    openAllPhotosByDefault: isDevelopmentPreview === true,
     photoLibrary,
   }
 }
@@ -94,8 +94,13 @@ export function JournalRoute({
       capsuleCacheNamespace={capsuleCacheNamespace}
       journalPhotos={routeData.journalPhotos}
       onUploadJournalPhotos={routeData.photoLibrary.importPhotos}
+      onDeleteJournalPhoto={routeData.photoLibrary.deletePhoto}
+      onDeleteCapsulePhoto={async (capsuleId, photoId) => {
+        const capsule = routeData.capsules.find(({ id }) => id === capsuleId)
+        if (!capsule) throw new Error('This Capsule is no longer available. Please refresh Journal.')
+        await removeCapsuleContent({ scope: capsuleCacheNamespace, capsule, photoId, store: capsuleStore })
+      }}
       journalPhotoImportProgress={routeData.photoLibrary.importProgress}
-      openAllPhotosByDefault={routeData.openAllPhotosByDefault}
     />
   )
 }

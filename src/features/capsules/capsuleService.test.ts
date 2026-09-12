@@ -64,6 +64,7 @@ import {
   createFamilySpecialCapsule,
   ensureFamilyWeeklyCapsule,
   fetchFamilyCapsules,
+  getCapsuleFamilyContext,
   uploadFamilyCapsulePhoto,
 } from './capsuleService'
 
@@ -132,6 +133,7 @@ describe('capsuleService', () => {
         closes_at: '2026-08-31T00:00:00.000Z',
         item_count: 3,
         created_at: '2026-08-24T00:00:00.000Z',
+        created_by: userId,
         creator: { display_name: 'Simreen' },
       }],
       error: null,
@@ -147,7 +149,7 @@ describe('capsuleService', () => {
         caption: 'Pancakes',
         captured_at: '2026-08-29T08:00:00.000Z',
         uploader_id: userId,
-        uploader: { display_name: 'Simreen' },
+        uploader: { display_name: 'Simreen', avatar_path: 'https://images.example/simreen.jpg' },
       }],
       error: null,
     })
@@ -164,11 +166,15 @@ describe('capsuleService', () => {
         id: capsuleId,
         familySynced: true,
         totalPhotoCount: 3,
+        createdById: userId,
+        ownedByCurrentUser: true,
         photos: [
           expect.objectContaining({
             image: 'https://private.test/photo',
             thumbnail: 'https://private.test/thumb',
             contributorName: 'Simreen',
+            contributorAvatarUrl: 'https://images.example/simreen.jpg',
+            uploaderId: userId,
             ownedByCurrentUser: true,
           }),
         ],
@@ -180,6 +186,38 @@ describe('capsuleService', () => {
     )
     expect(mocks.itemsQuery.in).toHaveBeenCalledWith('capsule_id', [capsuleId])
     expect(mocks.itemsQuery.range).toHaveBeenCalledWith(0, 499)
+    expect(mocks.itemsQuery.select).toHaveBeenCalledWith(expect.stringContaining('(display_name,avatar_path)'))
+    expect(mocks.itemsQuery.order).toHaveBeenCalledWith('id', { ascending: true })
+  })
+
+  it('returns all visible family contributors rather than only the signed-in uploader', async () => {
+    const otherId = 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee'
+    const ownItem = {
+      id: itemId, capsule_id: capsuleId, image_path: 'own-image', thumbnail_path: 'own-thumb',
+      image_width: 900, image_height: 1200, captured_at: '2026-08-29T08:00:00.000Z',
+      uploader_id: userId, uploader: { display_name: 'Simreen', avatar_path: 'https://images.example/simreen.jpg' },
+    }
+    const familyItem = {
+      ...ownItem, id: otherId, uploader_id: otherId, image_path: 'family-image', thumbnail_path: 'family-thumb',
+      uploader: [{ display_name: 'Mum', avatar_path: 'javascript:alert(1)' }],
+    }
+    mocks.capsulesQuery.limit.mockResolvedValue({ data: [{
+      id: capsuleId, kind: 'weekly', title: 'This week', week_start: '2026-08-24',
+      opens_at: '2026-08-31T00:00:00.000Z', closes_at: '2026-08-31T00:00:00.000Z',
+      item_count: 2, created_at: '2026-08-24T00:00:00.000Z',
+    }], error: null })
+    mocks.itemsQuery.range.mockResolvedValue({ data: [ownItem, familyItem], error: null })
+    mocks.bucket.createSignedUrls.mockImplementation(async (paths: string[]) => ({
+      data: paths.map((path) => ({ signedUrl: `https://private.test/${path}` })), error: null,
+    }))
+
+    const [capsule] = await fetchFamilyCapsules()
+    expect(capsule.photos).toEqual([
+      expect.objectContaining({ contributorName: 'Simreen', contributorAvatarUrl: 'https://images.example/simreen.jpg', ownedByCurrentUser: true }),
+      expect.objectContaining({ contributorName: 'Mum', contributorAvatarUrl: undefined, ownedByCurrentUser: false }),
+    ])
+    expect(mocks.itemsQuery.eq).toHaveBeenCalledWith('circle_id', circleId)
+    expect(mocks.itemsQuery.eq).not.toHaveBeenCalledWith('uploader_id', expect.anything())
   })
 
   it('uses a stable client ID when retrying special Capsule creation', async () => {
@@ -197,6 +235,19 @@ describe('capsuleService', () => {
       p_opens_at: '2026-09-20T20:00:00.000Z',
       p_capsule_id: capsuleId,
     })
+  })
+
+  it('rejects a deletion caller from another account/family namespace', async () => {
+    await expect(getCapsuleFamilyContext(`another-user:${circleId}`)).resolves.toBeNull()
+    await expect(getCapsuleFamilyContext('user_test:eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee')).resolves.toBeNull()
+    expect(mocks.client.rpc).not.toHaveBeenCalled()
+  })
+
+  it('invalidates a resolved family context as soon as the account changes', async () => {
+    const context = await getCapsuleFamilyContext(`user_test:${circleId}`)
+    expect(context?.isCurrent()).toBe(true)
+    mocks.getClerkSupabaseIdentity.mockReturnValue({ subject: 'another-user' })
+    expect(context?.isCurrent()).toBe(false)
   })
 
   it('uploads an ordinary portrait image to canonical private paths before finalizing', async () => {

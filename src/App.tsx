@@ -176,11 +176,12 @@ function CapsulePhotoMemberRoute() {
 /** Wraps every member route in the shell and account-scoped data providers. */
 function MemberApplication() {
   const storageSubject = useActiveMemberStorageSubject()
+  const cacheNamespace = useActiveMemberCacheNamespace()
   return (
     <AccountScopedData>
       <WidgetDeepLinkHandler storageSubject={storageSubject} />
       <WidgetSnapshotPublisher storageSubject={storageSubject} />
-      <AppShell>
+      <AppShell memberCacheNamespace={cacheNamespace}>
         <Suspense fallback={<RouteLoading />}>
           <Outlet />
         </Suspense>

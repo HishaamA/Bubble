@@ -5,11 +5,13 @@ import type {
   FamilyCapsule,
 } from '../capsules/types'
 import type { AppTheme } from '../../theme/AppTheme'
+import type { JournalPhoto } from '../journal/journalPhotoTypes'
 import {
-  addLocalDays,
-  startOfCapsuleWeek,
-  toLocalDateInput,
-} from '../capsules/capsuleDates'
+  journalWidgetPhotoRoute,
+  journalWidgetPhotoKey,
+  journalWidgetRotationMs,
+  selectJournalWidgetPhotos,
+} from './journalWidgetPhotos'
 
 const twoHoursMs = 2 * 60 * 60 * 1_000
 const maxScheduledTransitions = 12
@@ -81,6 +83,8 @@ export type SelectBubbleWidgetInput = {
   events: readonly WidgetEvent[]
   /** Capsules fetched from the authenticated family service, never local cache. */
   authorizedCapsules: readonly FamilyCapsule[]
+  /** All library uploads fetched from the authenticated, account-scoped service. */
+  authorizedJournalPhotos?: readonly JournalPhoto[]
   viewedRecapIds?: ReadonlySet<string>
   allowContributionPrompt?: boolean
   /** Lets the timeline selector derive the prompt's 17:00–21:00 window. */
@@ -116,7 +120,8 @@ export function selectBubbleWidget(
   const urgentActions = flattenActions(urgentEvents)
   const authorizedCapsules = input.authorizedCapsules
     .filter(isServiceAuthorizedCapsule)
-  const nextRefreshAt = calculateNextRefreshAt(now, events, authorizedCapsules)
+  const journalPhotos = selectJournalWidgetPhotos(input.authorizedJournalPhotos ?? [], authorizedCapsules, now)
+  const nextRefreshAt = calculateNextRefreshAt(now, events, authorizedCapsules, journalPhotos.length > 1)
   const common = {
     version: 1 as const,
     generatedAt: now.toISOString(),
@@ -209,28 +214,20 @@ export function selectBubbleWidget(
     })
   }
 
-  const memoryCapsule = authorizedCapsules
-    .filter((capsule) => (
-      capsule.kind === 'weekly'
-      && dateMs(capsule.opensAt) <= nowMs
-      && representsImmediatelyPreviousLocalWeek(capsule, now)
-      && latestPhoto(capsule.photos) !== undefined
-    ))
-    .sort((left, right) => dateMs(right.opensAt) - dateMs(left.opensAt))[0]
-  const memoryPhoto = memoryCapsule ? latestPhoto(memoryCapsule.photos) : undefined
-  if (memoryCapsule && memoryPhoto) {
+  const memory = journalPhotos[0]
+  if (memory) {
     return protectSelection({
       snapshot: {
         ...common,
         kind: 'memory',
-        eyebrow: 'Last week',
-        title: photoTitle(memoryPhoto),
-        subtitle: memoryPhoto.contributorName
-          ? memoryPhoto.contributorName
+        eyebrow: 'From your Journal',
+        title: photoTitle(memory.photo),
+        subtitle: memory.photo.contributorName
+          ? memory.photo.contributorName
           : 'A memory worth keeping',
-        route: `/journal/photo/${encodeURIComponent(memoryCapsule.id)}/${encodeURIComponent(memoryPhoto.id)}`,
+        route: journalWidgetPhotoRoute(memory),
       },
-      thumbnail: memoryPhoto.thumbnail,
+      thumbnail: memory.photo.thumbnail,
     })
   }
 
@@ -334,25 +331,17 @@ function selectCurrentPages(input: SelectBubbleWidgetInput, current: BubbleWidge
       route: `/capsule?recap=${encodeURIComponent(capsule.id)}&source=widget`,
     }, latestPhoto(capsule.photos)?.thumbnail))
 
-  const previousWeek = opened.find((capsule) => (
-    capsule.kind === 'weekly' && representsImmediatelyPreviousLocalWeek(capsule, input.now)
-    && latestPhoto(capsule.photos) !== undefined
-  ))
-  if (previousWeek) {
-    [...previousWeek.photos].filter((photo) => (
-      photo.syncStatus === 'synced' && validDate(photo.capturedAt) !== null
-    )).sort((left, right) => dateMs(right.capturedAt) - dateMs(left.capturedAt)
-      || left.id.localeCompare(right.id)).slice(0, 6).forEach((photo) => add({
+  selectJournalWidgetPhotos(input.authorizedJournalPhotos ?? [], opened, input.now)
+    .slice(0, 6).forEach((memory) => add({
       ...common,
-      id: pageId('photos', previousWeek.id, photo.id),
+      id: pageId('photos', journalWidgetPhotoKey(memory)),
       group: 'photos',
       kind: 'memory',
-      eyebrow: 'Last week',
-      title: photoTitle(photo),
-      subtitle: photo.contributorName || 'A memory worth keeping',
-      route: `/journal/photo/${encodeURIComponent(previousWeek.id)}/${encodeURIComponent(photo.id)}`,
-    }, photo.thumbnail))
-  }
+      eyebrow: 'From your Journal',
+      title: photoTitle(memory.photo),
+      subtitle: memory.photo.contributorName || 'A memory worth keeping',
+      route: journalWidgetPhotoRoute(memory),
+    }, memory.photo.thumbnail))
   if (current.kind === 'capture' || current.kind === 'empty') {
     add({
       ...widgetCard(current),
@@ -363,7 +352,7 @@ function selectCurrentPages(input: SelectBubbleWidgetInput, current: BubbleWidge
   return { pages, thumbnails }
 }
 
-function photoTitle(photo: CapsulePhoto) {
+function photoTitle(photo: JournalPhoto) {
   const caption = photo.caption.trim()
   return /^(?:image|photo|img[_ -]?\d+|fullsizerender)(?:\.[a-z0-9]+)?$/i.test(caption)
     ? 'A little memory'
@@ -488,23 +477,11 @@ function latestPhoto(photos: readonly CapsulePhoto[]) {
     .sort((left, right) => dateMs(right.capturedAt) - dateMs(left.capturedAt))[0]
 }
 
-function representsImmediatelyPreviousLocalWeek(
-  capsule: FamilyCapsule,
-  now: Date,
-) {
-  const currentWeekStart = startOfCapsuleWeek(now)
-  const previousWeekStart = addLocalDays(currentWeekStart, -7)
-  if (capsule.weekStart) {
-    return capsule.weekStart === toLocalDateInput(previousWeekStart)
-  }
-  const opensAt = validDate(capsule.opensAt)
-  return opensAt !== null && isSameLocalDay(opensAt, currentWeekStart)
-}
-
 function calculateNextRefreshAt(
   now: Date,
   events: readonly WidgetEvent[],
   capsules: readonly FamilyCapsule[],
+  rotatePhotos: boolean,
 ) {
   const nowMs = now.getTime()
   const nextDay = new Date(
@@ -525,6 +502,9 @@ function calculateNextRefreshAt(
     21,
   ).getTime()
   const candidates = [nextDay]
+  if (rotatePhotos) {
+    candidates.push((Math.floor(nowMs / journalWidgetRotationMs) + 1) * journalWidgetRotationMs)
+  }
 
   if (contributionWindowStart > nowMs) {
     candidates.push(contributionWindowStart)

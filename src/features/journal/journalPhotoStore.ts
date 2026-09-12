@@ -64,6 +64,10 @@ export function parseStoredJournalPhoto(value: unknown): JournalPhoto | null {
     caption: value.caption,
     capturedAt: capturedAt.toISOString(),
     contributorName: value.contributorName,
+    ...(typeof value.uploaderId === 'string' &&
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value.uploaderId)
+      ? { uploaderId: value.uploaderId }
+      : {}),
     ownedByCurrentUser: value.ownedByCurrentUser,
     syncStatus: value.syncStatus,
   }

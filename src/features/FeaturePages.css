@@ -1187,11 +1187,10 @@
 
 .profile-family-copy small {
   margin-top: 0.16rem;
-  overflow: hidden;
   color: rgba(255, 255, 255, 0.42);
-  font-size: 0.62rem;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  font-size: 0.75rem;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
 }
 
 .profile-toast {
@@ -1335,6 +1334,8 @@
 
 .profile-page .ks-section {
   position: relative;
+  min-width: 0;
+  grid-template-columns: minmax(0, 1fr);
   gap: 0.72rem;
   margin-top: 1.5rem;
 }
@@ -1348,6 +1349,8 @@
   font-family: var(--font-accent);
   font-size: 1.08rem;
   font-weight: 560;
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 .profile-page .profile-action-row {
@@ -1403,7 +1406,9 @@
 
 .profile-page .profile-family-copy strong {
   color: var(--profile-ink);
-  font-size: 0.79rem;
+  font-size: 0.88rem;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
 }
 
 .profile-page .profile-family-copy small {
@@ -1433,8 +1438,10 @@
 }
 
 .profile-page .settings-card {
+  container: profile-preferences / inline-size;
+  min-width: 0;
   overflow: visible;
-  padding: 0.15rem 0.8rem;
+  padding: 0.15rem min(0.8rem, 14px);
   border: 1.5px solid rgba(23, 59, 99, 0.45);
   border-radius: 0.72rem 0.92rem 0.68rem 0.86rem;
   color: var(--profile-ink);
@@ -1457,11 +1464,25 @@
 
 .profile-page .settings-row__copy strong {
   color: var(--profile-ink);
-  font-size: 0.78rem;
+  font-size: 0.86rem;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+/* Text can grow without forcing the switch or its description off the card. */
+@container profile-preferences (max-width: 15rem) {
+  .profile-page .settings-row {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: min(0.5rem, 10px);
+  }
 }
 
 .profile-page .settings-row__copy span {
   color: var(--profile-muted);
+  font-size: 0.75rem;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
 }
 
 .profile-page .ks-toggle::before {
@@ -1515,7 +1536,7 @@
   gap: 0.8rem;
   margin: 0.1rem 0.45rem 0;
   width: calc(100% - 0.9rem);
-  padding: 0.85rem;
+  padding: min(0.85rem, 14px);
   border: 1px solid rgba(23, 59, 99, 0.3);
   border-top: 0;
   border-radius: 0 0 0.82rem 0.66rem;
@@ -1673,7 +1694,7 @@
 }
 
 .profile-page .family-sync__circle-card {
-  padding: 0.8rem;
+  padding: min(0.8rem, 13px);
   border: 1px solid rgba(23, 59, 99, 0.3);
   border-radius: 0.74rem 0.62rem 0.86rem 0.68rem;
   background: rgba(151, 181, 141, 0.28);
@@ -1724,7 +1745,7 @@
   .profile-page .family-sync {
     margin-inline: 0.25rem;
     width: calc(100% - 0.5rem);
-    padding: 0.68rem;
+    padding: min(0.68rem, 11px);
   }
 
   .profile-page .family-sync__code-actions,

@@ -1238,7 +1238,95 @@
 
 .people-timeline__date-editor {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  min-width: 0;
+  max-width: 100%;
   gap: 0.7rem;
+}
+
+/* A native iOS date field has an intrinsic width unless every grid child can
+   shrink. Keep its value inside the paper card without disabling the picker. */
+.people-timeline__date-editor input {
+  box-sizing: border-box;
+  min-width: 0;
+  max-width: 100%;
+  min-height: 2.75rem;
+  font-size: 1rem;
+}
+
+.people-timeline__date-editor input[type='date'] {
+  appearance: none;
+  -webkit-appearance: none;
+  overflow: hidden;
+  color-scheme: light;
+}
+
+.people-timeline__date-editor input[type='date']::-webkit-date-and-time-value {
+  width: 100%;
+  min-width: 0;
+  margin: 0;
+  text-align: left;
+}
+
+.people-timeline__date-editor input[type='date']::-webkit-datetime-edit {
+  min-width: 0;
+  padding: 0;
+}
+
+/* The rest of the timeline sits on a dark canvas; this editor sits on paper.
+   Its ink must stay dark in Plum, Forest and Midnight, including native fields. */
+.journal-page .people-timeline .people-timeline__date-editor {
+  --date-editor-ink: var(--journal-paper-ink, #351129);
+  --date-editor-muted: color-mix(in srgb, var(--date-editor-ink) 78%, var(--journal-paper, #fff0d1));
+  --date-editor-line: color-mix(in srgb, var(--date-editor-ink) 42%, transparent);
+  border-color: var(--date-editor-line);
+  color: var(--date-editor-ink);
+  background: var(--journal-paper, #fff0d1);
+  color-scheme: light;
+}
+
+.journal-page .people-timeline .people-timeline__date-editor label > span {
+  color: var(--date-editor-muted);
+  font-size: 0.78rem;
+  font-weight: 650;
+}
+
+.journal-page .people-timeline .people-timeline__date-editor input {
+  border-color: var(--date-editor-line);
+  color: var(--date-editor-ink);
+  background: color-mix(in srgb, var(--journal-paper, #fff0d1) 30%, white);
+  caret-color: var(--date-editor-ink);
+}
+
+.journal-page .people-timeline .people-timeline__date-editor .people-timeline__date-kind {
+  max-width: 100%;
+  border-color: var(--date-editor-line);
+  background: transparent;
+}
+
+.journal-page .people-timeline .people-timeline__date-editor .people-timeline__date-kind button,
+.journal-page .people-timeline .people-timeline__date-editor .people-timeline__form-actions button {
+  min-width: 0;
+  min-height: 2.75rem;
+  border-color: var(--date-editor-line);
+  color: var(--date-editor-ink);
+  font-size: 0.8rem;
+  overflow-wrap: anywhere;
+}
+
+.journal-page .people-timeline .people-timeline__date-editor .people-timeline__date-kind button[aria-pressed='true'],
+.journal-page .people-timeline .people-timeline__date-editor .people-timeline__form-actions button:first-child {
+  background: var(--journal-accent);
+}
+
+.journal-page .people-timeline .people-timeline__date-editor :is(button, input):focus-visible {
+  outline: 2px solid var(--date-editor-ink);
+  outline-offset: 3px;
+}
+
+.journal-page .people-timeline .people-timeline__date-editor > p[role='alert'] {
+  color: #962738;
+  overflow-wrap: anywhere;
 }
 
 .people-timeline__date-kind {

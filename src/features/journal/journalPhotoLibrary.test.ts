@@ -63,6 +63,20 @@ describe('journal photo library helpers', () => {
     ])
   })
 
+  it('never assigns cached bytes to a different uploader that reused the same photo ID', () => {
+    const oldUpload = {
+      ...photo('same-id', 'synced', new Blob(['old image'])),
+      uploaderId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+    }
+    const otherUpload = {
+      ...photo('same-id', 'synced', 'https://family.example/other-person.jpg'),
+      uploaderId: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
+      ownedByCurrentUser: false,
+    }
+    expect(mergeJournalPhotos([oldUpload], [otherUpload])).toEqual([otherUpload])
+    expect(mergeLocalJournalPhotos([otherUpload], [oldUpload])).toEqual([otherUpload])
+  })
+
   it('does not replace a fresh signed URL with an expired cached URL', () => {
     const id = '22222222-2222-4222-8222-222222222222'
     const cached = {

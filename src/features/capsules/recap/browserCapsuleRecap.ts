@@ -2,7 +2,9 @@ import {
   buildCapsuleRecapPlan,
   CAPSULE_RECAP_FRAME_RATE,
   CAPSULE_RECAP_PHOTO_DURATION_MS,
+  orderCapsuleRecapPhotos,
 } from './recapPlan'
+import { drawRecapAttribution, loadRecapAvatar } from './recapAttribution'
 import type { CapsuleImageSource, CapsulePhoto } from '../types'
 
 const OUTPUT_WIDTH = 720
@@ -118,10 +120,9 @@ export async function renderBrowserCapsuleRecap(photos: CapsulePhoto[]) {
   const plan = buildCapsuleRecapPlan(photos)
   if (plan.frames.length === 0) throw new Error('Add at least one photo first.')
 
-  const orderedPhotos = [...photos]
-    .sort((left, right) => left.capturedAt.localeCompare(right.capturedAt))
-    .slice(0, plan.frames.length)
+  const orderedPhotos = orderCapsuleRecapPhotos(photos)
   const loadedImages = await loadImages(orderedPhotos.map((photo) => photo.image))
+  const loadedAvatars = await Promise.all(orderedPhotos.map(loadRecapAvatar))
   let stream: MediaStream | null = null
   let recorder: MediaRecorder | null = null
   try {
@@ -148,8 +149,10 @@ export async function renderBrowserCapsuleRecap(photos: CapsulePhoto[]) {
     })
 
     recorder.start()
-    for (const { image } of loadedImages) {
+    for (const [index, { image }] of loadedImages.entries()) {
+      const contributor = orderedPhotos[index]
       drawCover(context, image)
+      drawRecapAttribution(context, contributor, loadedAvatars[index]?.image ?? null, OUTPUT_WIDTH)
       await wait(CAPSULE_RECAP_PHOTO_DURATION_MS)
     }
     recorder.stop()
@@ -158,6 +161,7 @@ export async function renderBrowserCapsuleRecap(photos: CapsulePhoto[]) {
     if (recorder?.state !== 'inactive') recorder?.stop()
     stream?.getTracks().forEach((track) => track.stop())
     loadedImages.forEach(({ release }) => release())
+    loadedAvatars.forEach((avatar) => avatar?.release())
   }
 }
 

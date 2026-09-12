@@ -92,8 +92,16 @@ struct BubbleWidgetPageSelection {
         calendar: Calendar = .autoupdatingCurrent
     ) -> String? {
         guard calendar.isDate(selectedAt, inSameDayAs: date),
-              snapshot.availablePages(for: lane, at: date, calendar: calendar)
-                .contains(where: { $0.id == pageID }) else { return nil }
+              let page = snapshot.availablePages(for: lane, at: date, calendar: calendar)
+                .first(where: { $0.id == pageID }) else { return nil }
+        if page.group == .photos {
+            // A manual photo choice stays visible for its current hour, then
+            // reminiscing resumes. Task and recap choices stay member-owned.
+            let anchor = max(selectedAt, snapshot.generatedDate ?? selectedAt)
+            return snapshot.rotatingPhotoPage(
+                startingWith: pageID, anchoredAt: anchor, at: date, calendar: calendar
+            )?.id
+        }
         return pageID
     }
 }
@@ -210,12 +218,48 @@ struct BubbleWidgetSnapshot: Codable {
     ) -> [BubbleWidgetPage] {
         guard privacy == .full,
               wasGenerated(onSameLocalDayAs: date, calendar: calendar),
+              resolvedForDisplay(at: date, calendar: calendar).snapshot.privacy == .full,
               let pages, pages.count <= 12,
               Set(pages.map(\.id)).count == pages.count,
               pages.allSatisfy({ $0.privacy == .full && $0.theme == theme }) else {
             return []
         }
         return pages.filter { lane.group == nil || $0.group == lane.group }
+    }
+
+    /// Rotate only the already-authorized, pre-shuffled photo deck. The page
+    /// keeps its own route and thumbnail identity as one indivisible choice.
+    func rotatingPhotoPage(
+        startingWith pageID: String? = nil,
+        anchoredAt anchor: Date? = nil,
+        at date: Date,
+        calendar: Calendar = .autoupdatingCurrent
+    ) -> BubbleWidgetPage? {
+        let photos = availablePages(for: .photos, at: date, calendar: calendar)
+        guard !photos.isEmpty, let generatedDate else { return nil }
+        let startIndex = photos.firstIndex { $0.id == pageID } ?? 0
+        let from = anchor ?? generatedDate
+        let elapsedHours = max(0, Int(floor(date.timeIntervalSince1970 / 3_600)
+            - floor(from.timeIntervalSince1970 / 3_600)))
+        return photos[(startIndex + elapsedHours) % photos.count]
+    }
+
+    /// Timeline entries are precomputed so photo rotation doesn't depend on
+    /// the app opening again or WidgetKit accepting an immediate reload.
+    func photoRotationDates(
+        after date: Date,
+        calendar: Calendar = .autoupdatingCurrent
+    ) -> [Date] {
+        guard availablePages(for: .photos, at: date, calendar: calendar).count > 1,
+              let end = calendar.date(byAdding: .day, value: 1, to: calendar.startOfDay(for: date))
+        else { return [] }
+        var next = Date(timeIntervalSince1970: (floor(date.timeIntervalSince1970 / 3_600) + 1) * 3_600)
+        var dates: [Date] = []
+        while next < end && dates.count < 25 {
+            dates.append(next)
+            next = next.addingTimeInterval(3_600)
+        }
+        return dates
     }
 
     func emptySnapshot(for lane: BubbleWidgetLane) -> BubbleWidgetSnapshot {
@@ -232,7 +276,7 @@ struct BubbleWidgetSnapshot: Codable {
             version: 1, generatedAt: generatedAt, nextRefreshAt: nil,
             kind: .empty, theme: theme, eyebrow: group.rawValue.capitalized,
             title: title, subtitle: "Open Bubble", badge: nil,
-            route: group == .tasks ? "/journal?section=plans" : "/capsule",
+            route: group == .tasks ? "/journal?section=plans" : group == .photos ? "/journal" : "/capsule",
             privacy: .hidden, schedule: nil
         )
         return fallback
@@ -366,7 +410,9 @@ enum BubbleWidgetStorage {
               let selectedAt = selection["selectedAt"] as? Date,
               let resolvedID = BubbleWidgetPageSelection(pageID: pageID, selectedAt: selectedAt)
                 .resolvedID(in: snapshot, lane: lane, at: date) else {
-            defaults?.removeObject(forKey: key)
+            // Building tomorrow's/another future timeline entry must not
+            // erase a choice that remains valid on the currently shown card.
+            if date <= Date() { defaults?.removeObject(forKey: key) }
             return nil
         }
         return resolvedID

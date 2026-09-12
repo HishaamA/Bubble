@@ -1,7 +1,7 @@
 import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import type { ComponentProps } from 'react'
-import { MemoryRouter, Route, Routes } from 'react-router-dom'
+import { MemoryRouter, Route, Routes, useNavigate } from 'react-router-dom'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { FamilyCapsule } from '../capsules/types'
 import type { JournalPhoto } from './journalPhotoTypes'
@@ -110,7 +110,7 @@ describe('JournalPage', () => {
 
     expect(screen.getByRole('heading', { name: 'Journal' })).toBeInTheDocument()
     expect(screen.getByText('Our family')).toBeInTheDocument()
-    expect(screen.getByText('Your private place to remember.')).toBeInTheDocument()
+    expect(screen.getByText('Your family’s place to remember.')).toBeInTheDocument()
 
     const tablist = screen.getByRole('tablist', { name: 'Journal sections' })
     expect(tablist).toBeInTheDocument()
@@ -245,12 +245,12 @@ describe('JournalPage', () => {
     expect(peopleProps.cacheNamespace).toBe('family:ahmed')
   })
 
-  it('keeps the original People default when preview content is enabled', () => {
-    renderJournal({ openAllPhotosByDefault: true })
+  it('defaults to All photos without requiring matched family faces', () => {
+    renderJournal()
 
     expect(sectionMocks.people).toHaveBeenLastCalledWith(
       expect.objectContaining({
-        initialPersonId: undefined,
+        initialPersonId: 'review-uploads',
       }),
     )
   })
@@ -280,7 +280,7 @@ describe('JournalPage', () => {
 
   it('restores the selected person and focused memory after opening a photo', () => {
     renderJournal(
-      { openAllPhotosByDefault: true },
+      {},
       {
         pathname: '/journal',
         state: {
@@ -296,6 +296,70 @@ describe('JournalPage', () => {
     expect(sectionMocks.people).toHaveBeenLastCalledWith(expect.objectContaining({
       initialPersonId: 'maya',
       focusMemoryId: 'capsule-opened-opened-photo',
+    }))
+  })
+
+  it('opens a direct widget URL on All photos with the exact stable timeline key', () => {
+    renderJournal({}, '/journal?photo=summer-photo&collection=family-photo-library&source=widget')
+
+    expect(sectionMocks.people).toHaveBeenLastCalledWith(expect.objectContaining({
+      initialPersonId: 'review-uploads',
+      focusPhotoKey: 'journal-photo:summer-photo',
+      focusRequestKey: expect.any(String),
+      scrollToFocusedPhoto: true,
+    }))
+    expect(screen.getByRole('tab', { name: 'Photos' })).toHaveAttribute('aria-selected', 'true')
+  })
+
+  it('handles repeated widget taps on a mounted Journal without trapping later tab choices', async () => {
+    function WidgetTap() {
+      const navigate = useNavigate()
+      return <button onClick={() => navigate('/journal', {
+        state: { journalContext: {
+          section: 'people',
+          personId: 'review-uploads',
+          focusMemoryId: 'journal-photo-summer-photo',
+          focusPhotoKey: 'journal-photo:summer-photo',
+          source: 'widget',
+        } },
+      })}>Tap photo widget</button>
+    }
+    const user = userEvent.setup()
+    render(<MemoryRouter initialEntries={['/journal']}>
+      <WidgetTap />
+      <JournalPage now={testNow} />
+    </MemoryRouter>)
+    await user.click(screen.getByRole('tab', { name: 'Plans' }))
+    await user.click(screen.getByRole('button', { name: 'Tap photo widget' }))
+    expect(screen.getByRole('tab', { name: 'Photos' })).toHaveAttribute('aria-selected', 'true')
+    const firstRequest = sectionMocks.people.mock.lastCall?.[0].focusRequestKey
+    expect(firstRequest).toBeTruthy()
+
+    await user.click(screen.getByRole('tab', { name: 'Plans' }))
+    expect(screen.getByTestId('plans-section')).toBeInTheDocument()
+    await user.click(screen.getByRole('tab', { name: 'Photos' }))
+    expect(sectionMocks.people).toHaveBeenLastCalledWith(expect.objectContaining({
+      focusPhotoKey: undefined,
+      focusRequestKey: undefined,
+      scrollToFocusedPhoto: false,
+    }))
+
+    await user.click(screen.getByRole('button', { name: 'Tap photo widget' }))
+    expect(sectionMocks.people.mock.lastCall?.[0].focusRequestKey).not.toBe(firstRequest)
+    expect(sectionMocks.people).toHaveBeenLastCalledWith(expect.objectContaining({
+      focusPhotoKey: 'journal-photo:summer-photo',
+      scrollToFocusedPhoto: true,
+    }))
+    await user.click(screen.getByRole('tab', { name: 'Flights' }))
+    expect(screen.getByTestId('flights-section')).toBeInTheDocument()
+  })
+
+  it('ignores malformed widget parameters and keeps ordinary Journal browsing available', () => {
+    renderJournal({}, '/journal?photo=bad/id&collection=family-photo-library&source=widget')
+    expect(sectionMocks.people).toHaveBeenLastCalledWith(expect.objectContaining({
+      initialPersonId: 'review-uploads',
+      focusPhotoKey: undefined,
+      scrollToFocusedPhoto: false,
     }))
   })
 

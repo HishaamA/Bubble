@@ -34,6 +34,7 @@ public final class BubbleWidgetRemoteViewsService extends RemoteViewsService {
         private BubbleWidgetSnapshot sourceSnapshot;
         private BubbleWidgetSnapshot displaySnapshot = BubbleWidgetSnapshot.fallback("plum");
         private List<BubbleWidgetSnapshot.Page> pages = Collections.emptyList();
+        private List<BubbleWidgetSnapshot.Page> rotatedPages = Collections.emptyList();
         private Bitmap legacyThumbnail;
         private Map<String, Bitmap> pageThumbnails = Collections.emptyMap();
 
@@ -60,10 +61,19 @@ public final class BubbleWidgetRemoteViewsService extends RemoteViewsService {
         private synchronized void replaceEntry(BubbleWidgetStore.Entry entry) {
             recycleCurrent();
             sourceSnapshot = entry.snapshot;
+            long now = System.currentTimeMillis();
             displaySnapshot = sourceSnapshot == null
                 ? BubbleWidgetSnapshot.fallback("plum")
-                : sourceSnapshot.forDisplay(System.currentTimeMillis());
-            pages = displaySnapshot.pages;
+                : sourceSnapshot.forDisplay(now);
+            rotatedPages = BubbleWidgetPhotoRotation.pagesForDisplay(
+                displaySnapshot,
+                now
+            );
+            // A resolved hidden schedule may still carry the stored deck. Do not
+            // expose its images, routes, or row count while previews are hidden.
+            pages = rotatedPages.isEmpty()
+                ? Collections.emptyList()
+                : displaySnapshot.pages;
             if (pages.isEmpty()) {
                 legacyThumbnail = displaySnapshot == sourceSnapshot
                     ? entry.thumbnail
@@ -86,6 +96,7 @@ public final class BubbleWidgetRemoteViewsService extends RemoteViewsService {
             sourceSnapshot = null;
             displaySnapshot = BubbleWidgetSnapshot.fallback("plum");
             pages = Collections.emptyList();
+            rotatedPages = Collections.emptyList();
         }
 
         @Override
@@ -112,7 +123,9 @@ public final class BubbleWidgetRemoteViewsService extends RemoteViewsService {
                     options
                 );
             }
-            BubbleWidgetSnapshot.Page page = pages.get(position);
+            // Keep the image and its exact Journal link from the same payload,
+            // while getItemId preserves the user-selected original swipe slot.
+            BubbleWidgetSnapshot.Page page = rotatedPages.get(position);
             return BubbleWidgetRenderer.renderPageItem(
                 context,
                 page,
@@ -174,6 +187,7 @@ public final class BubbleWidgetRemoteViewsService extends RemoteViewsService {
             sourceSnapshot = null;
             displaySnapshot = BubbleWidgetSnapshot.fallback(theme);
             pages = Collections.emptyList();
+            rotatedPages = Collections.emptyList();
         }
 
         private static void recycle(Bitmap bitmap) {

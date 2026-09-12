@@ -1,3 +1,5 @@
+import { JOURNAL_LIBRARY_ID } from '../journal/journalPhotoTypes'
+
 export type BubbleWidgetDestination = {
   to: string
   state?: Record<string, unknown>
@@ -44,14 +46,28 @@ export function parseBubbleWidgetDeepLink(
   if (destination.origin !== 'https://bubble.local') return null
   const params = destination.searchParams
   const pathname = destination.pathname
+  if ([...new Set(params.keys())].some((key) => params.getAll(key).length !== 1)) {
+    return null
+  }
 
   if (pathname === '/' && params.size === 0) return { to: '/' }
 
   if (pathname === '/journal') {
-    if ([...params.keys()].some((key) => key !== 'section')) return null
+    if ([...params.keys()].some((key) => !['section', 'photo', 'collection', 'source'].includes(key))) return null
     const section = params.get('section')
     if (section !== null && section !== 'plans' && section !== 'photos' && section !== 'flights') {
       return null
+    }
+    if (params.get('source') !== null && params.get('source') !== 'widget') return null
+    if (params.has('photo') || params.has('collection')) {
+      const photoId = params.get('photo')
+      const collectionId = params.get('collection')
+      if (
+        !photoId || !collectionId
+        || !safeRouteId(photoId) || !safeRouteId(collectionId)
+        || (section !== null && section !== 'photos')
+      ) return null
+      return journalPhotoDestination(collectionId, photoId)
     }
     return section === 'plans'
       ? {
@@ -67,6 +83,8 @@ export function parseBubbleWidgetDeepLink(
     }
     const recap = params.get('recap')
     const contribute = params.get('contribute')
+    if (params.has('recap') && !recap) return null
+    if (params.has('contribute') && !contribute) return null
     if (recap && contribute) return null
     if (recap && !safeRouteId(recap)) return null
     if (contribute && !safeRouteId(contribute)) return null
@@ -97,11 +115,33 @@ export function parseBubbleWidgetDeepLink(
   if (params.size === 0 && /^\/journal\/photo\/[^/]+\/[^/]+$/.test(pathname)) {
     const [, , , capsuleId, photoId] = pathname.split('/')
     return capsuleId && photoId && safeRouteId(capsuleId) && safeRouteId(photoId)
-      ? { to: pathname }
+      ? journalPhotoDestination(capsuleId, photoId)
       : null
   }
 
   return null
+}
+
+/** Widget photos focus the ordinary Journal timeline, never a separate viewer. */
+function journalPhotoDestination(collectionId: string, photoId: string): BubbleWidgetDestination {
+  return {
+    to: '/journal',
+    state: {
+      journalContext: {
+        section: 'people',
+        personId: 'review-uploads',
+        focusMemoryId: collectionId === JOURNAL_LIBRARY_ID
+          ? `journal-photo-${photoId}`
+          : `capsule-${collectionId}-${photoId}`,
+        focusPhotoKey: collectionId === JOURNAL_LIBRARY_ID
+          ? `journal-photo:${photoId}`
+          : `photo:${photoId}`,
+        focusPhotoId: photoId,
+        focusCollectionId: collectionId,
+        source: 'widget',
+      },
+    },
+  }
 }
 
 function safeRouteId(value: string) {

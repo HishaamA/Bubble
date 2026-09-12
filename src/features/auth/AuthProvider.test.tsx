@@ -105,6 +105,7 @@ describe('ClerkAuthBridge', () => {
       subject: 'user_A',
       displayName: 'Amina Ahmed',
       email: 'user_A@example.com',
+      imageUrl: 'https://images.example/user_A.jpg',
     })
     await expect(session.accessToken()).resolves.toBe('clerk-token')
     await session.signOut()

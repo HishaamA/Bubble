@@ -21,13 +21,23 @@ export type CapsuleRecapPlan = {
   durationMs: number
 }
 
+/** The same shared rows produce the same film on every family member's device. */
+export function orderCapsuleRecapPhotos(photos: CapsulePhoto[]) {
+  return [...photos].sort((left, right) => (
+    left.capturedAt.localeCompare(right.capturedAt) || left.id.localeCompare(right.id)
+  ))
+}
+
 /** Builds a deterministic, chronologically ordered frame plan for a recap. */
 export function buildCapsuleRecapPlan(
   photos: CapsulePhoto[],
 ): CapsuleRecapPlan {
-  const ordered = [...photos]
-    .sort((left, right) => left.capturedAt.localeCompare(right.capturedAt))
-    .slice(0, CAPSULE_RECAP_MAX_PHOTOS)
+  // Never silently save only the first part of a family's Capsule. Playback
+  // remains unbounded; the native codecs and browser recorder share this cap.
+  if (photos.length > CAPSULE_RECAP_MAX_PHOTOS) {
+    throw new Error(`This Capsule has ${photos.length} photos. Video export supports up to ${CAPSULE_RECAP_MAX_PHOTOS}; every photo is still available in the family recap.`)
+  }
+  const ordered = orderCapsuleRecapPhotos(photos)
 
   const frames = ordered.map((photo, sourceIndex) => ({
     photoId: photo.id,

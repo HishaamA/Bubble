@@ -8,6 +8,7 @@ import {
   type FormEvent,
 } from 'react'
 import { createPortal } from 'react-dom'
+import { subscribeToAppResume } from '../../lib/appResume'
 import { useAuth } from '../auth'
 import { useFamilyOnboarding } from '../onboarding'
 import '../FeaturePages.css'
@@ -17,7 +18,6 @@ import {
   cancelEventReminder,
   enableEventReminder,
   readDesiredEventReminders,
-  type ReminderEvent,
 } from './eventReminders'
 import {
   createFamilyEvent as createFamilyEventRecord,
@@ -40,27 +40,23 @@ import {
   type PlanTask,
 } from './planDetails'
 import { notifyWidgetDataChanged } from '../widgets/widgetStorage'
+import { PlanCard } from './PlanCard'
+import { PlanWeekPicker } from './PlanWeekPicker'
+import type {
+  FamilyEvent,
+  PlanChecklistProgress,
+  PlanTaskDefinitions,
+} from './familyPlanTypes'
+import {
+  completedTaskIdsForPlan,
+  formatPlanDay,
+  planCategories,
+  planDoodleForSeed,
+  selectUpcomingPlans,
+  tasksForPlan,
+  todayInputValue,
+} from './planViewModel'
 
-type FamilyEvent = ReminderEvent & {
-  date: string
-  time: string
-  location: string
-  category: PlanCategory
-  doodle?: PlanDoodleName
-  tasks?: PlanTask[]
-  demoPresentation?: DemoPlanPresentation
-}
-
-type DemoPlanPresentation = {
-  attendees: Array<{ name: string; initials: string; avatar?: string }>
-  additionalAttendees: number
-  checklist: Array<PlanTask & { initiallyDone: boolean }>
-  doodle: PlanDoodleName
-  timeStyle: 'time-location' | 'weekday-time' | 'next-weekend'
-}
-
-type PlanChecklistProgress = Record<string, string[]>
-type PlanTaskDefinitions = Record<string, PlanTask[]>
 type DraftPlanTask = { id: string; value: string }
 
 const createdEventsKey = 'kinsphere-created-events'
@@ -69,14 +65,6 @@ const checklistProgressKey = 'kinsphere-plan-checklists:v1'
 const taskDefinitionsKey = 'kinsphere-plan-tasks:v1'
 const completedPlanIdsKey = 'kinsphere-completed-plans:v1'
 const pendingPlanDeleteIdsKey = 'kinsphere-pending-plan-deletes:v1'
-const planCategories = [
-  { value: 'travel', label: 'Travel' },
-  { value: 'graduation', label: 'Graduation' },
-  { value: 'wedding', label: 'Wedding' },
-  { value: 'anniversary', label: 'Anniversary' },
-  { value: 'appointment', label: 'Important appointment' },
-  { value: 'other', label: 'Other milestone' },
-] as const
 
 /**
  * Family plans embedded in Journal. This component owns the same offline,
@@ -194,46 +182,23 @@ function JournalEventsSectionForFamily({
   )
   const pendingDeleteRetryRef = useRef<Promise<void> | null>(null)
 
-  // Merge demo, device, and family sources by ID. Completed plans remain
-  // hidden even when a stale Realtime fetch still contains their server row.
-  const allUpcomingEvents = useMemo(() => {
-    const eventsById = new Map<string, FamilyEvent>()
-    for (const event of [
-      ...demoPlans,
-      ...createdEvents,
-      ...sharedFamilyEvents,
-    ]) {
-      if (completedPlanIds.has(event.id)) continue
-      const startsAt = new Date(event.startsAt).getTime()
-      if (
-        !Number.isFinite(startsAt)
-        || (
-          !event.demoPresentation
-          && event.date < localDateInputValue(new Date(timelineOpenedAt))
-        )
-      ) continue
-      eventsById.set(event.id, event)
-    }
-    return [...eventsById.values()].sort(
-      (left, right) =>
-        new Date(left.startsAt).getTime() -
-        new Date(right.startsAt).getTime(),
-    )
-  }, [completedPlanIds, createdEvents, demoPlans, sharedFamilyEvents, timelineOpenedAt])
+  // Keep derived calendar data separate from account-scoped mutation effects.
+  const allUpcomingEvents = useMemo(() => selectUpcomingPlans({
+    demoPlans,
+    createdEvents,
+    sharedFamilyEvents,
+    completedPlanIds,
+    timelineOpenedAt,
+  }), [completedPlanIds, createdEvents, demoPlans, sharedFamilyEvents, timelineOpenedAt])
   const selectedDayEvents = useMemo(
     () => allUpcomingEvents.filter((event) => event.date === selectedPlanDay),
     [allUpcomingEvents, selectedPlanDay],
   )
-  const displayedWeek = useMemo(
-    () => planWeekForDate(selectedPlanDay),
-    [selectedPlanDay],
-  )
-  const displayedWeekRange = formatPlanWeekRange(displayedWeek)
   const selectedDayLabel = formatPlanDay(selectedPlanDay)
 
   /** Rehydrates server-backed plans after a successful local create. */
   const refreshFamilyEvents = useCallback(async () => {
-    const records = await fetchFamilyEvents()
+    const records = await fetchFamilyEvents({ includeEarlierToday: true })
     setSharedFamilyEvents(toImportantFamilyEvents(records))
     setSharedEventsUnavailable(false)
   }, [])
@@ -242,6 +207,7 @@ function JournalEventsSectionForFamily({
   // path; the cleanup callback also prevents a late subscription from leaking.
   useEffect(() => {
     let active = true
+    let refreshGeneration = 0
     let unsubscribe: () => void = () => undefined
 
     /** Replays durable optimistic deletions one batch at a time. */
@@ -277,22 +243,24 @@ function JournalEventsSectionForFamily({
 
     /** Applies a family refresh only while this account-scoped body is mounted. */
     async function refreshWhileActive() {
+      const generation = ++refreshGeneration
       try {
-        const records = await fetchFamilyEvents()
-        if (active) {
+        const records = await fetchFamilyEvents({ includeEarlierToday: true })
+        if (active && generation === refreshGeneration) {
           setSharedFamilyEvents(toImportantFamilyEvents(records))
           setSharedEventsUnavailable(false)
+          void retryPendingSharedDeletes()
         }
-        void retryPendingSharedDeletes()
       } catch {
-        if (active) setSharedEventsUnavailable(true)
+        if (active && generation === refreshGeneration) setSharedEventsUnavailable(true)
         // Locally-created plans remain available while offline.
       } finally {
-        if (active) setEventsLoading(false)
+        if (active && generation === refreshGeneration) setEventsLoading(false)
       }
     }
 
     void refreshWhileActive()
+    const stopResume = subscribeToAppResume(() => void refreshWhileActive())
     void subscribeToFamilyEvents(() => void refreshWhileActive())
       .then((stop) => {
         if (active) unsubscribe = stop
@@ -304,6 +272,7 @@ function JournalEventsSectionForFamily({
 
     return () => {
       active = false
+      stopResume()
       unsubscribe()
     }
   }, [pendingPlanDeleteIdsStorageKey, storageSubject])
@@ -523,13 +492,6 @@ function JournalEventsSectionForFamily({
     })
   }
 
-  /** Resolves editable overrides before encoded or demo task definitions. */
-  function tasksForPlan(event: FamilyEvent) {
-    return taskDefinitions[event.id]
-      ?? event.tasks
-      ?? event.demoPresentation?.checklist
-      ?? []
-  }
 
   /** Toggles the inline task composer for exactly one plan card. */
   function openTaskComposer(eventId: string) {
@@ -548,7 +510,7 @@ function JournalEventsSectionForFamily({
       taskComposerInputRef.current?.focus()
       return
     }
-    const currentTasks = tasksForPlan(event)
+    const currentTasks = tasksForPlan(event, taskDefinitions)
     if (currentTasks.length >= 12) {
       setReminderStatus('This plan already has the maximum of 12 tasks.')
       return
@@ -585,7 +547,7 @@ function JournalEventsSectionForFamily({
       )
     } catch {
       setReminderStatus(
-        `“${label}” was saved here. Family sync will retry when the calendar reconnects.`,
+        `“${label}” was saved on this device, but could not be shared. Reconnect and add it again to share it with your family.`,
       )
     }
   }
@@ -682,61 +644,11 @@ function JournalEventsSectionForFamily({
         </div>
       </div>
 
-      <nav
-        className="journal-events__week"
-        aria-label={`Family plans, ${displayedWeekRange}`}
-      >
-        <div className="journal-events__week-days">
-          {displayedWeek.map((date) => {
-            const dateValue = localDateInputValue(date)
-            const selected = dateValue === selectedPlanDay
-            const hasPlans = allUpcomingEvents.some(
-              (event) => event.date === dateValue,
-            )
-            const weekday = new Intl.DateTimeFormat('en', {
-              weekday: 'long',
-            }).format(date)
-            return (
-              <button
-                key={dateValue}
-                type="button"
-                aria-label={`${weekday}, ${new Intl.DateTimeFormat('en', {
-                  month: 'long',
-                  day: 'numeric',
-                }).format(date)}${hasPlans ? ', has plans' : ''}`}
-                aria-pressed={selected}
-                data-has-plans={hasPlans ? 'true' : 'false'}
-                onClick={() => choosePlanDay(dateValue)}
-              >
-                <span aria-hidden="true">{weekday.slice(0, 1)}</span>
-                <strong>{date.getDate()}</strong>
-                <i aria-hidden="true" />
-              </button>
-            )
-          })}
-        </div>
-        <div className="journal-events__week-navigation">
-          <button
-            type="button"
-            aria-label="Previous week"
-            onClick={() => choosePlanDay(shiftPlanDay(selectedPlanDay, -7))}
-          >
-            <svg aria-hidden="true" viewBox="0 0 12 12">
-              <path d="m7.5 2-4 4 4 4" />
-            </svg>
-          </button>
-          <p aria-live="polite">{displayedWeekRange}</p>
-          <button
-            type="button"
-            aria-label="Next week"
-            onClick={() => choosePlanDay(shiftPlanDay(selectedPlanDay, 7))}
-          >
-            <svg aria-hidden="true" viewBox="0 0 12 12">
-              <path d="m4.5 2 4 4-4 4" />
-            </svg>
-          </button>
-        </div>
-      </nav>
+      <PlanWeekPicker
+        selectedPlanDay={selectedPlanDay}
+        events={allUpcomingEvents}
+        onChoosePlanDay={choosePlanDay}
+      />
 
       <section
         className="ks-section journal-events__upcoming"
@@ -763,199 +675,32 @@ function JournalEventsSectionForFamily({
             ? selectedDayEvents
             : selectedDayEvents.slice(0, 3)
           ).map((event, index) => {
-            const date = new Date(`${event.date}T12:00:00`)
-            const day = new Intl.DateTimeFormat('en', {
-              day: '2-digit',
-            }).format(date)
-            const month = new Intl.DateTimeFormat('en', {
-              month: 'short',
-            }).format(date)
-            const time = new Intl.DateTimeFormat('en', {
-              hour: 'numeric',
-              minute: '2-digit',
-            }).format(new Date(event.startsAt))
-            const weekday = new Intl.DateTimeFormat('en', {
-              weekday: 'long',
-            }).format(date)
-            const hasReminder = reminderIds.has(event.id)
-            const categoryLabel = planCategoryLabel(event.category)
-            const presentation = event.demoPresentation
-            const checklist = tasksForPlan(event)
-            const doodle = event.doodle
-              ?? presentation?.doodle
-              ?? planDoodleForSeed(event.id)
-            const completedChecklistItems = new Set(
-              checklistProgress[event.id]
-              ?? checklist
-                .filter(taskStartsCompleted)
-                .map((item) => item.id)
-              ?? [],
-            )
-
+            const checklist = tasksForPlan(event, taskDefinitions)
             return (
-              <article
+              <PlanCard
                 key={event.id}
-                className={`ks-card event-list-item event-plan-card${
-                  index > 0 ? ' journal-events__event--revealed' : ''
-                }`}
-                data-category={event.category}
-              >
-                <div className="event-plan-card__artwork" aria-hidden="true">
-                  <span className="event-plan-card__sketch">
-                    <PlanDoodle doodle={doodle} />
-                  </span>
-                  <time
-                    className="event-plan-card__date journal-events__sr-only"
-                    dateTime={event.date}
-                    aria-label={`${weekday}, ${month} ${day}`}
-                  >
-                    <strong>{day}</strong>
-                    <span>{month}</span>
-                  </time>
-                </div>
-                <div className="event-plan-card__content">
-                  <div className="event-plan-card__title-row">
-                    <div>
-                      <span className="event-list-item__category journal-events__sr-only">
-                        {categoryLabel}
-                      </span>
-                      <h4>{event.title}</h4>
-                    </div>
-                    <button
-                      className="event-reminder-button event-plan-card__doodle"
-                      type="button"
-                      aria-label={`${
-                        hasReminder ? 'Remove reminder for' : 'Remind me about'
-                      } ${event.title}`}
-                      aria-pressed={hasReminder}
-                      aria-busy={reminderBusyIds.has(event.id)}
-                      disabled={reminderBusyIds.has(event.id)}
-                      onClick={() => void toggleReminder(event)}
-                    >
-                      <ReminderBellDoodle />
-                      <span className="journal-events__sr-only">
-                        {hasReminder ? 'Reminder on' : 'Remind me'}
-                      </span>
-                    </button>
-                  </div>
-                  <p className="event-plan-card__when">
-                    <time dateTime={event.startsAt}>
-                      {presentation?.timeStyle === 'time-location'
-                        ? time
-                        : presentation?.timeStyle === 'next-weekend'
-                          ? 'Next weekend'
-                          : `${weekday} · ${time}`}
-                    </time>
-                    {presentation?.timeStyle === 'time-location' ? (
-                      <span> · {event.location}</span>
-                    ) : null}
-                  </p>
-                  {!presentation ? (
-                    <p className="event-plan-card__location">{event.location}</p>
-                  ) : null}
-                  {presentation ? (
-                    <div
-                      className="event-plan-card__attendees"
-                      aria-label={`Going: ${presentation.attendees
-                        .map((attendee) => attendee.name)
-                        .join(', ')}${presentation.additionalAttendees > 0
-                        ? `, plus ${presentation.additionalAttendees} more`
-                        : ''}`}
-                    >
-                      {presentation.attendees.map((attendee) => (
-                        <span key={attendee.name} title={attendee.name}>
-                          {attendee.initials}
-                        </span>
-                      ))}
-                      {presentation.additionalAttendees > 0 ? (
-                        <span aria-hidden="true">
-                          +{presentation.additionalAttendees}
-                        </span>
-                      ) : null}
-                    </div>
-                  ) : null}
-                </div>
-                {checklist.length > 0 ? (
-                  <ul
-                    className="event-plan-card__checklist"
-                    aria-label={`${event.title} checklist`}
-                  >
-                    {checklist.map((item) => {
-                      const checked = completedChecklistItems.has(item.id)
-                      return (
-                        <li key={item.id}>
-                          <label data-checked={checked ? 'true' : 'false'}>
-                            <input
-                              type="checkbox"
-                              checked={checked}
-                              onChange={() => toggleChecklistItem(event, item, checklist)}
-                            />
-                            <span className="event-plan-card__checkbox" aria-hidden="true">
-                              <svg viewBox="0 0 16 16">
-                                <path d="m3 8 3 3 7-8" />
-                              </svg>
-                            </span>
-                            <span>{item.label}</span>
-                          </label>
-                        </li>
-                      )
-                    })}
-                  </ul>
-                ) : null}
-                {taskComposerPlanId === event.id ? (
-                  <form
-                    className="event-plan-card__task-composer"
-                    aria-label={`Add task to ${event.title}`}
-                    onSubmit={(submitEvent) => void addTaskToPlan(submitEvent, event)}
-                  >
-                    <label htmlFor={`plan-task-${event.id}`}>New task</label>
-                    <div>
-                      <input
-                        ref={taskComposerInputRef}
-                        id={`plan-task-${event.id}`}
-                        value={taskComposerValue}
-                        maxLength={80}
-                        placeholder="Bring dessert"
-                        enterKeyHint="done"
-                        onChange={(changeEvent) => setTaskComposerValue(changeEvent.target.value)}
-                        onKeyDown={(keyEvent) => {
-                          if (keyEvent.key === 'Escape') {
-                            setTaskComposerPlanId('')
-                            setTaskComposerValue('')
-                          }
-                        }}
-                      />
-                      <button type="submit">Save</button>
-                    </div>
-                  </form>
-                ) : null}
-                <div className="event-plan-card__actions">
-                  <button
-                    className="event-plan-card__add-task"
-                    type="button"
-                    aria-expanded={taskComposerPlanId === event.id}
-                    onClick={() => openTaskComposer(event.id)}
-                  >
-                    <span aria-hidden="true">＋</span>
-                    <span>{taskComposerPlanId === event.id ? 'Cancel' : 'Add task'}</span>
-                    <span className="journal-action-spacer" aria-hidden="true" />
-                  </button>
-                  <button
-                    className="event-plan-card__complete"
-                    type="button"
-                    aria-label={`Complete task: ${event.title}`}
-                    aria-busy={completionBusyIds.has(event.id)}
-                    disabled={completionBusyIds.has(event.id)}
-                    onClick={() => void completePlan(event)}
-                  >
-                    <svg aria-hidden="true" viewBox="0 0 20 20">
-                      <path d="m4 10 4 4 8-9" />
-                    </svg>
-                    <span>Complete task</span>
-                    <span className="journal-action-spacer" aria-hidden="true" />
-                  </button>
-                </div>
-              </article>
+                event={event}
+                revealed={index > 0}
+                checklist={checklist}
+                completedChecklistItems={completedTaskIdsForPlan(event.id, checklist, checklistProgress)}
+                reminder={{ enabled: reminderIds.has(event.id), busy: reminderBusyIds.has(event.id) }}
+                completionBusy={completionBusyIds.has(event.id)}
+                composerInputRef={taskComposerInputRef}
+                composer={{
+                  open: taskComposerPlanId === event.id,
+                  value: taskComposerValue,
+                  onValueChange: setTaskComposerValue,
+                  onToggle: () => openTaskComposer(event.id),
+                  onCancel: () => {
+                    setTaskComposerPlanId('')
+                    setTaskComposerValue('')
+                  },
+                  onSubmit: (submitEvent) => void addTaskToPlan(submitEvent, event),
+                }}
+                onToggleReminder={() => void toggleReminder(event)}
+                onToggleTask={(item) => toggleChecklistItem(event, item, checklist)}
+                onComplete={() => void completePlan(event)}
+              />
             )
           })}
         </div>
@@ -1329,12 +1074,6 @@ function isPlanTask(value: unknown): value is PlanTask {
   )
 }
 
-/** Reads the demo-only initial completion marker without widening PlanTask. */
-function taskStartsCompleted(
-  task: PlanTask,
-): task is PlanTask & { initiallyDone: true } {
-  return 'initiallyDone' in task && task.initiallyDone === true
-}
 
 /** Creates a collision-resistant task ID and enforces the shared label limit. */
 function createPlanTask(label: string): PlanTask {
@@ -1350,74 +1089,7 @@ function createDraftPlanTask(): DraftPlanTask {
   return { id: task.id, value: '' }
 }
 
-/** Selects stable artwork so a plan does not change decoration between renders. */
-function planDoodleForSeed(seed: string): PlanDoodleName {
-  const doodles: PlanDoodleName[] = ['star', 'sun', 'fish', 'heart']
-  const hash = [...seed].reduce(
-    (current, character) => ((current * 31) + character.charCodeAt(0)) >>> 0,
-    7,
-  )
-  return doodles[hash % doodles.length]
-}
 
-/** Maps stored category codes to human-readable card labels. */
-function planCategoryLabel(category: PlanCategory) {
-  return (
-    planCategories.find((item) => item.value === category)?.label
-    ?? 'Milestone'
-  )
-}
-
-/** Renders one decorative plan motif outside the accessibility tree. */
-function PlanDoodle({ doodle }: { doodle: PlanDoodleName }) {
-  if (doodle === 'heart') {
-    return (
-      <svg viewBox="0 0 32 32" aria-hidden="true">
-        <path d="M16 27S5 21 5 12.8C5 8.2 10.6 6 16 12c5.4-6 11-3.8 11 1 0 8-11 14-11 14Z" />
-      </svg>
-    )
-  }
-  if (doodle === 'star') {
-    return (
-      <svg viewBox="0 0 32 32" aria-hidden="true">
-        <path d="m16 3.5 3.7 8 8.7 1-6.5 5.8 1.8 8.5-7.7-4.5-7.7 4.5 1.8-8.5-6.5-5.8 8.7-1Z" />
-        <path d="m16 8 1.9 5.8 6 .1-4.8 3.5 1.7 5.8-4.8-3.5-4.8 3.5 1.7-5.8-4.8-3.5 6-.1Z" />
-      </svg>
-    )
-  }
-  if (doodle === 'sun') {
-    return (
-      <svg viewBox="0 0 32 32" aria-hidden="true">
-        <circle cx="16" cy="16" r="6" />
-        <path d="M16 2v5m0 18v5M2 16h5m18 0h5M6.1 6.1l3.6 3.6m12.6 12.6 3.6 3.6m0-19.8-3.6 3.6M9.7 22.3l-3.6 3.6" />
-      </svg>
-    )
-  }
-  if (doodle === 'fish') {
-    return (
-      <svg viewBox="0 0 32 32" aria-hidden="true">
-        <path d="M5 16c4.2-6.3 11.7-8.4 18-3.2l5-3v12.4l-5-3C16.7 24.4 9.2 22.3 5 16Z" />
-        <circle cx="20" cy="14.3" r="0.8" />
-        <path d="M10 12.5c1.8 2.1 1.8 4.9 0 7m4.5-9.1 2.2-3.2 2.1 3.9" />
-      </svg>
-    )
-  }
-  return (
-    <svg viewBox="0 0 32 32" aria-hidden="true">
-      <path d="M16 27S5 21 5 12.8C5 8.2 10.6 6 16 12c5.4-6 11-3.8 11 1 0 8-11 14-11 14Z" />
-    </svg>
-  )
-}
-
-/** Renders the shared reminder-control glyph. */
-function ReminderBellDoodle() {
-  return (
-    <svg viewBox="0 0 32 32" aria-hidden="true">
-      <path d="M9 22h14l-2-3.2V14a5 5 0 0 0-10 0v4.8Zm5 3h4" />
-      <path d="M8 8.5c-1.5 1.4-2.2 3.2-2.2 5.2m18.4-5.2c1.5 1.4 2.2 3.2 2.2 5.2" />
-    </svg>
-  )
-}
 
 /** Builds stable preview plans near the mount date without entering persistence. */
 function createDemoFamilyPlans(anchorTimestamp: number): FamilyEvent[] {
@@ -1554,66 +1226,4 @@ function readChecklistProgress(storageKey: string): PlanChecklistProgress {
         ),
       ]),
   )
-}
-
-/** Returns the Monday-through-Sunday local week containing an input date. */
-function planWeekForDate(value: string) {
-  const selected = new Date(`${value}T12:00:00`)
-  const mondayOffset = (selected.getDay() + 6) % 7
-  const monday = new Date(
-    selected.getFullYear(),
-    selected.getMonth(),
-    selected.getDate() - mondayOffset,
-    12,
-  )
-  return Array.from({ length: 7 }, (_, index) => new Date(
-    monday.getFullYear(),
-    monday.getMonth(),
-    monday.getDate() + index,
-    12,
-  ))
-}
-
-/** Produces the compact heading for a complete displayed week. */
-function formatPlanWeekRange(week: Date[]) {
-  const first = week[0]
-  const last = week.at(-1)
-  if (!first || !last) return ''
-  const format = (date: Date) => new Intl.DateTimeFormat('en', {
-    month: 'short',
-    day: 'numeric',
-  }).format(date)
-  return `${format(first)} – ${format(last)}`
-}
-
-/** Formats a local input date without UTC day rollover. */
-function formatPlanDay(value: string) {
-  const date = new Date(`${value}T12:00:00`)
-  if (Number.isNaN(date.getTime())) return value
-  return new Intl.DateTimeFormat('en', {
-    weekday: 'long',
-    month: 'long',
-    day: 'numeric',
-  }).format(date)
-}
-
-/** Moves calendar selection by whole local days, with a safe invalid fallback. */
-function shiftPlanDay(value: string, days: number) {
-  const date = new Date(`${value}T12:00:00`)
-  if (Number.isNaN(date.getTime())) return todayInputValue()
-  date.setDate(date.getDate() + days)
-  return localDateInputValue(date)
-}
-
-/** Serializes a Date for an HTML date field in device-local time. */
-function localDateInputValue(date: Date) {
-  const year = date.getFullYear()
-  const month = String(date.getMonth() + 1).padStart(2, '0')
-  const day = String(date.getDate()).padStart(2, '0')
-  return `${year}-${month}-${day}`
-}
-
-/** Returns today's HTML date value in device-local time. */
-function todayInputValue() {
-  return localDateInputValue(new Date())
 }

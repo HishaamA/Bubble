@@ -4,6 +4,7 @@ import {
   render,
   screen,
   waitFor,
+  within,
 } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter } from 'react-router-dom'
@@ -37,6 +38,35 @@ const person = {
   id: '10000000-0000-4000-8000-000000000001',
   displayName: 'Simreen',
   email: 'simreen@example.com',
+}
+
+const members = [
+  { id: person.id, displayName: person.displayName, avatarUrl: null, role: 'owner' as const, isCurrentUser: true },
+  { id: '20000000-0000-4000-8000-000000000002', displayName: 'Shaymaa', avatarUrl: 'https://example.com/avatar.jpg', role: 'member' as const, isCurrentUser: false },
+]
+
+const connectedSnapshot: Extract<FamilySyncSnapshot, { kind: 'connected' }> = {
+  kind: 'connected',
+  person,
+  circle: {
+    id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+    name: 'Ahmed family',
+    role: 'owner',
+    memberCount: members.length,
+    shareCode: 'BUB-AAAA-BBBB-CCCC-DDDD-EEEE-FFFF',
+  },
+  pendingRequests: [],
+  members,
+}
+
+function deferred<T>() {
+  let resolve!: (value: T) => void
+  let reject!: (reason: unknown) => void
+  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise
+    reject = rejectPromise
+  })
+  return { promise, resolve, reject }
 }
 
 describe('FamilySyncPanel', () => {
@@ -84,6 +114,7 @@ describe('FamilySyncPanel', () => {
           shareCode: 'BUB-1111-2222-3333-4444-5555-6666',
         },
         pendingRequests: [],
+        members,
       })
     })
 
@@ -118,6 +149,7 @@ describe('FamilySyncPanel', () => {
           shareCode: code,
         },
         pendingRequests: [],
+        members,
       })
     })
 
@@ -227,6 +259,7 @@ describe('FamilySyncPanel', () => {
         shareCode: 'BUB-AAAA-BBBB-CCCC-DDDD-EEEE-FFFF',
       },
       pendingRequests: [pendingRequest],
+      members,
     }
     const setup = createAdapter(connected)
     const shareCode = vi.fn(async () => 'shared' as const)
@@ -289,6 +322,7 @@ describe('FamilySyncPanel', () => {
         shareCode: familyCode,
       },
       pendingRequests: [],
+      members,
     })
 
     renderPanel(<FamilySyncPanel adapter={setup.adapter} />)
@@ -318,6 +352,7 @@ describe('FamilySyncPanel', () => {
         shareCode: currentCode,
       },
       pendingRequests: [],
+      members,
     }
     const setup = createAdapter(connected)
     setup.adapter.rotateFamilyCode = vi.fn(async () => {
@@ -347,5 +382,303 @@ describe('FamilySyncPanel', () => {
     expect(
       screen.getByText(/previous code no longer works/i),
     ).toBeInTheDocument()
+  })
+
+  it('shows actual members, roles and You, with an initials fallback for a failed portrait', async () => {
+    const setup = createAdapter(connectedSnapshot)
+    renderPanel(<FamilySyncPanel adapter={setup.adapter} />)
+    const roster = await screen.findByRole('region', { name: 'Your family' })
+    expect(within(roster).getAllByRole('listitem')).toHaveLength(2)
+    expect(within(roster).getByText('Simreen')).toBeInTheDocument()
+    expect(within(roster).getByText('Shaymaa')).toBeInTheDocument()
+    expect(within(roster).getByText('You')).toBeInTheDocument()
+    expect(within(roster).getByText('Owner')).toBeInTheDocument()
+    expect(within(roster).getByText('Member')).toBeInTheDocument()
+    const portrait = roster.querySelector('img')!
+    expect(portrait).toHaveAttribute('loading', 'lazy')
+    fireEvent.error(portrait)
+    expect(roster.querySelector('img')).toBeNull()
+    expect(within(roster).getAllByText('S')).toHaveLength(2)
+    expect(within(roster).queryByText(person.email)).toBeNull()
+  })
+
+  it('latches rapid rotation taps and publishes the returned code without a stale second read', async () => {
+    const setup = createAdapter(connectedSnapshot)
+    const rotation = deferred<string>()
+    setup.adapter.rotateFamilyCode = vi.fn(() => rotation.promise)
+    const callback = vi.fn()
+    renderPanel(<FamilySyncPanel adapter={setup.adapter} onSnapshotChange={callback} />)
+    fireEvent.click(await screen.findByRole('button', { name: 'Replace family code' }))
+    const confirm = screen.getByRole('button', { name: 'Create new code' })
+    act(() => {
+      fireEvent.click(confirm)
+      fireEvent.click(confirm)
+    })
+    expect(setup.adapter.rotateFamilyCode).toHaveBeenCalledTimes(1)
+    expect(screen.getByRole('button', { name: 'Creating…' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: 'Keep code' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: 'Copy code' })).toBeDisabled()
+    expect(screen.getByRole('region', { name: 'Family Sync' })).toHaveAttribute('aria-busy', 'false')
+    const newCode = 'BUB-1111-2222-3333-4444-5555-6666'
+    await act(async () => rotation.resolve(newCode))
+    expect(await screen.findByText(newCode)).toBeInTheDocument()
+    expect(screen.queryByText(connectedSnapshot.circle.shareCode)).toBeNull()
+    expect(setup.adapter.loadSnapshot).toHaveBeenCalledTimes(1)
+    expect(callback).toHaveBeenLastCalledWith({ ...connectedSnapshot, circle: { ...connectedSnapshot.circle, shareCode: newCode } })
+  })
+
+  it('keeps a failed rotation error local and allows a deliberate retry', async () => {
+    const user = userEvent.setup()
+    const setup = createAdapter(connectedSnapshot)
+    const nextCode = 'BUB-1111-2222-3333-4444-5555-6666'
+    setup.adapter.rotateFamilyCode = vi.fn()
+      .mockRejectedValueOnce(new Error('network unavailable'))
+      .mockResolvedValueOnce(nextCode)
+    renderPanel(<FamilySyncPanel adapter={setup.adapter} />)
+    await user.click(await screen.findByRole('button', { name: 'Replace family code' }))
+    await user.click(screen.getByRole('button', { name: 'Create new code' }))
+    const confirmation = screen.getByRole('group', { name: 'Confirm family code rotation' })
+    expect(await within(confirmation).findByRole('alert')).toHaveTextContent(/could not reach the server/i)
+    expect(screen.getByText(connectedSnapshot.circle.shareCode)).toBeInTheDocument()
+    expect(screen.queryByText(/previous code no longer works/i)).toBeNull()
+    await user.click(screen.getByRole('button', { name: 'Create new code' }))
+    expect(await screen.findByText(nextCode)).toBeInTheDocument()
+    expect(screen.queryByRole('alert')).toBeNull()
+    expect(setup.adapter.rotateFamilyCode).toHaveBeenCalledTimes(2)
+  })
+
+  it.each(['not-a-code', connectedSnapshot.circle.shareCode])('does not announce a successful rotation for an unconfirmed result: %s', async (result) => {
+    const setup = createAdapter(connectedSnapshot)
+    setup.adapter.rotateFamilyCode = vi.fn(async () => result)
+    renderPanel(<FamilySyncPanel adapter={setup.adapter} />)
+    fireEvent.click(await screen.findByRole('button', { name: 'Replace family code' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Create new code' }))
+    expect(await screen.findByRole('alert')).toHaveTextContent(/could not be confirmed/i)
+    expect(screen.queryByText(/previous code no longer works/i)).toBeNull()
+    expect(screen.getByText(connectedSnapshot.circle.shareCode)).toBeInTheDocument()
+  })
+
+  it('clears the old family immediately on auth change and ignores its deferred rotation', async () => {
+    const setup = createAdapter(connectedSnapshot)
+    const rotation = deferred<string>()
+    const newFamilyLoad = deferred<FamilySyncSnapshot>()
+    let authChanged!: () => void
+    setup.adapter.subscribeToAuthChanges = (callback) => { authChanged = callback; return vi.fn() }
+    setup.adapter.rotateFamilyCode = vi.fn(() => rotation.promise)
+    setup.adapter.loadSnapshot = vi.fn()
+      .mockResolvedValueOnce(connectedSnapshot)
+      .mockReturnValueOnce(newFamilyLoad.promise)
+    const callback = vi.fn()
+    renderPanel(<FamilySyncPanel adapter={setup.adapter} onSnapshotChange={callback} />)
+    fireEvent.click(await screen.findByRole('button', { name: 'Replace family code' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Create new code' }))
+    act(() => authChanged())
+    expect(screen.queryByText(connectedSnapshot.circle.shareCode)).toBeNull()
+    expect(screen.queryByRole('group', { name: 'Confirm family code rotation' })).toBeNull()
+    const otherFamily: FamilySyncSnapshot = {
+      ...connectedSnapshot,
+      person: { ...person, id: 'different-account', displayName: 'Hishaam' },
+      circle: { ...connectedSnapshot.circle, id: 'different-family', name: 'Another family', shareCode: 'BUB-1234-1234-1234-1234-1234-1234', role: 'member' },
+      members: [],
+    }
+    await act(async () => newFamilyLoad.resolve(otherFamily))
+    await act(async () => rotation.resolve('BUB-1111-2222-3333-4444-5555-6666'))
+    expect(screen.getByRole('heading', { name: 'Another family' })).toBeInTheDocument()
+    expect(screen.getByText(otherFamily.circle.shareCode)).toBeInTheDocument()
+    expect(screen.queryByText(/previous code no longer works/i)).toBeNull()
+    expect(callback).toHaveBeenCalledTimes(2)
+    expect(callback).toHaveBeenLastCalledWith(otherFamily)
+  })
+
+  it('ignores a deferred rotation after navigation unmounts the panel', async () => {
+    const setup = createAdapter(connectedSnapshot)
+    const rotation = deferred<string>()
+    setup.adapter.rotateFamilyCode = vi.fn(() => rotation.promise)
+    const callback = vi.fn()
+    const view = renderPanel(<FamilySyncPanel adapter={setup.adapter} onSnapshotChange={callback} />)
+    fireEvent.click(await screen.findByRole('button', { name: 'Replace family code' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Create new code' }))
+    view.unmount()
+    await act(async () => rotation.resolve('BUB-1111-2222-3333-4444-5555-6666'))
+    expect(callback).toHaveBeenCalledTimes(1)
+    expect(setup.adapter.loadSnapshot).toHaveBeenCalledTimes(1)
+  })
+
+  it('does not let a late old-family snapshot overwrite a newer authenticated snapshot', async () => {
+    const setup = createAdapter(connectedSnapshot)
+    const staleLoad = deferred<FamilySyncSnapshot>()
+    let authChanged!: () => void
+    setup.adapter.subscribeToAuthChanges = (callback) => { authChanged = callback; return vi.fn() }
+    setup.adapter.loadSnapshot = vi.fn().mockReturnValueOnce(staleLoad.promise).mockResolvedValueOnce({ kind: 'signed-out' })
+    const callback = vi.fn()
+    renderPanel(<FamilySyncPanel adapter={setup.adapter} onSnapshotChange={callback} />)
+    await waitFor(() => expect(setup.adapter.loadSnapshot).toHaveBeenCalledTimes(1))
+    act(() => authChanged())
+    await screen.findByRole('heading', { name: 'Keep your family close' })
+    await act(async () => staleLoad.resolve(connectedSnapshot))
+    expect(screen.queryByText(connectedSnapshot.circle.shareCode)).toBeNull()
+    expect(callback).toHaveBeenCalledTimes(1)
+  })
+
+  it('does not reload when the parent supplies a new snapshot callback', async () => {
+    const setup = createAdapter(connectedSnapshot)
+    const view = renderPanel(<FamilySyncPanel adapter={setup.adapter} onSnapshotChange={() => undefined} />)
+    await screen.findByRole('heading', { name: 'Ahmed family' })
+    const nextCallback = vi.fn()
+    view.rerender(<MemoryRouter><FamilySyncPanel adapter={setup.adapter} onSnapshotChange={nextCallback} /></MemoryRouter>)
+    fireEvent.click(screen.getByRole('button', { name: 'Refresh' }))
+    await waitFor(() => expect(nextCallback).toHaveBeenCalledTimes(1))
+    expect(setup.adapter.loadSnapshot).toHaveBeenCalledTimes(2)
+  })
+
+  it('releases a replaced adapter and ignores its unfinished family load', async () => {
+    const previous = createAdapter(connectedSnapshot)
+    const replacement = createAdapter({ kind: 'signed-out' })
+    const staleLoad = deferred<FamilySyncSnapshot>()
+    const unsubscribePrevious = vi.fn()
+    const unsubscribeReplacement = vi.fn()
+    previous.adapter.loadSnapshot = vi.fn(() => staleLoad.promise)
+    previous.adapter.subscribeToAuthChanges = vi.fn(() => unsubscribePrevious)
+    replacement.adapter.subscribeToAuthChanges = vi.fn(() => unsubscribeReplacement)
+    const onSnapshotChange = vi.fn()
+    const view = renderPanel(
+      <FamilySyncPanel adapter={previous.adapter} onSnapshotChange={onSnapshotChange} />,
+    )
+    await waitFor(() => expect(previous.adapter.loadSnapshot).toHaveBeenCalledTimes(1))
+
+    view.rerender(
+      <MemoryRouter>
+        <FamilySyncPanel adapter={replacement.adapter} onSnapshotChange={onSnapshotChange} />
+      </MemoryRouter>,
+    )
+    await screen.findByRole('heading', { name: 'Keep your family close' })
+    expect(unsubscribePrevious).toHaveBeenCalledTimes(1)
+    expect(unsubscribeReplacement).not.toHaveBeenCalled()
+
+    await act(async () => staleLoad.resolve(connectedSnapshot))
+    expect(screen.queryByText(connectedSnapshot.circle.shareCode)).toBeNull()
+    expect(onSnapshotChange).toHaveBeenCalledExactlyOnceWith({ kind: 'signed-out' })
+    expect(replacement.adapter.loadSnapshot).toHaveBeenCalledTimes(1)
+    view.unmount()
+    expect(unsubscribeReplacement).toHaveBeenCalledTimes(1)
+  })
+
+  it('does not report a successful create when the following snapshot could not be refreshed', async () => {
+    const user = userEvent.setup()
+    const setup = createAdapter({ kind: 'unjoined', person, pendingRequest: null })
+    const create = deferred<void>()
+    setup.adapter.createCircle = vi.fn(() => create.promise)
+    setup.adapter.loadSnapshot = vi.fn()
+      .mockResolvedValueOnce({ kind: 'unjoined', person, pendingRequest: null })
+      .mockRejectedValueOnce(new Error('network unavailable'))
+      .mockResolvedValueOnce(connectedSnapshot)
+    renderPanel(<FamilySyncPanel adapter={setup.adapter} />)
+    await user.type(await screen.findByLabelText('Family group name'), 'Ahmed family')
+    const form = screen.getByRole('button', { name: 'Create family group' }).closest('form')!
+    act(() => {
+      fireEvent.submit(form)
+      fireEvent.submit(form)
+    })
+    expect(setup.adapter.createCircle).toHaveBeenCalledTimes(1)
+    await act(async () => create.resolve())
+    expect(await screen.findByRole('alert')).toHaveTextContent(/change was sent, but we could not refresh/i)
+    expect(screen.queryByText(/is ready\. Your family code/i)).toBeNull()
+    await user.click(screen.getByRole('button', { name: 'Check again' }))
+    expect(await screen.findByRole('heading', { name: 'Ahmed family' })).toBeInTheDocument()
+    expect(setup.adapter.createCircle).toHaveBeenCalledTimes(1)
+  })
+
+  it('ignores a late sharing response after sign-out and blocks duplicate sharing taps', async () => {
+    const setup = createAdapter(connectedSnapshot)
+    const share = deferred<'shared'>()
+    const shareCode = vi.fn(() => share.promise)
+    let authChanged!: () => void
+    setup.adapter.subscribeToAuthChanges = (callback) => { authChanged = callback; return vi.fn() }
+    renderPanel(<FamilySyncPanel adapter={setup.adapter} shareCode={shareCode} />)
+    const button = await screen.findByRole('button', { name: 'Share family code for Ahmed family' })
+    act(() => {
+      fireEvent.click(button)
+      fireEvent.click(button)
+    })
+    expect(shareCode).toHaveBeenCalledTimes(1)
+    setup.setSnapshot({ kind: 'signed-out' })
+    act(() => authChanged())
+    await screen.findByRole('heading', { name: 'Keep your family close' })
+    await act(async () => share.resolve('shared'))
+    expect(screen.queryByText(/ready in the share sheet/i)).toBeNull()
+    expect(screen.queryByText(connectedSnapshot.circle.shareCode)).toBeNull()
+  })
+
+  it('recovers from a failed initial load without duplicating a rapid retry', async () => {
+    const setup = createAdapter(connectedSnapshot)
+    const retry = deferred<FamilySyncSnapshot>()
+    setup.adapter.loadSnapshot = vi.fn()
+      .mockRejectedValueOnce(new Error('network unavailable'))
+      .mockReturnValueOnce(retry.promise)
+    renderPanel(<FamilySyncPanel adapter={setup.adapter} />)
+    const button = await screen.findByRole('button', { name: 'Check again' })
+    act(() => {
+      fireEvent.click(button)
+      fireEvent.click(button)
+    })
+    expect(setup.adapter.loadSnapshot).toHaveBeenCalledTimes(2)
+    await act(async () => retry.resolve(connectedSnapshot))
+    expect(await screen.findByRole('region', { name: 'Your family' })).toBeInTheDocument()
+    expect(screen.queryByRole('alert')).toBeNull()
+  })
+
+  it('does not claim a family join succeeded when a stale refresh still says unjoined', async () => {
+    const user = userEvent.setup()
+    const setup = createAdapter({ kind: 'unjoined', person, pendingRequest: null })
+    renderPanel(<FamilySyncPanel adapter={setup.adapter} />)
+    await user.type(await screen.findByLabelText('Family code'), connectedSnapshot.circle.shareCode)
+    await user.click(screen.getByRole('button', { name: 'Join family' }))
+    expect(await screen.findByRole('alert')).toHaveTextContent(/have not updated yet/i)
+    expect(screen.queryByText('You are now connected to your family.')).toBeNull()
+  })
+
+  it.each([
+    new Error('family_access_changed'),
+    new Error('account_changed'),
+    { code: '42501', message: 'Permission denied' },
+    { status: 403, message: 'Forbidden' },
+  ])('discards the previous roster and code when refreshed access is rejected: %j', async (reason) => {
+    const setup = createAdapter(connectedSnapshot)
+    setup.adapter.loadSnapshot = vi.fn()
+      .mockResolvedValueOnce(connectedSnapshot)
+      .mockRejectedValueOnce(reason)
+      .mockResolvedValueOnce({ kind: 'signed-out' })
+    renderPanel(<FamilySyncPanel adapter={setup.adapter} />)
+    fireEvent.click(await screen.findByRole('button', { name: 'Refresh' }))
+    await screen.findByRole('alert')
+    expect(screen.queryByText(connectedSnapshot.circle.shareCode)).toBeNull()
+    expect(screen.queryByRole('region', { name: 'Your family' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Replace family code' })).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: 'Check again' }))
+    expect(await screen.findByRole('heading', { name: 'Keep your family close' })).toBeInTheDocument()
+  })
+
+  it('retains the family through a temporary network refresh failure', async () => {
+    const setup = createAdapter(connectedSnapshot)
+    setup.adapter.loadSnapshot = vi.fn()
+      .mockResolvedValueOnce(connectedSnapshot)
+      .mockRejectedValueOnce(new Error('network unavailable'))
+    renderPanel(<FamilySyncPanel adapter={setup.adapter} />)
+    fireEvent.click(await screen.findByRole('button', { name: 'Refresh' }))
+    await screen.findByRole('alert')
+    expect(screen.getByText(connectedSnapshot.circle.shareCode)).toBeInTheDocument()
+    expect(screen.getByRole('region', { name: 'Your family' })).toBeInTheDocument()
+  })
+
+  it('clears stale owner actions when a rotation discovers changed permissions', async () => {
+    const setup = createAdapter(connectedSnapshot)
+    setup.adapter.rotateFamilyCode = vi.fn().mockRejectedValueOnce(new Error('owner_required'))
+    renderPanel(<FamilySyncPanel adapter={setup.adapter} />)
+    fireEvent.click(await screen.findByRole('button', { name: 'Replace family code' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Create new code' }))
+    await screen.findByRole('alert')
+    expect(screen.queryByText(connectedSnapshot.circle.shareCode)).toBeNull()
+    expect(screen.queryByRole('group', { name: 'Confirm family code rotation' })).toBeNull()
+    expect(screen.getByRole('button', { name: 'Check again' })).toBeInTheDocument()
   })
 })

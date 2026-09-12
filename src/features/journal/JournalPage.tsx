@@ -9,6 +9,7 @@ import { AppWhimsy } from '../../app/AppWhimsy'
 import type { FamilyCapsule } from '../capsules/types'
 import { JournalEventsSection } from '../events'
 import { FlightTrackerSection } from '../flights'
+import { parseBubbleWidgetDeepLink } from '../widgets/widgetDeepLink'
 import { unlockedCapsulePhotos } from './capsuleJournalArchive'
 import type {
   JournalPhoto,
@@ -16,13 +17,15 @@ import type {
   JournalPhotoImportResult,
 } from './journalPhotoTypes'
 import { PeopleTimeline } from './people'
+import { ALL_PHOTOS_PERSON_ID } from './people/types'
+import { TimelinePhotoPreviewScope } from './people/TimelinePhotoImage'
 import './JournalPage.css'
 
 const journalSections = [
   {
     id: 'people',
     label: 'Photos',
-    subtitle: 'Your private place to remember.',
+    subtitle: 'Your family’s place to remember.',
   },
   {
     id: 'plans',
@@ -43,6 +46,8 @@ type JournalLocationState = {
     section?: unknown
     personId?: unknown
     focusMemoryId?: unknown
+    focusPhotoKey?: unknown
+    source?: unknown
   }
 }
 
@@ -52,11 +57,12 @@ type JournalPageProps = {
   capsuleNow?: Date
   capsuleCacheNamespace?: string
   journalPhotos?: readonly JournalPhoto[]
+  onDeleteJournalPhoto?: (photoId: string) => Promise<void>
+  onDeleteCapsulePhoto?: (capsuleId: string, photoId: string) => Promise<void>
   onUploadJournalPhotos?: (
     files: readonly File[],
   ) => Promise<JournalPhotoImportResult>
   journalPhotoImportProgress?: JournalPhotoImportProgress
-  openAllPhotosByDefault?: boolean
 }
 
 /** Accepts only section identifiers backed by a rendered journal tab. */
@@ -74,6 +80,8 @@ export function JournalPage({
   capsuleCacheNamespace = 'signed-out:no-family',
   journalPhotos = [],
   onUploadJournalPhotos,
+  onDeleteJournalPhoto,
+  onDeleteCapsulePhoto,
   journalPhotoImportProgress,
 }: JournalPageProps = {}) {
   const location = useLocation()
@@ -83,10 +91,17 @@ export function JournalPage({
   const [openedAt] = useState(() => new Date())
   const effectiveNow = now ?? openedAt
   const effectiveCapsuleNow = capsuleNow ?? effectiveNow
-  const returnedContext = (location.state as JournalLocationState | null)
+  const queryContext = useMemo(() => {
+    if (!location.search) return undefined
+    const destination = parseBubbleWidgetDeepLink(
+      `com.simerfamily.kinsphere://open?route=${encodeURIComponent(`/journal${location.search}`)}`,
+    )
+    return (destination?.state as JournalLocationState | undefined)?.journalContext
+  }, [location.search])
+  const returnedContext = queryContext ?? (location.state as JournalLocationState | null)
     ?.journalContext
-  // Photo and panorama routes return through navigation state. Read it once as
-  // the initial tab/person context so ordinary tab changes remain user-owned.
+  // Apply each navigation once. A widget tap can arrive while this same
+  // Journal instance is showing Plans; later local tab choices stay user-owned.
   const returnedSection = readJournalSection(
     returnedContext?.section,
   )
@@ -96,9 +111,19 @@ export function JournalPage({
   const returnedMemoryId = typeof returnedContext?.focusMemoryId === 'string'
     ? returnedContext.focusMemoryId
     : undefined
-  const [activeSection, setActiveSection] = useState<JournalSection>(
-    () => returnedSection ?? 'people',
-  )
+  const returnedPhotoKey = typeof returnedContext?.focusPhotoKey === 'string'
+    ? returnedContext.focusPhotoKey
+    : undefined
+  const fromWidget = returnedContext?.source === 'widget'
+  const [dismissedWidgetRequest, setDismissedWidgetRequest] = useState<string | null>(null)
+  const widgetRequestActive = fromWidget && dismissedWidgetRequest !== location.key
+  const [sectionSelection, setSectionSelection] = useState(() => ({
+    navigationKey: location.key,
+    section: returnedSection ?? 'people',
+  }))
+  const activeSection = sectionSelection.navigationKey === location.key
+    ? sectionSelection.section
+    : returnedSection ?? 'people'
   const tabRefs = useRef<Array<HTMLButtonElement | null>>([])
   const photos = useMemo(
     // Locked capsule media never reaches PeopleTimeline, its face scanner, or
@@ -109,7 +134,10 @@ export function JournalPage({
 
   /** Switches content and optionally restores keyboard focus to the chosen tab. */
   function chooseSection(section: JournalSection, focus = false) {
-    setActiveSection(section)
+    setSectionSelection({ navigationKey: location.key, section })
+    // Once the user leaves the widget's selected photo, do not re-apply it on
+    // returning to Photos after its timeline has unmounted.
+    if (fromWidget) setDismissedWidgetRequest(location.key)
     if (focus) {
       const index = journalSections.findIndex(({ id }) => id === section)
       tabRefs.current[index]?.focus()
@@ -209,13 +237,19 @@ export function JournalPage({
         aria-labelledby={personScrapbookOpen ? undefined : `journal-tab-${activeSection}`}
       >
         {personScrapbookOpen || activeSection === 'people' ? (
+          <TimelinePhotoPreviewScope namespace={capsuleCacheNamespace}>
           <PeopleTimeline
             photos={photos}
             journalPhotos={journalPhotos}
             cacheNamespace={capsuleCacheNamespace}
-            initialPersonId={routePersonId ?? returnedPersonId}
-            focusMemoryId={returnedMemoryId}
+            initialPersonId={routePersonId ?? returnedPersonId ?? ALL_PHOTOS_PERSON_ID}
+            focusMemoryId={!fromWidget || widgetRequestActive ? returnedMemoryId : undefined}
+            focusPhotoKey={!fromWidget || widgetRequestActive ? returnedPhotoKey : undefined}
+            focusRequestKey={widgetRequestActive ? location.key : undefined}
+            scrollToFocusedPhoto={widgetRequestActive}
             onUploadPhotos={onUploadJournalPhotos}
+            onDeletePhoto={onDeleteJournalPhoto}
+            onDeleteCapsulePhoto={onDeleteCapsulePhoto}
             photoImportProgress={journalPhotoImportProgress}
             personAlbumOpen={personScrapbookOpen}
             onOpenPersonAlbum={(personId) => navigate(
@@ -226,6 +260,7 @@ export function JournalPage({
               state: { journalContext: { section: 'people' } },
             })}
           />
+          </TimelinePhotoPreviewScope>
         ) : null}
         {!personScrapbookOpen && activeSection === 'plans' ? <JournalEventsSection /> : null}
         {!personScrapbookOpen && activeSection === 'flights' ? (

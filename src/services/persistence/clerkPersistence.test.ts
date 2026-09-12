@@ -157,6 +157,64 @@ beforeEach(() => {
 })
 
 describe('Clerk-backed persistence service', () => {
+  it.each([
+    ['create', () => createFamily('Family')],
+    ['join', () => joinFamilyByCode('BUB-1111-2222-3333-4444-5555-6666')],
+    ['rotate', () => rotateFamilyShareCode(circleId)],
+    ['roster', () => readFamilyMembers(circleId)],
+    ['code', () => readFamilyShareCode(circleId)],
+    ['leave', () => leaveFamily()],
+  ] as const)('blocks %s after an account switch during bootstrap', async (_label, operation) => {
+    mocks.client.rpc.mockImplementationOnce(async () => {
+      mocks.identity.mockReturnValue({ subject: 'user_clerk_bob' })
+      return { data: [bootstrapRow()], error: null }
+    })
+    await expect(operation()).rejects.toThrow('account_changed')
+    expect(mocks.client.rpc).toHaveBeenCalledTimes(1)
+    expect(mocks.client.rpc.mock.calls[0][0]).toBe('bootstrap_current_user')
+  })
+
+  it('refuses rotation for a stale family target without changing a code', async () => {
+    await expect(rotateFamilyShareCode('bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb')).rejects.toThrow('family_access_changed')
+    expect(mocks.client.rpc.mock.calls.some(([name]) => name === 'rotate_family_share_code')).toBe(false)
+  })
+
+  it('refuses member rotation before calling the destructive RPC', async () => {
+    const original = mocks.client.rpc.getMockImplementation()!
+    mocks.client.rpc.mockImplementation(async (name: string, ...args: unknown[]) => name === 'get_current_family'
+      ? { data: [familyRow('member')], error: null }
+      : original(name, ...args))
+    await expect(rotateFamilyShareCode(circleId)).rejects.toThrow('circle_owner_required')
+    expect(mocks.client.rpc.mock.calls.some(([name]) => name === 'rotate_family_share_code')).toBe(false)
+  })
+
+  it('does not rotate if the account changes while owner permission is loading', async () => {
+    const original = mocks.client.rpc.getMockImplementation()!
+    mocks.client.rpc.mockImplementation(async (name: string, ...args: unknown[]) => {
+      if (name === 'get_current_family') {
+        mocks.identity.mockReturnValue({ subject: 'user_clerk_bob' })
+        return { data: [familyRow()], error: null }
+      }
+      return original(name, ...args)
+    })
+    await expect(rotateFamilyShareCode(circleId)).rejects.toThrow('account_changed')
+    expect(mocks.client.rpc.mock.calls.some(([name]) => name === 'rotate_family_share_code')).toBe(false)
+  })
+
+  it('rejects a roster for a different family than the screen being populated', async () => {
+    await expect(readFamilyMembers('other-family')).rejects.toThrow('family_access_changed')
+  })
+
+  it('does not return a late family code to a different signed-in account', async () => {
+    const original = mocks.client.rpc.getMockImplementation()!
+    mocks.client.rpc.mockImplementation(async (name: string, ...args: unknown[]) => {
+      const result = await original(name, ...args)
+      if (name === 'rotate_family_share_code') mocks.identity.mockReturnValue({ subject: 'user_clerk_bob' })
+      return result
+    })
+    await expect(rotateFamilyShareCode(circleId)).rejects.toThrow('account_changed')
+  })
+
   it('bootstraps from display metadata while PostgreSQL owns the subject', async () => {
     await expect(bootstrapCurrentClerkProfile()).resolves.toEqual({
       userId: internalUserId,

@@ -121,6 +121,44 @@ beforeEach(() => {
 })
 
 describe('JournalEventsSection', () => {
+  it('receives a family plan on foregrounding even if realtime missed the change', async () => {
+    renderJournalEventsSection()
+    await screen.findByRole('heading', { name: /^No plans on / })
+    expect(eventServiceMocks.fetchFamilyEvents).toHaveBeenCalledWith({ includeEarlierToday: true })
+    eventServiceMocks.fetchFamilyEvents.mockResolvedValue([{
+      id: 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeee1',
+      title: 'Mum’s shared plan',
+      startsAt: dateFromToday(0, 20).toISOString(),
+      location: 'Family home',
+      details: 'kinsphere-plan-category:v1:other',
+    }])
+    await act(async () => window.dispatchEvent(new Event('focus')))
+    expect(await screen.findByRole('heading', { name: 'Mum’s shared plan' })).toBeInTheDocument()
+    expect(eventServiceMocks.fetchFamilyEvents).toHaveBeenLastCalledWith({ includeEarlierToday: true })
+  })
+
+  it('does not let an older fetch replace a newer family refresh or refresh after unmount', async () => {
+    let finishOld!: (value: unknown[]) => void
+    eventServiceMocks.fetchFamilyEvents.mockReturnValueOnce(new Promise((resolve) => { finishOld = resolve }))
+    const view = renderJournalEventsSection()
+    await waitFor(() => expect(eventServiceMocks.fetchFamilyEvents).toHaveBeenCalledOnce())
+    eventServiceMocks.fetchFamilyEvents.mockResolvedValue([{
+      id: 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeee1',
+      title: 'Newest family plan',
+      startsAt: dateFromToday(0, 20).toISOString(),
+      location: 'Family home',
+      details: 'kinsphere-plan-category:v1:other',
+    }])
+    await act(async () => window.dispatchEvent(new Event('online')))
+    await screen.findByRole('heading', { name: 'Newest family plan' })
+    await act(async () => finishOld([]))
+    expect(screen.getByRole('heading', { name: 'Newest family plan' })).toBeInTheDocument()
+    view.unmount()
+    const calls = eventServiceMocks.fetchFamilyEvents.mock.calls.length
+    await act(async () => window.dispatchEvent(new Event('focus')))
+    expect(eventServiceMocks.fetchFamilyEvents).toHaveBeenCalledTimes(calls)
+  })
+
   it('shows the selected date in an actionable empty calendar state', async () => {
     renderJournalEventsSection()
 

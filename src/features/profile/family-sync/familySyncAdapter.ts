@@ -8,6 +8,7 @@ import {
   createFamily,
   joinFamilyByCode,
   readFamilyMembership,
+  readFamilyMembers,
   rotateFamilyShareCode,
 } from '../../../services/persistence'
 import type {
@@ -79,13 +80,22 @@ export function toFamilySyncErrorMessage(errorReason: unknown) {
     return 'That invite has expired, was revoked, or has already been used.'
   }
   if (message.includes('already_a_member')) {
-    return 'You are already connected to that family circle.'
+    return 'You are already connected to a family. Leave it before joining or creating another.'
   }
   if (message.includes('join_request_not_pending')) {
     return 'That request has already been handled. Refresh to see the latest list.'
   }
   if (message.includes('circle_owner_required')) {
     return 'Only the family circle owner can do that.'
+  }
+  if (message.includes('family_access_changed') || message.includes('account_changed')) {
+    return 'Your account or family changed. Refresh and try again.'
+  }
+  if (message.includes('family_code_missing') || message.includes('family_code_generation_failed')) {
+    return 'The family code is unavailable. Ask the family owner to try replacing it.'
+  }
+  if (message.includes('invalid_family_name')) {
+    return 'Give your family a name of 80 characters or fewer.'
   }
   if (message.includes('password')) {
     return 'Use a stronger password with at least 8 characters.'
@@ -113,11 +123,13 @@ export function toFamilySyncErrorMessage(errorReason: unknown) {
 async function getAuthenticatedPerson(): Promise<{
   person: FamilySyncPerson
   userId: string
+  subject: string
 } | null> {
   if (!getSupabaseClient()) return null
   const identity = getClerkSupabaseIdentity()
   if (!identity) return null
   const profile = await bootstrapCurrentClerkProfile()
+  requireSameSubject(identity.subject)
 
   return {
     person: {
@@ -126,6 +138,24 @@ async function getAuthenticatedPerson(): Promise<{
       displayName: profile.displayName,
     },
     userId: profile.userId,
+    subject: identity.subject,
+  }
+}
+
+/** Do not combine requests belonging to different sign-ins in one snapshot. */
+function requireSameSubject(subject: string) {
+  if (getClerkSupabaseIdentity()?.subject !== subject) throw new Error('account_changed')
+}
+
+/** Untrusted profile metadata is never interpreted as a script or local file URL. */
+function avatarUrl(path: string | null): string | null {
+  if (!path) return null
+  try {
+    const url = new URL(path)
+    return url.protocol === 'https:' && !url.username && !url.password ? url.href : null
+  } catch {
+    // Storage keys are not public URLs. Use initials until signed avatar support exists.
+    return null
   }
 }
 
@@ -138,6 +168,8 @@ async function loadSnapshot(): Promise<FamilySyncSnapshot> {
   if (!authenticated) return { kind: 'signed-out' }
 
   const membership = await readFamilyMembership()
+  requireSameSubject(authenticated.subject)
+  if (membership.userId !== authenticated.userId) throw new Error('account_changed')
   if (membership.kind !== 'member') {
     const { data: pendingRequestData, error: pendingRequestError } = await client
       .from('join_requests')
@@ -148,6 +180,7 @@ async function loadSnapshot(): Promise<FamilySyncSnapshot> {
       .limit(1)
       .maybeSingle()
     if (pendingRequestError) throw pendingRequestError
+    requireSameSubject(authenticated.subject)
 
     const pendingRequestRecord = asRecord(pendingRequestData)
     return {
@@ -170,6 +203,25 @@ async function loadSnapshot(): Promise<FamilySyncSnapshot> {
   if (!membership.shareCode) {
     throw new Error('The family share code could not be loaded.')
   }
+  const familyMembers = await readFamilyMembers(circleId)
+  requireSameSubject(authenticated.subject)
+  if (familyMembers.some((member) => member.familyId !== circleId)) {
+    throw new Error('family_access_changed')
+  }
+  const seenMembers = new Set<string>()
+  const members = familyMembers.map((member) => {
+    if (seenMembers.has(member.userId)) throw new Error('Family Sync returned an incomplete response.')
+    seenMembers.add(member.userId)
+    return {
+      id: member.userId,
+      displayName: member.displayName,
+      avatarUrl: avatarUrl(member.avatarPath),
+      role: member.role,
+      isCurrentUser: member.userId === authenticated.userId,
+    }
+  })
+  const currentMember = members.find((member) => member.isCurrentUser)
+  if (!currentMember || currentMember.role !== role) throw new Error('family_access_changed')
 
   let pendingRequests: Array<{
     id: string
@@ -185,6 +237,7 @@ async function loadSnapshot(): Promise<FamilySyncSnapshot> {
       .eq('status', 'pending')
       .order('created_at', { ascending: true })
     if (requestError) throw requestError
+    requireSameSubject(authenticated.subject)
 
     pendingRequests = (requestData ?? []).map((requestValue) => {
       const requestRecord = asRecord(requestValue)
@@ -206,10 +259,11 @@ async function loadSnapshot(): Promise<FamilySyncSnapshot> {
       id: circleId,
       name: membership.circleName,
       role,
-      memberCount: membership.memberCount,
+      memberCount: members.length,
       shareCode: membership.shareCode,
     },
     pendingRequests,
+    members,
   }
 }
 
