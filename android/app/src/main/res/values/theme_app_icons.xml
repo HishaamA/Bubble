@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <item type="mipmap" name="ic_launcher_plum">@mipmap/ic_launcher</item>
+    <color name="ic_launcher_forest_background">#08382f</color>
+    <color name="ic_launcher_midnight_background">#07163d</color>
+</resources>

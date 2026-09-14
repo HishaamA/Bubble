@@ -1,0 +1,11 @@
+fastapi>=0.115,<1
+uvicorn>=0.34,<1
+python-multipart>=0.0.20,<1
+numpy>=2.0,<3
+scipy>=1.14,<2
+opencv-python>=4.10,<5
+Pillow>=11,<13
+torch==2.8.0
+torchvision==0.23.0
+kornia>=0.7,<1
+lightglue @ git+https://github.com/cvg/LightGlue.git@eb42fee2d71449efb0aa5c10549752b5d75384d8

@@ -21,6 +21,7 @@ import { sameCapsulePhotoOwner } from '../capsules/capsulePhotoOwnership'
 export type UnlockedCapsulePhoto = CapsulePhoto & {
   capsuleTitle: string
   capsuleOpensAt: string
+  origin?: 'device-gallery'
 }
 
 /** Matches synced capsules by ID, with week start as the legacy weekly identity. */

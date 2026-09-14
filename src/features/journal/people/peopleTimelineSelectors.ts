@@ -1,4 +1,4 @@
-import { effectivePeopleForPhoto, sortTimelinePhotos } from './peopleTimelineHelpers'
+import { sortTimelinePhotos } from './peopleTimelineHelpers'
 import {
   ALL_PHOTOS_PERSON_ID,
   FAMILY_PERSON_ID,
@@ -67,10 +67,26 @@ export function selectEffectivePeopleByPhoto(
   photos: readonly PeopleTimelinePhoto[],
   automaticMatches: readonly FaceSuggestion[],
 ): PeopleByPhoto {
-  return new Map(photos.map((photo) => [
-    photo.key,
-    new Set(effectivePeopleForPhoto(state, photo.key, automaticMatches)),
-  ]))
+  // Index each decision once rather than walking every match for every photo
+  // after each gallery batch. Preserve the original people ordering and policy.
+  const peopleIds = new Set(state.people.map(({ id }) => id))
+  const result = new Map(photos.map(({ key }) => [key, new Set<string>()]))
+  const dismissed = new Set(state.dismissedSuggestions.map(({ photoKey, personId, faceId }) =>
+    `${photoKey}\u0000${personId}\u0000${faceId ?? '*'}`))
+  const dismissedPairs = new Set(state.dismissedSuggestions.map(({ photoKey, personId }) => `${photoKey}\u0000${personId}`))
+  for (const { photoKey, personId, source } of state.assignments) {
+    // Older builds persisted inferred links. They are not a user decision and
+    // must qualify again through the current automatic-matching policy below.
+    if (source === 'manual' && peopleIds.has(personId)) result.get(photoKey)?.add(personId)
+  }
+  for (const { photoKey, personId, faceId } of automaticMatches) {
+    const pair = `${photoKey}\u0000${personId}`
+    if (!peopleIds.has(personId) || dismissed.has(`${pair}\u0000*`) ||
+      (faceId ? dismissed.has(`${pair}\u0000${faceId}`) : dismissedPairs.has(pair))) continue
+    result.get(photoKey)?.add(personId)
+  }
+  return new Map([...result].map(([key, selected]) =>
+    [key, new Set([...peopleIds].filter((id) => selected.has(id)))]))
 }
 
 /** Enrollment, not the mere presence of a name, enables automatic grouping. */
@@ -107,17 +123,17 @@ export function selectPeoplePhotoAlbums(
   return { albums, previews }
 }
 
-/** Family requires two distinct enrolled people, including manual decisions. */
+/** Any two distinct family members qualify; accepted manual tags need no enrollment. */
 export function selectFamilyPhotoKeys(
   photos: readonly PeopleTimelinePhoto[],
   effectivePeople: PeopleByPhoto,
-  enrolledPersonIds: ReadonlySet<string>,
+  familyPersonIds: ReadonlySet<string>,
 ) {
   return new Set(photos.filter((photo) => {
-    let enrolledCount = 0
+    let familyCount = 0
     for (const personId of effectivePeople.get(photo.key) ?? []) {
-      if (enrolledPersonIds.has(personId)) enrolledCount += 1
-      if (enrolledCount >= 2) return true
+      if (familyPersonIds.has(personId)) familyCount += 1
+      if (familyCount >= 2) return true
     }
     return false
   }).map(({ key }) => key))

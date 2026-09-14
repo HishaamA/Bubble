@@ -17,6 +17,17 @@ const auth = vi.hoisted(() => ({
   signOut: vi.fn(async () => undefined),
 }))
 
+const phoneGallery = vi.hoisted(() => ({
+  usePhoneGallery: vi.fn(),
+  connect: vi.fn(async () => undefined),
+  refresh: vi.fn(async () => undefined),
+  disconnect: vi.fn(),
+  openSettings: vi.fn(async () => undefined),
+  skipSetup: vi.fn(),
+}))
+
+vi.mock('../journal/gallery/usePhoneGallery', () => ({ usePhoneGallery: phoneGallery.usePhoneGallery }))
+
 vi.mock('../auth', () => ({
   useAuth: () => ({
     signOut: auth.signOut,
@@ -89,6 +100,13 @@ beforeEach(() => {
   vi.clearAllMocks()
   window.localStorage.clear()
   setAppTheme('plum')
+  phoneGallery.usePhoneGallery.mockReturnValue({
+    supported: true, enabled: false, setupComplete: true, permission: 'prompt',
+    photos: [], ready: true, progress: null, error: null,
+    connect: phoneGallery.connect, refresh: phoneGallery.refresh,
+    disconnect: phoneGallery.disconnect, openSettings: phoneGallery.openSettings,
+    skipSetup: phoneGallery.skipSetup,
+  })
   persistence.readProfilePreferences.mockResolvedValue({
     notificationsEnabled: true,
     quietHoursEnabled: true,
@@ -114,6 +132,60 @@ beforeEach(() => {
 })
 
 describe('SettingsPage', () => {
+  it('keeps gallery opt-in available after skipping setup using Journal’s exact private namespace', async () => {
+    render(<MemoryRouter><SettingsPage /></MemoryRouter>)
+
+    const gallery = screen.getByRole('region', { name: 'Phone gallery connection' })
+    expect(gallery).toBeVisible()
+    expect(gallery).toHaveTextContent('your originals are not copied')
+    expect(screen.getAllByRole('heading', { name: 'Phone gallery' })).toHaveLength(1)
+    expect(within(gallery).queryByRole('button', { name: 'Not now' })).not.toBeInTheDocument()
+    expect(phoneGallery.usePhoneGallery).toHaveBeenCalledWith('user_clerk_alice:family-1')
+    expect(phoneGallery.usePhoneGallery).not.toHaveBeenCalledWith('user_clerk_alice:family:family-1')
+    expect(phoneGallery.connect).not.toHaveBeenCalled()
+    expect(phoneGallery.openSettings).not.toHaveBeenCalled()
+    expect(phoneGallery.skipSetup).not.toHaveBeenCalled()
+
+    await userEvent.click(within(gallery).getByRole('button', { name: 'Connect gallery' }))
+    expect(phoneGallery.connect).toHaveBeenCalledOnce()
+  })
+
+  it('exposes connected and limited-access gallery management directly in Settings', async () => {
+    phoneGallery.usePhoneGallery.mockReturnValue({
+      ...phoneGallery.usePhoneGallery(), enabled: true, permission: 'limited',
+    })
+    render(<MemoryRouter><SettingsPage /></MemoryRouter>)
+
+    const gallery = screen.getByRole('region', { name: 'Phone gallery connection' })
+    expect(within(gallery).getByRole('button', { name: 'Check for new photos' })).toBeVisible()
+    expect(within(gallery).getByRole('button', { name: 'Change photo access' })).toBeVisible()
+    expect(within(gallery).getByRole('button', { name: 'Disconnect' })).toBeVisible()
+    expect(phoneGallery.connect).not.toHaveBeenCalled()
+
+    await userEvent.click(within(gallery).getByRole('button', { name: 'Check for new photos' }))
+    expect(phoneGallery.refresh).toHaveBeenCalledOnce()
+    await userEvent.click(within(gallery).getByRole('button', { name: 'Change photo access' }))
+    expect(phoneGallery.connect).toHaveBeenCalledOnce()
+    await userEvent.click(within(gallery).getByRole('button', { name: 'Disconnect' }))
+    expect(phoneGallery.disconnect).toHaveBeenCalledOnce()
+  })
+
+  it('keeps indexing and permission errors visible in Settings without requesting access', () => {
+    phoneGallery.usePhoneGallery.mockReturnValue({
+      ...phoneGallery.usePhoneGallery(), enabled: true, permission: 'granted',
+      ready: false, progress: { loaded: 250 }, error: 'Some photos could not be checked.',
+    })
+    render(<MemoryRouter><SettingsPage /></MemoryRouter>)
+
+    const gallery = screen.getByRole('region', { name: 'Phone gallery connection' })
+    expect(within(gallery).getByRole('status')).toHaveTextContent('250 checked')
+    expect(within(gallery).getByRole('alert')).toHaveTextContent('Some photos could not be checked.')
+    expect(within(gallery).getByRole('button', { name: 'Check for new photos' })).toBeDisabled()
+    expect(within(gallery).getByRole('button', { name: 'Disconnect' })).toBeEnabled()
+    expect(phoneGallery.connect).not.toHaveBeenCalled()
+    expect(phoneGallery.openSettings).not.toHaveBeenCalled()
+  })
+
   it('keeps account and family settings accessible and updates preference state', async () => {
     const user = userEvent.setup()
     render(

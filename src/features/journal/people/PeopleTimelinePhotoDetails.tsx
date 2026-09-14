@@ -1,10 +1,41 @@
-import type { FormEventHandler } from 'react'
+import { useId, useState, type FormEventHandler } from 'react'
+import './PhotoMatchCorrection.css'
 import type {
   TimelineDateOverride,
   TimelineDatePrecision,
   TimelinePerson,
   TimelinePhotoAssignment,
 } from './types'
+
+/** Explicit label correction, never a photo-removal action. Key by photo/person. */
+export function PhotoMatchCorrection({ personName, photoDescription, onCorrect }: {
+  personName: string
+  photoDescription: string
+  onCorrect: () => void
+}) {
+  const [confirming, setConfirming] = useState(false)
+  const descriptionId = useId()
+  return (
+    <div className="photo-match-correction">
+      <button type="button" className="photo-match-correction__toggle"
+        aria-expanded={confirming}
+        aria-label={`Correct automatic match for ${personName} in ${photoDescription}`}
+        onClick={() => setConfirming((value) => !value)}>
+        Not {personName}?
+      </button>
+      {confirming ? (
+        <div className="photo-match-correction__confirm" role="group"
+          aria-label={`Remove automatic match for ${personName}?`} aria-describedby={descriptionId}>
+          <p id={descriptionId}>Only this person label will be removed. Your photo stays in All photos and its original location.</p>
+          <div>
+            <button type="button" onClick={() => { onCorrect(); setConfirming(false) }}>Not {personName}</button>
+            <button type="button" onClick={() => setConfirming(false)}>Keep match</button>
+          </div>
+        </div>
+      ) : null}
+    </div>
+  )
+}
 
 type PeopleTimelineDateEditorProps = {
   draft: TimelineDateOverride
@@ -106,7 +137,7 @@ export function PeopleTimelinePhotoTags({
               </label>
             )
           }) : (
-            <p>Add a person with a face photo above, then review or correct matches here.</p>
+            <p>Add a face photo for a person to match them automatically. You can also tag this photo yourself.</p>
           )}
         </div>
       ) : null}

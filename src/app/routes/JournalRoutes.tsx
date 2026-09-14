@@ -1,4 +1,4 @@
-import { useMemo } from 'react'
+import { useEffect, useMemo } from 'react'
 import { removeCapsuleContent } from '../../features/capsules/capsuleRemovalActions'
 import type {
   CapsuleStore,
@@ -10,6 +10,10 @@ import { useJournalCapsuleArchive } from '../../features/journal/capsuleJournalA
 import { withDemoJournalPhotos } from '../../features/journal/demoJournalPhotos'
 import { JournalPage } from '../../features/journal'
 import { useJournalPhotoLibrary } from '../../features/journal/journalPhotoLibrary'
+import { usePhoneGallery } from '../../features/journal/gallery/usePhoneGallery'
+import { PHONE_GALLERY_CLEARED_EVENT, type PhoneGalleryClearedDetail } from '../../features/journal/gallery/phoneGallery'
+import { phoneGalleryJournalPhotos } from '../../features/journal/phoneGalleryPhotos'
+import { reconcilePhoneGalleryTimeline } from '../../features/journal/people/peopleTimelineSession'
 import type {
   JournalPhoto,
   JournalPhotoStore,
@@ -38,6 +42,23 @@ function useJournalRouteData({
   journalPhotoStore,
 }: JournalArchiveRouteProps) {
   const { isDevelopmentPreview, user } = useAuth()
+  const gallery = usePhoneGallery(capsuleCacheNamespace)
+  const galleryPhotos = useMemo(() => phoneGalleryJournalPhotos(gallery.photos), [gallery.photos])
+  useEffect(() => {
+    if (!gallery.ready || gallery.progress || gallery.error) return
+    void reconcilePhoneGalleryTimeline(capsuleCacheNamespace,
+      new Set(galleryPhotos.map(({ id }) => `journal-photo:${id}`)))
+  }, [capsuleCacheNamespace, gallery.ready, gallery.progress, gallery.error, galleryPhotos])
+  useEffect(() => {
+    const forget = (event: Event) => {
+      const detail = (event as CustomEvent<PhoneGalleryClearedDetail>).detail
+      if (detail?.cacheNamespace === capsuleCacheNamespace && detail.reason !== 'refresh' && detail.reason !== 'account') {
+        void reconcilePhoneGalleryTimeline(capsuleCacheNamespace, new Set())
+      }
+    }
+    window.addEventListener(PHONE_GALLERY_CLEARED_EVENT, forget)
+    return () => window.removeEventListener(PHONE_GALLERY_CLEARED_EVENT, forget)
+  }, [capsuleCacheNamespace])
   const archive = useJournalCapsuleArchive({
     cacheNamespace: capsuleCacheNamespace,
     enabled: suppliedCapsules === undefined,
@@ -50,11 +71,11 @@ function useJournalRouteData({
     store: journalPhotoStore,
   })
   const journalPhotos = useMemo(
-    () => withDemoJournalPhotos(
+    () => [...withDemoJournalPhotos(
       suppliedJournalPhotos ?? photoLibrary.photos,
       isDevelopmentPreview === true,
-    ),
-    [isDevelopmentPreview, photoLibrary.photos, suppliedJournalPhotos],
+    ), ...galleryPhotos],
+    [isDevelopmentPreview, photoLibrary.photos, suppliedJournalPhotos, galleryPhotos],
   )
 
   return {
@@ -62,9 +83,11 @@ function useJournalRouteData({
     journalPhotos,
     loading:
       (suppliedCapsules === undefined && archive.loading) ||
-      (suppliedJournalPhotos === undefined && photoLibrary.loading),
+      (suppliedJournalPhotos === undefined && photoLibrary.loading) ||
+      (gallery.enabled && !gallery.ready && gallery.progress !== null),
     now: now ?? archive.clock,
     photoLibrary,
+    gallery,
   }
 }
 
@@ -93,6 +116,7 @@ export function JournalRoute({
       capsuleNow={routeData.now}
       capsuleCacheNamespace={capsuleCacheNamespace}
       journalPhotos={routeData.journalPhotos}
+      galleryConnection={routeData.gallery}
       onUploadJournalPhotos={routeData.photoLibrary.importPhotos}
       onDeleteJournalPhoto={routeData.photoLibrary.deletePhoto}
       onDeleteCapsulePhoto={async (capsuleId, photoId) => {

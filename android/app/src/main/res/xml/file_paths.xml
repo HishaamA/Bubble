@@ -2,4 +2,6 @@
 <paths xmlns:android="http://schemas.android.com/apk/res/android">
     <!-- Only completed, temporary recap videos are shared outside the app. -->
     <cache-path name="capsule_recaps" path="CapsuleRecaps/" />
+    <!-- Capacitor's ordinary-photo camera input creates temporary files here. -->
+    <external-files-path name="capture_photos" path="Pictures/" />
 </paths>

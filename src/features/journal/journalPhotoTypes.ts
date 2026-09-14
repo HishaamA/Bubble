@@ -16,7 +16,9 @@ export type JournalPhoto = {
   /** Server profile identity; older local-only imports may not have it yet. */
   uploaderId?: string
   ownedByCurrentUser: boolean
-  syncStatus: 'pending' | 'synced'
+  syncStatus: 'pending' | 'synced' | 'local'
+  /** Read-only library reference; never an upload or a copied original. */
+  origin?: 'device-gallery'
 }
 
 export type JournalPhotoDeletion = {

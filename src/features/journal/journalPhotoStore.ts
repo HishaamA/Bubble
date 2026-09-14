@@ -19,7 +19,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 /** Accepts only media shapes supported by the journal renderer. */
 function isImageSource(value: unknown): value is JournalPhoto['image'] {
-  return value instanceof Blob || (typeof value === 'string' && value.length > 0)
+  return value instanceof Blob || (typeof value === 'string' && value.length > 0 && !value.startsWith('bubble-gallery:'))
 }
 
 /** Rejects non-integral or implausibly large stored image dimensions. */
@@ -33,6 +33,8 @@ function safeDimension(value: unknown, maximum: number) {
 /** Validates an untrusted IndexedDB photo before exposing it to the UI. */
 export function parseStoredJournalPhoto(value: unknown): JournalPhoto | null {
   if (!isRecord(value)) return null
+  // Linked gallery assets belong only to the reference index, never this copy/upload store.
+  if (value.origin === 'device-gallery' || value.syncStatus === 'local') return null
   const capturedAt = typeof value.capturedAt === 'string'
     ? new Date(value.capturedAt)
     : new Date(Number.NaN)

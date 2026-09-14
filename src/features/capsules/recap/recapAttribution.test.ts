@@ -57,7 +57,9 @@ describe('recap attribution', () => {
 
   it('prepares a native portrait frame with attribution and releases all private image URLs', async () => {
     const context = drawingContext()
-    vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue(context)
+    vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockImplementation(
+      ((contextId: string) => contextId === '2d' ? context : null) as HTMLCanvasElement['getContext'],
+    )
     const encoded = new Blob(['composited frame'], { type: 'image/jpeg' })
     const toBlob = vi.spyOn(HTMLCanvasElement.prototype, 'toBlob').mockImplementation((callback) => callback(encoded))
     await expect(prepareAttributedRecapFrame(new Blob(['family photo']), contributor)).resolves.toBe(encoded)

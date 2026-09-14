@@ -114,6 +114,28 @@ function addScan(
 }
 
 describe('people timeline helpers', () => {
+  it('reuses progressive matching safely when a person gains a different reference', () => {
+    const state = emptyPeopleTimelineState()
+    state.people = [person('mum')]
+    const original = faceResDescriptor(2)
+    const older = faceResDescriptor(91)
+    enroll(state, 'mum', original)
+    addScan(state, 'recent', detectedFace('face-1', original))
+    addScan(state, 'older', detectedFace('face-1', older))
+    expect(createFaceSuggestions(state).map(({ photoKey }) => photoKey)).toEqual(['recent'])
+    const improved = {
+      ...state,
+      faceProfiles: { mum: { references: [...state.faceProfiles.mum.references, enrollmentReference('older-ref', older)] } },
+    }
+    const matches = createFaceSuggestions(improved)
+    expect(matches.map(({ photoKey }) => photoKey)).toEqual(['recent', 'older'])
+    expect(createFaceReviewCandidates(improved, undefined, undefined, undefined, matches))
+      .toEqual(createFaceReviewCandidates(improved))
+    // Replacing the reference list must not retain a removed appearance match.
+    expect(createFaceSuggestions({ ...improved, faceProfiles: { mum: { references: [enrollmentReference('older-only', older)] } } })
+      .map(({ photoKey }) => photoKey)).toEqual(['older'])
+  })
+
   it('deduplicates one upload across revealed Capsules with stable collection identity and offline media', () => {
     const image = new Blob(['offline full'], { type: 'image/jpeg' })
     const thumbnail = new Blob(['offline thumbnail'], { type: 'image/jpeg' })
@@ -258,8 +280,8 @@ describe('people timeline helpers', () => {
     addScan(
       state,
       'group-photo',
-      detectedFace('face-1', shiftedDescriptor(maya, 0.2)),
-      detectedFace('face-2', shiftedDescriptor(leena, 0.2)),
+      detectedFace('face-1', shiftedDescriptor(maya, 0.15)),
+      detectedFace('face-2', shiftedDescriptor(leena, 0.15)),
     )
 
     const suggestions = createFaceSuggestions(state)
@@ -284,11 +306,11 @@ describe('people timeline helpers', () => {
     const ambiguousIdentity = emptyPeopleTimelineState()
     ambiguousIdentity.people = [person('maya'), person('leena')]
     enroll(ambiguousIdentity, 'maya', maya)
-    enroll(ambiguousIdentity, 'leena', shiftedDescriptor(maya, 0.4))
+    enroll(ambiguousIdentity, 'leena', shiftedDescriptor(maya, 0.3))
     addScan(
       ambiguousIdentity,
       'candidate',
-      detectedFace('face-1', shiftedDescriptor(maya, 0.2)),
+      detectedFace('face-1', shiftedDescriptor(maya, 0.15)),
     )
 
     const duplicateIdentity = emptyPeopleTimelineState()
@@ -297,8 +319,8 @@ describe('people timeline helpers', () => {
     addScan(
       duplicateIdentity,
       'candidate',
-      detectedFace('face-1', shiftedDescriptor(maya, 0.2)),
-      detectedFace('face-2', shiftedDescriptor(maya, 0.205)),
+      detectedFace('face-1', shiftedDescriptor(maya, 0.15)),
+      detectedFace('face-2', shiftedDescriptor(maya, 0.155)),
     )
 
     expect(createFaceSuggestions(ambiguousIdentity)).toEqual([])
@@ -314,7 +336,7 @@ describe('people timeline helpers', () => {
     addScan(
       state,
       'candidate',
-      detectedFace('face-1', shiftedDescriptor(alternate, 0.22)),
+      detectedFace('face-1', shiftedDescriptor(alternate, 0.15)),
     )
 
     expect(createFaceSuggestions(state)).toContainEqual(expect.objectContaining({
@@ -324,7 +346,7 @@ describe('people timeline helpers', () => {
     }))
   })
 
-  it('learns a cross-age reference only from an explicitly confirmed face', () => {
+  it('uses an explicitly confirmed cross-age face to recognize a near-exact new appearance', () => {
     const primary = faceResDescriptor()
     const child = shiftedDescriptor(primary, 0.5)
     const state = emptyPeopleTimelineState()
@@ -346,7 +368,7 @@ describe('people timeline helpers', () => {
     addScan(
       state,
       'candidate',
-      detectedFace('face-1', shiftedDescriptor(child, 0.22)),
+      detectedFace('face-1', shiftedDescriptor(child, 0.15)),
     )
 
     expect(createFaceSuggestions(state)).toContainEqual(expect.objectContaining({
@@ -354,6 +376,7 @@ describe('people timeline helpers', () => {
       faceId: 'face-1',
       personId: 'maya',
     }))
+    expect(createFaceReviewCandidates(state)).not.toContainEqual(expect.objectContaining({ photoKey: 'candidate' }))
   })
 
   it('never learns from a whole-photo manual tag without a face id', () => {
@@ -383,27 +406,142 @@ describe('people timeline helpers', () => {
     expect(createFaceSuggestions(state)).toEqual([])
   })
 
-  it('routes medium-confidence and lower-quality faces to review', () => {
+  it('automatically groups clear faces, reviews only plausible matches, and ignores weak ones', () => {
     const maya = faceResDescriptor()
     const state = emptyPeopleTimelineState()
     state.people = [person('maya')]
     enroll(state, 'maya', maya)
-    addScan(
-      state,
-      'medium-match',
-      detectedFace('face-1', shiftedDescriptor(maya, 0.3)),
-    )
-    addScan(
-      state,
-      'lower-quality-match',
-      detectedFace('face-1', shiftedDescriptor(maya, 0.2), 0.36),
-    )
+    addScan(state, 'clear-match', detectedFace('face-1', shiftedDescriptor(maya, 0.15)))
+    addScan(state, 'possible-match', detectedFace('face-1', shiftedDescriptor(maya, 0.18)))
+    addScan(state, 'weak-match', detectedFace('face-1', shiftedDescriptor(maya, 0.3)))
+    addScan(state, 'poor-quality', detectedFace('face-1', maya, 0.36))
+    const before = structuredClone(state)
 
+    const automatic = createFaceSuggestions(state)
+    expect(automatic.map(({ photoKey }) => photoKey)).toEqual(['clear-match'])
+    expect(effectivePeopleForPhoto(state, 'clear-match', automatic)).toEqual(['maya'])
+    expect(createFaceReviewCandidates(state).map(({ photoKey }) => photoKey))
+      .toEqual(['possible-match'])
+    expect(effectivePeopleForPhoto(state, 'weak-match', automatic)).toEqual([])
+    // Ignoring a weak match is a read-only filter, not a permanent dismissal or
+    // removal of the original, stored scan, or an existing manual decision.
+    expect(state).toEqual(before)
+  })
+
+  it.each([
+    { score: 0.55, quality: 0.9, expected: 'ignored' },
+    { score: 0.62, quality: 0.9, expected: 'ignored' },
+    { score: 0.77, quality: 0.9, expected: 'ignored' },
+    { score: 0.78, quality: 0.9, expected: 'review' },
+    { score: 0.91, quality: 0.9, expected: 'review' },
+    { score: 0.92, quality: 0.9, expected: 'automatic' },
+    { score: 0.79, quality: 0.55, expected: 'ignored' },
+    { score: 0.8, quality: 0.55, expected: 'review' },
+    { score: 1, quality: 0.74, expected: 'review' },
+    { score: 1, quality: 0.75, expected: 'automatic' },
+    { score: 1, quality: 0.549, expected: 'ignored' },
+    { score: 1, quality: Number.NaN, expected: 'ignored' },
+  ])('classifies similarity $score at quality $quality as $expected', ({ score, quality, expected }) => {
+    const maya = faceResDescriptor()
+    // For 1024 components, Human's amplified distance root is 160 * delta.
+    const candidate = shiftedDescriptor(maya, (0.8 - 0.6 * score) / 1.6)
+    expect(faceResSimilarity(maya, candidate)).toBe(score)
+    const state = emptyPeopleTimelineState()
+    state.people = [person('maya')]
+    enroll(state, 'maya', maya)
+    addScan(state, 'candidate', { ...detectedFace('face-1', candidate, quality), minFacePixels: 128 })
+    expect(createFaceSuggestions(state)).toHaveLength(expected === 'automatic' ? 1 : 0)
+    expect(createFaceReviewCandidates(state)).toHaveLength(expected === 'review' ? 1 : 0)
+  })
+
+  it('keeps likely but not uniquely identified relatives out of automatic albums', () => {
+    const maya = faceResDescriptor()
+    const state = emptyPeopleTimelineState()
+    state.people = [person('maya'), person('leena')]
+    enroll(state, 'maya', maya)
+    enroll(state, 'leena', shiftedDescriptor(maya, 0.42))
+    addScan(state, 'likely-maya', detectedFace('face-1', shiftedDescriptor(maya, 0.2)))
+    addScan(state, 'identity-tie', detectedFace('face-1', shiftedDescriptor(maya, 0.21)))
     expect(createFaceSuggestions(state)).toEqual([])
-    expect(createFaceReviewCandidates(state)).toEqual(expect.arrayContaining([
-      expect.objectContaining({ photoKey: 'medium-match', faceId: 'face-1' }),
-      expect.objectContaining({ photoKey: 'lower-quality-match', faceId: 'face-1' }),
-    ]))
+    expect(createFaceReviewCandidates(state)).toEqual([
+      expect.objectContaining({ photoKey: 'likely-maya', personId: 'maya' }),
+    ])
+  })
+
+  it('keeps the review identity margin inclusive without accepting an identity tie', () => {
+    const maya = faceResDescriptor()
+    const candidate = shiftedDescriptor(maya, 0.19625) // .81 match
+    const leena = shiftedDescriptor(candidate, 0.2075) // .78 competing identity
+    const state = emptyPeopleTimelineState()
+    state.people = [person('maya'), person('leena')]
+    enroll(state, 'maya', maya)
+    enroll(state, 'leena', leena)
+    expect(faceResSimilarity(candidate, maya)).toBe(0.81)
+    expect(faceResSimilarity(candidate, leena)).toBe(0.78)
+    addScan(state, 'candidate', detectedFace('face-1', candidate))
+    expect(createFaceSuggestions(state)).toEqual([])
+    expect(createFaceReviewCandidates(state)).toEqual([
+      expect.objectContaining({ photoKey: 'candidate', personId: 'maya' }),
+    ])
+  })
+
+  it('honors explicit review decisions while leaving sibling faces reviewable', () => {
+    const maya = faceResDescriptor()
+    const leena = shiftedDescriptor(maya, 0.8)
+    const state = emptyPeopleTimelineState()
+    state.people = [person('maya'), person('leena')]
+    enroll(state, 'maya', maya)
+    enroll(state, 'leena', leena)
+    for (const photoKey of ['dismissed', 'confirmed', 'legacy-dismissed']) {
+      addScan(state, photoKey,
+        detectedFace('face-1', shiftedDescriptor(maya, 0.18)),
+        detectedFace('face-2', shiftedDescriptor(leena, 0.18)))
+    }
+    state.dismissedSuggestions = [
+      { photoKey: 'dismissed', faceId: 'face-1', personId: 'maya', dismissedAt: '2026-01-01' },
+      { photoKey: 'legacy-dismissed', personId: 'maya', dismissedAt: '2026-01-01' },
+    ]
+    // A whole-photo tag should stay accepted, without teaching a new face.
+    state.assignments = [{ photoKey: 'confirmed', personId: 'maya', source: 'manual', confirmedAt: '2026-01-01' }]
+    const reviews = createFaceReviewCandidates(state)
+    expect(reviews).toHaveLength(3)
+    expect(reviews.every(({ faceId, personId }) => faceId === 'face-2' && personId === 'leena')).toBe(true)
+    expect(effectivePeopleForPhoto(state, 'confirmed')).toEqual(['maya'])
+  })
+
+  it('reconsiders ignored saved scans after enrollment improves without scanning or deleting them', () => {
+    const maya = faceResDescriptor()
+    const oldAppearance = shiftedDescriptor(maya, 0.3)
+    const state = emptyPeopleTimelineState()
+    state.people = [person('maya')]
+    enroll(state, 'maya', maya)
+    addScan(state, 'old-photo', detectedFace('face-1', oldAppearance))
+    expect(createFaceSuggestions(state)).toEqual([])
+    expect(createFaceReviewCandidates(state)).toEqual([])
+    const scans = state.faceScans
+    enroll(state, 'maya', maya, oldAppearance)
+    expect(createFaceSuggestions(state)).toEqual([
+      expect.objectContaining({ photoKey: 'old-photo', personId: 'maya' }),
+    ])
+    expect(createFaceReviewCandidates(state)).toEqual([])
+    expect(state.faceScans).toBe(scans)
+    expect(state.dismissedSuggestions).toEqual([])
+  })
+
+  it('does not turn thousands of weak gallery matches into review work', () => {
+    const maya = faceResDescriptor()
+    const weak = shiftedDescriptor(maya, 0.3)
+    const state = emptyPeopleTimelineState()
+    state.people = [person('maya')]
+    enroll(state, 'maya', maya)
+    for (let index = 0; index < 4_000; index += 1) {
+      addScan(state, `gallery-${index}`, detectedFace('face-1', weak))
+    }
+    addScan(state, 'clear', detectedFace('face-1', maya))
+    addScan(state, 'possible', detectedFace('face-1', shiftedDescriptor(maya, 0.18)))
+    expect(createFaceSuggestions(state).map(({ photoKey }) => photoKey)).toEqual(['clear'])
+    expect(createFaceReviewCandidates(state).map(({ photoKey }) => photoKey)).toEqual(['possible'])
+    expect(Object.keys(state.faceScans)).toHaveLength(4_002)
   })
 
   it('does not surface detections below the review quality floor', () => {
@@ -437,8 +575,8 @@ describe('people timeline helpers', () => {
     addScan(
       state,
       'photo:family',
-      detectedFace('face-1', shiftedDescriptor(maya, 0.2)),
-      detectedFace('face-2', shiftedDescriptor(leena, 0.2)),
+      detectedFace('face-1', shiftedDescriptor(maya, 0.15)),
+      detectedFace('face-2', shiftedDescriptor(leena, 0.15)),
     )
 
     expect(createFaceSuggestions(state)).toEqual([

@@ -161,8 +161,9 @@ export function journalPhotoAsUnlocked(
 ): UnlockedCapsulePhoto {
   return {
     ...photo,
+    syncStatus: photo.syncStatus === 'local' ? undefined : photo.syncStatus,
     capsuleId: JOURNAL_LIBRARY_ID,
-    capsuleTitle: 'Family photos',
+    capsuleTitle: photo.origin === 'device-gallery' ? 'Your phone gallery' : 'Family photos',
     capsuleOpensAt: '1970-01-01T00:00:00.000Z',
   }
 }

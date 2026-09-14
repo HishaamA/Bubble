@@ -4,54 +4,91 @@ import android.app.PendingIntent;
 import android.appwidget.AppWidgetManager;
 import android.content.Context;
 import android.content.Intent;
+import android.content.res.Configuration;
 import android.graphics.Bitmap;
 import android.graphics.Color;
 import android.net.Uri;
-import android.os.Build;
 import android.os.Bundle;
 import android.util.TypedValue;
 import android.view.View;
 import android.widget.RemoteViews;
+import java.util.List;
 import com.simerfamily.kinsphere.MainActivity;
 import com.simerfamily.kinsphere.R;
 
-/** Builds Bubble's swipe shell and its compact paper-and-doodle cards. */
+/** Builds one explicitly selected, full-size launcher card and its navigation. */
 final class BubbleWidgetRenderer {
     private static final int DEFAULT_WIDTH_DP = 120;
     private static final int DEFAULT_HEIGHT_DP = 120;
 
     private BubbleWidgetRenderer() {}
 
-    /** Collection shell. Deliberately does not select or auto-advance a child. */
-    static RemoteViews renderShell(Context context, int appWidgetId) {
-        RemoteViews views = new RemoteViews(context.getPackageName(), R.layout.bubble_widget_stack);
-        Intent adapter = new Intent(context, BubbleWidgetRemoteViewsService.class)
-            .putExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, appWidgetId)
-            .setData(new Uri.Builder()
-                .scheme("bubble-widget")
-                .authority("stack")
-                .appendPath(Integer.toString(appWidgetId))
-                .build());
-        views.setRemoteAdapter(R.id.bubble_widget_stack, adapter);
+    /** Publish while holding the snapshot transaction lock: image, route and slot stay together. */
+    static void publish(Context context, AppWidgetManager manager, int appWidgetId, int direction) {
+        BubbleWidgetStore.withEntry(context, entry -> {
+            try {
+                long now = System.currentTimeMillis();
+                int position = BubbleWidgetNavigation.selectPosition(
+                    context, appWidgetId, entry.snapshot, now, direction);
+                manager.updateAppWidget(appWidgetId, renderSelected(context, appWidgetId,
+                    entry, manager.getAppWidgetOptions(appWidgetId), position, now));
+            } finally {
+                if (entry.thumbnail != null) entry.thumbnail.recycle();
+                for (Bitmap bitmap : entry.pageThumbnails.values()) {
+                    if (bitmap != null && !bitmap.isRecycled()) bitmap.recycle();
+                }
+            }
+        });
+    }
 
-        Intent open = new Intent(context, MainActivity.class)
-            .setAction(Intent.ACTION_VIEW)
-            .setPackage(context.getPackageName())
-            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP);
-        int flags = PendingIntent.FLAG_UPDATE_CURRENT;
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            // Collection fill-ins need a mutable template on Android 12+.
-            flags |= PendingIntent.FLAG_MUTABLE;
+    /** Complete, absolute widget state; no relative actions lost by launcher update merging. */
+    static RemoteViews renderSelected(Context context, int appWidgetId,
+        BubbleWidgetStore.Entry entry, Bundle options, int position, long now) {
+        BubbleWidgetSnapshot source = entry.snapshot;
+        BubbleWidgetSnapshot display = source == null
+            ? BubbleWidgetSnapshot.fallback("plum") : source.forDisplay(now);
+        if (source != null && !source.isCurrentLocalDay(now)) {
+            display = BubbleWidgetSnapshot.fallback(source.theme);
         }
-        views.setPendingIntentTemplate(
-            R.id.bubble_widget_stack,
-            PendingIntent.getActivity(context, appWidgetId, open, flags)
-        );
+        List<BubbleWidgetSnapshot.Page> pages = BubbleWidgetPhotoRotation.pagesForDisplay(display, now);
+        int count = Math.max(1, pages.size());
+        int selected = Math.floorMod(position, count);
+        CardData card;
+        Bitmap bitmap;
+        String route;
+        if (pages.isEmpty()) {
+            card = CardData.from(display);
+            bitmap = display == source && display.mayShowThumbnail() ? entry.thumbnail : null;
+            route = display.route;
+        } else {
+            BubbleWidgetSnapshot.Page page = pages.get(selected);
+            card = CardData.from(page);
+            bitmap = page.mayShowThumbnail() ? entry.pageThumbnails.get(page.id) : null;
+            route = page.route;
+        }
+        RemoteViews views = new RemoteViews(context.getPackageName(), R.layout.bubble_widget_stack);
+        views.setInt(R.id.bubble_widget_shell, "setBackgroundResource", Palette.forTheme(card.theme).cardBackground);
+        views.removeAllViews(R.id.bubble_widget_page_container);
+        RemoteViews content = renderCard(context, card, bitmap, options, selected, count);
+        content.setOnClickPendingIntent(R.id.bubble_widget_root,
+            directPendingIntent(context, appWidgetId, route));
+        views.addView(R.id.bubble_widget_page_container, content);
+        BubbleWidgetNavigation.attachControls(context, views, appWidgetId, count > 1);
+        views.setTextViewText(R.id.bubble_widget_navigation_position, (selected + 1) + " / " + count);
+        views.setContentDescription(R.id.bubble_widget_navigation_position,
+            "Card " + (selected + 1) + " of " + count);
+        views.setTextColor(R.id.bubble_widget_navigation_position, Palette.forTheme(card.theme).muted);
+        int width = widgetWidth(context, options);
+        views.setViewVisibility(R.id.bubble_widget_navigation_position, width >= 150 ? View.VISIBLE : View.GONE);
+        float density = context.getResources().getDisplayMetrics().density;
+        int side = Math.round((width < 150 ? 4 : 12) * density);
+        views.setViewPadding(R.id.bubble_widget_navigation, side, 0, side, Math.round(8 * density));
         return views;
     }
 
     /** Static fail-private surface used if a storage transaction cannot complete. */
     static RemoteViews renderPrivateFallback(Context context, int appWidgetId, Bundle options) {
+        BubbleWidgetNavigation.clearSelection(context, appWidgetId);
         BubbleWidgetSnapshot fallback = BubbleWidgetSnapshot.fallback("plum");
         RemoteViews views = renderCard(context, CardData.from(fallback), null, options);
         views.setOnClickPendingIntent(
@@ -86,11 +123,24 @@ final class BubbleWidgetRenderer {
         Bitmap thumbnail,
         Bundle options
     ) {
+        return renderPageItem(context, page, thumbnail, options, 0, 1);
+    }
+
+    static RemoteViews renderPageItem(
+        Context context,
+        BubbleWidgetSnapshot.Page page,
+        Bitmap thumbnail,
+        Bundle options,
+        int position,
+        int pageCount
+    ) {
         RemoteViews views = renderCard(
             context,
             CardData.from(page),
             page.mayShowThumbnail() ? thumbnail : null,
-            options
+            options,
+            position,
+            "full".equals(page.privacy) ? pageCount : 1
         );
         views.setOnClickFillInIntent(
             R.id.bubble_widget_root,
@@ -105,80 +155,149 @@ final class BubbleWidgetRenderer {
         Bitmap thumbnail,
         Bundle options
     ) {
+        return renderCard(context, display, thumbnail, options, 0, 1);
+    }
+
+    private static RemoteViews renderCard(
+        Context context, CardData display, Bitmap thumbnail, Bundle options,
+        int position, int pageCount
+    ) {
         boolean mediaLayout = thumbnail != null;
         int layout = mediaLayout ? R.layout.bubble_widget_media : R.layout.bubble_widget_text;
         RemoteViews views = new RemoteViews(context.getPackageName(), layout);
-        int width = options == null
-            ? DEFAULT_WIDTH_DP
-            : options.getInt(AppWidgetManager.OPTION_APPWIDGET_MIN_WIDTH, DEFAULT_WIDTH_DP);
-        int height = options == null
-            ? DEFAULT_HEIGHT_DP
-            : options.getInt(AppWidgetManager.OPTION_APPWIDGET_MIN_HEIGHT, DEFAULT_HEIGHT_DP);
+        boolean landscape = context.getResources().getConfiguration().orientation
+            == Configuration.ORIENTATION_LANDSCAPE;
+        int width = widgetWidth(context, options);
+        int height = widgetDimension(options,
+            landscape ? AppWidgetManager.OPTION_APPWIDGET_MIN_HEIGHT
+                : AppWidgetManager.OPTION_APPWIDGET_MAX_HEIGHT,
+            AppWidgetManager.OPTION_APPWIDGET_MIN_HEIGHT, DEFAULT_HEIGHT_DP);
+
+        // Also support launcher hosts that measure RemoteViews with AT_MOST.
+        // Size every background/content layer, not only the outer wrapper.
+        float density = context.getResources().getDisplayMetrics().density;
+        int[] fillLayers = {
+            R.id.bubble_widget_root,
+            R.id.bubble_widget_card,
+            mediaLayout ? R.id.bubble_widget_media_scrim : R.id.bubble_widget_text_content,
+        };
+        // FrameLayout does not remeasure its sole MATCH_PARENT child after
+        // resolving a minimum under AT_MOST. Size the background and content
+        // as well, so an expanded root cannot leave a small card inside it.
+        for (int layer : fillLayers) {
+            views.setInt(layer, "setMinimumHeight", Math.round(height * density));
+        }
+        // View.setMinimumWidth is not remotely callable on Android 7–11.
+        // A zero-height TextView with a WRAP_CONTENT width contributes the
+        // desired width up through all three layers, using an API24-safe
+        // RemoteViews method. The stack still caps it to the available width.
+        views.setInt(R.id.bubble_widget_width_driver, "setMinWidth", Math.round(width * density));
         boolean tiny = width < 120 || height < 120;
         boolean compact = width < 150 || height < 150;
-        boolean roomy = width >= 175 && height >= 165;
+        boolean browsing = pageCount > 1;
+        boolean shortCard = browsing && height < 150;
+        int content = mediaLayout ? R.id.bubble_widget_media_scrim : R.id.bubble_widget_text_content;
+        int padding = Math.round((compact ? 8 : 16) * density);
+        views.setViewPadding(content, padding, padding, padding,
+            browsing ? Math.round((compact ? 56 : 72) * density) : padding);
 
         Palette palette = Palette.forTheme(display.theme);
         views.setInt(R.id.bubble_widget_card, "setBackgroundResource", palette.cardBackground);
-        views.setInt(R.id.bubble_widget_tape, "setBackgroundResource", palette.tapeBackground);
         views.setTextColor(R.id.bubble_widget_eyebrow, palette.eyebrow);
         views.setTextColor(R.id.bubble_widget_title, palette.ink);
-        views.setTextColor(R.id.bubble_widget_subtitle, palette.muted);
-        views.setTextColor(R.id.bubble_widget_doodle, palette.playInk);
-        views.setTextColor(R.id.bubble_widget_badge, palette.badgeInk);
-        views.setInt(R.id.bubble_widget_badge, "setBackgroundResource", palette.badgeBackground);
-        views.setInt(R.id.bubble_widget_doodle, "setBackgroundResource", palette.playBackground);
-        views.setInt(R.id.bubble_widget_orbit, "setBackgroundResource", palette.orbitBackground);
+        views.setTextColor(R.id.bubble_widget_subtitle, mediaLayout ? palette.ink : palette.muted);
         views.setTextViewText(
             R.id.bubble_widget_eyebrow,
             display.eyebrow.toUpperCase(java.util.Locale.US)
         );
+        views.setViewVisibility(R.id.bubble_widget_eyebrow,
+            shortCard && !mediaLayout ? View.GONE : View.VISIBLE);
         views.setTextViewText(R.id.bubble_widget_title, display.title);
-        String subtitle = compactSubtitle(display, compact);
+        boolean timedCard = "urgent".equals(display.kind) || "today".equals(display.kind);
+        String subtitle = display.subtitle;
+        String time = null;
+        if (!mediaLayout && timedCard && subtitle != null) {
+            int separator = subtitle.indexOf(" · ");
+            time = separator >= 0 ? subtitle.substring(0, separator) : subtitle;
+            subtitle = separator >= 0 ? subtitle.substring(separator + 3) : null;
+        }
         views.setTextViewText(R.id.bubble_widget_subtitle, subtitle == null ? "" : subtitle);
-        views.setTextViewText(R.id.bubble_widget_doodle, doodleFor(display.kind));
-        views.setTextViewText(
-            R.id.bubble_widget_badge,
-            display.badge == null ? defaultBadge(display.kind) : display.badge
-        );
 
         float titleSize = mediaLayout
-            ? (compact ? 13f : 14f)
-            : (tiny ? 13f : compact ? 14f : 16f);
+            ? (compact ? 12f : 15f)
+            : (tiny ? 13f : compact ? 14f : 24f);
         views.setTextViewTextSize(R.id.bubble_widget_title, TypedValue.COMPLEX_UNIT_SP, titleSize);
-        views.setInt(R.id.bubble_widget_title, "setMaxLines", mediaLayout || tiny ? 2 : 3);
+        views.setInt(R.id.bubble_widget_title, "setMaxLines",
+            compact || (browsing && height < 210) ? 1 : browsing || mediaLayout ? 2 : 3);
         views.setInt(
             R.id.bubble_widget_subtitle,
             "setMaxLines",
             mediaLayout || compact ? 1 : 2
         );
 
-        boolean timedCard = "urgent".equals(display.kind) || "today".equals(display.kind);
         boolean showSubtitle = subtitle != null
-            && (!tiny || timedCard)
-            && (!mediaLayout || height >= 130);
-        boolean showBadge = mediaLayout ? roomy && display.badge != null : !compact;
+            && !(browsing && compact)
+            && !(browsing && height < 190)
+            && (!mediaLayout || height >= 150);
         views.setViewVisibility(
             R.id.bubble_widget_subtitle,
             showSubtitle ? View.VISIBLE : View.GONE
         );
-        views.setViewVisibility(R.id.bubble_widget_badge, showBadge ? View.VISIBLE : View.GONE);
+        views.setTextColor(R.id.bubble_widget_page_position, palette.ink);
+        views.setTextViewText(R.id.bubble_widget_page_position, (position + 1) + " of " + pageCount);
+        views.setContentDescription(R.id.bubble_widget_page_position,
+            "Card " + (position + 1) + " of " + pageCount);
+        views.setViewVisibility(R.id.bubble_widget_page_position,
+            View.GONE);
 
         if (mediaLayout) {
+            int captionPadding = Math.round((compact ? 4 : 8) * density);
+            views.setViewPadding(R.id.bubble_widget_photo_caption,
+                captionPadding, captionPadding, captionPadding, captionPadding);
             views.setImageViewBitmap(R.id.bubble_widget_thumbnail, thumbnail);
             boolean reveal = "unlock".equals(display.kind);
             views.setViewVisibility(R.id.bubble_widget_play, reveal ? View.VISIBLE : View.GONE);
-            views.setViewVisibility(R.id.bubble_widget_orbit, reveal ? View.VISIBLE : View.GONE);
             views.setInt(R.id.bubble_widget_play, "setBackgroundResource", palette.playBackground);
             views.setTextColor(R.id.bubble_widget_play, palette.playInk);
         } else {
-            views.setViewVisibility(R.id.bubble_widget_orbit, View.VISIBLE);
+            views.setTextColor(R.id.bubble_widget_time, palette.eyebrow);
+            views.setTextViewText(R.id.bubble_widget_time, time == null ? "" : time);
+            views.setViewVisibility(R.id.bubble_widget_time,
+                time != null && !shortCard ? View.VISIBLE : View.GONE);
+            views.setTextColor(R.id.bubble_widget_doodle, palette.playInk);
+            views.setInt(R.id.bubble_widget_doodle, "setBackgroundResource", palette.playBackground);
+            views.setTextViewText(R.id.bubble_widget_doodle, doodleFor(display.kind));
+            views.setViewVisibility(R.id.bubble_widget_doodle, View.GONE);
+            views.setTextColor(R.id.bubble_widget_badge, palette.badgeInk);
+            views.setInt(R.id.bubble_widget_badge, "setBackgroundResource", palette.badgeBackground);
+            views.setTextViewText(R.id.bubble_widget_badge, display.badge == null ? "" : display.badge);
+            views.setViewVisibility(R.id.bubble_widget_badge,
+                !compact && !browsing && display.badge != null ? View.VISIBLE : View.GONE);
+            views.setInt(R.id.bubble_widget_orbit, "setBackgroundResource", palette.orbitBackground);
+            views.setViewVisibility(R.id.bubble_widget_orbit, View.GONE);
         }
         String description = display.subtitle == null
             ? display.title
             : display.title + ". " + display.subtitle;
-        views.setContentDescription(R.id.bubble_widget_root, description);
+        views.setContentDescription(R.id.bubble_widget_root,
+            browsing ? description + ". Card " + (position + 1) + " of " + pageCount : description);
         return views;
+    }
+
+    private static int widgetWidth(Context context, Bundle options) {
+        boolean landscape = context.getResources().getConfiguration().orientation
+            == Configuration.ORIENTATION_LANDSCAPE;
+        return widgetDimension(options,
+            landscape ? AppWidgetManager.OPTION_APPWIDGET_MAX_WIDTH
+                : AppWidgetManager.OPTION_APPWIDGET_MIN_WIDTH,
+            AppWidgetManager.OPTION_APPWIDGET_MIN_WIDTH, DEFAULT_WIDTH_DP);
+    }
+
+    private static int widgetDimension(Bundle options, String key, String fallbackKey, int fallback) {
+        if (options == null) return fallback;
+        int value = options.getInt(key, 0);
+        if (value <= 0) value = options.getInt(fallbackKey, 0);
+        return value > 0 ? value : fallback;
     }
 
     private static Intent fillInIntent(Context context, String route) {
@@ -192,15 +311,19 @@ final class BubbleWidgetRenderer {
         int requestCode,
         String route
     ) {
-        Intent open = new Intent(Intent.ACTION_VIEW, routeUri(context, route), context, MainActivity.class)
-            .setPackage(context.getPackageName())
-            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP);
+        Intent open = directOpenIntent(context, route);
         return PendingIntent.getActivity(
             context,
             requestCode,
             open,
             PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE
         );
+    }
+
+    static Intent directOpenIntent(Context context, String route) {
+        return new Intent(Intent.ACTION_VIEW, routeUri(context, route), context, MainActivity.class)
+            .setPackage(context.getPackageName())
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP);
     }
 
     private static Uri routeUri(Context context, String route) {

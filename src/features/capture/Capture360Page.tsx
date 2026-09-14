@@ -23,10 +23,7 @@ import {
   type ProcessedPanorama,
 } from '../../services/media/processPanorama'
 import type { StoredPanoramaAnnotation } from '../memories/shared'
-import {
-  composeGuidedPanorama,
-  type GuidedPanoramaProgress,
-} from '../../services/media/composeGuidedPanorama'
+import { composeGuidedPanorama, type GuidedPanoramaProgress } from '../../services/media/composeGuidedPanorama'
 import { GuidedCapturePreview } from './GuidedCapturePreview'
 import { GuidedPanoramaReview } from './GuidedPanoramaReview'
 import {
@@ -34,6 +31,7 @@ import {
   isNativeCaptureCancellation,
   isNativePanoramaCaptureAvailable,
   startNativePanoramaCapture,
+  type NativePanoramaCaptureOptions,
   type NativePanoramaCaptureResult,
 } from './nativePanoramaCapture'
 import { installCaptureEditorViewportSync } from './captureEditorViewport'
@@ -43,26 +41,58 @@ import { CaptureIcon } from './CaptureIcon'
 
 import type { CaptureSource, Capture360Submission } from './captureTypes'
 export type { CaptureSource, Capture360Submission } from './captureTypes'
+import {
+  aiPanoramaProgressLabel,
+  assembleAiNativePanorama,
+  assembleAiPhotoPanorama,
+  checkAiPanoramaHealth,
+  isAiPanoramaCancellation,
+  type AiPanoramaHealth,
+  type AiPanoramaProgress,
+  type AiProcessedPanorama,
+} from '../../services/media/aiPanorama'
+import {
+  assembleNativePanorama,
+  getNativePanoramaStitchStatus,
+  getSavedNativeCaptures,
+  isCompleteNativeCapture,
+  isNativePanoramaMemoryFailure,
+  nativeStitchProgressLabel,
+  openSavedNativePanorama,
+  usesNativePanoramaStitch,
+  type NativeStitchProgress,
+  type NativeStitchStatus,
+  type SavedNativeCapture,
+} from '../../services/media/nativePanoramaStitch'
 
 type Capture360PageProps = {
   now?: Date
   dailyWindow?: DailyCaptureWindow
   familySeed?: string
+  /** Stable authenticated identity; recovery never crosses account boundaries. */
+  captureOwnerKey?: string
+  /** Standard is the shared on-phone compositor; advanced keeps strict alignment. */
+  assemblyMode?: 'standard' | 'advanced'
+  savedCaptureSessionIds?: readonly string[]
   dailyCaptureCompleted?: boolean
   initialMode?: CaptureSource
   connectedFamilySync?: boolean
   onClose?: () => void
   onViewMemories?: () => void
+  onOpenAiGeneration?: () => void
+  onOpenAdvancedAssembly?: () => void
   onSaveDraft?: (submission: Capture360Submission) => void | Promise<void>
   onShare?: (submission: Capture360Submission) => void | Promise<void>
   readDimensions?: (file: File) => Promise<ImageDimensions>
   processPanorama?: (file: File) => Promise<ProcessedPanorama>
   guidedCaptureAvailable?: boolean
-  startGuidedCapture?: () => Promise<NativePanoramaCaptureResult>
+  startGuidedCapture?: (options?: NativePanoramaCaptureOptions) => Promise<NativePanoramaCaptureResult>
   discardGuidedCapture?: (result: NativePanoramaCaptureResult) => Promise<void>
   composeGuidedCapture?: (
     result: NativePanoramaCaptureResult,
     onProgress?: (progress: GuidedPanoramaProgress) => void,
+    outputWidth?: number,
+    signal?: AbortSignal,
   ) => Promise<ProcessedPanorama>
   successMessage?: string
 }
@@ -74,11 +104,28 @@ type CaptureDraft = {
   dimensions: ImageDimensions
   previewUrl: string
   source: CaptureSource
-  origin: 'guided' | 'upload'
+  origin: 'guided' | 'upload' | 'ai'
   savedLocally: boolean
   nativeCaptureResult?: NativePanoramaCaptureResult
   picker?: 'camera' | 'library'
   warning?: string
+}
+
+// Raw images remain in native storage; this registry holds only their
+// session metadata and never returns one account's capture to another account.
+const recoverableNativeCaptures = new Map<string, {
+  result: NativePanoramaCaptureResult
+  saving?: Promise<void>
+}>()
+const NO_SAVED_CAPTURE_SESSIONS: readonly string[] = []
+const LEGACY_TRACKING_WARNING = 'These photos use older Android tracking coordinates. Tracking drift can produce misplaced or patchwork views; blending cannot repair it. A new capture is recommended. Your originals are kept.'
+
+function hasLegacyAndroidTracking(capture: NativePanoramaCaptureResult) {
+  return capture.frames.some((frame) => frame.poseSource === 'arcoreDisplayOrientedPose')
+}
+
+function hasRunningNativeAssembly(capture: SavedNativeCapture) {
+  return capture.assembly?.state === 'queued' || capture.assembly?.state === 'running'
 }
 
 /** Creates a UUID for drafts before either local or family persistence begins. */
@@ -101,11 +148,16 @@ export function Capture360Page({
   now,
   dailyWindow,
   familySeed,
+  captureOwnerKey,
+  assemblyMode = 'standard',
+  savedCaptureSessionIds = NO_SAVED_CAPTURE_SESSIONS,
   dailyCaptureCompleted = false,
   initialMode = 'daily',
   connectedFamilySync = false,
   onClose,
   onViewMemories,
+  onOpenAiGeneration,
+  onOpenAdvancedAssembly,
   onSaveDraft,
   onShare,
   readDimensions = readImageDimensions,
@@ -113,9 +165,13 @@ export function Capture360Page({
   guidedCaptureAvailable = isNativePanoramaCaptureAvailable(),
   startGuidedCapture = startNativePanoramaCapture,
   discardGuidedCapture = discardNativePanoramaCapture,
-  composeGuidedCapture = composeGuidedPanorama,
+  composeGuidedCapture,
   successMessage,
 }: Capture360PageProps) {
+  const nativeRecovery = usesNativePanoramaStitch()
+  const advancedNativeAssembly = nativeRecovery && assemblyMode === 'advanced'
+  const computerAssembly = !nativeRecovery && assemblyMode === 'advanced'
+  const savedCaptureSessions = useMemo(() => new Set(savedCaptureSessionIds), [savedCaptureSessionIds])
   const [clock, setClock] = useState(() => new Date())
   const [source, setSource] = useState<CaptureSource>(initialMode)
   const [draft, setDraft] = useState<CaptureDraft | null>(null)
@@ -132,8 +188,29 @@ export function Capture360Page({
   const [guidePreview, setGuidePreview] = useState(false)
   const [guidedCaptureRunning, setGuidedCaptureRunning] = useState(false)
   const [guidedCaptureStatus, setGuidedCaptureStatus] = useState('')
+  const [aiHealth, setAiHealth] = useState<AiPanoramaHealth | null>(null)
+  const [aiAssembling, setAiAssembling] = useState(false)
+  const [sharedAssembling, setSharedAssembling] = useState(false)
+  const [aiProgress, setAiProgress] = useState<AiPanoramaProgress | null>(null)
+  const [nativeStitchStatus, setNativeStitchStatus] = useState<NativeStitchStatus | null>(null)
+  const [nativeProgress, setNativeProgress] = useState<NativeStitchProgress | null>(null)
+  const [savedCaptures, setSavedCaptures] = useState<SavedNativeCapture[]>(() => {
+    const capture = captureOwnerKey ? recoverableNativeCaptures.get(captureOwnerKey)?.result : undefined
+    return capture ? [capture] : []
+  })
+  const [savedCaptureStatusError, setSavedCaptureStatusError] = useState('')
+  const [removeOriginals, setRemoveOriginals] = useState<SavedNativeCapture | null>(null)
+  const [acknowledgedAssemblyRemoval, setAcknowledgedAssemblyRemoval] = useState(false)
+  const [memoryRetryCapture, setMemoryRetryCapture] = useState<NativePanoramaCaptureResult | null>(null)
+  const [loadingOriginals, setLoadingOriginals] = useState(nativeRecovery && Boolean(captureOwnerKey))
+  const [hasPendingCapture, setHasPendingCapture] = useState(() => Boolean(captureOwnerKey && recoverableNativeCaptures.has(captureOwnerKey)))
+  const aiAbortRef = useRef<AbortController | null>(null)
+  const nativeDetachRef = useRef<AbortController | null>(null)
+  const sharedAbortRef = useRef<AbortController | null>(null)
+  const pendingNativeCaptureRef = useRef<NativePanoramaCaptureResult | null>(captureOwnerKey ? recoverableNativeCaptures.get(captureOwnerKey)?.result ?? null : null)
   const cameraInputRef = useRef<HTMLInputElement>(null)
   const libraryInputRef = useRef<HTMLInputElement>(null)
+  const aiPhotosInputRef = useRef<HTMLInputElement>(null)
   const capturePageRef = useRef<HTMLElement>(null)
   const captionInputRef = useRef<HTMLTextAreaElement>(null)
   const sourceRef = useRef<CaptureSource>(initialMode)
@@ -151,6 +228,140 @@ export function Capture360Page({
   const mountedRef = useRef(true)
   const restoreGuideFocusRef = useRef(false)
   const guidedCaptureButtonRef = useRef<HTMLButtonElement>(null)
+  const visibleSavedCaptures = nativeRecovery
+    ? savedCaptures.filter((capture) => capture.ownerKey === captureOwnerKey)
+    : savedCaptures
+  const recoveredRunningJobsKey = visibleSavedCaptures
+    .filter((capture) => capture.assembly?.state === 'queued' || capture.assembly?.state === 'running')
+    .map((capture) => `${capture.directoryUrl}:${capture.assembly?.jobId ?? ''}`).join('|')
+
+  useEffect(() => {
+    if (!computerAssembly) return
+    const controller = new AbortController()
+    void checkAiPanoramaHealth({ signal: controller.signal })
+      .then((health) => { if (!controller.signal.aborted) setAiHealth(health) })
+      .catch(() => undefined)
+    return () => controller.abort()
+  }, [computerAssembly])
+
+  useEffect(() => {
+    if (!advancedNativeAssembly) return
+    let active = true
+    const controller = new AbortController()
+    void getNativePanoramaStitchStatus({ signal: controller.signal }).then((status) => {
+      if (active) setNativeStitchStatus(status)
+    }).catch(() => {
+      if (active) setNativeStitchStatus({ available: false, offline: true, model: 'DISK + LightGlue' })
+    })
+    return () => { active = false; controller.abort() }
+  }, [advancedNativeAssembly])
+
+  useEffect(() => {
+    if (!nativeRecovery) return
+    let active = true
+    const controller = new AbortController()
+    if (!captureOwnerKey) {
+      return () => { active = false; controller.abort() }
+    }
+    // Memories hydrate after this page mounts. Do not keep offering an already
+    // saved source set as unfinished, but never detach an active native job.
+    const previousPending = pendingNativeCaptureRef.current as SavedNativeCapture | null
+    if (previousPending?.sessionId && savedCaptureSessions.has(previousPending.sessionId)
+      && !hasRunningNativeAssembly(previousPending) && !guidedCaptureInFlightRef.current
+      && !recoverableNativeCaptures.get(captureOwnerKey)?.saving) {
+      pendingNativeCaptureRef.current = null
+      recoverableNativeCaptures.delete(captureOwnerKey)
+      setHasPendingCapture(false)
+    }
+    void getSavedNativeCaptures(captureOwnerKey, { signal: controller.signal }).then((captures) => {
+      if (!active) return
+      setSavedCaptures(captures)
+      setSavedCaptureStatusError('')
+      const previous = pendingNativeCaptureRef.current
+      const latest = previous && captures.find((capture) => capture.ownerKey === captureOwnerKey
+        && capture.directoryUrl === previous.directoryUrl)
+      if (latest && !guidedCaptureInFlightRef.current && !recoverableNativeCaptures.get(captureOwnerKey)?.saving) {
+        if (!hasRunningNativeAssembly(latest) && (latest.assembly?.state === 'completed'
+          || latest.savedResult?.state === 'completed'
+          || (assemblyMode === 'standard' && latest.assembly?.state === 'failed')
+          || (assemblyMode === 'standard' && hasLegacyAndroidTracking(latest))
+          || (latest.sessionId && savedCaptureSessions.has(latest.sessionId)))) {
+          pendingNativeCaptureRef.current = null
+          recoverableNativeCaptures.delete(captureOwnerKey)
+          setHasPendingCapture(false)
+        } else {
+          pendingNativeCaptureRef.current = latest
+          recoverableNativeCaptures.set(captureOwnerKey, { result: latest })
+        }
+      }
+      const pending = captures.find((capture) => isCompleteNativeCapture(capture)
+        && capture.ownerKey === captureOwnerKey
+        && capture.assembly?.state !== 'completed' && capture.savedResult?.state !== 'completed'
+        && (assemblyMode !== 'standard' || capture.assembly?.state !== 'failed')
+        && (assemblyMode !== 'standard' || hasRunningNativeAssembly(capture) || !hasLegacyAndroidTracking(capture))
+        && (hasRunningNativeAssembly(capture) || !capture.sessionId || !savedCaptureSessions.has(capture.sessionId)))
+      if (pending && !pendingNativeCaptureRef.current && !guidedCaptureInFlightRef.current) {
+        pendingNativeCaptureRef.current = pending
+        recoverableNativeCaptures.set(captureOwnerKey, { result: pending })
+        setHasPendingCapture(true)
+      }
+    }).catch((reason: unknown) => {
+      if (active) setError(reason instanceof Error ? reason.message : 'Saved originals could not be loaded. Reopen Capture to try again.')
+    }).finally(() => { if (active) setLoadingOriginals(false) })
+    return () => { active = false; controller.abort() }
+  }, [assemblyMode, captureOwnerKey, nativeRecovery, savedCaptureSessions])
+
+  // A foreground page can observe a job started before this mount. Read its durable
+  // status without restarting inference, opening a result, or cancelling the worker.
+  useEffect(() => {
+    if (!nativeRecovery || !captureOwnerKey || !recoveredRunningJobsKey || guidedCaptureRunning) return
+    let active = true
+    let reading = false
+    let timer: ReturnType<typeof setTimeout> | undefined
+    let pendingRead: AbortController | undefined
+    const schedule = () => {
+      if (active && !document.hidden) timer = setTimeout(() => void refresh(), 2_000)
+    }
+    const refresh = async () => {
+      if (!active || document.hidden || reading) return
+      reading = true
+      const controller = new AbortController()
+      pendingRead = controller
+      let continuePolling = false
+      try {
+        const captures = await getSavedNativeCaptures(captureOwnerKey, { signal: controller.signal })
+        if (!active || controller.signal.aborted) return
+        setSavedCaptures(captures)
+        setSavedCaptureStatusError('')
+        continuePolling = captures.some((capture) => capture.ownerKey === captureOwnerKey
+          && (capture.assembly?.state === 'queued' || capture.assembly?.state === 'running'))
+      } catch (reason) {
+        if (!active) return
+        if (controller.signal.aborted) continuePolling = true
+        else {
+          // Stop automatic retries on a failed status channel. The worker remains independent.
+          setSavedCaptureStatusError(reason instanceof Error ? reason.message
+            : 'Saved status could not be refreshed. Assembly may still be running; reopen Capture to check again.')
+        }
+      } finally {
+        reading = false
+        if (continuePolling) schedule()
+      }
+    }
+    const visibilityChanged = () => {
+      clearTimeout(timer)
+      if (document.hidden) pendingRead?.abort()
+      else void refresh()
+    }
+    schedule()
+    document.addEventListener('visibilitychange', visibilityChanged)
+    return () => {
+      active = false
+      clearTimeout(timer)
+      pendingRead?.abort()
+      document.removeEventListener('visibilitychange', visibilityChanged)
+    }
+  }, [captureOwnerKey, guidedCaptureRunning, nativeRecovery, recoveredRunningJobsKey])
 
   // A supplied clock freezes time for tests; production checks frequently enough
   // for a 15-minute capture window to open and close without user navigation.
@@ -167,6 +378,9 @@ export function Capture360Page({
     mountedRef.current = true
     return () => {
       mountedRef.current = false
+      sharedAbortRef.current?.abort()
+      if (nativeDetachRef.current) nativeDetachRef.current.abort()
+      else aiAbortRef.current?.abort()
       guidedCaptureRequestRef.current += 1
       fileSelectionRequestRef.current += 1
       guidedCaptureInFlightRef.current = false
@@ -178,7 +392,7 @@ export function Capture360Page({
       if (previewUrlRef.current) URL.revokeObjectURL(previewUrlRef.current)
       previewUrlRef.current = null
     }
-  }, [])
+  }, [nativeRecovery])
 
   // The shared app coordinator reveals focused fields. Capture additionally
   // tracks a compact breakpoint so its preview and actions fit the keyboard-
@@ -201,7 +415,9 @@ export function Capture360Page({
   const phase = getDailyCapturePhase(currentTime, captureWindow, dailyCompleted)
   const canUseDailyWindow = phase === 'open'
   const isSuccess = shared
-  const interactionBusy = checking || guidedCaptureRunning || savingDraft || sharing
+  const interactionBusy = checking || guidedCaptureRunning || savingDraft || sharing || loadingOriginals
+  const needsAssemblyRemovalAcknowledgement = (removeOriginals?.savedResult?.state === 'completed' || removeOriginals?.assembly?.state === 'completed')
+    && !(draft?.savedLocally && draft.nativeCaptureResult?.directoryUrl === removeOriginals.directoryUrl)
 
   /** Reads synchronous mutexes that close React's pre-render double-action window. */
   function hasBlockingInteraction() {
@@ -210,10 +426,30 @@ export function Capture360Page({
       fileSelectionInFlightRef.current ||
       draftSaveInFlightRef.current ||
       shareInFlightRef.current
+      || loadingOriginals
     )
   }
 
-  /** Releases one draft's browser/native resources and resets its editor state. */
+  function retainNativeCapture(result: NativePanoramaCaptureResult) {
+    if (captureOwnerKey && recoverableNativeCaptures.get(captureOwnerKey)?.result !== result) {
+      recoverableNativeCaptures.set(captureOwnerKey, { result })
+    }
+    pendingNativeCaptureRef.current = result
+    if (mountedRef.current) {
+      setHasPendingCapture(true)
+      setSavedCaptures((current) => [result, ...current.filter((capture) => capture.directoryUrl !== result.directoryUrl)])
+    }
+  }
+
+  function releaseNativeRecovery(result: NativePanoramaCaptureResult) {
+    if (captureOwnerKey && recoverableNativeCaptures.get(captureOwnerKey)?.result === result) {
+      recoverableNativeCaptures.delete(captureOwnerKey)
+    }
+    if (pendingNativeCaptureRef.current === result) pendingNativeCaptureRef.current = null
+    if (mountedRef.current) setHasPendingCapture(Boolean(pendingNativeCaptureRef.current))
+  }
+
+  /** Releases the browser preview; original photos remain available for retry. */
   function clearDraft({ invalidateFileSelection = true } = {}) {
     if (invalidateFileSelection) {
       fileSelectionRequestRef.current += 1
@@ -232,8 +468,9 @@ export function Capture360Page({
     setError('')
     if (cameraInputRef.current) cameraInputRef.current.value = ''
     if (libraryInputRef.current) libraryInputRef.current.value = ''
+    if (aiPhotosInputRef.current) aiPhotosInputRef.current.value = ''
     if (nativeCaptureResult) {
-      void discardGuidedCapture(nativeCaptureResult).catch(() => undefined)
+      releaseNativeRecovery(nativeCaptureResult)
     }
   }
 
@@ -303,6 +540,7 @@ export function Capture360Page({
       height: selectedDraft.dimensions.height,
       createdAt: selectedDraft.createdAt,
       annotations: nextAnnotations,
+      ...(selectedDraft.nativeCaptureResult?.sessionId ? { captureSessionId: selectedDraft.nativeCaptureResult.sessionId } : {}),
     }
   }
 
@@ -324,16 +562,13 @@ export function Capture360Page({
       .catch(() => undefined)
       .then(() => onSaveDraft(submission))
     draftSaveQueueRef.current = saveOperation
+    const recovery = captureOwnerKey ? recoverableNativeCaptures.get(captureOwnerKey) : undefined
+    if (recovery && recovery.result === selectedDraft.nativeCaptureResult) recovery.saving = saveOperation
 
     try {
       await saveOperation
       if (selectedDraft.nativeCaptureResult) {
-        try {
-          await discardGuidedCapture(selectedDraft.nativeCaptureResult)
-        } catch {
-          // The assembled panorama is durable now. Stale cache cleanup can be
-          // retried by the OS without putting the saved moment at risk.
-        }
+        releaseNativeRecovery(selectedDraft.nativeCaptureResult)
       }
       setDraft((currentDraft) =>
         currentDraft?.id === selectedDraft.id
@@ -343,11 +578,11 @@ export function Capture360Page({
                 saveVersion === draftSaveVersionRef.current
                   ? true
                   : currentDraft.savedLocally,
-              nativeCaptureResult: undefined,
             }
           : currentDraft,
       )
     } catch (reason) {
+      if (recovery?.saving === saveOperation) recovery.saving = undefined
       if (saveVersion === draftSaveVersionRef.current) {
         setDraft((currentDraft) =>
           currentDraft?.id === selectedDraft.id
@@ -444,11 +679,12 @@ export function Capture360Page({
   }
 
   /** Runs one native capture/composition session or opens the browser concept preview. */
-  async function beginGuidedCapture(nextSource: CaptureSource) {
+  async function beginGuidedCapture(nextSource: CaptureSource, selectedCapture?: SavedNativeCapture,
+    outputWidth: 2048 | 4096 = assemblyMode === 'advanced' ? 4096 : 2048, openFinished = false) {
     // React state disables the button visually; this ref closes the same-tick
     // window before a render so the native bridge can only own one session.
     if (hasBlockingInteraction()) return
-    if (nextSource === 'daily' && !canUseDailyWindow) return
+    if (nextSource === 'daily' && !canUseDailyWindow && !pendingNativeCaptureRef.current && !selectedCapture) return
     sourceRef.current = nextSource
     setSource(nextSource)
     setShared(false)
@@ -470,21 +706,42 @@ export function Capture360Page({
     )
     setGuidedCaptureRunning(true)
     setGuidedCaptureStatus('Opening the camera guide…')
-    let captureResult: NativePanoramaCaptureResult | undefined
     let keepNativeCapture = false
+    let attemptedCapture: NativePanoramaCaptureResult | undefined
     try {
-      const result = await startGuidedCapture()
-      captureResult = result
+      const recovery = captureOwnerKey ? recoverableNativeCaptures.get(captureOwnerKey) : undefined
+      if (!selectedCapture && captureOwnerKey && pendingNativeCaptureRef.current && !recovery) {
+        pendingNativeCaptureRef.current = null
+        setHasPendingCapture(false)
+        setAnnouncement('Your previous sphere finished saving in Memories.')
+        return
+      }
+      if (recovery?.saving) {
+        setGuidedCaptureStatus('Waiting for your previous save…')
+        try { await recovery.saving } catch { /* A failed save remains retryable. */ }
+        if (!requestIsCurrent()) return
+        if (captureOwnerKey && !recoverableNativeCaptures.has(captureOwnerKey)) {
+          pendingNativeCaptureRef.current = null
+          setHasPendingCapture(false)
+          setAnnouncement('Your previous sphere finished saving in Memories.')
+          return
+        }
+      }
+      if (nativeRecovery && !captureOwnerKey) throw new Error('Sign in before capturing so your original photos stay with your account.')
+      const result = selectedCapture ?? pendingNativeCaptureRef.current ?? await startGuidedCapture({ ownerKey: captureOwnerKey })
+      attemptedCapture = result
+      if (nativeRecovery && result.ownerKey !== captureOwnerKey) throw new Error('These original photos are not available for this account.')
+      // Originals survive assembly, saving, sharing, cancellation, and navigation.
+      keepNativeCapture = true
+      retainNativeCapture(result)
       if (!requestIsCurrent()) return
-      if (
-        result.frames.length < result.targetCount ||
-        result.capturedCount < result.targetCount
-      ) {
-        throw new Error('Capture every surrounding dot before finishing.')
+      if (!isCompleteNativeCapture(result)) {
+        releaseNativeRecovery(result)
+        throw new Error('This capture is incomplete. Its original photos are kept. Start a new capture and finish every dot.')
       }
 
       setGuidedCaptureStatus('Building your 360° moment…')
-      const processed = await composeGuidedCapture(result, (progress) => {
+      const localProgress = (progress: GuidedPanoramaProgress) => {
         if (!requestIsCurrent()) return
         if (progress.phase === 'reading') {
           setGuidedCaptureStatus(`Reading view ${Math.min(progress.completed + 1, progress.total)} of ${progress.total}…`)
@@ -493,7 +750,92 @@ export function Capture360Page({
         } else {
           setGuidedCaptureStatus('Finishing your 360° moment…')
         }
-      })
+      }
+      let processed: AiProcessedPanorama | undefined
+      let qualityNote = `Built from ${result.capturedCount} overlapping views around you.`
+      const savedResult = result as SavedNativeCapture
+      const resumeNativeJob = nativeRecovery && (savedResult.assembly?.state === 'queued' || savedResult.assembly?.state === 'running')
+      if (nativeRecovery && !resumeNativeJob && !openFinished && visibleSavedCaptures.some((capture) =>
+        capture.assembly?.state === 'queued' || capture.assembly?.state === 'running')) {
+        throw new Error('Another capture is still being assembled on this phone. Resume its progress or stop it before starting another assembly. Your originals are kept.')
+      }
+      if (nativeRecovery && (advancedNativeAssembly || openFinished || resumeNativeJob)) {
+        const controller = new AbortController()
+        const detachment = new AbortController()
+        aiAbortRef.current = controller
+        nativeDetachRef.current = detachment
+        setAiAssembling(true)
+        const nativeOptions = {
+          ownerKey: captureOwnerKey!,
+          signal: controller.signal,
+          detachSignal: detachment.signal,
+          outputWidth,
+          onProgress: (progress: NativeStitchProgress) => {
+            if (!requestIsCurrent()) return
+            setNativeProgress(progress)
+            setGuidedCaptureStatus(nativeStitchProgressLabel(progress.stage))
+          },
+        }
+        if (openFinished) {
+          setGuidedCaptureStatus('Opening your finished sphere…')
+          const detachRead = () => controller.abort()
+          detachment.signal.addEventListener('abort', detachRead, { once: true })
+          try {
+            processed = await openSavedNativePanorama(result, nativeOptions)
+          } finally {
+            detachment.signal.removeEventListener('abort', detachRead)
+          }
+        } else {
+          processed = await assembleNativePanorama(result, nativeOptions)
+        }
+        if (requestIsCurrent()) setMemoryRetryCapture(null)
+        qualityNote = [processed.report?.aiUsed === true
+          ? 'DISK + LightGlue aligned your original photos on this phone.'
+          : 'Your original photos were aligned on this phone.',
+        'Originals are kept for another try.',
+        ...(processed.viewerWidth === 2048 ? ['Assembled at 2048 × 1024 to use less memory.'] : []),
+        ...(processed.report?.warnings ?? [])].join(' ')
+      } else if (assemblyMode === 'standard') {
+        const controller = new AbortController()
+        sharedAbortRef.current = controller
+        setSharedAssembling(true)
+        const compositor = composeGuidedCapture ?? composeGuidedPanorama
+        processed = await compositor(result, localProgress, outputWidth, controller.signal)
+        if (controller.signal.aborted) throw new DOMException('Assembly stopped. Your originals are kept.', 'AbortError')
+        qualityNote = `Blended ${result.capturedCount} original views on this phone. Originals are kept. Review the joins: blending cannot repair camera movement or pose drift in older captures.`
+        if (savedResult.assembly?.state === 'failed') qualityNote += ' Advanced alignment previously rejected these photos. This blend does not establish that their alignment is correct.'
+      } else {
+        const controller = new AbortController()
+        aiAbortRef.current = controller
+        setGuidedCaptureStatus('Checking enhanced stitching…')
+        const health = await checkAiPanoramaHealth({ signal: controller.signal })
+        if (!requestIsCurrent()) return
+        setAiHealth(health)
+        if (health?.aiAvailable) {
+          setAiAssembling(true)
+          try {
+            processed = await assembleAiNativePanorama(result, {
+              signal: controller.signal,
+              onProgress: (progress) => {
+                if (!requestIsCurrent()) return
+                setAiProgress(progress)
+                setGuidedCaptureStatus(aiPanoramaProgressLabel(progress))
+              },
+            })
+            qualityNote = [processed.report?.aiUsed === true
+              ? 'AI aligned the original photos and blended their joins.'
+              : 'The original photos were aligned and their joins blended.',
+            ...(processed.report?.warnings ?? [])].join(' ')
+          } finally {
+            if (requestIsCurrent()) { setAiAssembling(false); setAiProgress(null) }
+          }
+        } else {
+          throw new Error('Enhanced stitching is unavailable. Your original photos are kept. Connect the stitching computer, then retry.')
+        }
+      }
+      if (!requestIsCurrent()) return
+      if (!processed) throw new Error('Assembly did not return a finished sphere. Your original photos are kept.')
+      if (hasLegacyAndroidTracking(result)) qualityNote += ` ${LEGACY_TRACKING_WARNING}`
       if (!requestIsCurrent()) return
       const file = new File(
         [processed.viewer],
@@ -505,20 +847,16 @@ export function Capture360Page({
         { width: processed.viewerWidth, height: processed.viewerHeight },
         nextSource,
         'guided',
-        `Built from ${result.capturedCount} overlapping views around you.`,
+        qualityNote,
         result,
       )
       if (onSaveDraft) {
         setGuidedCaptureStatus('Saving your assembled sphere…')
         try {
           await saveDraftLocally(assembledDraft)
-          // saveDraftLocally has made the panorama durable and released the
-          // native frame directory, so the bridge result is no longer ours.
-          captureResult = undefined
           if (!requestIsCurrent()) return
         } catch {
           if (!requestIsCurrent()) return
-          keepNativeCapture = true
           throw new Error('Your sphere was assembled, but it could not be saved yet. The preview and source pictures are still here. Try saving again.')
         }
       }
@@ -528,7 +866,12 @@ export function Capture360Page({
           : 'Your guided 360° moment is ready to review.',
       )
     } catch (captureError) {
-      if (requestIsCurrent() && !isNativeCaptureCancellation(captureError)) {
+      if (requestIsCurrent() && attemptedCapture && isNativePanoramaMemoryFailure(captureError)) setMemoryRetryCapture(attemptedCapture)
+      if (requestIsCurrent() && keepNativeCapture) setHasPendingCapture(Boolean(pendingNativeCaptureRef.current))
+      if (requestIsCurrent() && (sharedAbortRef.current?.signal.aborted
+        || aiAbortRef.current?.signal.aborted || isAiPanoramaCancellation(captureError))) {
+        setAnnouncement('Assembly stopped. Your source photos are kept for another try.')
+      } else if (requestIsCurrent() && !isNativeCaptureCancellation(captureError)) {
         const message = captureError instanceof Error
           ? captureError.message
           : 'The guided capture could not be completed. Your family has not received anything yet.'
@@ -536,20 +879,120 @@ export function Capture360Page({
         setAnnouncement(message)
       }
     } finally {
-      if (captureResult && !keepNativeCapture) {
-        try {
-          await discardGuidedCapture(captureResult)
-        } catch {
-          // Cache directories are OS-evictable; cleanup failure must not throw
-          // away the finished, already-sanitized panorama.
-        }
+      if (nativeRecovery && captureOwnerKey && requestIsCurrent()) {
+        void getSavedNativeCaptures(captureOwnerKey).then((captures) => {
+          if (requestIsCurrent()) setSavedCaptures(captures)
+        }).catch(() => undefined)
       }
       if (guidedCaptureRequestRef.current === requestId) {
         guidedCaptureInFlightRef.current = false
         if (mountedRef.current) {
           setGuidedCaptureRunning(false)
           setGuidedCaptureStatus('')
+          setAiAssembling(false)
+          setSharedAssembling(false)
+          setAiProgress(null)
+          setNativeProgress(null)
+          aiAbortRef.current = null
+          nativeDetachRef.current = null
+          sharedAbortRef.current = null
         }
+      }
+    }
+  }
+
+  /** Explicitly releases a rejected set so a fresh capture can be started. */
+  async function discardPendingSourcePhotos(result: NativePanoramaCaptureResult) {
+    if (hasBlockingInteraction()) return
+    const recovery = captureOwnerKey ? recoverableNativeCaptures.get(captureOwnerKey) : undefined
+    if (recovery?.saving) {
+      setError('This sphere is still being saved. Wait for its save to finish before discarding photos.')
+      return
+    }
+    guidedCaptureInFlightRef.current = true
+    setGuidedCaptureRunning(true)
+    setGuidedCaptureStatus('Discarding the saved source photos…')
+    try {
+      await discardGuidedCapture(result)
+      releaseNativeRecovery(result)
+      if (mountedRef.current) {
+        setSavedCaptures((captures) => captures.filter((capture) => capture.directoryUrl !== result.directoryUrl))
+        setDraft((current) => current && current.nativeCaptureResult?.directoryUrl === result.directoryUrl
+          ? { ...current, nativeCaptureResult: undefined } : current)
+        setRemoveOriginals(null)
+        setError('')
+        setAnnouncement('The source photos were discarded. You can start a new capture.')
+      }
+    } catch {
+      if (mountedRef.current) setError('The source photos could not be discarded. Try again.')
+    } finally {
+      guidedCaptureInFlightRef.current = false
+      if (mountedRef.current) {
+        setGuidedCaptureRunning(false)
+        setGuidedCaptureStatus('')
+      }
+    }
+  }
+
+  /** Lets desktop users assemble original overlapping photos with the same engine. */
+  async function selectAiPhotos(event: ChangeEvent<HTMLInputElement>) {
+    const input = event.currentTarget
+    const files = Array.from(input.files ?? [])
+    if (!files.length || hasBlockingInteraction()) return
+    const requestId = ++fileSelectionRequestRef.current
+    const requestIsCurrent = () => mountedRef.current && fileSelectionRequestRef.current === requestId
+    const controller = new AbortController()
+    aiAbortRef.current = controller
+    fileSelectionInFlightRef.current = true
+    setChecking(true)
+    setAiAssembling(true)
+    setShared(false)
+    setError('')
+    setGuidedCaptureStatus('Checking enhanced stitching…')
+    try {
+      const health = await checkAiPanoramaHealth({ signal: controller.signal })
+      if (!health?.aiAvailable) throw new Error('The stitching computer is not ready. Start the stitching service, then choose your photos again.')
+      const processed = await assembleAiPhotoPanorama(files, {
+        signal: controller.signal,
+        onProgress: (progress) => {
+          if (!requestIsCurrent()) return
+          setAiProgress(progress)
+          setGuidedCaptureStatus(aiPanoramaProgressLabel(progress))
+        },
+      })
+      if (!requestIsCurrent()) return
+      const file = new File([processed.viewer], `bubble-ai-${Date.now()}-360.jpg`, { type: 'image/jpeg' })
+      const assembled = installDraft(file, {
+        width: processed.viewerWidth, height: processed.viewerHeight,
+      }, 'manual', 'ai', [
+        `Assembled from ${files.length} original photos.`, ...(processed.report?.warnings ?? []),
+      ].join(' '))
+      if (onSaveDraft) {
+        try {
+          await saveDraftLocally(assembled)
+        } catch {
+          if (requestIsCurrent()) setError('Your sphere is ready to review, but could not be saved yet. Try saving again.')
+        }
+      }
+      if (requestIsCurrent()) setAnnouncement('Your assembled sphere is ready to review.')
+    } catch (reason) {
+      if (!requestIsCurrent()) return
+      if (isAiPanoramaCancellation(reason)) {
+        setAnnouncement('Assembly stopped. Your original photos are unchanged.')
+      } else {
+        const message = reason instanceof Error ? reason.message : 'These photos could not be assembled. Try a set with more overlap.'
+        setError(message)
+        setAnnouncement(message)
+      }
+    } finally {
+      input.value = ''
+      if (requestIsCurrent()) {
+        fileSelectionInFlightRef.current = false
+        aiAbortRef.current = null
+        setChecking(false)
+        setAiAssembling(false)
+        setAiProgress(null)
+        setGuidedCaptureStatus('')
       }
     }
   }
@@ -684,18 +1127,13 @@ export function Capture360Page({
         createdAt: draft.createdAt,
         annotations,
       })
-      if (draft.nativeCaptureResult) {
-        try {
-          await discardGuidedCapture(draft.nativeCaptureResult)
-        } catch {
-          // Sharing already made the assembled panorama durable.
-        }
+      if (draft.nativeCaptureResult && onShare) {
+        releaseNativeRecovery(draft.nativeCaptureResult)
         setDraft((currentDraft) =>
           currentDraft?.id === draft.id
             ? {
                 ...currentDraft,
                 savedLocally: true,
-                nativeCaptureResult: undefined,
               }
             : currentDraft,
         )
@@ -752,9 +1190,9 @@ export function Capture360Page({
             className="ks-feature__header-action"
             type="button"
             aria-label="Close 360 capture"
-            disabled={interactionBusy}
+            disabled={interactionBusy && !(nativeRecovery && aiAssembling) && !sharedAssembling}
             onClick={() => {
-              if (!hasBlockingInteraction()) onClose()
+              if (!hasBlockingInteraction() || (nativeRecovery && aiAssembling) || sharedAssembling) onClose()
             }}
           >
             <CaptureIcon name="close" />
@@ -794,6 +1232,7 @@ export function Capture360Page({
         </section>
       ) : draft && reviewingPanorama ? (
         <>
+          {draft.warning ? <p className="capture-quality-note">{draft.warning}</p> : null}
           {savingDraft ? (
             <p className="capture-quality-note" role="status">
               Saving your latest changes…
@@ -831,11 +1270,13 @@ export function Capture360Page({
               clearDraft()
               if (captureOrigin === 'guided') {
                 void beginGuidedCapture(captureSource)
+              } else if (captureOrigin === 'ai') {
+                aiPhotosInputRef.current?.click()
               } else {
                 openPicker(captureSource, capturePicker)
               }
             }}
-            retakeLabel={draft.origin === 'upload' ? 'Choose another' : 'Retake'}
+            retakeLabel={draft.origin === 'guided' ? 'Retake' : 'Choose another'}
             busy={interactionBusy}
           />
         </>
@@ -859,6 +1300,27 @@ export function Capture360Page({
       ) : (
         <CaptureStartPanel
           source={source}
+          nativeRecovery={nativeRecovery}
+          hasPendingCapture={hasPendingCapture}
+          computerAssembly={computerAssembly}
+          enhancedAssemblyAvailable={Boolean(aiHealth?.aiAvailable)}
+          assemblyMode={assemblyMode}
+          advancedNativeAssembly={advancedNativeAssembly}
+          offlineAssemblyAvailable={Boolean(nativeStitchStatus?.available && nativeStitchStatus.offline)}
+          nativeProgress={nativeProgress}
+          aiProgress={aiProgress}
+          sharedAssembling={sharedAssembling}
+          aiAssembling={aiAssembling}
+          onNewCapture={() => {
+            const pending = pendingNativeCaptureRef.current
+            if (pending) releaseNativeRecovery(pending)
+            void beginGuidedCapture('manual')
+          }}
+          onChooseAiPhotos={() => aiPhotosInputRef.current?.click()}
+          onStopSharedAssembly={() => sharedAbortRef.current?.abort()}
+          onStopAiAssembly={() => aiAbortRef.current?.abort()}
+          onOpenAiGeneration={onOpenAiGeneration}
+          onOpenAdvancedAssembly={onOpenAdvancedAssembly}
           phase={phase}
           captureWindow={captureWindow}
           interactionBusy={interactionBusy}
@@ -880,6 +1342,84 @@ export function Capture360Page({
         />
       )}
 
+      {visibleSavedCaptures.length > 0 ? <details className="capture-originals" open={!draft}>
+        <summary>Original photos on this device <span>{visibleSavedCaptures.length} {visibleSavedCaptures.length === 1 ? 'capture' : 'captures'}</span></summary>
+        <p>Keep these photos to retry assembly. Saving or sharing a sphere does not remove them.</p>
+        {savedCaptureStatusError ? <p role="status">{savedCaptureStatusError}</p> : null}
+        <ul>
+          {visibleSavedCaptures.map((capture, index) => <li key={capture.directoryUrl ?? index}>
+            <div>
+              <strong>{isCompleteNativeCapture(capture) ? 'Complete capture' : 'Incomplete capture'}</strong>
+              <span>{capture.frames.length} of {capture.targetCount} views{capture.createdAt ? ` · ${new Date(capture.createdAt).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })}` : ''}</span>
+              {capture.sessionId && savedCaptureSessions.has(capture.sessionId) ? <p>A sphere from these originals is already saved in Memories. The originals remain available for another try.</p> : null}
+              {hasLegacyAndroidTracking(capture) ? <p>{LEGACY_TRACKING_WARNING}</p> : null}
+              {assemblyMode === 'standard' && capture.assembly?.state === 'failed' ? <p>Advanced alignment previously rejected these photos. Rebuilding with the shared blend may still produce misaligned views; it does not repair their tracking. Rebuild only if you want to inspect another result.</p> : null}
+              {!isCompleteNativeCapture(capture) ? <p>These originals are kept, but do not cover a complete sphere. Start a new capture to finish every direction.</p> : null}
+              {capture.assembly?.state === 'queued' || capture.assembly?.state === 'running' ? <p>
+                {nativeStitchProgressLabel(capture.assembly.stage ?? 'queued')} · {Math.round(Math.max(0, Math.min(1, capture.assembly.progress ?? 0)) * 100)}%
+              </p> : null}
+              {capture.assembly?.state === 'failed' && capture.assembly.error ? <p>{capture.assembly.error}</p> : null}
+              {capture.savedResult?.state === 'completed' && capture.savedResult.report ? <p>
+                {capture.savedResult.report.aiUsed === true ? 'Saved result aligned on this phone with DISK + LightGlue.' : 'Saved result assembled on this phone.'}
+                {' '}{capture.savedResult.report.warnings?.join(' ')}
+              </p> : capture.assembly?.state === 'completed' && capture.assembly.report ? <p>
+                {capture.assembly.report.aiUsed === true ? 'Aligned on this phone with DISK + LightGlue.' : 'Assembled on this phone.'}
+                {' '}{capture.assembly.report.warnings?.join(' ')}
+              </p> : null}
+            </div>
+            {nativeRecovery && (capture.savedResult?.state === 'completed' || capture.assembly?.state === 'completed') ? <button className="ks-secondary-button" type="button" disabled={interactionBusy} onClick={() => {
+              clearDraft()
+              setShared(false)
+              void beginGuidedCapture(source, capture, 4096, true)
+            }}>Open finished sphere</button> : null}
+            {isCompleteNativeCapture(capture) ? <button className="ks-secondary-button" type="button" disabled={interactionBusy} onClick={() => {
+              clearDraft()
+              setShared(false)
+              void beginGuidedCapture(source, capture)
+            }}>{nativeRecovery
+                ? capture.assembly?.state === 'running' || capture.assembly?.state === 'queued' ? 'Resume progress' : 'Retry on this phone'
+                : assemblyMode === 'standard' ? 'Retry on this phone' : 'Retry enhanced assembly'}</button> : null}
+            {advancedNativeAssembly && isCompleteNativeCapture(capture)
+              && (isNativePanoramaMemoryFailure(capture.assembly) || memoryRetryCapture?.directoryUrl === capture.directoryUrl) ? <>
+                <p>This phone ran short of memory. A smaller 2048 × 1024 sphere uses less memory and keeps your original photos.</p>
+                <button className="ks-secondary-button" type="button" disabled={interactionBusy} onClick={() => {
+                  clearDraft()
+                  setShared(false)
+                  void beginGuidedCapture(source, capture, 2048)
+                }}>Retry with less memory</button>
+              </> : null}
+            <button className="capture-originals__remove" type="button" disabled={interactionBusy || capture.assembly?.state === 'queued' || capture.assembly?.state === 'running'} onClick={() => {
+              setAcknowledgedAssemblyRemoval(false)
+              setRemoveOriginals(capture)
+            }}>Remove originals</button>
+          </li>)}
+        </ul>
+      </details> : null}
+
+      {removeOriginals ? <section className="capture-originals-confirm" role="region" aria-labelledby="remove-originals-title">
+        <h2 id="remove-originals-title">Remove these original photos?</h2>
+        <p>This permanently removes {removeOriginals.frames.length} captured photos and this capture’s local assembly files. Any sphere already saved in Memories is kept. These photos will no longer be available to rebuild it.</p>
+        {needsAssemblyRemovalAcknowledgement ? <label>
+          <input type="checkbox" checked={acknowledgedAssemblyRemoval} disabled={interactionBusy} onChange={(event) => setAcknowledgedAssemblyRemoval(event.target.checked)} />
+          I understand the local finished sphere is also removed, including if I have not saved it to Memories.
+        </label> : null}
+        <div>
+          <button className="ks-secondary-button" type="button" disabled={interactionBusy} onClick={() => setRemoveOriginals(null)}>Keep originals</button>
+          <button className="ks-secondary-button capture-originals__remove" type="button" disabled={interactionBusy || (needsAssemblyRemovalAcknowledgement && !acknowledgedAssemblyRemoval)} onClick={() => void discardPendingSourcePhotos(removeOriginals)}>Permanently remove originals</button>
+        </div>
+      </section> : null}
+
+      {computerAssembly ? <input
+        ref={aiPhotosInputRef}
+        className="capture-file-input"
+        type="file"
+        accept="image/jpeg"
+        multiple
+        aria-label="Choose overlapping source photos for AI assembly"
+        tabIndex={-1}
+        disabled={interactionBusy}
+        onChange={(event) => void selectAiPhotos(event)}
+      /> : null}
       <input
         ref={cameraInputRef}
         className="capture-file-input"

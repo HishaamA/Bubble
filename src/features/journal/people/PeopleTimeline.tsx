@@ -16,8 +16,10 @@ import { PeopleTimelineAlbums, PeopleTimelinePeople } from './PeopleTimelinePeop
 import { PeopleTimelinePersonForm, PeopleTimelinePersonManager } from './PeopleTimelinePersonForm'
 import { PeopleTimelineViewer } from './PeopleTimelineViewer'
 import { JournalPhotoDeleteControl } from '../JournalPhotoDeleteControl'
-import { PeopleTimelineDateEditor, PeopleTimelinePhotoTags } from './PeopleTimelinePhotoDetails'
+import { PeopleTimelineDateEditor, PeopleTimelinePhotoTags, PhotoMatchCorrection } from './PeopleTimelinePhotoDetails'
 import { PeopleTimelineScanStatus } from './PeopleTimelineScanStatus'
+import { GalleryScanStatus } from './GalleryScanStatus'
+import { useGalleryScanSession } from './galleryScanSession'
 import { scanReferencePortrait, scanTimelineFaces } from './faceRecognition'
 import {
   createFaceReviewCandidates,
@@ -52,6 +54,8 @@ import {
 import './PeopleTimeline.css'
 import { ContentRemovalControl } from '../ContentRemovalControl'
 import { useHiddenContent, photoVisibilityKey, setContentHidden, restoreHiddenContent } from '../contentVisibility'
+import { PHONE_GALLERY_CLEARED_EVENT, type PhoneGalleryClearedDetail } from '../gallery/phoneGallery'
+import { GALLERY_TIMELINE_PREFIX, prunePhoneGalleryMatches } from '../phoneGalleryPhotos'
 
 const REVIEW_PERSON_ID = ALL_PHOTOS_PERSON_ID
 const MAX_REFERENCE_PHOTO_BYTES = 25 * 1024 * 1024
@@ -127,7 +131,7 @@ function automaticScanSignature(
     .sort()
   if (!profileSignature.length) return ''
   const pendingPhotoKeys = photos
-    .filter((photo) => photo.canScanFaces && faceScans[photo.key] === undefined)
+    .filter((photo) => photo.origin !== 'device-gallery' && photo.canScanFaces && faceScans[photo.key] === undefined)
     .map((photo) => typeof photo.scanSource === 'string'
       ? `${photo.key}\u0002${photo.scanSource}`
       : photo.key)
@@ -173,6 +177,7 @@ function originalDateDraft(photo: PeopleTimelinePhoto): DateDraft {
  */
 export function PeopleTimeline({
   photos,
+  galleryIndexReady = true,
   journalPhotos = [],
   cacheNamespace,
   className,
@@ -194,6 +199,7 @@ export function PeopleTimeline({
     ready: cacheReady,
     replace: setTimelineState,
     save: queueTimelineStateSave,
+    getSnapshot: getTimelineSnapshot,
   } = usePeopleTimelineSession(cacheNamespace)
   const hidden = useHiddenContent(cacheNamespace)
   const [selectedPersonId, setSelectedPersonId] = useState(initialPersonId ?? FAMILY_PERSON_ID)
@@ -257,11 +263,15 @@ export function PeopleTimeline({
     addingPersonBusy ||
     referenceBusy ||
     faceDataClearing
+  // Library matching must never lock the entry point for enrolling another person.
+  const personEditorBusy = !cacheReady || importingPhotos || addingPersonBusy || referenceBusy || faceDataClearing
 
   const timelinePhotos = useMemo(
     () => toPeopleTimelinePhotos(photos, journalPhotos).filter((photo) => !hidden.includes(photoVisibilityKey(photo.id, photo.kind))),
     [hidden, journalPhotos, photos],
   )
+  const galleryScan = useGalleryScanSession(cacheNamespace, galleryIndexReady ? timelinePhotos : undefined,
+    addingPerson || managingPerson || addingPersonBusy || referenceBusy || faceDataClearing || Boolean(scanProgress))
   const selectedPerson = timelineState.people.find(
     ({ id }) => id === selectedPersonId,
   )
@@ -269,21 +279,23 @@ export function PeopleTimeline({
     selectedPersonId === REVIEW_PERSON_ID
       ? 'All photos'
       : selectedPersonId === FACE_REVIEW_PERSON_ID
-        ? 'Review matches'
+        ? 'Possible matches'
         : 'Family'
   )
-  const automaticMatches = useMemo(
-    () => createFaceSuggestions(timelineState),
-    [timelineState],
-  )
-  const reviewMatches = useMemo(
-    () => createFaceReviewCandidates(timelineState),
+  const { automaticMatches, reviewMatches } = useMemo(
+    () => {
+      const automaticMatches = createFaceSuggestions(timelineState)
+      return { automaticMatches, reviewMatches: createFaceReviewCandidates(timelineState,
+        undefined, undefined, undefined, automaticMatches) }
+    },
     [timelineState],
   )
   const actionableReviewMatches = useMemo(() => {
     const postponed = new Set(postponedFaceReviews)
-    return reviewMatches.filter((match) => !postponed.has(faceReviewKey(match)))
-  }, [postponedFaceReviews, reviewMatches])
+    const availablePhotos = new Set(timelinePhotos.map(({ key }) => key))
+    return reviewMatches.filter((match) => availablePhotos.has(match.photoKey)
+      && !postponed.has(faceReviewKey(match)))
+  }, [postponedFaceReviews, reviewMatches, timelinePhotos])
   const faceReviewPreviews = useMemo(() => selectFaceReviewPreviews(
     actionableReviewMatches,
     timelinePhotos,
@@ -293,10 +305,14 @@ export function PeopleTimeline({
   const effectivePeopleByPhoto = useMemo(() => selectEffectivePeopleByPhoto(
     timelineState, timelinePhotos, automaticMatches,
   ), [automaticMatches, timelinePhotos, timelineState])
+  const manuallyConfirmedLabels = useMemo(() => new Set(timelineState.assignments
+    .filter(({ source }) => source === 'manual')
+    .map(({ photoKey, personId }) => `${photoKey}\u0000${personId}`)), [timelineState.assignments])
   const enrolledPersonIds = useMemo(
     () => selectEnrolledPersonIds(timelineState.faceProfiles),
     [timelineState.faceProfiles],
   )
+  const familyPersonIds = useMemo(() => new Set(timelineState.people.map(({ id }) => id)), [timelineState.people])
   const setupComplete = enrolledPersonIds.size >= 2
   const setupPeople = useMemo(() => [...timelineState.people]
     .sort((first, second) => (
@@ -307,8 +323,8 @@ export function PeopleTimeline({
     [effectivePeopleByPhoto, timelinePhotos, timelineState.people],
   )
   const familyPhotoKeys = useMemo(() => selectFamilyPhotoKeys(
-    timelinePhotos, effectivePeopleByPhoto, enrolledPersonIds,
-  ), [effectivePeopleByPhoto, enrolledPersonIds, timelinePhotos])
+    timelinePhotos, effectivePeopleByPhoto, familyPersonIds,
+  ), [effectivePeopleByPhoto, familyPersonIds, timelinePhotos])
   const visiblePhotos = useMemo(() => selectVisibleTimelinePhotos({
     selectedPersonId,
     photos: timelinePhotos,
@@ -362,16 +378,47 @@ export function PeopleTimeline({
     return nextState
   }, [setTimelineState])
 
-  /** Applies one functional update against the latest timeline ref. */
+  /** Background gallery checkpoints may publish before React commits a new render. */
   const updateTimelineState = useCallback((
     update: (current: typeof timelineState) => typeof timelineState,
   ) => {
-    return replaceTimelineState(update(timelineStateRef.current))
-  }, [replaceTimelineState])
+    return replaceTimelineState(update(getTimelineSnapshot().state))
+  }, [getTimelineSnapshot, replaceTimelineState])
 
   useEffect(() => {
     timelineStateRef.current = timelineState
   }, [timelineState])
+
+  useEffect(() => {
+    const stopGalleryScan = (event: Event) => {
+      const detail = (event as CustomEvent<PhoneGalleryClearedDetail>).detail
+      if (detail?.cacheNamespace !== cacheNamespace) return
+      scanController.current?.abort()
+      scanController.current = null
+      setScanProgress(null)
+      lastAutomaticScanSignature.current = ''
+      if (detail.reason !== 'account' && detail.reason !== 'refresh') {
+        const cleared = updateTimelineState((state) => prunePhoneGalleryMatches(state, new Set()))
+        void queueTimelineStateSave(cleared)
+      }
+    }
+    window.addEventListener(PHONE_GALLERY_CLEARED_EVENT, stopGalleryScan)
+    return () => window.removeEventListener(PHONE_GALLERY_CLEARED_EVENT, stopGalleryScan)
+  }, [cacheNamespace, queueTimelineStateSave, updateTimelineState])
+
+  const availableGalleryKeys = useMemo(() => new Set(timelinePhotos
+    .filter(({ origin }) => origin === 'device-gallery').map(({ key }) => key)), [timelinePhotos])
+  const availableGalleryKeysRef = useRef(availableGalleryKeys)
+  useEffect(() => {
+    const previous = availableGalleryKeysRef.current
+    availableGalleryKeysRef.current = availableGalleryKeys
+    if ([...previous].some((key) => !availableGalleryKeys.has(key))) {
+      scanController.current?.abort()
+      scanController.current = null
+      setScanProgress(null)
+      lastAutomaticScanSignature.current = ''
+    }
+  }, [availableGalleryKeys])
 
   useEffect(() => {
     scanController.current?.abort()
@@ -391,14 +438,12 @@ export function PeopleTimeline({
 
   useEffect(() => {
     if (!cacheReady) return
-    const migratedState = migrateLegacyPeopleTimelineState(
-      timelineStateRef.current,
-      timelinePhotos,
-    )
-    if (migratedState !== timelineStateRef.current) {
+    const current = getTimelineSnapshot().state
+    const migratedState = migrateLegacyPeopleTimelineState(current, timelinePhotos)
+    if (migratedState !== current) {
       replaceTimelineState(migratedState)
     }
-  }, [cacheReady, replaceTimelineState, timelinePhotos])
+  }, [cacheReady, getTimelineSnapshot, replaceTimelineState, timelinePhotos])
 
   useEffect(() => {
     // Face-scan checkpoints persist each completed photo explicitly. Avoid a
@@ -528,8 +573,10 @@ export function PeopleTimeline({
       if (scrollToFocusedPhoto && photoSurface) {
         const chrome = photoSurface.closest('.journal-page')
           ?.querySelector('.journal-page__chrome')
-        const chromeHeight = chrome?.getBoundingClientRect().height ?? 0
-        photoSurface.style.scrollMarginTop = `${chromeHeight + 16}px`
+        const pinned = chrome && ['sticky', 'fixed'].includes(getComputedStyle(chrome).position)
+        photoSurface.style.scrollMarginTop = pinned
+          ? `${chrome.getBoundingClientRect().height + 16}px`
+          : 'calc(var(--safe-area-top, env(safe-area-inset-top, 0px)) + 16px)'
         photoSurface.scrollIntoView?.({ block: 'start', behavior: 'instant' })
       }
     })
@@ -615,7 +662,8 @@ export function PeopleTimeline({
 
   /** Records the exact invoking control before showing the add-person form. */
   function openAddPerson(event: MouseEvent<HTMLButtonElement>) {
-    if (photoPickerBusy) return
+    if (personEditorBusy) return
+    interruptScanForEditor()
     addPersonOpenerRef.current = event.currentTarget
     setAddingPerson(true)
     setAddPersonError('')
@@ -689,10 +737,7 @@ export function PeopleTimeline({
       setAddPersonError(portraitError)
       return
     }
-    if (scanController.current) {
-      setAddPersonError('Wait for the current photo check to finish, then try again.')
-      return
-    }
+    interruptScanForEditor()
 
     // Disabled state is committed on a later render. A hardware key and click,
     // or two synthetic submits, can reach this handler in the same turn; take a
@@ -703,6 +748,7 @@ export function PeopleTimeline({
     setAddPersonError('')
     try {
       const { scans, failed } = await scanReferencePhotos(newPersonPortraits)
+      if (!getTimelineSnapshot().ready) return // The originating account may have departed.
       const person = { id: createLocalId(), name, createdAt: new Date().toISOString() }
       updateTimelineState((current) => ({
         ...current,
@@ -748,6 +794,7 @@ export function PeopleTimeline({
     person: PeopleTimelineState['people'][number] | undefined = selectedPerson,
   ) {
     if (!person) return
+    interruptScanForEditor()
     setSelectedPersonId(person.id)
     setActivePhotoKey(null)
     setAddingPerson(false)
@@ -799,10 +846,7 @@ export function PeopleTimeline({
       setManageError(portraitError)
       return
     }
-    if (scanController.current) {
-      setManageError('Wait for the current photo check to finish, then try again.')
-      return
-    }
+    interruptScanForEditor()
 
     // The ref closes the same-turn gap before `referenceBusy` disables the
     // form. Without it, duplicate activation would scan the same private File
@@ -815,6 +859,7 @@ export function PeopleTimeline({
     setManageError('')
     try {
       const { scans, failed } = await scanReferencePhotos(referencePortraits)
+      if (!getTimelineSnapshot().ready || !getTimelineSnapshot().state.people.some(({ id }) => id === personId)) return
       updateTimelineState((current) => ({
         ...current,
         faceProfiles: {
@@ -874,42 +919,48 @@ export function PeopleTimeline({
     choosePerson(FAMILY_PERSON_ID)
   }
 
-  /** Adds or removes a manual whole-photo assignment for the active photo. */
-  function setPhotoTag(personId: string, tagged: boolean) {
-    if (!displayedPhoto) return
-    const automaticallyMatched = automaticMatches.some((match) =>
-      match.photoKey === displayedPhoto.key && match.personId === personId,
-    ) || timelineState.assignments.some((assignment) =>
-      assignment.photoKey === displayedPhoto.key &&
-      assignment.personId === personId &&
-      assignment.source === 'face-suggestion',
-    )
+  /** Explicit whole-photo label correction; originals and other people remain unchanged. */
+  function setPhotoPersonTag(photoKey: string, personId: string, tagged: boolean) {
     updateTimelineState((current) => {
       const withoutTag = current.assignments.filter((assignment) => !(
-        assignment.photoKey === displayedPhoto.key && assignment.personId === personId
+        assignment.photoKey === photoKey && assignment.personId === personId
       ))
       const withoutDismissal = current.dismissedSuggestions.filter((dismissal) => !(
-        dismissal.photoKey === displayedPhoto.key && dismissal.personId === personId
+        dismissal.photoKey === photoKey && dismissal.personId === personId
       ))
       return {
         ...current,
         assignments: tagged
           ? [...withoutTag, {
-              photoKey: displayedPhoto.key,
+              photoKey,
               personId,
               source: 'manual',
               confirmedAt: new Date().toISOString(),
             }]
           : withoutTag,
-        dismissedSuggestions: !tagged && automaticallyMatched
+        // A manually confirmed label may suppress automatic proposals today.
+        // Remember an explicit untag regardless, so it cannot reappear later.
+        dismissedSuggestions: !tagged
           ? [...withoutDismissal, {
-              photoKey: displayedPhoto.key,
+              photoKey,
               personId,
               dismissedAt: new Date().toISOString(),
             }]
           : withoutDismissal,
       }
     })
+  }
+
+  function renderPhotoCorrections(photo: PeopleTimelinePhoto, personId?: string) {
+    const automaticallyAssigned = timelineState.people.filter((person) =>
+      (!personId || person.id === personId)
+      && effectivePeopleByPhoto.get(photo.key)?.has(person.id)
+      && !manuallyConfirmedLabels.has(`${photo.key}\u0000${person.id}`))
+    return automaticallyAssigned.map((person) => (
+      <PhotoMatchCorrection key={`${cacheNamespace}:${photo.key}:${person.id}`} personName={person.name}
+        photoDescription={photo.caption || 'this photo'}
+        onCorrect={() => setPhotoPersonTag(photo.key, person.id, false)} />
+    ))
   }
 
   /** Accepts, reassigns, or dismisses one face-specific review candidate. */
@@ -1031,7 +1082,7 @@ export function PeopleTimeline({
       return
     }
     const unscannedPhotos = timelinePhotos.filter((photo) =>
-      photo.canScanFaces && timelineStateRef.current.faceScans[photo.key] === undefined,
+      photo.origin !== 'device-gallery' && photo.canScanFaces && timelineStateRef.current.faceScans[photo.key] === undefined,
     )
     setScanError(false)
     if (!unscannedPhotos.length) {
@@ -1072,6 +1123,8 @@ export function PeopleTimeline({
         unscannedPhotos,
         async (checkpoint) => {
           if (controller.signal.aborted) return
+          if (checkpoint.photoKey.startsWith(GALLERY_TIMELINE_PREFIX) &&
+            !availableGalleryKeysRef.current.has(checkpoint.photoKey)) return
           setScanMessage(
             `Checking photo ${checkpoint.completed} of ${checkpoint.total} on this device…`,
           )
@@ -1155,6 +1208,16 @@ export function PeopleTimeline({
     setScanMessage(stoppedScanMessage(savedPhotoCount))
   }
 
+  /** Enrollment takes priority; the serialized model finishes/aborts its current image safely. */
+  function interruptScanForEditor() {
+    if (!scanController.current) return
+    scanController.current.abort()
+    scanController.current = null
+    lastAutomaticScanSignature.current = ''
+    setScanProgress(null)
+    setScanMessage('Photo checking is paused while you add a face. Saved results are kept.')
+  }
+
   /** Clears all private face vectors while preserving manual people and dates. */
   async function clearFaceData() {
     lastAutomaticScanSignature.current = ''
@@ -1189,6 +1252,8 @@ export function PeopleTimeline({
       scanController.current ||
       scanProgress ||
       addingPersonBusy ||
+      addingPerson ||
+      managingPerson ||
       referenceBusy ||
       faceDataClearing ||
       lastAutomaticScanSignature.current === pendingScanKey
@@ -1203,6 +1268,8 @@ export function PeopleTimeline({
     }, AUTOMATIC_FACE_SCAN_SETTLE_MS)
     return () => window.clearTimeout(settleTimer)
   }, [
+    addingPerson,
+    managingPerson,
     addingPersonBusy,
     cacheReady,
     faceDataClearing,
@@ -1243,6 +1310,8 @@ export function PeopleTimeline({
     }
 
     return (
+      <>
+      <GalleryScanStatus scan={galleryScan} />
       <PersonScrapbookPage
         person={scrapbookPerson}
         photos={scrapbookPhotos}
@@ -1252,12 +1321,15 @@ export function PeopleTimeline({
         onManage={onClosePersonAlbum
           ? () => managePersonFromScrapbook(scrapbookPerson.id)
           : undefined}
+        renderPhotoActions={(photo) => renderPhotoCorrections(photo, scrapbookPerson.id)}
       />
+      </>
     )
   }
 
   return (
     <section className={rootClassName} aria-labelledby="people-timeline-title">
+      <GalleryScanStatus scan={galleryScan} />
       <header className="people-timeline__header">
         <h2 id="people-timeline-title">People</h2>
       </header>
@@ -1284,7 +1356,7 @@ export function PeopleTimeline({
           enrolledPersonIds={enrolledPersonIds}
           selectedPersonId={selectedPersonId}
           setupComplete={setupComplete}
-          addDisabled={photoPickerBusy}
+          addDisabled={personEditorBusy}
           onOpenAlbum={openPersonAlbum}
           onManagePerson={startManagingPerson}
           onAddPerson={openAddPerson}
@@ -1313,6 +1385,7 @@ export function PeopleTimeline({
             type="button"
             className="people-timeline__chip people-timeline__review-chip"
             aria-pressed={selectedPersonId === FACE_REVIEW_PERSON_ID}
+            aria-label={`Review ${actionableReviewMatches.length} possible ${actionableReviewMatches.length === 1 ? 'match' : 'matches'} (optional)`}
             onClick={() => choosePerson(FACE_REVIEW_PERSON_ID)}
           >
             Review <span>{actionableReviewMatches.length}</span>
@@ -1382,7 +1455,7 @@ export function PeopleTimeline({
         <PeopleTimelinePersonForm
           formRef={addPersonFormRef}
           name={newPersonName}
-          disabled={addingPersonBusy || importingPhotos || Boolean(scanProgress)}
+          disabled={addingPersonBusy || importingPhotos}
           scanning={addingPersonBusy}
           error={addPersonError}
           onNameChange={(name) => {
@@ -1405,7 +1478,7 @@ export function PeopleTimeline({
           referenceCount={timelineState.faceProfiles[selectedPerson.id]?.references.length ?? 0}
           selectedPortraitCount={referencePortraits.length}
           scanning={referenceBusy}
-          referenceDisabled={referenceBusy || importingPhotos || Boolean(scanProgress)}
+          referenceDisabled={referenceBusy || importingPhotos}
           error={manageError}
           confirmingDelete={confirmingDelete}
           onNameChange={(name) => {
@@ -1425,14 +1498,14 @@ export function PeopleTimeline({
       ) : null}
 
       {cacheReady && faceReviewPreviews.length ? (
-        <section className="people-timeline__faces-to-name" aria-label="Faces to name">
+        <section className="people-timeline__faces-to-name" aria-label="Possible matches">
           <header>
             <div>
-              <h3>Faces to name</h3>
-              <p>Check the people Bubble found in your photos.</p>
+              <h3>Possible matches</h3>
+              <p>{actionableReviewMatches.length} possible {actionableReviewMatches.length === 1 ? 'match' : 'matches'} · optional</p>
             </div>
             <button type="button" onClick={() => choosePerson(FACE_REVIEW_PERSON_ID)}>
-              Review all
+              Open review
             </button>
           </header>
           <div className="people-timeline__face-candidates">
@@ -1451,12 +1524,12 @@ export function PeopleTimeline({
                   <TimelinePhotoImage source={preview.photo.source} alt="" />
                 </span>
                 <strong>{preview.person.name}</strong>
-                <small>Review face</small>
+                <small>Possible match</small>
               </button>
             ))}
           </div>
           <p className="people-timeline__face-hint">
-            Reviewing a face helps group future photos more accurately.
+            Strong matches are added automatically, and you can correct them. Other photos stay in All photos.
           </p>
         </section>
       ) : null}
@@ -1491,6 +1564,7 @@ export function PeopleTimeline({
           }}
           onEditDate={beginDateEdit}
         >
+          {renderPhotoCorrections(displayedPhoto, selectedPerson?.id)}
           {dateEditorOpen ? (
             <PeopleTimelineDateEditor
               draft={dateDraft}
@@ -1507,7 +1581,7 @@ export function PeopleTimeline({
             />
           ) : null}
           {displayedPhoto.kind === 'journal-photo' && onDeletePhoto &&
-            journalPhotos.some((photo) => photo.id === displayedPhoto.id && photo.ownedByCurrentUser) ? (
+            journalPhotos.some((photo) => photo.id === displayedPhoto.id && photo.ownedByCurrentUser && photo.origin !== 'device-gallery') ? (
             <JournalPhotoDeleteControl
               key={`${cacheNamespace}:${displayedPhoto.id}`}
               photoId={displayedPhoto.id}
@@ -1522,7 +1596,9 @@ export function PeopleTimeline({
             description={displayedPhoto.kind === 'capsule-photo' && onDeleteCapsulePhoto && photos.some((photo) =>
               photo.id === displayedPhoto.id && photo.capsuleId === displayedPhoto.capsuleId && photo.ownedByCurrentUser)
               ? 'This deletes your photo from this Capsule, its family recap, and its Journal entry for everyone. Separate uploads and videos already saved to a phone stay unchanged.'
-              : 'This hides the photo from your Journal and widget on this device. Your family keeps the original. You can restore hidden items below.'}
+              : displayedPhoto.origin === 'device-gallery'
+                ? 'This hides the linked photo from Journal on this device. The original stays in your phone gallery. You can restore hidden items below.'
+                : 'This hides the photo from your Journal and widget on this device. Your family keeps the original. You can restore hidden items below.'}
             onRemove={async () => {
               if (displayedPhoto.kind === 'capsule-photo' && onDeleteCapsulePhoto && photos.some((photo) =>
                 photo.id === displayedPhoto.id && photo.capsuleId === displayedPhoto.capsuleId && photo.ownedByCurrentUser)) {
@@ -1537,7 +1613,7 @@ export function PeopleTimeline({
             effectivePersonIds={effectivePeopleByPhoto.get(displayedPhoto.key)}
             open={tagEditorOpen}
             onToggle={() => setTagEditorOpen((current) => !current)}
-            onTagChange={setPhotoTag}
+            onTagChange={(personId, tagged) => setPhotoPersonTag(displayedPhoto.key, personId, tagged)}
           />
         </PeopleTimelineViewer>
       ) : selectedPerson ? (
@@ -1571,8 +1647,8 @@ export function PeopleTimeline({
         </div>
       ) : selectedPersonId === FACE_REVIEW_PERSON_ID ? (
         <div className="people-timeline__empty">
-          <p className="people-timeline__empty-title">Review complete for now</p>
-          <p>Clear matches were filed automatically. Uncertain faces stay unnamed until there is better evidence.</p>
+          <p className="people-timeline__empty-title">Nothing to review</p>
+          <p>Strong matches were added automatically. You can correct a person label without removing the photo.</p>
           <button type="button" onClick={() => choosePerson(REVIEW_PERSON_ID)}>All photos</button>
         </div>
       ) : selectedPersonId === REVIEW_PERSON_ID ? (
@@ -1591,7 +1667,7 @@ export function PeopleTimeline({
           <p>
             {scanProgress
               ? 'Your ordinary photo uploads are being organized privately on this device.'
-              : 'Family will fill with ordinary photos containing at least two enrolled people.'}
+              : 'Photos with any two or more family members appear here, matched automatically or confirmed by you.'}
           </p>
           {onUploadPhotos && timelinePhotos.length === 0 ? (
             <button type="button" disabled={photoPickerBusy} onClick={openPhotoPicker}>

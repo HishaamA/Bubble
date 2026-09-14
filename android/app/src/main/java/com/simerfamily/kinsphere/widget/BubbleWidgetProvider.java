@@ -6,7 +6,6 @@ import android.content.ComponentName;
 import android.content.Context;
 import android.content.Intent;
 import android.os.Bundle;
-import com.simerfamily.kinsphere.R;
 
 /** Home-screen widget provider for Bubble's prioritized daily snapshot. */
 public final class BubbleWidgetProvider extends AppWidgetProvider {
@@ -33,10 +32,23 @@ public final class BubbleWidgetProvider extends AppWidgetProvider {
     @Override
     public void onDisabled(Context context) {
         BubbleWidgetScheduler.cancel(context);
+        BubbleWidgetNavigation.clearAllSelections(context);
+    }
+
+    @Override
+    public void onDeleted(Context context, int[] appWidgetIds) {
+        if (appWidgetIds != null) {
+            for (int appWidgetId : appWidgetIds) {
+                BubbleWidgetNavigation.clearSelection(context, appWidgetId);
+            }
+        }
     }
 
     @Override
     public void onReceive(Context context, Intent intent) {
+        if (BubbleWidgetNavigation.handleBrowse(context, intent)) {
+            return;
+        }
         super.onReceive(context, intent);
         String action = intent == null ? null : intent.getAction();
         BubbleWidgetSnapshot snapshot = BubbleWidgetStore.load(context);
@@ -47,36 +59,10 @@ public final class BubbleWidgetProvider extends AppWidgetProvider {
             Intent.ACTION_TIME_CHANGED.equals(action) ||
             Intent.ACTION_TIMEZONE_CHANGED.equals(action)
         ) {
-            boolean preserveSwipePosition = ACTION_REFRESH.equals(action) &&
-                snapshot != null &&
-                !snapshot.pages.isEmpty() &&
-                snapshot.isCurrentLocalDay(System.currentTimeMillis());
-            if (preserveSwipePosition) {
-                // Updating only collection rows keeps the current stable slot:
-                // a planner stays put while photo slots receive fresh images.
-                refreshCollection(context);
-            } else {
-                if (
-                    snapshot != null &&
-                    !snapshot.isCurrentLocalDay(System.currentTimeMillis())
-                ) {
-                    showPrivateFallback(context);
-                } else {
-                    updateAll(context);
-                }
-            }
+            // Selection belongs to this widget, not a launcher-owned adapter.
+            // Repaint the selected stable slot as its authorized payload changes.
+            updateAll(context);
             BubbleWidgetScheduler.replace(context, snapshot);
-        }
-    }
-
-    private static void refreshCollection(Context context) {
-        Context appContext = context.getApplicationContext();
-        AppWidgetManager manager = AppWidgetManager.getInstance(appContext);
-        int[] ids = manager.getAppWidgetIds(
-            new ComponentName(appContext, BubbleWidgetProvider.class)
-        );
-        if (ids.length > 0) {
-            manager.notifyAppWidgetViewDataChanged(ids, R.id.bubble_widget_stack);
         }
     }
 
@@ -98,6 +84,7 @@ public final class BubbleWidgetProvider extends AppWidgetProvider {
             new ComponentName(appContext, BubbleWidgetProvider.class)
         );
         for (int appWidgetId : ids) {
+            BubbleWidgetNavigation.clearSelection(appContext, appWidgetId);
             manager.updateAppWidget(
                 appWidgetId,
                 BubbleWidgetRenderer.renderPrivateFallback(
@@ -118,11 +105,7 @@ public final class BubbleWidgetProvider extends AppWidgetProvider {
             return;
         }
         for (int appWidgetId : appWidgetIds) {
-            manager.updateAppWidget(
-                appWidgetId,
-                BubbleWidgetRenderer.renderShell(context, appWidgetId)
-            );
+            BubbleWidgetRenderer.publish(context, manager, appWidgetId, 0);
         }
-        manager.notifyAppWidgetViewDataChanged(appWidgetIds, R.id.bubble_widget_stack);
     }
 }

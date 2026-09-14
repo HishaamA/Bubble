@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import type { CapsuleImageSource } from '../capsules/types'
+import { GalleryPhotoImage } from './GalleryPhotoImage'
+import { isGalleryPhotoSource } from './gallery/phoneGallery'
 
 type CapsulePhotoImageProps = {
   source: CapsuleImageSource
@@ -65,6 +67,7 @@ export function CapsulePhotoImage({
   alt,
   className,
 }: CapsulePhotoImageProps) {
+  if (isGalleryPhotoSource(source)) return <GalleryPhotoImage key={source} source={source} alt={alt} className={className} />
   if (typeof source === 'string') {
     const usableSource = source.startsWith('blob:') ? '' : source
     return (

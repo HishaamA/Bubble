@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- USB-only local AI testing; this manifest is excluded from release APKs. -->
+    <application android:networkSecurityConfig="@xml/debug_network_security_config">
+        <!-- Read-only counts for ADB QA. No account/photo identifiers or vectors.
+             DUMP is a platform-protected permission; this component does not
+             exist in release builds and never starts or changes scan work. -->
+        <receiver
+            android:name=".gallery.BackgroundGalleryScanStatusReceiver"
+            android:exported="true"
+            android:permission="android.permission.DUMP">
+            <intent-filter>
+                <action android:name="com.simerfamily.kinsphere.GALLERY_SCAN_STATUS" />
+            </intent-filter>
+        </receiver>
+    </application>
+</manifest>

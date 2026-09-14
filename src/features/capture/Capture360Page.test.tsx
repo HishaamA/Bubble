@@ -377,10 +377,10 @@ describe('Capture360Page', () => {
     await user.click(screen.getByRole('button', { name: 'Capture today in 360°' }))
 
     expect(await screen.findByRole('alert')).toHaveTextContent(
-      'Capture every surrounding dot before finishing.',
+      'This capture is incomplete.',
     )
     expect(composeGuidedCapture).not.toHaveBeenCalled()
-    expect(discardGuidedCapture).toHaveBeenCalledTimes(1)
+    expect(discardGuidedCapture).not.toHaveBeenCalled()
     expect(screen.getByRole('button', { name: 'Capture today in 360°' })).toBeEnabled()
   })
 
@@ -427,16 +427,17 @@ describe('Capture360Page', () => {
     await screen.findByAltText('Preview of selected 360 panorama')
     expect(startGuidedCapture).toHaveBeenCalledTimes(1)
     expect(composeGuidedCapture).toHaveBeenCalledTimes(1)
-    expect(discardGuidedCapture).toHaveBeenCalledTimes(1)
+    expect(discardGuidedCapture).not.toHaveBeenCalled()
     await user.click(screen.getByRole('button', { name: 'Share with family' }))
 
     await waitFor(() => expect(onShare).toHaveBeenCalledWith(expect.objectContaining({ source: 'daily' })))
+    expect(discardGuidedCapture).not.toHaveBeenCalled()
     await user.click(screen.getByRole('button', { name: 'Share another' }))
     await user.click(screen.getByRole('button', { name: 'Go to today’s moment' }))
     expect(screen.getByText('Today’s moment is shared')).toBeInTheDocument()
   })
 
-  it('saves an assembled guided sphere before cleaning up its native frames and reuses its id when sharing', async () => {
+  it('saves an assembled guided sphere while retaining its native frames and reuses its id when sharing', async () => {
     const user = userEvent.setup()
     const pendingSave = makeDeferred<void>()
     const onSaveDraft = vi.fn<
@@ -477,7 +478,7 @@ describe('Capture360Page', () => {
     expect(discardGuidedCapture).not.toHaveBeenCalled()
 
     await act(async () => pendingSave.resolve(undefined))
-    await waitFor(() => expect(discardGuidedCapture).toHaveBeenCalledTimes(1))
+    expect(discardGuidedCapture).not.toHaveBeenCalled()
 
     await user.click(screen.getByRole('button', { name: 'Continue' }))
     await user.type(screen.getByRole('textbox', { name: /moment title/i }), 'Saved sphere')
@@ -523,6 +524,6 @@ describe('Capture360Page', () => {
     await user.click(screen.getByRole('button', { name: 'Try saving again' }))
     expect(await screen.findByText(/saved safely to memories/i)).toBeInTheDocument()
     expect(onSaveDraft).toHaveBeenCalledTimes(2)
-    expect(discardGuidedCapture).toHaveBeenCalledTimes(1)
+    expect(discardGuidedCapture).not.toHaveBeenCalled()
   })
 })

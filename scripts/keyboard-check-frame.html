@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Synthetic phone form</title>
+<style>
+  label { display: grid; gap: 8px; margin-block: 24px; font: 16px system-ui; }
+  input, textarea { padding: 14px; border-radius: 12px; background: #fff1d2; color: #301027; border: 1px solid #d895aa; }
+  h1 { font-size: 38px; margin: 20px 0; }
+  button { padding: 14px 24px; margin: 16px 0; }
+</style>
+<div id="root">
+  <div class="app-viewport app-viewport--native">
+    <main class="app-content">
+      <section class="ks-feature">
+        <h1>A little about you</h1>
+        <p>Keyboard-safe form fixture</p>
+        <label>Name<input autocomplete="off"></label>
+        <label>Favourite place<input autocomplete="off"></label>
+        <label>Favourite food<input autocomplete="off"></label>
+        <label>A family tradition<textarea rows="3"></textarea></label>
+        <label>One last thought<input id="last-field" autocomplete="off"></label>
+        <button type="button">Save</button>
+      </section>
+    </main>
+    <nav class="tab-bar">Moments · Capsule · Journal</nav>
+  </div>
+</div>
+<script type="module">
+  import '../src/index.css'
+  import '../src/App.css'
+  import '../src/features/FeaturePages.css'
+  import { installAppViewportGeometrySync } from '../src/app/appViewportGeometry.ts'
+  Object.defineProperty(navigator, 'maxTouchPoints', { configurable: true, value: 1 })
+  installAppViewportGeometrySync(document.documentElement)
+</script>
+</html>

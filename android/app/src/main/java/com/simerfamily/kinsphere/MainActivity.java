@@ -18,6 +18,10 @@ import com.simerfamily.kinsphere.capsule.CapsuleRecapPlugin;
 import com.simerfamily.kinsphere.debug.DebugAccessPlugin;
 import com.simerfamily.kinsphere.panorama.PanoramaCapturePlugin;
 import com.simerfamily.kinsphere.widget.BubbleWidgetPlugin;
+import com.simerfamily.kinsphere.panorama.PanoramaStitchPlugin;
+import com.simerfamily.kinsphere.appearance.AppIconPlugin;
+import com.simerfamily.kinsphere.gallery.PhoneGalleryPlugin;
+import com.simerfamily.kinsphere.gallery.BackgroundGalleryScanPlugin;
 import java.util.Locale;
 
 /** Hosts the Capacitor bridge and the reversible window state used by Cardboard. */
@@ -38,6 +42,10 @@ public final class MainActivity extends BridgeActivity {
         registerPlugin(DebugAccessPlugin.class);
         registerPlugin(PanoramaCapturePlugin.class);
         registerPlugin(BubbleWidgetPlugin.class);
+        registerPlugin(PanoramaStitchPlugin.class);
+        registerPlugin(AppIconPlugin.class);
+        registerPlugin(PhoneGalleryPlugin.class);
+        if (android.os.Build.VERSION.SDK_INT >= 28) registerPlugin(BackgroundGalleryScanPlugin.class);
         super.onCreate(savedInstanceState);
         // KinSphere's normal app shell owns this baseline. Cardboard temporarily
         // switches it to edge-to-edge and restores this explicit state on exit.

@@ -1,4 +1,5 @@
 import type { Capture360Submission } from '../../features/capture'
+import { withAiPanoramaDisclosure } from './panoramaProvenance'
 import type {
   SavePanoramaMomentInput,
   StoredPanoramaAnnotation,
@@ -378,7 +379,7 @@ export async function publishFamilyMoment(
         p_panorama_height: processedPanorama.viewerHeight,
         p_thumbnail_width: processedPanorama.thumbnailWidth,
         p_thumbnail_height: processedPanorama.thumbnailHeight,
-        p_caption: submission.caption || null,
+        p_caption: withAiPanoramaDisclosure(submission.caption, submission.provenance) || null,
         p_annotations: remoteAnnotations,
       },
     )

@@ -24,6 +24,8 @@ final class AppBridgeViewController: CAPBridgeViewController {
         bridge?.registerPluginInstance(CapsuleRecapPlugin())
         bridge?.registerPluginInstance(NativeWebAuthPlugin())
         bridge?.registerPluginInstance(BubbleWidgetPlugin())
+        bridge?.registerPluginInstance(AppIconPlugin())
+        bridge?.registerPluginInstance(PhoneGalleryPlugin())
     }
 
     /// Publishes the first settled safe-area geometry after presentation.

@@ -28,6 +28,7 @@ export function createMemberSessionCache<T>(options: { dispose?(value: T): void 
 
 /** Clears loaded data and invalidates pending work for a departing member. */
 export function clearMemberSessionCaches(namespace?: string) {
+  if (namespace !== undefined) cancelNativeGalleryScan(namespace)
   caches.forEach((cache) => cache.clear(namespace))
 }
 
@@ -47,3 +48,4 @@ export function retainMemberSessionCaches(namespace: string) {
     })
   }
 }
+import { cancelNativeGalleryScan } from '../features/journal/people/nativeGalleryScan'

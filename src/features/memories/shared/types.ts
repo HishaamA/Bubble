@@ -1,3 +1,5 @@
+import type { AiPanoramaProvenance } from '../../../services/media/panoramaProvenance'
+
 export type MomentSource = 'daily' | 'manual'
 
 export type PanoramaAnnotationKind = 'text' | 'voice'
@@ -27,6 +29,9 @@ export type StoredPanoramaMoment = {
   width: number
   height: number
   source: MomentSource
+  provenance?: AiPanoramaProvenance
+  /** Local native source set retained after assembly, never a remote file path. */
+  captureSessionId?: string
   uploaderDisplayName: string
   /** True until an autosaved guided capture is finalized by the user. */
   isDraft?: boolean
@@ -56,6 +61,8 @@ export type SavePanoramaMomentInput = {
   width: number
   height: number
   source: MomentSource
+  provenance?: AiPanoramaProvenance
+  captureSessionId?: string
   uploaderDisplayName: string
   isDraft?: boolean
   ownedByCurrentUser?: boolean

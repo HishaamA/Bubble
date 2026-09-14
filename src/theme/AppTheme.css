@@ -311,18 +311,7 @@
 }
 
 :root[data-bubble-theme] .journal-page__chrome {
-  background:
-    radial-gradient(
-      ellipse at 82% -8%,
-      color-mix(in srgb, var(--theme-canvas-highlight) 25%, transparent),
-      transparent 25rem
-    ),
-    repeating-linear-gradient(
-      103deg,
-      color-mix(in srgb, var(--theme-paper) 1.2%, transparent) 0 1px,
-      transparent 1px 4px
-    ),
-    color-mix(in srgb, var(--theme-canvas) 97%, transparent);
+  background: transparent;
   box-shadow: 0 1px color-mix(in srgb, var(--theme-paper) 58%, transparent);
 }
 
@@ -1932,12 +1921,10 @@
  * but every primary route sits on the exact same selected-theme canvas.
  */
 :root[data-bubble-theme] .app-viewport,
-:root[data-bubble-theme] .app-status-bar-backdrop,
-:root[data-bubble-theme] .journal-page__chrome {
+:root[data-bubble-theme] .app-status-bar-backdrop {
   background: var(--theme-page-background);
-  /* Chrome is a crop of the shell canvas, not a new short gradient. Matching
-   * size and origin makes status bar, sticky heading, and body seamless in
-   * every theme, including after scroll and native viewport resizing. */
+  /* The native status area crops the shell canvas, not a new short gradient.
+   * Matching size and origin keeps it seamless as page content scrolls. */
   background-size: 100% var(--app-visual-viewport-height, 100dvh);
   background-position: center top;
   background-repeat: no-repeat;
@@ -1953,9 +1940,10 @@
   background-image: none;
 }
 
-/* The shared canvas is opaque, so moving photos/text cannot bleed into the
- * sticky heading. A backdrop blur would change that canvas at the boundary. */
+/* Journal's heading and tabs scroll with its content. Let the stationary shell
+ * canvas show through instead of dragging an opaque gradient panel over it. */
 :root[data-bubble-theme] .journal-page__chrome {
+  background: transparent;
   backdrop-filter: none;
 }
 

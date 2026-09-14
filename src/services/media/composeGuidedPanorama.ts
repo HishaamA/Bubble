@@ -192,12 +192,33 @@ export function directionToEquirectangular(
 }
 
 /** Decodes one native frame and exposes an explicit memory-release callback. */
-async function decodeFrame(source: string): Promise<DecodedFrame> {
+function throwIfAborted(signal?: AbortSignal) {
+  if (signal?.aborted) throw new DOMException('Assembly stopped. Your original photos are kept.', 'AbortError')
+}
+
+async function decodeFrame(source: string, signal?: AbortSignal): Promise<DecodedFrame> {
+  throwIfAborted(signal)
   const image = new Image()
   image.decoding = 'async'
-  image.src = source
-  await image.decode()
-  return { image, close: () => { image.src = '' } }
+  let abort: (() => void) | undefined
+  try {
+    image.src = source
+    await Promise.race([
+      image.decode(),
+      new Promise<never>((_, reject) => {
+        abort = () => reject(new DOMException('Assembly stopped. Your original photos are kept.', 'AbortError'))
+        signal?.addEventListener('abort', abort, { once: true })
+        if (signal?.aborted) abort()
+      }),
+    ])
+    throwIfAborted(signal)
+    return { image, close: () => { image.src = '' } }
+  } catch (error) {
+    image.src = ''
+    throw error
+  } finally {
+    if (abort) signal?.removeEventListener('abort', abort)
+  }
 }
 
 /** Requires a readable 2D context for projection and encoding work. */
@@ -770,13 +791,8 @@ function fillUncoveredPixels(
 
 /** Gives the browser one paint opportunity between expensive source frames. */
 function yieldToBrowserPaint(): Promise<void> {
-  return new Promise<void>((resolve) => {
-    if (typeof requestAnimationFrame === 'function') {
-      requestAnimationFrame(() => resolve())
-    } else {
-      setTimeout(resolve, 0)
-    }
-  })
+  // rAF pauses in a hidden WebView and can leave an aborted assembly hanging.
+  return new Promise<void>((resolve) => setTimeout(resolve, 0))
 }
 
 /**
@@ -794,7 +810,9 @@ export async function composeGuidedPanorama(
   captureResult: NativePanoramaCaptureResult,
   onProgress?: (progress: GuidedPanoramaProgress) => void,
   outputWidth = DEFAULT_OUTPUT_WIDTH,
+  signal?: AbortSignal,
 ): Promise<ProcessedPanorama> {
+  throwIfAborted(signal)
   if (typeof document === 'undefined') {
     throw new Error('Panorama assembly requires an installed app or browser canvas.')
   }
@@ -828,6 +846,7 @@ export async function composeGuidedPanorama(
     frameIndex < captureResult.frames.length;
     frameIndex += 1
   ) {
+    throwIfAborted(signal)
     const frame = captureResult.frames[frameIndex]
     onProgress?.({
       phase: 'reading',
@@ -836,7 +855,7 @@ export async function composeGuidedPanorama(
     })
     // Decode one high-resolution frame at a time. Parallel decoding has a much
     // higher peak-memory cost and can terminate a mobile WebView mid-capture.
-    const decoded = await decodeFrame(nativeFrameSource(frame))
+    const decoded = await decodeFrame(nativeFrameSource(frame), signal)
     try {
       const sourceWidth = decoded.image.naturalWidth || frame.width
       const sourceHeight = decoded.image.naturalHeight || frame.height
@@ -866,6 +885,10 @@ export async function composeGuidedPanorama(
       })
 
       for (let y = 0; y < sampleHeight; y += 1) {
+        if (y % 128 === 0) {
+          await yieldToBrowserPaint()
+          throwIfAborted(signal)
+        }
         const cameraY = -(y - cy) / fy
         const normalizedY = Math.abs(
           (y - cy) / (y < cy ? topRadius : bottomRadius),
@@ -949,6 +972,7 @@ export async function composeGuidedPanorama(
   // Projection records two candidate owners per destination pixel. Exposure is
   // solved after every source has contributed, then only compatible seam
   // neighbors are mixed into the final RGBA image.
+  throwIfAborted(signal)
   const outputCanvas = document.createElement('canvas')
   outputCanvas.width = safeOutputWidth
   outputCanvas.height = outputHeight
@@ -1028,6 +1052,8 @@ export async function composeGuidedPanorama(
     safeOutputWidth,
     outputHeight,
   )
+  await yieldToBrowserPaint()
+  throwIfAborted(signal)
   outputContext.putImageData(outputImage, 0, 0)
   onProgress?.({ phase: 'encoding', completed: 0, total: 1 })
 
@@ -1047,6 +1073,7 @@ export async function composeGuidedPanorama(
     encodeCanvasAsJpeg(outputCanvas, 0.9),
     encodeCanvasAsJpeg(thumbnailCanvas, 0.82),
   ])
+  throwIfAborted(signal)
   onProgress?.({ phase: 'encoding', completed: 1, total: 1 })
 
   return {

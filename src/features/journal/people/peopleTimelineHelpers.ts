@@ -13,17 +13,23 @@ import type {
   TimelineDateOverride,
 } from './types'
 
-const MAX_SUPPLEMENTAL_REFERENCES_PER_PERSON = 8
-const MINIMUM_DESCRIPTOR_LENGTH = 64
-const MINIMUM_SUPPLEMENTAL_REFERENCE_QUALITY = 0.35
-const DEFAULT_HIGH_SIMILARITY = 0.62
-const DEFAULT_HIGH_FACE_MARGIN = 0.08
-const DEFAULT_HIGH_PERSON_MARGIN = 0.05
-const DEFAULT_REVIEW_SIMILARITY = 0.48
+const MAX_SUPPLEMENTAL_REFERENCES_PER_PERSON = 64
+const FACE_RES_DESCRIPTOR_LENGTH = 1_024
+const MINIMUM_SUPPLEMENTAL_REFERENCE_QUALITY = 0.55
+const MINIMUM_AUTOMATIC_REFERENCE_QUALITY = 0.62
+const DEFAULT_HIGH_SIMILARITY = 0.86
+const DEFAULT_HIGH_FACE_MARGIN = 0.12
+const DEFAULT_HIGH_PERSON_MARGIN = 0.08
+// Review is a narrow band of plausible matches, not a queue of every detected
+// face. These are model similarity scores, not calibrated identity probabilities.
+// Uncertain matches remain available for manual tagging and can be reconsidered
+// when a person gains a confirmed appearance. Raising automatic precision must
+// not send the old, permissive acceptance band wholesale into the review queue.
+const DEFAULT_REVIEW_SIMILARITY = 0.78
 const DEFAULT_REVIEW_FACE_MARGIN = 0.03
 const DEFAULT_REVIEW_PERSON_MARGIN = 0.02
-const MINIMUM_HIGH_FACE_QUALITY = 0.42
-const MINIMUM_REVIEW_FACE_QUALITY = 0.32
+const MINIMUM_HIGH_FACE_QUALITY = 0.75
+const MINIMUM_REVIEW_FACE_QUALITY = 0.55
 const FACE_RES_DISTANCE_MULTIPLIER = 25
 const FACE_RES_NORMALIZATION_MIN = 0.2
 const FACE_RES_NORMALIZATION_MAX = 0.8
@@ -53,6 +59,7 @@ export function toPeopleTimelinePhotos(
     key: `journal-photo:${photo.id}`,
     id: photo.id,
     kind: 'journal-photo',
+    origin: photo.origin,
     source: photo.thumbnail,
     scanSource: photo.image,
     displayWidth: photo.width,
@@ -243,11 +250,13 @@ export function faceResSimilarity(
   right: readonly number[],
 ) {
   if (
-    left.length < MINIMUM_DESCRIPTOR_LENGTH ||
+    left.length !== FACE_RES_DESCRIPTOR_LENGTH ||
     left.length !== right.length
   ) return -1
 
   let squaredDistance = 0
+  let leftHasSignal = false
+  let rightHasSignal = false
   for (let index = 0; index < left.length; index += 1) {
     const leftValue = left[index]
     const rightValue = right[index]
@@ -259,7 +268,10 @@ export function faceResSimilarity(
     ) return -1
     const difference = leftValue - rightValue
     squaredDistance += difference * difference
+    leftHasSignal ||= leftValue !== 0
+    rightHasSignal ||= rightValue !== 0
   }
+  if (!leftHasSignal || !rightHasSignal) return -1
   if (squaredDistance === 0) return 1
 
   // Human rounds the amplified distance before taking its root.
@@ -275,6 +287,59 @@ export function faceResSimilarity(
   return Math.round(100 * Math.max(0, Math.min(1, normalized))) / 100
 }
 
+// Timeline descriptors are immutable. Validate each one once so thousands
+// of pair comparisons only perform the numeric distance loop. Weak keys release
+// both prepared vectors and pair scores when their owning state is discarded.
+const preparedDescriptors = new WeakMap<readonly number[], readonly number[] | null>()
+const referenceSimilarities = new WeakMap<readonly number[], WeakMap<readonly number[], number>>()
+
+function preparedDescriptor(values: readonly number[]) {
+  if (preparedDescriptors.has(values)) return preparedDescriptors.get(values) ?? null
+  if (values.length !== FACE_RES_DESCRIPTOR_LENGTH) {
+    preparedDescriptors.set(values, null)
+    return null
+  }
+  let hasSignal = false
+  for (let index = 0; index < values.length; index += 1) {
+    const value = values[index]
+    if (value === undefined || !Number.isFinite(value)) {
+      preparedDescriptors.set(values, null)
+      return null
+    }
+    hasSignal ||= value !== 0
+  }
+  preparedDescriptors.set(values, hasSignal ? values : null)
+  return hasSignal ? values : null
+}
+
+function cachedFaceResSimilarity(left: readonly number[], right: readonly number[]) {
+  let cached = referenceSimilarities.get(left)
+  const existing = cached?.get(right)
+  if (existing !== undefined) return existing
+  const preparedLeft = preparedDescriptor(left)
+  const preparedRight = preparedDescriptor(right)
+  let squaredDistance = 0
+  if (preparedLeft && preparedRight) {
+    for (let index = 0; index < FACE_RES_DESCRIPTOR_LENGTH; index += 1) {
+      const difference = preparedLeft[index]! - preparedRight[index]!
+      squaredDistance += difference * difference
+    }
+  }
+  let score = -1
+  if (preparedLeft && preparedRight) {
+    if (squaredDistance === 0) score = 1
+    else {
+      const amplified = Math.round(100 * FACE_RES_DISTANCE_MULTIPLIER * squaredDistance) / 100
+      const normalized = (1 - Math.sqrt(amplified) / 100 - FACE_RES_NORMALIZATION_MIN) /
+        (FACE_RES_NORMALIZATION_MAX - FACE_RES_NORMALIZATION_MIN)
+      score = Math.round(100 * Math.max(0, Math.min(1, normalized))) / 100
+    }
+  }
+  if (!cached) { cached = new WeakMap(); referenceSimilarities.set(left, cached) }
+  cached.set(right, score)
+  return score
+}
+
 /** Scores a detected face against the best known appearance for one person. */
 function strongestReferenceSimilarity(
   detectedFace: readonly number[],
@@ -284,10 +349,38 @@ function strongestReferenceSimilarity(
   for (const reference of references) {
     strongest = Math.max(
       strongest,
-      faceResSimilarity(detectedFace, reference.embedding),
+      cachedFaceResSimilarity(detectedFace, reference.embedding),
     )
   }
   return strongest
+}
+
+type MatchReference = FaceReference & { automaticAnchor: boolean }
+
+/** Explicit face confirmations teach new appearances; inferred labels never do. */
+function automaticReferenceConfidence(
+  embedding: readonly number[],
+  references: readonly MatchReference[],
+  minimumSimilarity: number,
+) {
+  const trusted = references.filter(({ quality, automaticAnchor }) => automaticAnchor && quality !== undefined &&
+    Number.isFinite(quality) && quality >= MINIMUM_AUTOMATIC_REFERENCE_QUALITY)
+    .map((reference) => ({ reference, score: strongestReferenceSimilarity(embedding, [reference]) }))
+    .sort((left, right) => right.score - left.score)
+  const strongest = trusted[0]
+  if (!strongest) return -1
+  // A user-confirmed childhood/older appearance is as intentional as a new
+  // enrollment photo. Requiring the original portrait to agree again prevents
+  // that confirmation from ever helping. Keep the strict single-view cutoff.
+  if (clearsMatchThreshold(strongest.score, Math.min(1, minimumSimilarity + 0.06))) {
+    return strongest.score
+  }
+  const independent = trusted.find(({ reference, score }) =>
+    reference !== strongest.reference &&
+    !(reference.photoKey && reference.photoKey === strongest.reference.photoKey) &&
+    strongestReferenceSimilarity(reference.embedding, [strongest.reference]) < 0.99 &&
+    clearsMatchThreshold(score, minimumSimilarity - 0.04))
+  return independent ? strongest.score : -1
 }
 
 type FaceMatchDecision = FaceSuggestion & {
@@ -296,7 +389,7 @@ type FaceMatchDecision = FaceSuggestion & {
 
 type PersonReferences = {
   personId: string
-  references: FaceReference[]
+  references: MatchReference[]
 }
 
 type ScoredFace = {
@@ -304,6 +397,7 @@ type ScoredFace = {
   scores: Array<{
     personId: string
     confidence: number
+    automaticConfidence: number
   }>
 }
 
@@ -312,19 +406,34 @@ type MatchThresholds = {
   minimumFaceMargin: number
   minimumPersonMargin: number
   minimumFaceQuality: number
+  automatic: boolean
 }
 
 /** Rejects undersized or non-finite descriptors before matching. */
 function validReference(reference: FaceReference) {
-  return reference.embedding.length >= MINIMUM_DESCRIPTOR_LENGTH &&
-    reference.embedding.every(Number.isFinite)
+  return reference.embedding.length === FACE_RES_DESCRIPTOR_LENGTH &&
+    reference.embedding.every(Number.isFinite) && reference.embedding.some((value) => value !== 0) &&
+    (reference.quality === undefined || (Number.isFinite(reference.quality) &&
+      reference.quality >= MINIMUM_SUPPLEMENTAL_REFERENCE_QUALITY && reference.quality <= 1))
 }
 
 /** Builds per-person reference sets, including bounded confirmed appearances. */
 function referenceProfiles(state: PeopleTimelineState): PersonReferences[] {
+  const rejected = new Set(state.dismissedSuggestions.map(({ photoKey, faceId, personId }) =>
+    faceDecisionKey(photoKey, faceId ?? '*', personId)))
+  const confirmedAnchors = new Set(state.assignments.flatMap((assignment) =>
+    assignment.source === 'manual' && assignment.faceId
+      ? [faceDecisionKey(assignment.photoKey, assignment.faceId, assignment.personId)] : []))
   const profiles = state.people.flatMap(({ id: personId }) => {
     const profile = state.faceProfiles[personId]
-    const references = profile?.references.filter(validReference) ?? []
+    const references = profile?.references.filter((reference) => validReference(reference) &&
+      (!reference.photoKey || (!rejected.has(faceDecisionKey(reference.photoKey, '*', personId)) &&
+        !rejected.has(faceDecisionKey(reference.photoKey, reference.faceId ?? '', personId)))))
+      .map((reference): MatchReference => ({
+        ...reference,
+        automaticAnchor: reference.source === 'enrollment' || Boolean(reference.photoKey && reference.faceId &&
+          confirmedAnchors.has(faceDecisionKey(reference.photoKey, reference.faceId, personId))),
+      })) ?? []
     return references.length > 0 ? [{ personId, references: [...references] }] : []
   })
   const profilesByPerson = new Map(
@@ -338,31 +447,40 @@ function referenceProfiles(state: PeopleTimelineState): PersonReferences[] {
   for (let index = state.assignments.length - 1; index >= 0; index -= 1) {
     const assignment = state.assignments[index]
     if (!assignment) continue
-    if (assignment.source !== 'manual' || !assignment.faceId) continue
+    if (assignment.source !== 'manual' || !assignment.faceId ||
+      rejected.has(faceDecisionKey(assignment.photoKey, '*', assignment.personId)) ||
+      rejected.has(faceDecisionKey(assignment.photoKey, assignment.faceId, assignment.personId))) continue
     const enrolledPerson = profilesByPerson.get(assignment.personId)
     const detectedFace = state.faceScans[assignment.photoKey]?.faces
       .find(({ id }) => id === assignment.faceId)
     if (
       !enrolledPerson ||
       !detectedFace ||
+      !Number.isFinite(detectedFace.quality) || detectedFace.quality > 1 ||
       detectedFace.quality < MINIMUM_SUPPLEMENTAL_REFERENCE_QUALITY ||
-      detectedFace.embedding.length < MINIMUM_DESCRIPTOR_LENGTH ||
-      !detectedFace.embedding.every(Number.isFinite)
+      detectedFace.embedding.length !== FACE_RES_DESCRIPTOR_LENGTH ||
+      !detectedFace.embedding.every(Number.isFinite) ||
+      !detectedFace.embedding.some((value) => value !== 0)
     ) continue
     const supplementalCount = supplementalCounts.get(assignment.personId) ?? 0
     if (supplementalCount >= MAX_SUPPLEMENTAL_REFERENCES_PER_PERSON) continue
 
+    // An orphan/legacy untrusted reference must not swallow a new explicit
+    // confirmation just because its vector is identical. The new confirmation
+    // supplies provenance (and measured quality) that the old row lacks.
     const alreadyIncluded = enrolledPerson.references.some((reference) =>
-      (
+      reference.automaticAnchor && reference.quality !== undefined &&
+      reference.quality >= MINIMUM_AUTOMATIC_REFERENCE_QUALITY && ((
         reference.photoKey === assignment.photoKey &&
         reference.faceId === assignment.faceId
-      ) || faceResSimilarity(reference.embedding, detectedFace.embedding) === 1,
+      ) || cachedFaceResSimilarity(reference.embedding, detectedFace.embedding) === 1),
     )
     if (alreadyIncluded) continue
     enrolledPerson.references.push({
       id: `confirmed:${assignment.photoKey}:${assignment.faceId}`,
       embedding: detectedFace.embedding,
       source: 'manual-photo',
+      automaticAnchor: true,
       createdAt: assignment.confirmedAt,
       quality: detectedFace.quality,
       photoKey: assignment.photoKey,
@@ -390,6 +508,24 @@ function faceDecisionKey(photoKey: string, faceId: string, personId: string) {
   return `${photoKey}\u0000${faceId}\u0000${personId}`
 }
 
+/** Keeps inclusive cutoffs inclusive despite binary rounding in score margins. */
+function clearsMatchThreshold(value: number, minimum: number) {
+  return value + 1e-9 >= minimum
+}
+
+/** Separates actual face detail from mesh confidence; supports old saved scans. */
+function faceDetailPixels(face: StoredFaceDetection) {
+  if (face.minFacePixels !== undefined) {
+    return Number.isFinite(face.minFacePixels) && face.minFacePixels <= 1280
+      ? Math.max(0, face.minFacePixels) : 0
+  }
+  // Earlier scans persisted the weighted quality but not its pixel-size input.
+  // Subtract the maximum possible pose contribution to obtain a conservative
+  // size lower bound. Never treat high detection confidence alone as detail.
+  return 160 * Math.max(0, Math.min(1,
+    (face.quality - 0.4 * face.detectorScore - 0.25 * face.descriptorScore - 0.1) / 0.25))
+}
+
 /** Produces one-to-one face matches that satisfy the supplied confidence policy. */
 function createMatchDecisions(
   state: PeopleTimelineState,
@@ -399,12 +535,12 @@ function createMatchDecisions(
   if (!profiles.length) return []
 
   const confirmedPeople = new Set(
-    state.assignments.map(({ photoKey, personId }) =>
+    state.assignments.filter(({ source }) => source === 'manual').map(({ photoKey, personId }) =>
       `${photoKey}\u0000${personId}`,
     ),
   )
   const confirmedFaces = new Set(
-    state.assignments.flatMap(({ photoKey, faceId }) =>
+    state.assignments.filter(({ source }) => source === 'manual').flatMap(({ photoKey, faceId }) =>
       faceId ? [`${photoKey}\u0000${faceId}`] : [],
     ),
   )
@@ -417,19 +553,16 @@ function createMatchDecisions(
   const decisions: FaceMatchDecision[] = []
 
   for (const [photoKey, scan] of Object.entries(state.faceScans)) {
-    const availableProfiles = profiles.filter(({ personId }) =>
-      !confirmedPeople.has(`${photoKey}\u0000${personId}`),
-    )
-    const availableFaces = scan.faces.filter(({ id }) =>
-      !confirmedFaces.has(`${photoKey}\u0000${id}`),
-    )
-    if (!availableProfiles.length || !availableFaces.length) continue
-
-    const scoreMatrix: ScoredFace[] = availableFaces.map((detection) => ({
+    // A manual tag must not remove that identity from the competing evidence:
+    // otherwise the same face could be relabelled as its next-closest relative.
+    // Suppress confirmed outputs below, while still scoring all people/faces.
+    const scoreMatrix: ScoredFace[] = scan.faces.map((detection) => ({
       detection,
-      scores: availableProfiles.map(({ personId, references }) => ({
+      scores: profiles.map(({ personId, references }) => ({
         personId,
         confidence: strongestReferenceSimilarity(detection.embedding, references),
+        automaticConfidence: thresholds.automatic
+          ? automaticReferenceConfidence(detection.embedding, references, thresholds.minimumSimilarity) : -1,
       })),
     }))
 
@@ -437,20 +570,28 @@ function createMatchDecisions(
       const scoredFace = scoreMatrix[faceIndex]
       if (!scoredFace) continue
       const { detection } = scoredFace
-      if (detection.quality < thresholds.minimumFaceQuality) continue
+      if (confirmedFaces.has(`${photoKey}\u0000${detection.id}`)) continue
+      if (![detection.quality, detection.detectorScore, detection.descriptorScore]
+        .every((value) => Number.isFinite(value) && value >= 0 && value <= 1) ||
+        detection.quality < thresholds.minimumFaceQuality ||
+        detection.detectorScore < (thresholds.automatic ? 0.75 : 0.5) ||
+        detection.descriptorScore < (thresholds.automatic ? 0.75 : 0.5) ||
+        !clearsMatchThreshold(faceDetailPixels(detection), thresholds.automatic ? 80 : 48)) continue
 
       const ranked = [...scoredFace.scores]
         .sort((left, right) => right.confidence - left.confidence)
 
       const best = ranked[0]
       const runnerUp = ranked[1]
-      if (!best || best.confidence < qualityAdjustedThreshold(
+      if (best && confirmedPeople.has(`${photoKey}\u0000${best.personId}`)) continue
+      const confidence = thresholds.automatic ? best?.automaticConfidence : best?.confidence
+      if (!best || confidence === undefined || !clearsMatchThreshold(confidence, qualityAdjustedThreshold(
         thresholds.minimumSimilarity,
         detection.quality,
-      )) continue
+      ))) continue
       if (
         runnerUp &&
-        best.confidence - runnerUp.confidence < thresholds.minimumFaceMargin
+        !clearsMatchThreshold(confidence - runnerUp.confidence, thresholds.minimumFaceMargin)
       ) continue
       if (
         dismissed.has(faceDecisionKey(photoKey, detection.id, best.personId)) ||
@@ -468,11 +609,11 @@ function createMatchDecisions(
         .sort((left, right) => right - left)
       const closestCompetingFace = competingFaceScores[0] ?? -1
       if (
-        closestCompetingFace >= best.confidence ||
-        best.confidence - closestCompetingFace < thresholds.minimumPersonMargin
+        closestCompetingFace >= confidence ||
+        !clearsMatchThreshold(confidence - closestCompetingFace, thresholds.minimumPersonMargin)
       ) continue
 
-      decisions.push({ photoKey, faceId: detection.id, ...best })
+      decisions.push({ photoKey, faceId: detection.id, personId: best.personId, confidence })
     }
   }
 
@@ -493,18 +634,20 @@ export function createFaceSuggestions(
     minimumFaceMargin,
     minimumPersonMargin,
     minimumFaceQuality: MINIMUM_HIGH_FACE_QUALITY,
+    automatic: true,
   })
 }
 
-/** Returns borderline matches that need an explicit person decision. */
+/** Offers plausible near-matches for optional review without dismissing weak faces. */
 export function createFaceReviewCandidates(
   state: PeopleTimelineState,
   minimumSimilarity = DEFAULT_REVIEW_SIMILARITY,
   minimumFaceMargin = DEFAULT_REVIEW_FACE_MARGIN,
   minimumPersonMargin = DEFAULT_REVIEW_PERSON_MARGIN,
+  automaticMatches: readonly FaceMatchDecision[] = createFaceSuggestions(state),
 ): FaceMatchDecision[] {
   const automaticDecisionKeys = new Set(
-    createFaceSuggestions(state).map(({ photoKey, faceId, personId }) =>
+    automaticMatches.map(({ photoKey, faceId, personId }) =>
       faceDecisionKey(photoKey, faceId, personId),
     ),
   )
@@ -513,6 +656,7 @@ export function createFaceReviewCandidates(
     minimumFaceMargin,
     minimumPersonMargin,
     minimumFaceQuality: MINIMUM_REVIEW_FACE_QUALITY,
+    automatic: false,
   }).filter(({ photoKey, faceId, personId }) =>
     !automaticDecisionKeys.has(faceDecisionKey(photoKey, faceId, personId)),
   )
@@ -529,7 +673,7 @@ export function effectivePeopleForPhoto(
   const effective = new Set(
     state.assignments
       .filter((assignment) =>
-        assignment.photoKey === photoKey && peopleIds.has(assignment.personId),
+        assignment.source === 'manual' && assignment.photoKey === photoKey && peopleIds.has(assignment.personId),
       )
       .map(({ personId }) => personId),
   )

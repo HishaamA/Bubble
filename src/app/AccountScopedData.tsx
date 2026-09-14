@@ -7,6 +7,7 @@ import {
 import { useFamilyOnboarding } from '../features/onboarding'
 import { createAccountCacheNamespace } from './accountCacheNamespace'
 import { retainMemberSessionCaches } from './memberSessionCache'
+import { retainNativeGalleryScope } from '../features/journal/people/nativeGalleryScan'
 
 type AccountScopedDataProps = {
   children: ReactNode
@@ -19,7 +20,7 @@ type AccountScopedDataProps = {
  */
 export function AccountScopedData({ children }: AccountScopedDataProps) {
   const { status, user } = useAuth()
-  const { snapshot } = useFamilyOnboarding()
+  const { snapshot, status: familyStatus } = useFamilyOnboarding()
   const familyId =
     snapshot?.kind === 'member' ? snapshot.membership.familyId : 'no-family'
   const cacheNamespace =
@@ -28,6 +29,13 @@ export function AccountScopedData({ children }: AccountScopedDataProps) {
       : 'signed-out:no-family'
 
   useEffect(() => retainMemberSessionCaches(cacheNamespace), [cacheNamespace])
+  useEffect(() => {
+    // Loading/error snapshots are not evidence that the member changed family.
+    // Wait for a definitive auth/membership result before pruning a cold job.
+    if (status === 'loading' || (status === 'signed-in' &&
+      !['member', 'needs-family', 'pending'].includes(familyStatus))) return
+    retainNativeGalleryScope(cacheNamespace)
+  }, [cacheNamespace, familyStatus, status])
 
   return (
     <SharedMomentsProvider

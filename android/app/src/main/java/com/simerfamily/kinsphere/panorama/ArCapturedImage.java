@@ -1,13 +1,11 @@
 package com.simerfamily.kinsphere.panorama;
 
 import android.graphics.Bitmap;
-import android.graphics.BitmapFactory;
 import android.graphics.ImageFormat;
 import android.graphics.Matrix;
 import android.graphics.Rect;
-import android.graphics.YuvImage;
 import android.media.Image;
-import java.io.ByteArrayOutputStream;
+import android.os.Build;
 import java.io.File;
 import java.io.FileOutputStream;
 import java.io.IOException;
@@ -18,77 +16,91 @@ final class ArCapturedImage {
 
     final int width;
     final int height;
+    final int imageWidth;
+    final int imageHeight;
+    final int cropLeft;
+    final int cropTop;
+    final int dataSpace;
     private final byte[] nv21;
+    private final PanoramaYuv.ColorModel colorModel;
 
     /** Owns the detached NV21 bytes for one even-sized ARCore image. */
-    private ArCapturedImage(int width, int height, byte[] nv21) {
+    private ArCapturedImage(int imageWidth, int imageHeight, int cropLeft, int cropTop,
+        int width, int height, byte[] nv21, int dataSpace, PanoramaYuv.ColorModel colorModel) {
+        this.imageWidth = imageWidth;
+        this.imageHeight = imageHeight;
+        this.cropLeft = cropLeft;
+        this.cropTop = cropTop;
         this.width = width;
         this.height = height;
         this.nv21 = nv21;
+        this.dataSpace = dataSpace;
+        this.colorModel = colorModel;
     }
 
-    /** Copies cropped YUV planes before ARCore closes the source {@link Image}. */
+    /** Copies full YUV planes and retains their crop before ARCore closes the source image. */
     static ArCapturedImage copyOf(Image image) throws IOException {
         if (image.getFormat() != ImageFormat.YUV_420_888) {
             throw new IOException("ARCore returned an unsupported camera image format.");
         }
         Rect crop = image.getCropRect();
-        int width = crop.width();
-        int height = crop.height();
-        if (width <= 0 || height <= 0 || (width & 1) != 0 || (height & 1) != 0) {
-            throw new IOException("ARCore returned invalid camera image dimensions.");
-        }
-
+        int imageWidth = image.getWidth();
+        int imageHeight = image.getHeight();
         Image.Plane[] planes = image.getPlanes();
         if (planes.length < 3) {
             throw new IOException("ARCore returned incomplete YUV camera planes.");
         }
-        long outputByteCount = (long) width * height * 3L / 2L;
-        if (outputByteCount > Integer.MAX_VALUE) {
-            throw new IOException("ARCore returned a camera image that is too large.");
+        // Read the required pixel data through the provider first. ARCore owns
+        // its image lifetime separately from android.media.Image's hidden flag.
+        ByteBuffer[] buffers = {
+            planes[0].getBuffer(), planes[1].getBuffer(), planes[2].getBuffer()
+        };
+        int dataSpace = optionalDataSpace(image);
+        return copyOfPlanes(imageWidth, imageHeight, crop, dataSpace,
+            buffers,
+            new int[] { planes[0].getRowStride(), planes[1].getRowStride(), planes[2].getRowStride() },
+            new int[] { planes[0].getPixelStride(), planes[1].getPixelStride(), planes[2].getPixelStride() });
+    }
+
+    /** Missing optional colour metadata must not reject valid ARCore camera pixels. */
+    private static int optionalDataSpace(Image image) {
+        if (Build.VERSION.SDK_INT < 33) return 0;
+        try {
+            return image.getDataSpace();
+        } catch (IllegalStateException | UnsupportedOperationException unavailable) {
+            // ARCore 1.54 inherits Image.getDataSpace(), but does not initialize
+            // the framework's mIsImageValid flag. That inherited getter reports
+            // "Image is already closed" even for a live, readable ARCore image.
+            // Only this optional getter falls back to UNKNOWN (normal SDR YUV).
+            // Real plane/lifetime failures and explicit unsupported colour
+            // spaces still propagate; never catch errors around the whole copy.
+            return 0;
         }
+    }
+
+    /** Shared plane-copy boundary, also exercised with deterministic synthetic image planes. */
+    static ArCapturedImage copyOfPlanes(int imageWidth, int imageHeight, Rect crop, int dataSpace,
+        ByteBuffer[] planes, int[] rowStrides, int[] pixelStrides) throws IOException {
+        if (crop == null) throw new IOException("The AR camera crop is missing.");
+        int width = crop.width();
+        int height = crop.height();
+        PanoramaYuv.validateCrop(imageWidth, imageHeight, crop.left, crop.top, width, height);
+        PanoramaYuv.ColorModel colorModel = PanoramaYuv.colorModel(dataSpace);
         final byte[] output;
         try {
-            output = new byte[(int) outputByteCount];
+            // Retain the full chroma grid: cropping packed NV21 at an odd origin
+            // would silently shift U/V onto different source pixels.
+            output = PanoramaYuv.copyNv21(planes, rowStrides, pixelStrides, imageWidth, imageHeight);
         } catch (OutOfMemoryError error) {
             throw new IOException("The AR camera image is too large to copy safely.", error);
         }
-        copyPlane(
-            planes[0],
-            crop.left,
-            crop.top,
-            width,
-            height,
-            output,
-            0,
-            1
-        );
+        return new ArCapturedImage(imageWidth, imageHeight, crop.left, crop.top,
+            width, height, output, dataSpace, colorModel);
+    }
 
-        int chromaWidth = width / 2;
-        int chromaHeight = height / 2;
-        int chromaOffset = width * height;
-        // NV21 stores V then U for each 2x2 luma block.
-        copyPlane(
-            planes[2],
-            crop.left / 2,
-            crop.top / 2,
-            chromaWidth,
-            chromaHeight,
-            output,
-            chromaOffset,
-            2
-        );
-        copyPlane(
-            planes[1],
-            crop.left / 2,
-            crop.top / 2,
-            chromaWidth,
-            chromaHeight,
-            output,
-            chromaOffset + 1,
-            2
-        );
-        return new ArCapturedImage(width, height, output);
+    /** Ranks focus within one steady hold, without a minimum score or an RGB allocation. */
+    double lumaSharpnessScore() {
+        return PanoramaYuv.lumaSharpness(nv21, imageWidth, cropLeft, cropTop, width, height);
     }
 
     /** Rotates, downsizes, and writes an upright JPEG while retaining source dimensions. */
@@ -98,21 +110,25 @@ final class ArCapturedImage {
         int requestedWidth,
         int jpegQualityPercent
     ) throws IOException {
-        ByteArrayOutputStream sourceJpeg = new ByteArrayOutputStream(Math.max(64 * 1024, nv21.length / 2));
-        YuvImage yuv = new YuvImage(nv21, ImageFormat.NV21, width, height, null);
-        if (!yuv.compressToJpeg(new Rect(0, 0, width, height), jpegQualityPercent, sourceJpeg)) {
-            throw new IOException("The AR camera image could not be converted to JPEG.");
+        int normalizedRotation = ((rotationDegrees % 360) + 360) % 360;
+        if (normalizedRotation % 90 != 0 || jpegQualityPercent < 0 || jpegQualityPercent > 100) {
+            throw new IOException("The camera output settings are invalid.");
         }
-        byte[] jpegBytes = sourceJpeg.toByteArray();
-        Bitmap decoded = BitmapFactory.decodeByteArray(jpegBytes, 0, jpegBytes.length);
-        if (decoded == null) {
-            throw new IOException("The AR camera JPEG could not be decoded.");
-        }
+        Bitmap decoded = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888);
 
         Bitmap upright = decoded;
         Bitmap scaled = decoded;
         try {
-            int normalizedRotation = ((rotationDegrees % 360) + 360) % 360;
+            // Direct RGB conversion uses bounded scratch space, off the GL thread.
+            // The final compress below is the only JPEG encoding in this path.
+            int tileRows = Math.min(32, height);
+            int[] pixels = new int[width * tileRows];
+            for (int row = 0; row < height; row += tileRows) {
+                int rows = Math.min(tileRows, height - row);
+                PanoramaYuv.convertRows(nv21, imageWidth, imageHeight, cropLeft, cropTop,
+                    width, height, row, rows, colorModel, pixels);
+                decoded.setPixels(pixels, 0, width, 0, row, width, rows);
+            }
             if (normalizedRotation != 0) {
                 Matrix rotation = new Matrix();
                 rotation.postRotate(normalizedRotation);
@@ -143,6 +159,8 @@ final class ArCapturedImage {
                 if (!scaled.compress(Bitmap.CompressFormat.JPEG, jpegQualityPercent, output)) {
                     throw new IOException("The upright AR camera JPEG could not be saved.");
                 }
+                // Persist the source before UI acknowledges its dot and commits the manifest.
+                output.getFD().sync();
             }
             return new EncodedFrame(
                 destination,
@@ -150,7 +168,8 @@ final class ArCapturedImage {
                 outputHeight,
                 width,
                 height,
-                normalizedRotation
+                normalizedRotation, imageWidth, imageHeight, cropLeft, cropTop,
+                dataSpace, colorModel.name()
             );
         } finally {
             if (scaled != upright && scaled != decoded) {
@@ -163,52 +182,6 @@ final class ArCapturedImage {
         }
     }
 
-    /** Copies a strided image plane into the packed NV21 destination with bounds checks. */
-    private static void copyPlane(
-        Image.Plane plane,
-        int left,
-        int top,
-        int width,
-        int height,
-        byte[] destination,
-        int destinationOffset,
-        int destinationPixelStride
-    ) throws IOException {
-        ByteBuffer buffer = plane.getBuffer().duplicate();
-        int bufferOffset = buffer.position();
-        int rowStride = plane.getRowStride();
-        int pixelStride = plane.getPixelStride();
-        int destinationIndex = destinationOffset;
-        for (int row = 0; row < height; row += 1) {
-            int rowStart = bufferOffset + (top + row) * rowStride + left * pixelStride;
-            if (pixelStride == 1 && destinationPixelStride == 1) {
-                int rowEnd = rowStart + width;
-                int destinationEnd = destinationIndex + width;
-                if (
-                    rowStart < 0 ||
-                    rowEnd < rowStart ||
-                    rowEnd > buffer.limit() ||
-                    destinationEnd < destinationIndex ||
-                    destinationEnd > destination.length
-                ) {
-                    throw new IOException("The AR camera image planes were truncated.");
-                }
-                buffer.position(rowStart);
-                buffer.get(destination, destinationIndex, width);
-                destinationIndex = destinationEnd;
-                continue;
-            }
-            for (int column = 0; column < width; column += 1) {
-                int sourceIndex = rowStart + column * pixelStride;
-                if (sourceIndex < 0 || sourceIndex >= buffer.limit() || destinationIndex >= destination.length) {
-                    throw new IOException("The AR camera image planes were truncated.");
-                }
-                destination[destinationIndex] = buffer.get(sourceIndex);
-                destinationIndex += destinationPixelStride;
-            }
-        }
-    }
-
     /** Describes one durable JPEG and the source transform needed for intrinsics. */
     static final class EncodedFrame {
         final File file;
@@ -217,6 +190,12 @@ final class ArCapturedImage {
         final int sourceWidth;
         final int sourceHeight;
         final int sourceRotationDegrees;
+        final int sourceImageWidth;
+        final int sourceImageHeight;
+        final int sourceCropLeft;
+        final int sourceCropTop;
+        final int sourceDataSpace;
+        final String yuvColorConversion;
 
         /** Captures both saved-image dimensions and the original ARCore image geometry. */
         EncodedFrame(
@@ -225,7 +204,13 @@ final class ArCapturedImage {
             int height,
             int sourceWidth,
             int sourceHeight,
-            int sourceRotationDegrees
+            int sourceRotationDegrees,
+            int sourceImageWidth,
+            int sourceImageHeight,
+            int sourceCropLeft,
+            int sourceCropTop,
+            int sourceDataSpace,
+            String yuvColorConversion
         ) {
             this.file = file;
             this.width = width;
@@ -233,6 +218,12 @@ final class ArCapturedImage {
             this.sourceWidth = sourceWidth;
             this.sourceHeight = sourceHeight;
             this.sourceRotationDegrees = sourceRotationDegrees;
+            this.sourceImageWidth = sourceImageWidth;
+            this.sourceImageHeight = sourceImageHeight;
+            this.sourceCropLeft = sourceCropLeft;
+            this.sourceCropTop = sourceCropTop;
+            this.sourceDataSpace = sourceDataSpace;
+            this.yuvColorConversion = yuvColorConversion;
         }
     }
 }

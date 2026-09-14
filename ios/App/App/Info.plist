@@ -45,6 +45,10 @@
 	<string>Bubble uses the microphone when you add a private voice note to a panoramic family memory.</string>
 	<key>NSPhotoLibraryAddUsageDescription</key>
 	<string>Bubble saves the family recap videos you choose to keep in your photo library.</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>When you connect your gallery, Bubble reads the photos you allow to build private family timelines and match familiar faces on this device. Originals stay in Photos and are not uploaded or duplicated.</string>
+	<key>PHPhotoLibraryPreventAutomaticLimitedAccessAlert</key>
+	<true/>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>

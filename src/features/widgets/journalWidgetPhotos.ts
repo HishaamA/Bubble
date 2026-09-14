@@ -41,6 +41,7 @@ export function selectJournalWidgetPhotos(
   for (const candidate of candidates) {
     if (!candidate.collectionId.trim() || !candidate.photo.id.trim()
       || candidate.photo.syncStatus !== 'synced'
+      || candidate.photo.origin === 'device-gallery'
       || !Number.isFinite(Date.parse(candidate.photo.capturedAt))) continue
     unique.set(identity(candidate), candidate)
   }

@@ -1,17 +1,62 @@
 <?xml version="1.0" encoding="utf-8"?>
 <FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/bubble_widget_shell"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:clipChildren="false"
-    android:clipToPadding="false"
+    android:clipToOutline="true"
     android:padding="0dp">
 
-    <StackView
-        android:id="@+id/bubble_widget_stack"
+    <FrameLayout
+        android:id="@+id/bubble_widget_page_container"
         android:layout_width="match_parent"
         android:layout_height="match_parent"
-        android:animateFirstView="false"
-        android:clipChildren="false"
-        android:clipToPadding="false"
         android:padding="0dp" />
+
+    <LinearLayout
+        android:id="@+id/bubble_widget_navigation"
+        android:layout_width="match_parent"
+        android:layout_height="56dp"
+        android:layout_gravity="bottom"
+        android:gravity="center_vertical"
+        android:orientation="horizontal"
+        android:paddingStart="12dp"
+        android:paddingEnd="12dp"
+        android:paddingBottom="8dp"
+        android:visibility="gone">
+
+        <TextView
+            android:id="@+id/bubble_widget_navigation_position"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:ellipsize="end"
+            android:fontFamily="sans-serif-medium"
+            android:includeFontPadding="false"
+            android:maxLines="1"
+            android:paddingStart="4dp"
+            android:textColor="#B9BCC8"
+            android:textSize="11sp" />
+
+        <ImageView
+            android:id="@+id/bubble_widget_previous"
+            android:layout_width="48dp"
+            android:layout_height="48dp"
+            android:background="@drawable/bubble_widget_browse_button"
+            android:contentDescription="Previous Bubble card"
+            android:focusable="true"
+            android:padding="14dp"
+            android:scaleType="fitCenter"
+            android:src="@drawable/bubble_widget_chevron_previous" />
+
+        <ImageView
+            android:id="@+id/bubble_widget_next"
+            android:layout_width="48dp"
+            android:layout_height="48dp"
+            android:background="@drawable/bubble_widget_browse_button"
+            android:contentDescription="Next Bubble card"
+            android:focusable="true"
+            android:padding="14dp"
+            android:scaleType="fitCenter"
+            android:src="@drawable/bubble_widget_chevron_next" />
+    </LinearLayout>
 </FrameLayout>

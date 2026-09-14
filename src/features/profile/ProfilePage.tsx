@@ -1,8 +1,11 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { AppWhimsy } from '../../app/AppWhimsy'
+import { createAccountCacheNamespace } from '../../app/accountCacheNamespace'
 import { useAuth } from '../auth'
 import { familyEventStorageSubject } from '../events/eventStorage'
+import { PhoneGalleryPanel } from '../journal/PhoneGalleryPanel'
+import { usePhoneGallery } from '../journal/gallery/usePhoneGallery'
 import { useFamilyOnboarding } from '../onboarding/familyOnboardingContext'
 import '../FeaturePages.css'
 import { FamilySyncPanel, type FamilySyncSnapshot } from './family-sync'
@@ -45,7 +48,7 @@ function getFamilySummary(snapshot: FamilySyncSnapshot | null) {
   }
 }
 
-/** Renders account, family, appearance, and notification settings. */
+/** Renders account, family, gallery access, appearance, and notification settings. */
 export function SettingsPage() {
   const navigate = useNavigate()
   const { signOut, user } = useAuth()
@@ -66,6 +69,12 @@ export function SettingsPage() {
     ? familyAccess.membership.familyId
     : null
   const widgetStorageSubject = familyEventStorageSubject(userId, familyId)
+  // Journal's private media namespace is account:family, not the separate
+  // account:family:familyId key used by widget/checklist preferences.
+  const galleryCacheNamespace = createAccountCacheNamespace(
+    userId ?? 'signed-out', familyId ?? 'no-family',
+  )
+  const gallery = usePhoneGallery(galleryCacheNamespace)
 
   /** Completes sign-out before replacing the protected settings route. */
   async function handleSignOut() {
@@ -187,6 +196,10 @@ export function SettingsPage() {
       </section>
 
       <AppearanceSettings />
+
+      <section className="ks-section" aria-label="Phone gallery settings">
+        <PhoneGalleryPanel gallery={gallery} mode="settings" />
+      </section>
 
       <ProfilePreferences
         key={userId ?? 'signed-out'}

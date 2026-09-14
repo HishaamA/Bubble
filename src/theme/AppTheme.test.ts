@@ -52,6 +52,7 @@ describe('AppTheme', () => {
       'forest',
     )
     expect(readStoredAppTheme()).toBe('forest')
+    expect(document.querySelector('link[rel="icon"]')).toHaveAttribute('href', '/icons/bubble-forest.svg')
 
     document.documentElement.dataset.bubbleTheme = 'plum'
     expect(initializeAppTheme()).toBe('forest')
@@ -84,17 +85,17 @@ describe('AppTheme', () => {
     expect(finalSurfaceContract).toContain('var(--theme-action) 54%')
   })
 
-  it('crops one full-viewport canvas behind the native status area and sticky Journal heading', () => {
+  it('keeps one full-viewport canvas behind the status area and scrolling Journal heading', () => {
     const finalSurfaceContract = themeStyles.slice(themeStyles.indexOf('/* Final page-surface contract'))
     const sharedCanvasRule = finalSurfaceContract.match(
-      /:root\[data-bubble-theme\] \.app-viewport,\s*:root\[data-bubble-theme\] \.app-status-bar-backdrop,\s*:root\[data-bubble-theme\] \.journal-page__chrome\s*\{([^}]+)\}/,
+      /:root\[data-bubble-theme\] \.app-viewport,\s*:root\[data-bubble-theme\] \.app-status-bar-backdrop\s*\{([^}]+)\}/,
     )?.[1]
     expect(sharedCanvasRule).toBeDefined()
     expect(sharedCanvasRule).toContain('background: var(--theme-page-background)')
     expect(sharedCanvasRule).toContain('background-size: 100% var(--app-visual-viewport-height, 100dvh)')
     expect(sharedCanvasRule).toContain('background-position: center top')
     expect(sharedCanvasRule).toContain('background-repeat: no-repeat')
-    expect(finalSurfaceContract).toMatch(/\.journal-page__chrome\s*\{\s*backdrop-filter: none;/)
+    expect(finalSurfaceContract).toMatch(/\.journal-page__chrome\s*\{\s*background: transparent;\s*backdrop-filter: none;/)
     expect(themeStyles).not.toContain('--theme-page-chrome')
 
     const statusRule = appStyles.match(/\.app-status-bar-backdrop\s*\{([^}]+)\}/)?.[1]

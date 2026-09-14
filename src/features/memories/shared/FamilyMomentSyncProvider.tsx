@@ -7,6 +7,7 @@ import {
   type PropsWithChildren,
 } from 'react'
 import type { Capture360Submission } from '../../capture'
+import { withAiPanoramaDisclosure } from '../../../services/media/panoramaProvenance'
 import { subscribeToSupabaseAuthChanges } from '../../../lib/supabase'
 import { subscribeToAppResume } from '../../../lib/appResume'
 import {
@@ -158,6 +159,8 @@ export function FamilyMomentSyncProvider({ children }: PropsWithChildren) {
       width: legacyLocalMoment.width,
       height: legacyLocalMoment.height,
       source: legacyLocalMoment.source,
+      provenance: legacyLocalMoment.provenance,
+      captureSessionId: legacyLocalMoment.captureSessionId,
       uploaderDisplayName: legacyLocalMoment.uploaderDisplayName,
       ownedByCurrentUser: true,
       familySynced: false,
@@ -201,9 +204,26 @@ export function FamilyMomentSyncProvider({ children }: PropsWithChildren) {
         const existing = moment.id
           ? momentsRef.current.find(({ id }) => id === moment.id)
           : undefined
+        // The current backend stores the disclosure caption, not provider metadata.
+        // Preserve explicit local provenance during remote annotation/ownership refreshes.
+        const provenance = moment.provenance ?? existing?.provenance
+        const reconciled = {
+          ...moment,
+          ...(provenance ? { provenance } : {}),
+          ...(existing?.captureSessionId ? { captureSessionId: existing.captureSessionId } : {}),
+          caption: withAiPanoramaDisclosure(moment.caption, provenance),
+          annotations: (moment.annotations ?? []).map((annotation) => {
+            const cached = existing?.annotations?.find(({ id }) => id === annotation.id)
+            return annotation.kind === 'voice' && !annotation.audioBlob && cached?.audioBlob &&
+              annotationMetadataMatches(cached, annotation)
+              ? { ...annotation, audioBlob: cached.audioBlob }
+              : annotation
+          }),
+        }
         if (
           existing?.familySynced === true &&
           existing.ownedByCurrentUser === moment.ownedByCurrentUser &&
+          existing.caption === reconciled.caption &&
           (
             annotationsAreDurablyCached(existing, moment) ||
             // Storage may return annotation metadata while a private voice
@@ -215,7 +235,7 @@ export function FamilyMomentSyncProvider({ children }: PropsWithChildren) {
         ) {
           continue
         }
-        const saved = await saveMoment(moment)
+        const saved = await saveMoment(reconciled)
         if (
           deletedIdsRef.current.has(saved.id) ||
           connectionRef.current !== connection
@@ -400,13 +420,16 @@ export function FamilyMomentSyncProvider({ children }: PropsWithChildren) {
     ): Promise<{ delivery: 'local' | 'family' }> => {
       const connection = connectionRef.current
       const annotations = submission.annotations ?? []
+      const caption = withAiPanoramaDisclosure(submission.caption, submission.provenance)
 
       if (!connection) {
         await saveMoment({
           id: submission.id,
           blob: submission.file,
-          label: submission.caption || 'A new 360 moment',
-          caption: submission.caption,
+          label: caption || 'A new 360 moment',
+          caption,
+          provenance: submission.provenance,
+          captureSessionId: submission.captureSessionId,
           createdAt: submission.createdAt,
           width: submission.width,
           height: submission.height,
@@ -419,12 +442,14 @@ export function FamilyMomentSyncProvider({ children }: PropsWithChildren) {
         return { delivery: 'local' }
       }
 
-      const processed = await publishFamilyMoment(connection, submission)
+      const processed = await publishFamilyMoment(connection, { ...submission, caption })
       await saveMoment({
         id: submission.id,
         blob: processed.viewer,
-        label: submission.caption || 'A new 360 moment',
-        caption: submission.caption,
+        label: caption || 'A new 360 moment',
+        caption,
+        provenance: submission.provenance,
+        captureSessionId: submission.captureSessionId,
         createdAt: submission.createdAt,
         width: processed.viewerWidth,
         height: processed.viewerHeight,
@@ -492,6 +517,8 @@ export function FamilyMomentSyncProvider({ children }: PropsWithChildren) {
         width: moment.width,
         height: moment.height,
         source: moment.source,
+        provenance: moment.provenance,
+        captureSessionId: moment.captureSessionId,
         uploaderDisplayName: moment.uploaderDisplayName,
         isDraft: moment.isDraft,
         ownedByCurrentUser: true,

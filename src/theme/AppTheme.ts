@@ -1,4 +1,5 @@
 import { useSyncExternalStore } from 'react'
+import { syncThemeAppIcon, updateThemeFavicon } from './themeAppIcon'
 
 export const APP_THEME_STORAGE_KEY = 'bubble:appearance-theme:v1'
 
@@ -67,6 +68,7 @@ function applyThemeToDocument(theme: AppTheme) {
 
   document.documentElement.dataset.bubbleTheme = theme
   updateThemeColour(theme)
+  updateThemeFavicon(theme)
 }
 
 /** Publishes theme changes to React's external-store subscribers. */
@@ -92,6 +94,7 @@ function handleStoredThemeChange(event: StorageEvent) {
 export function initializeAppTheme(): AppTheme {
   activeTheme = readStoredAppTheme()
   applyThemeToDocument(activeTheme)
+  void syncThemeAppIcon(activeTheme, false)
 
   if (typeof window !== 'undefined' && !storageListenerInstalled) {
     window.addEventListener('storage', handleStoredThemeChange)
@@ -115,6 +118,7 @@ export function setAppTheme(theme: AppTheme) {
 
   applyThemeToDocument(activeTheme)
   emitThemeChange()
+  void syncThemeAppIcon(activeTheme, true)
 }
 
 /** Registers a React external-store listener. */

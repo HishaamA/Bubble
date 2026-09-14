@@ -1,6 +1,7 @@
 import { Capacitor, registerPlugin } from '@capacitor/core'
 
 export type NativePanoramaCaptureOptions = {
+  ownerKey?: string
   outputWidth?: number
   mode?: 'quick' | 'standard' | 'detailed'
 }
@@ -28,14 +29,23 @@ export type NativePanoramaFrame = {
   verticalFovDegrees?: number
   rotationDegrees?: number
   imageOrientation?: string
+  poseSource?: string
+  coordinateFrameId?: string
   intrinsics?: number[]
   transform?: number[]
   sharpnessScore?: number
 }
 
 export type NativePanoramaCaptureResult = {
+  ownerKey?: string
+  sessionId?: string
+  createdAt?: string | number
+  state?: string
   frames: NativePanoramaFrame[]
   targetCount: number
+  initialTargetCount?: number
+  coverageComplete?: boolean
+  observedCoverage?: number
   capturedCount: number
   directoryUrl?: string
 }
@@ -44,7 +54,7 @@ type PanoramaCapturePlugin = {
   startCapture(
     options?: NativePanoramaCaptureOptions,
   ): Promise<NativePanoramaCaptureResult>
-  discardCapture(options: { directoryUrl: string }): Promise<void>
+  discardCapture(options: { directoryUrl: string; ownerKey?: string }): Promise<void>
 }
 
 type PanoramaCaptureRegistry = typeof globalThis & {
@@ -74,10 +84,10 @@ export function startNativePanoramaCapture(
   })
 }
 
-/** Releases temporary native frames after save, cancellation, or replacement. */
+/** Removes originals only after an explicit, confirmed user action. */
 export function discardNativePanoramaCapture(result: NativePanoramaCaptureResult) {
   if (!result.directoryUrl) return Promise.resolve()
-  return PanoramaCapture.discardCapture({ directoryUrl: result.directoryUrl })
+  return PanoramaCapture.discardCapture({ directoryUrl: result.directoryUrl, ownerKey: result.ownerKey })
 }
 
 /** Converts a native frame URI into a WebView-safe image source. */

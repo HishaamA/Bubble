@@ -16,6 +16,11 @@ final class PanoramaCapturePolicy {
     /** Prevents construction of this pure threshold policy. */
     private PanoramaCapturePolicy() {}
 
+    /** A completed hold is not a saved photo. Only durable acceptance completes the dot. */
+    static float displayedHoldProgress(float progress) {
+        return Float.isFinite(progress) ? Math.max(0.0f, Math.min(0.95f, progress)) : 0.0f;
+    }
+
     /** Shows final-target navigation only for the last small group of uncaptured dots. */
     static boolean shouldShowCompletionChevron(int remainingTargetCount) {
         return remainingTargetCount > 0 &&

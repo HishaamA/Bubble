@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { FamilyCapsule } from '../capsules/types'
 import { JOURNAL_LIBRARY_ID, type JournalPhoto } from '../journal/journalPhotoTypes'
+import { phoneGalleryJournalPhotos } from '../journal/phoneGalleryPhotos'
 import { journalWidgetPhotoRoute, selectJournalWidgetPhotos } from './journalWidgetPhotos'
 import { selectBubbleWidgetTimeline } from './widgetSnapshot'
 
@@ -20,7 +21,7 @@ function capsule(id: string, overrides: Partial<FamilyCapsule> = {}): FamilyCaps
     id, title: 'A celebration', kind: 'special', createdByName: 'Family',
     createdAt: '2020-01-01T00:00:00.000Z', closesAt: '2020-01-02T00:00:00.000Z',
     opensAt: '2020-01-02T00:00:00.000Z', familySynced: true,
-    photos: [{ ...photo('shared-id'), capsuleId: id }], ...overrides,
+    photos: [{ ...photo('shared-id'), syncStatus: 'synced', capsuleId: id }], ...overrides,
   }
 }
 
@@ -40,7 +41,7 @@ describe('Journal widget memories', () => {
   it('filters locked and pending duplicates before selecting a canonical authorized collection', () => {
     const result = selectJournalWidgetPhotos([], [
       capsule('a-locked', { opensAt: '2027-01-01T00:00:00.000Z' }),
-      capsule('b-pending', { photos: [{ ...photo('shared-id', { syncStatus: 'pending' }), capsuleId: 'b-pending' }] }),
+      capsule('b-pending', { photos: [{ ...photo('shared-id'), syncStatus: 'pending', capsuleId: 'b-pending' }] }),
       capsule('z-opened'),
     ], now)
     expect(result).toHaveLength(1)
@@ -126,5 +127,40 @@ describe('Journal widget memories', () => {
     expect(selection.pageThumbnails).toBeUndefined()
     expect(selection.snapshot.pages).toBeUndefined()
     expect(JSON.stringify(selection)).not.toMatch(/PRIVATE_MEMORY|https:\/\//)
+  })
+
+  it('excludes connected phone gallery references even if a caller incorrectly marks one synced', () => {
+    const linked = phoneGalleryJournalPhotos([{
+      id: 'device-gallery:private', nativeId: 'private',
+      source: 'bubble-gallery:private?scope=member%3Afamily',
+      capturedAt: '2020-01-01T12:00:00.000Z', modifiedAt: '2026-09-11T09:00:00.000Z',
+      width: 3000, height: 2000, filename: 'PRIVATE_DEVICE_FILENAME.jpg',
+    }])[0]
+    linked.caption = 'PRIVATE_DEVICE_MEMORY'
+    const incorrectlySynced = { ...linked, id: 'incorrectly-synced-gallery', syncStatus: 'synced' as const }
+    const result = selectJournalWidgetPhotos([linked, incorrectlySynced, photo('shared')], [], now)
+    expect(result.map(({ photo: item }) => item.id)).toEqual(['shared'])
+    const selection = selectBubbleWidgetTimeline({
+      now, theme: 'plum', privacy: 'full', events: [], authorizedCapsules: [],
+      authorizedJournalPhotos: [linked, incorrectlySynced, photo('shared')],
+    })
+    expect(selection.snapshot.pages).toHaveLength(1)
+    expect(selection.snapshot.pages![0].route).toContain('photo=shared')
+    expect(selection.thumbnail).toBe('https://example.test/shared-thumb.jpg')
+    expect(JSON.stringify(selection)).not.toMatch(/bubble-gallery|device-gallery|PRIVATE_DEVICE|incorrectly-synced-gallery/)
+  })
+
+  it('publishes no photo bytes or gallery page when the phone gallery is the only available source', () => {
+    const linked = photo('device-gallery:only', {
+      origin: 'device-gallery', syncStatus: 'local', caption: 'PRIVATE_DEVICE_ONLY',
+      image: 'bubble-gallery:only?scope=member%3Afamily', thumbnail: 'bubble-gallery:only?scope=member%3Afamily',
+    })
+    const selection = selectBubbleWidgetTimeline({
+      now, theme: 'forest', privacy: 'full', events: [], authorizedCapsules: [], authorizedJournalPhotos: [linked],
+    })
+    expect(selectJournalWidgetPhotos([linked], [], now)).toEqual([])
+    expect(selection.thumbnail).toBeUndefined()
+    expect(selection.pageThumbnails).toBeUndefined()
+    expect(JSON.stringify(selection)).not.toMatch(/bubble-gallery|device-gallery|PRIVATE_DEVICE_ONLY/)
   })
 })

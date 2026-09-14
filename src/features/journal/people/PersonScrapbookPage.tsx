@@ -1,4 +1,4 @@
-import { useId, useState, type CSSProperties } from 'react'
+import { useId, useState, type CSSProperties, type ReactNode } from 'react'
 import { TimelinePhotoImage } from './TimelinePhotoImage'
 import { formatTimelinePhotoDate } from './peopleTimelineHelpers'
 import {
@@ -20,6 +20,7 @@ export type PersonScrapbookPageProps = {
   dateOverrides?: Record<string, TimelineDateOverride>
   onBack?: () => void
   onManage?: () => void
+  renderPhotoActions?: (photo: PeopleTimelinePhoto) => ReactNode
 }
 
 type ScrapbookCardStyle = CSSProperties & {
@@ -48,7 +49,7 @@ const CARD_DOODLES = ['✦', '♡', '≈', '❋', '⌁'] as const
 
 /** Chooses authored caption text before falling back to an accessible label. */
 function photoDescription(photo: PeopleTimelinePhoto, personName: string) {
-  return photo.caption.trim() || `A family photo with ${personName}`
+  return photo.caption.trim() || `A photo in ${personName}’s scrapbook`
 }
 
 /** Owns one person's keyed local profile state and scrapbook presentation. */
@@ -59,6 +60,7 @@ function PersonScrapbookContent({
   dateOverrides,
   onBack,
   onManage,
+  renderPhotoActions,
 }: PersonScrapbookPageProps) {
   const titleId = useId()
   const collageTitleId = useId()
@@ -174,6 +176,7 @@ function PersonScrapbookContent({
                       </span>
                     ) : null}
                   </figcaption>
+                  {renderPhotoActions?.(photo)}
                   <span className="person-scrapbook__photo-doodle" aria-hidden="true">
                     {CARD_DOODLES[index % CARD_DOODLES.length]}
                   </span>

@@ -2,6 +2,7 @@ import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { AuthProvider, type AuthContextValue } from '../features/auth'
 import {
   FamilyMomentSyncProvider,
   SharedMomentsProvider,
@@ -10,6 +11,19 @@ import {
   type MomentObjectUrlManager,
 } from '../features/memories/shared'
 import { CaptureRoute, MemoriesRoute } from './MemoryExperienceRoutes'
+
+const captureAuth: AuthContextValue = {
+  status: 'signed-in',
+  user: {
+    id: 'capture-integration-user',
+    displayName: 'You',
+    email: null,
+    phone: null,
+    imageUrl: null,
+  },
+  getToken: async () => null,
+  signOut: async () => undefined,
+}
 
 vi.mock('../features/capture/equirectangular', async (importOriginal) => {
   const actual = await importOriginal<
@@ -53,20 +67,22 @@ describe('capture to Moments integration', () => {
     }
 
     render(
-      <SharedMomentsProvider
-        store={store}
-        objectUrls={objectUrls}
-        notifierFactory={createSilentNotifier}
-      >
-        <FamilyMomentSyncProvider>
-          <MemoryRouter initialEntries={['/capture?mode=manual']}>
-            <Routes>
-              <Route path="/capture" element={<CaptureRoute />} />
-              <Route path="/" element={<MemoriesRoute />} />
-            </Routes>
-          </MemoryRouter>
-        </FamilyMomentSyncProvider>
-      </SharedMomentsProvider>,
+      <AuthProvider value={captureAuth}>
+        <SharedMomentsProvider
+          store={store}
+          objectUrls={objectUrls}
+          notifierFactory={createSilentNotifier}
+        >
+          <FamilyMomentSyncProvider>
+            <MemoryRouter initialEntries={['/capture?workflow=legacy&mode=manual']}>
+              <Routes>
+                <Route path="/capture" element={<CaptureRoute />} />
+                <Route path="/" element={<MemoriesRoute />} />
+              </Routes>
+            </MemoryRouter>
+          </FamilyMomentSyncProvider>
+        </SharedMomentsProvider>
+      </AuthProvider>,
     )
 
     await user.click(

@@ -63,6 +63,7 @@ function MomentHarness() {
             width: 6000,
             height: 3000,
             source: 'manual',
+            captureSessionId: 'retained-source-session',
             uploaderDisplayName: 'Omar',
           })
         }
@@ -142,6 +143,7 @@ describe('SharedMomentsProvider', () => {
       uploaderDisplayName: 'Omar',
       width: 6000,
       height: 3000,
+      captureSessionId: 'retained-source-session',
     })
     expect(objectUrls.revoke).toHaveBeenCalledWith('blob:preview-1')
 

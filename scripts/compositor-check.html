@@ -1,0 +1,16 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Bubble local compositor check</title>
+<style>body{font:16px system-ui;background:#141b2e;color:#f9f0db;margin:24px auto;max-width:1000px;padding:0 20px}label,button,select{display:block;margin:16px 0}button,select{font:inherit;padding:12px}img{width:100%;height:auto}pre{white-space:pre-wrap}a{color:#ffd57f}</style></head>
+<body>
+<h1>Local compositor check</h1>
+<p>Developer-only comparison. Select a retained capture folder containing metadata.json and its JPEGs. Files stay in this browser. Nothing is saved to Moments or uploaded.</p>
+<label>Capture folder <input id="files" type="file" webkitdirectory multiple></label>
+<label>Output width <select id="width"><option>2048</option><option>4096</option><option>1024</option></select></label>
+<button id="run" disabled>Assemble with the shared iOS compositor</button>
+<button id="cancel" disabled>Stop assembly</button>
+<pre id="status" role="status">Choose a capture folder.</pre>
+<a id="download" hidden download="shared-compositor.jpg">Download comparison JPEG</a>
+<img id="output" hidden alt="Actual output from the shared phone compositor">
+<script type="module" src="./compositor-check.mjs"></script>
+</body></html>

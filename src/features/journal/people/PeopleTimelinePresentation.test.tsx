@@ -2,7 +2,7 @@ import { createRef } from 'react'
 import { fireEvent, render, screen, within } from '@testing-library/react'
 import { MemoryRouter, useLocation } from 'react-router-dom'
 import { describe, expect, it, vi } from 'vitest'
-import { PeopleTimelineDateEditor, PeopleTimelinePhotoTags } from './PeopleTimelinePhotoDetails'
+import { PeopleTimelineDateEditor, PeopleTimelinePhotoTags, PhotoMatchCorrection } from './PeopleTimelinePhotoDetails'
 import { PeopleTimelineScanStatus } from './PeopleTimelineScanStatus'
 import { PeopleTimelineViewer } from './PeopleTimelineViewer'
 import type { PeopleTimelinePhoto } from './types'
@@ -132,12 +132,29 @@ describe('controlled timeline photo presentation', () => {
       </MemoryRouter>,
     )
     expect(container.querySelector('.people-timeline__face-focus')).toHaveStyle({ left: '10%', top: '20%', width: '30%', height: '40%' })
+    expect(screen.getByText('Optional review')).toBeInTheDocument()
+    expect(screen.getByText('Only possible matches appear here. Skip any you’re unsure about.')).toBeInTheDocument()
     for (const label of ['Yes', 'No', 'Not sure']) fireEvent.click(screen.getByRole('button', { name: label }))
     expect(props.onReview.mock.calls).toEqual([[match, 'yes'], [match, 'no'], [match, 'unsure']])
   })
 })
 
 describe('controlled photo details', () => {
+  it('requires an explicit person-label confirmation and offers a non-destructive cancel', () => {
+    const onCorrect = vi.fn()
+    render(<PhotoMatchCorrection personName="Maya" photoDescription="Garden picnic" onCorrect={onCorrect} />)
+    fireEvent.click(screen.getByRole('button', { name: 'Correct automatic match for Maya in Garden picnic' }))
+    expect(onCorrect).not.toHaveBeenCalled()
+    expect(screen.getByRole('group', { name: 'Remove automatic match for Maya?' }))
+      .toHaveAccessibleDescription('Only this person label will be removed. Your photo stays in All photos and its original location.')
+    fireEvent.click(screen.getByRole('button', { name: 'Keep match' }))
+    expect(onCorrect).not.toHaveBeenCalled()
+    expect(screen.queryByRole('group')).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Correct automatic match for Maya in Garden picnic' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Not Maya' }))
+    expect(onCorrect).toHaveBeenCalledOnce()
+  })
+
   it('retains date-input constraints and delegates precision, edits, save, cancel and restore', () => {
     const props = {
       draft: { precision: 'year' as const, value: '2001' }, error: 'Enter a four-digit year.', hasOverride: true,
@@ -195,7 +212,7 @@ describe('controlled photo details', () => {
 
   it('keeps the no-people guidance inside the expanded tag panel', () => {
     render(<PeopleTimelinePhotoTags photoKey={photo.key} people={[]} assignments={[]} open onToggle={vi.fn()} onTagChange={vi.fn()} />)
-    expect(screen.getByText('Add a person with a face photo above, then review or correct matches here.')).toBeInTheDocument()
+    expect(screen.getByText('Add a face photo for a person to match them automatically. You can also tag this photo yourself.')).toBeInTheDocument()
   })
 })
 

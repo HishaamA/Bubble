@@ -52,7 +52,7 @@ function capsule(id: string): FamilyCapsule {
     id, title: id, kind: 'special', createdAt: '2026-01-01T00:00:00Z',
     closesAt: '2026-01-02T00:00:00Z', opensAt: '2026-01-02T00:00:00Z',
     createdByName: 'Maya', familySynced: true,
-    photos: [{ ...photo(id), capsuleId: id }],
+    photos: [{ ...photo(id), syncStatus: 'synced', capsuleId: id }],
   }
 }
 function useArchiveSubject(namespace: string) {

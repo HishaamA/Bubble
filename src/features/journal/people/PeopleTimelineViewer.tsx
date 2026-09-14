@@ -145,9 +145,9 @@ export function PeopleTimelineViewer({
       {review?.person ? (
         <section className="people-timeline__face-review" aria-live="polite">
           <div>
-            <span>Quick review</span>
+            <span>Optional review</span>
             <strong>Is the outlined face {review.person.name}?</strong>
-            <small>Your answer improves future matches only on this device.</small>
+            <small>Only possible matches appear here. Skip any you’re unsure about.</small>
           </div>
           <div className="people-timeline__face-review-actions">
             <button type="button" onClick={() => onReview(review.match, 'yes')}>Yes</button>

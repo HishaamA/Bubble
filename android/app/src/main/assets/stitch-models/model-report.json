@@ -1,0 +1,108 @@
+{
+  "model": "DISK-depth + LightGlue-DISK",
+  "provider": "CPUExecutionProvider",
+  "opset": 17,
+  "torch": "2.8.0+cu128",
+  "onnxruntime": "1.23.2",
+  "threads": 2,
+  "maxKeypoints": 1024,
+  "workingLongSide": 512,
+  "precision": "float32",
+  "adaptiveDepth": true,
+  "depthConfidence": 0.95,
+  "adaptivePruning": false,
+  "extractor": {
+    "bytes": 4394686,
+    "sha256": "8b6415ff7b1794f7acd7d88924bdd9a523d0228f254eacc0bc69280539f8f72b"
+  },
+  "matcher": {
+    "bytes": 47835077,
+    "sha256": "6b9b0d156660e785793d30fc77dcbc481b99e8edebefda07068cb088414b55aa"
+  },
+  "featureChecks": [
+    {
+      "width": 416,
+      "height": 512,
+      "keypoints": 1024,
+      "cpuSeconds": 1.4979149000064353,
+      "descriptorMaxError": 3.4008175134658813e-05,
+      "originalKeypointAgreement": 0.9990234375,
+      "onnxKeypointAgreement": 0.9990234375
+    },
+    {
+      "width": 416,
+      "height": 512,
+      "keypoints": 1024,
+      "cpuSeconds": 1.4142616000026464,
+      "descriptorMaxError": 2.0563602447509766e-05,
+      "originalKeypointAgreement": 1.0,
+      "onnxKeypointAgreement": 1.0
+    },
+    {
+      "width": 512,
+      "height": 416,
+      "keypoints": 1024,
+      "cpuSeconds": 1.4805391999980202,
+      "descriptorMaxError": 1.4360062777996063e-05,
+      "originalKeypointAgreement": 1.0,
+      "onnxKeypointAgreement": 1.0
+    }
+  ],
+  "pairChecks": [
+    {
+      "i": 0,
+      "j": 1,
+      "matches": 834,
+      "cpuSeconds": 0.3377053000003798,
+      "confidenceMaxError": 3.9637088775634766e-06,
+      "matchIndicesEqualPyTorch": true,
+      "layers": 2
+    },
+    {
+      "i": 0,
+      "j": 2,
+      "matches": 38,
+      "cpuSeconds": 0.72126799999387,
+      "confidenceMaxError": 1.239776611328125e-05,
+      "matchIndicesEqualPyTorch": true,
+      "layers": 5
+    }
+  ],
+  "configurationBenchmarks": [
+    {
+      "longSide": 384,
+      "maxKeypoints": 512,
+      "twoExtractionsCpuSeconds": 1.599891199999547,
+      "matchingCpuSeconds": 0.14524430000165012,
+      "features": [
+        512,
+        512
+      ],
+      "matches": 425
+    },
+    {
+      "longSide": 512,
+      "maxKeypoints": 768,
+      "twoExtractionsCpuSeconds": 3.416238899997552,
+      "matchingCpuSeconds": 0.20602419999340782,
+      "features": [
+        768,
+        768
+      ],
+      "matches": 628
+    },
+    {
+      "longSide": 640,
+      "maxKeypoints": 1024,
+      "twoExtractionsCpuSeconds": 4.451591500001086,
+      "matchingCpuSeconds": 0.28761150000354974,
+      "features": [
+        1024,
+        1024
+      ],
+      "matches": 818
+    }
+  ],
+  "blankImageKeypoints": 8,
+  "limitations": "Desktop CPU parity/timing on public synthetic demo; device speed and handheld quality require device validation."
+}

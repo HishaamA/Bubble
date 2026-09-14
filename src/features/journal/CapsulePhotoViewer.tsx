@@ -259,7 +259,7 @@ export function CapsulePhotoViewer({
               {photo.capsuleTitle}
             </span>
           </div>
-          {reactionStorageScope ? (
+          {reactionStorageScope && photo.origin !== 'device-gallery' ? (
             <PhotoReactions
               photoId={photo.id}
               storageScope={reactionStorageScope}

@@ -25,7 +25,7 @@ import org.json.JSONException;
  * Capacitor bridge for the native, guided source-frame panorama capture flow.
  *
  * <p>This plugin deliberately returns synchronized source frames, camera pose,
- * and intrinsics. The shared web layer assembles those frames into a panorama.</p>
+ * and intrinsics. Android assembles them offline through PanoramaStitch.</p>
  */
 @CapacitorPlugin(
     name = "PanoramaCapture",
@@ -40,6 +40,16 @@ public final class PanoramaCapturePlugin extends Plugin {
     /** Requests permission if needed, then opens one native guided capture session. */
     @PluginMethod
     public void startCapture(PluginCall call) {
+        try {
+            PanoramaCaptureStore.owner(call.getString("ownerKey"));
+        } catch (IllegalArgumentException error) {
+            call.reject(error.getMessage(), "INVALID_PROFILE");
+            return;
+        }
+        if (PanoramaStitchService.hasActiveJob()) {
+            call.reject("Finish or pause the current stitch before opening the camera.", "STITCH_IN_PROGRESS");
+            return;
+        }
         if (captureInProgress) {
             call.reject("A panorama capture is already in progress.", "CAPTURE_IN_PROGRESS");
             return;
@@ -65,7 +75,7 @@ public final class PanoramaCapturePlugin extends Plugin {
         launchCapture(call);
     }
 
-    /** Deletes one UUID-named capture session from the app's private cache. */
+    /** Deletes originals only for an explicit owner-scoped user request. */
     @PluginMethod
     public void discardCapture(PluginCall call) {
         if (captureInProgress) {
@@ -80,29 +90,9 @@ public final class PanoramaCapturePlugin extends Plugin {
         }
 
         try {
-            Uri uri = Uri.parse(directoryUrl);
-            if (uri.getScheme() != null && !"file".equalsIgnoreCase(uri.getScheme())) {
-                call.reject("Only a file:// panorama session URL can be discarded.", "INVALID_DIRECTORY");
-                return;
-            }
-            String candidatePath = uri.getScheme() == null ? directoryUrl : uri.getPath();
-            if (candidatePath == null) {
-                call.reject("The panorama session URL has no filesystem path.", "INVALID_DIRECTORY");
-                return;
-            }
-
-            File root = new File(getContext().getCacheDir(), "panorama_captures").getCanonicalFile();
-            File candidate = new File(candidatePath).getCanonicalFile();
-            // Sessions are created as direct UUID-named children. Requiring that
-            // exact shape is stricter than a prefix check and rejects traversal.
-            if (candidate.equals(root) || !root.equals(candidate.getParentFile())) {
-                call.reject("The directory is not an app-owned panorama session.", "INVALID_DIRECTORY");
-                return;
-            }
-            try {
-                UUID.fromString(candidate.getName());
-            } catch (IllegalArgumentException exception) {
-                call.reject("The panorama session directory name is invalid.", "INVALID_DIRECTORY");
+            File candidate = new PanoramaCaptureStore(getContext()).resolve(directoryUrl, call.getString("ownerKey"));
+            if (PanoramaStitchService.isSessionActive(candidate)) {
+                call.reject("Pause assembly before removing its original photos.", "STITCH_IN_PROGRESS");
                 return;
             }
 
@@ -115,7 +105,7 @@ public final class PanoramaCapturePlugin extends Plugin {
             JSObject result = new JSObject();
             result.put("discarded", existed);
             call.resolve(result);
-        } catch (IOException exception) {
+        } catch (IOException | JSONException | IllegalArgumentException exception) {
             call.reject("The panorama session path could not be validated.", "INVALID_DIRECTORY", exception);
         }
     }

@@ -2,6 +2,11 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools">
 
+    <queries>
+        <!-- Capacitor checks for a camera activity before launching photo input. -->
+        <intent><action android:name="android.media.action.IMAGE_CAPTURE" /></intent>
+    </queries>
+
     <application
         android:allowBackup="false"
         android:fullBackupContent="false"
@@ -23,11 +28,6 @@
             android:launchMode="singleTask"
             android:windowSoftInputMode="adjustResize"
             android:exported="true">
-
-            <intent-filter>
-                <action android:name="android.intent.action.MAIN" />
-                <category android:name="android.intent.category.LAUNCHER" />
-            </intent-filter>
 
             <!-- Return Google OAuth to the existing Bubble activity so
                  Capacitor's App plugin can emit the appUrlOpen event. -->
@@ -56,6 +56,32 @@
             </intent-filter>
 
         </activity>
+
+        <!-- Keep MainActivity itself enabled for authentication and widget links. -->
+        <activity-alias android:name=".PlumLauncher" android:targetActivity=".MainActivity"
+            android:enabled="true" android:exported="true" android:label="@string/app_name"
+            android:icon="@mipmap/ic_launcher_plum" android:roundIcon="@mipmap/ic_launcher_plum">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+        <activity-alias android:name=".ForestLauncher" android:targetActivity=".MainActivity"
+            android:enabled="false" android:exported="true" android:label="@string/app_name"
+            android:icon="@mipmap/ic_launcher_forest" android:roundIcon="@mipmap/ic_launcher_forest">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+        <activity-alias android:name=".MidnightLauncher" android:targetActivity=".MainActivity"
+            android:enabled="false" android:exported="true" android:label="@string/app_name"
+            android:icon="@mipmap/ic_launcher_midnight" android:roundIcon="@mipmap/ic_launcher_midnight">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
 
         <activity
             android:name=".panorama.PanoramaCaptureActivity"
@@ -97,6 +123,18 @@
             android:exported="false"
             android:permission="android.permission.BIND_REMOTEVIEWS" />
 
+        <service
+            android:name=".panorama.PanoramaStitchService"
+            android:exported="false"
+            android:foregroundServiceType="dataSync|mediaProcessing" />
+
+        <service
+            android:name=".gallery.BackgroundGalleryScanService"
+            android:process=":galleryscan"
+            android:exported="false"
+            android:stopWithTask="false"
+            android:foregroundServiceType="dataSync|mediaProcessing" />
+
         <provider
             android:name="androidx.core.content.FileProvider"
             android:authorities="${applicationId}.fileprovider"
@@ -109,6 +147,15 @@
     </application>
 
     <uses-permission android:name="android.permission.CAMERA" />
+    <!-- Read-only and requested only after Journal's gallery opt-in. -->
+    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="32" />
+    <uses-permission android:name="android.permission.READ_MEDIA_IMAGES" />
+    <uses-permission android:name="android.permission.READ_MEDIA_VISUAL_USER_SELECTED" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PROCESSING" />
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
     <!-- Capacitor's WebChromeClient grants WebView audio capture only when
          both permissions requested by the WebView are declared. -->

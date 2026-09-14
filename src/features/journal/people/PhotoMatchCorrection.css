@@ -1,0 +1,57 @@
+.photo-match-correction {
+  min-width: 0;
+  color: inherit;
+  font-family: var(--font-body, system-ui, sans-serif);
+  font-size: 0.78rem;
+  line-height: 1.45;
+}
+
+.photo-match-correction button {
+  min-height: 2.75rem;
+  padding: 0.5rem 0.75rem;
+  border: 1px solid currentColor;
+  border-radius: 0.65rem;
+  color: inherit;
+  background: transparent;
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.photo-match-correction__toggle {
+  opacity: 0.85;
+}
+
+.photo-match-correction button:is(:hover, [aria-expanded='true']) {
+  background: color-mix(in srgb, currentColor 8%, transparent);
+}
+
+.photo-match-correction button:active {
+  background: color-mix(in srgb, currentColor 14%, transparent);
+}
+
+.photo-match-correction button:focus-visible {
+  outline: 2px solid currentColor;
+  outline-offset: 3px;
+}
+
+.photo-match-correction__confirm {
+  margin-top: 0.5rem;
+  padding: 0.7rem;
+  border: 1px solid color-mix(in srgb, currentColor 30%, transparent);
+  border-radius: 0.65rem;
+}
+
+.photo-match-correction__confirm p {
+  margin: 0 0 0.6rem;
+}
+
+.photo-match-correction__confirm > div {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.photo-match-correction ~ .person-scrapbook__photo-doodle {
+  display: none;
+}

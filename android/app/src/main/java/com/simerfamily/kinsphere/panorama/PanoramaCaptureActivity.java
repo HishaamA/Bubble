@@ -33,6 +33,7 @@ import androidx.core.view.WindowCompat;
 import androidx.core.view.WindowInsetsCompat;
 import androidx.core.view.WindowInsetsControllerCompat;
 import com.google.ar.core.ArCoreApk;
+import com.google.ar.core.Anchor;
 import com.google.ar.core.Camera;
 import com.google.ar.core.CameraConfig;
 import com.google.ar.core.CameraConfigFilter;
@@ -44,6 +45,7 @@ import com.google.ar.core.TrackingFailureReason;
 import com.google.ar.core.TrackingState;
 import com.google.ar.core.exceptions.CameraNotAvailableException;
 import com.google.ar.core.exceptions.NotYetAvailableException;
+import com.google.ar.core.exceptions.NotTrackingException;
 import com.google.ar.core.exceptions.UnavailableApkTooOldException;
 import com.google.ar.core.exceptions.UnavailableArcoreNotInstalledException;
 import com.google.ar.core.exceptions.UnavailableDeviceNotCompatibleException;
@@ -56,6 +58,7 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
+import java.util.ArrayDeque;
 import java.util.Date;
 import java.util.List;
 import java.util.Locale;
@@ -73,8 +76,9 @@ import org.json.JSONObject;
  *
  * <p>ARCore owns the preview and supplies a six-degree-of-freedom pose, image
  * intrinsics, and YUV camera image from one synchronized {@link Frame}. That is
- * the same contract used by the iOS ARKit implementation; no independent
- * rotation sensor or CameraX shutter timing is mixed into the result.</p>
+ * the same camera contract used by the iOS ARKit implementation. A calibrated,
+ * timestamp-matched rotation sensor bridges short low-texture interruptions;
+ * those frames explicitly declare estimated orientation and no translation.</p>
  */
 public final class PanoramaCaptureActivity extends AppCompatActivity implements ArCameraRenderer.Listener {
 
@@ -86,6 +90,9 @@ public final class PanoramaCaptureActivity extends AppCompatActivity implements 
     private static final String TAG = "PanoramaCapture";
     private static final int CAMERA_PERMISSION_REQUEST = 360;
     private static final long CAPTURE_COOLDOWN_MILLIS = 450L;
+    private static final long IMAGE_RETRY_INTERVAL_MILLIS = 120L;
+    private static final long BEST_FRAME_SETTLE_NANOS = 220_000_000L;
+    private static final long SAVED_ACKNOWLEDGEMENT_MILLIS = 450L;
     private static final long GUIDANCE_INTERVAL_NANOS = 50_000_000L;
     private static final float[] IDENTITY_ROTATION = {
         1.0f, 0.0f, 0.0f,
@@ -94,11 +101,19 @@ public final class PanoramaCaptureActivity extends AppCompatActivity implements 
     };
 
     private final ArrayList<JSONObject> frames = new ArrayList<>();
+    private final ArrayDeque<JSONObject> captureDiagnostics = new ArrayDeque<>();
+    private long lastDiagnosticAtMillis;
     private CaptureOptions options;
     private String sessionId;
     private File capturesRoot;
     private File sessionDirectory;
-    private List<PanoramaTarget> targets;
+    private String captureOwnerKey = "legacy-local";
+    private long captureCreatedAt;
+    private volatile List<PanoramaTarget> targets;
+    private int initialTargetCount;
+    private volatile boolean coverageCheckInProgress;
+    private volatile boolean coverageComplete;
+    private double observedCoverage;
     private GLSurfaceView surfaceView;
     private ArCameraRenderer renderer;
     private PanoramaGuideView guideView;
@@ -107,18 +122,52 @@ public final class PanoramaCaptureActivity extends AppCompatActivity implements 
     private ProgressBar progressBar;
     private ExecutorService imageExecutor;
     private Session arSession;
+    // Owned by GL while rendering, then detached only after GLSurfaceView.onPause.
+    private Anchor captureAnchor;
+    private final float[] anchorToWorld = new float[16];
+    private boolean anchorStoppedReported;
+    private boolean unsupportedColorReported;
+    private PanoramaRotationSensor rotationSensor;
+    private final PanoramaRotationBridge rotationBridge = new PanoramaRotationBridge();
+    private PanoramaPose anchorToCapture = PanoramaPoseMapping.identity();
+    private boolean cameraTimestampIsRealtime;
+    private long sensorGeneration = -1;
+    private long lastBridgeCalibrationTimestamp;
+    private long currentAndroidCameraTimestamp;
+    private long currentCalibrationAgeNanos;
+    private boolean currentPoseEstimated;
+    private boolean trackingInterrupted;
+    private long visualRecoveryStartedAt;
+    private String inertialMessage;
+    private boolean usedInertialFrames;
+    private volatile boolean referenceNeedsVerification;
     private PanoramaPose currentPose;
-    private PanoramaPose previousPose;
-    private long previousFrameTimestampNanos;
-    private long alignedSinceNanos = -1L;
-    private PanoramaPose holdStartPose;
+    private final PanoramaCaptureGate captureGate = new PanoramaCaptureGate();
+    private final PanoramaCameraClock cameraImageClock = new PanoramaCameraClock();
+    // GL-thread only: retain one detached synchronized frame, never an open ARCore Image.
+    private final BestFrameSelector<CaptureSnapshot> bestFrameSelector = new BestFrameSelector<>(500_000_000L);
+    private int bestFrameTargetIndex = -1;
+    private long bestFrameWindowStartNanos;
+    private float bestFramePreviousProgress;
+    private volatile boolean gateResetRequested;
+    private boolean waitingForCameraImage;
+    private long lastImageAttemptAtMillis;
+    private String lastImageResult = "not_requested";
+    private int imageAttempts;
+    private int imagesAcquired;
+    private int imagesAccepted;
+    private long lastCpuImageTimestamp;
+    private long lastImageArTimestamp;
+    private long lastImageAndroidTimestamp;
+    private long lastFreshCameraFrameAtMillis;
     private long lastCaptureCompletedAtMillis;
     private long lastGuidancePublishedAtNanos;
+    private long savedAcknowledgementUntilMillis;
+    private long retryMessageUntilMillis;
+    private String retryMessage;
     private int alignedTargetIndex = -1;
     private int captureSurfaceRotation = Surface.ROTATION_0;
     private int imageRotationDegrees = 90;
-    private float smoothedAngularSpeed = Float.POSITIVE_INFINITY;
-    private float smoothedLinearSpeed = Float.POSITIVE_INFINITY;
     private boolean installRequested;
     private boolean sessionResumed;
     private volatile boolean cameraReady;
@@ -147,10 +196,20 @@ public final class PanoramaCaptureActivity extends AppCompatActivity implements 
     /** Creates the private capture session, deterministic targets, worker, and camera UI. */
     private void initializeCapture() {
         options = CaptureOptions.fromJson(getIntent().getStringExtra(EXTRA_OPTIONS_JSON));
+        try {
+            JSONObject captureOptions = new JSONObject(getIntent().getStringExtra(EXTRA_OPTIONS_JSON) == null
+                ? "{}" : getIntent().getStringExtra(EXTRA_OPTIONS_JSON));
+            captureOwnerKey = PanoramaCaptureStore.owner(captureOptions.optString("ownerKey", "legacy-local"));
+        } catch (JSONException | IllegalArgumentException error) {
+            failCapture("INVALID_PROFILE", "The local capture profile is unavailable.");
+            return;
+        }
+        captureCreatedAt = System.currentTimeMillis();
         targets = createTargets(options.mode);
+        initialTargetCount = targets.size();
         remainingTargetCount = targets.size();
         sessionId = UUID.randomUUID().toString();
-        capturesRoot = new File(getCacheDir(), "panorama_captures");
+        capturesRoot = new File(getFilesDir(), "panorama_captures");
         sessionDirectory = new File(capturesRoot, sessionId);
         if (
             (!capturesRoot.exists() && !capturesRoot.mkdirs()) ||
@@ -165,6 +224,7 @@ public final class PanoramaCaptureActivity extends AppCompatActivity implements 
         imageExecutor = Executors.newSingleThreadExecutor(
             task -> new Thread(task, "bubble-panorama-image")
         );
+        rotationSensor = new PanoramaRotationSensor(this);
         captureSurfaceRotation = getWindowManager().getDefaultDisplay().getRotation();
         buildCaptureInterface();
         guideView.setTargets(targets);
@@ -390,6 +450,7 @@ public final class PanoramaCaptureActivity extends AppCompatActivity implements 
         renderer.setDisplayRotation(captureSurfaceRotation);
         renderer.setSession(arSession);
         try {
+            if (rotationSensor != null) rotationSensor.start();
             arSession.resume();
             sessionResumed = true;
             surfaceView.onResume();
@@ -410,6 +471,13 @@ public final class PanoramaCaptureActivity extends AppCompatActivity implements 
         }
         cameraReady = false;
         resetSteadiness();
+        cameraImageClock.reset();
+        if (rotationSensor != null) rotationSensor.stop();
+        rotationBridge.reset();
+        lastBridgeCalibrationTimestamp = 0;
+        currentPoseEstimated = false;
+        trackingInterrupted = referenceNeedsVerification;
+        visualRecoveryStartedAt = 0;
         if (arSession != null && sessionResumed) {
             arSession.pause();
             sessionResumed = false;
@@ -486,6 +554,9 @@ public final class PanoramaCaptureActivity extends AppCompatActivity implements 
             CameraCharacteristics characteristics = manager.getCameraCharacteristics(
                 session.getCameraConfig().getCameraId()
             );
+            Integer timestampSource = characteristics.get(CameraCharacteristics.SENSOR_INFO_TIMESTAMP_SOURCE);
+            cameraTimestampIsRealtime = timestampSource != null &&
+                timestampSource == CameraCharacteristics.SENSOR_INFO_TIMESTAMP_SOURCE_REALTIME;
             Integer sensorOrientation = characteristics.get(CameraCharacteristics.SENSOR_ORIENTATION);
             if (sensorOrientation == null) {
                 return;
@@ -501,21 +572,223 @@ public final class PanoramaCaptureActivity extends AppCompatActivity implements 
     /** Processes synchronized preview, pose, tracking, and capture guidance on the GL thread. */
     @Override
     public void onFrame(Frame frame, Camera camera, float[] cameraToWorld, float[] projection) {
-        if (finishingCapture) {
+        if (finishingCapture || unsupportedColorReported) {
+            return;
+        }
+        if (gateResetRequested) {
+            gateResetRequested = false;
+            resetSteadiness();
+        }
+        PanoramaSensorHistory.Sample sensorSample = sensorForFrame(frame);
+        if (camera.getTrackingState() == TrackingState.STOPPED) {
+            pauseForCaptureAnchor(projection, "Tracking reference lost — your photos are kept");
+            if (!anchorStoppedReported) {
+                anchorStoppedReported = true;
+                runOnUiThread(() -> {
+                    if (!finishingCapture) failCapture("CAPTURE_REFERENCE_LOST",
+                        "The scan's tracking reference was lost. Your photos are kept; start a new scan.");
+                });
+            }
             return;
         }
         if (camera.getTrackingState() != TrackingState.TRACKING) {
+            trackingInterrupted = true;
+            visualRecoveryStartedAt = 0;
+            TrackingFailureReason reason = camera.getTrackingFailureReason();
+            boolean lowTexture = reason == TrackingFailureReason.INSUFFICIENT_FEATURES ||
+                reason == TrackingFailureReason.NONE;
+            if (publishInertialGuidance(frame, camera, projection, sensorSample, lowTexture,
+                reason == TrackingFailureReason.INSUFFICIENT_LIGHT
+                    ? "More light is needed — your photos are saved"
+                    : "Slow down and keep the lens in one spot")) return;
             cameraReady = false;
-            resetSteadiness();
+            captureGate.pauseTracking();
+            resetBestFrameWindow();
+            waitingForCameraImage = false;
+            recordCaptureDiagnostic("trackingPaused", null, -1, Float.NaN,
+                camera.getTrackingFailureReason().name());
             publishTrackingState(camera, projection);
             return;
         }
 
+        if (captureAnchor == null) {
+            try {
+                // Initial identity rotation keeps the existing gravity/yaw target layout.
+                captureAnchor = arSession.createAnchor(camera.getPose().extractTranslation());
+            } catch (NotTrackingException notReady) {
+                pauseForCaptureAnchor(projection, "Starting the scan — aim at an edge or detail");
+                return;
+            }
+        }
+        TrackingState anchorState = captureAnchor.getTrackingState();
+        if (anchorState != TrackingState.TRACKING) {
+            trackingInterrupted = true;
+            visualRecoveryStartedAt = 0;
+            PanoramaPose estimate = sensorSample == null ? null :
+                rotationBridge.estimate(sensorSample.pose, currentAndroidCameraTimestamp);
+            // AR's camera can recover before an old anchor. Replace only that
+            // anchor, using a recent calibrated estimate to preserve our original
+            // capture coordinates. Never reset the targets or accepted photos.
+            if (estimate != null && sensorSample.motionQuiet &&
+                reanchorInCaptureCoordinates(cameraToWorld, estimate)) {
+                anchorState = captureAnchor.getTrackingState();
+            }
+            if (anchorState != TrackingState.TRACKING) {
+                if (publishInertialGuidance(frame, camera, projection, sensorSample, true, "")) return;
+                pauseForCaptureAnchor(projection,
+                    "Face a detailed area to recover tracking — your photos are saved");
+                return;
+            }
+        }
+        captureAnchor.getPose().toMatrix(anchorToWorld, 0);
+        PanoramaPose pose = PanoramaPoseMapping.compose(anchorToCapture,
+            PanoramaPose.relativeToAnchor(cameraToWorld, anchorToWorld));
+        if (trackingInterrupted && (referenceNeedsVerification || rotationBridge.referenceCameraPose() != null)) {
+            PanoramaPose comparison = sensorSample == null ? null :
+                rotationBridge.guidance(sensorSample.pose, currentAndroidCameraTimestamp);
+            if (comparison == null) {
+                // A sensor restart or expired reference cannot silently establish
+                // new coordinates after gyro-assisted photos were accepted.
+                if (referenceNeedsVerification) {
+                    cameraReady = false;
+                    runOnUiThread(() -> {
+                        if (!finishingCapture) failCapture("CAPTURE_REFERENCE_LOST",
+                            "Motion tracking was interrupted for too long. Your original photos are kept; start a fresh scan.");
+                    });
+                    return;
+                }
+            } else {
+                PanoramaPose estimate = rotationBridge.estimate(sensorSample.pose, currentAndroidCameraTimestamp);
+                if (visualRecoveryStartedAt == 0) visualRecoveryStartedAt = frame.getTimestamp();
+                // Avoid switching sources on every flicker of visual tracking.
+                if (frame.getTimestamp() - visualRecoveryStartedAt < 750_000_000L) {
+                    publishInertialGuidance(frame, camera, projection, sensorSample, true, "");
+                    return;
+                }
+                // A large disagreement is not a valid continuation of this sphere.
+                // Do not silently snap previously saved directions to a new world.
+                if (pose.angularDistanceDegrees(comparison) > (estimate == null ? 3.0f : 8.0f)) {
+                    publishInertialGuidance(frame, camera, projection, sensorSample, false,
+                        "Tracking shifted — return to the last detailed area to realign");
+                    return;
+                }
+                // Retain the gyro's continuous rotation through a small AR
+                // relocalization correction; the same mapping applies thereafter.
+                if (estimate != null) {
+                    float[] continuous = estimate.transform.clone();
+                    System.arraycopy(pose.position, 0, continuous, 12, 3);
+                    PanoramaPose desired = PanoramaPose.fromCameraTransform(continuous);
+                    anchorToCapture = PanoramaPoseMapping.compose(
+                        PanoramaPoseMapping.between(pose, desired), anchorToCapture);
+                    pose = desired;
+                }
+                // Past 30s only a stable, genuinely tracked AR pose agreeing with
+                // guidance may resume; expired gyro poses never become photographs.
+            }
+        }
+        trackingInterrupted = false;
+        referenceNeedsVerification = false;
+        visualRecoveryStartedAt = 0;
+        setEstimatedPose(false);
+        if (sensorSample != null && currentAndroidCameraTimestamp > lastBridgeCalibrationTimestamp) {
+            float[] sensorToWorld = new float[16];
+            frame.getAndroidSensorPose().toMatrix(sensorToWorld, 0);
+            PanoramaPose sensorInCapture = PanoramaPoseMapping.compose(anchorToCapture,
+                PanoramaPose.relativeToAnchor(sensorToWorld, anchorToWorld));
+            rotationBridge.calibrate(pose, sensorInCapture, sensorSample.pose, currentAndroidCameraTimestamp);
+            lastBridgeCalibrationTimestamp = currentAndroidCameraTimestamp;
+        }
+        currentCalibrationAgeNanos = 0;
         cameraReady = true;
-        PanoramaPose pose = PanoramaPose.fromCameraTransform(cameraToWorld);
         currentPose = pose;
-        boolean steady = updateMotion(pose, frame.getTimestamp());
-        updateGuidance(frame, camera, pose, projection, steady);
+        updateGuidance(frame, camera, pose, projection);
+    }
+
+    /** Match only a documented real-time camera clock to timestamped sensor history. */
+    private PanoramaSensorHistory.Sample sensorForFrame(Frame frame) {
+        currentAndroidCameraTimestamp = 0;
+        if (!cameraTimestampIsRealtime || rotationSensor == null) return null;
+        long generation = rotationSensor.generation();
+        if (generation != sensorGeneration) {
+            sensorGeneration = generation;
+            rotationBridge.reset();
+            lastBridgeCalibrationTimestamp = 0;
+            resetSteadiness();
+        }
+        currentAndroidCameraTimestamp = frame.getAndroidCameraTimestamp();
+        long age = SystemClock.elapsedRealtimeNanos() - currentAndroidCameraTimestamp;
+        if (currentAndroidCameraTimestamp <= 0 || age < 0 || age > 500_000_000L) return null;
+        PanoramaSensorHistory.Sample sample = rotationSensor.at(currentAndroidCameraTimestamp);
+        if (sample != null && sample.generation != sensorGeneration) {
+            sensorGeneration = sample.generation;
+            rotationBridge.reset();
+            lastBridgeCalibrationTimestamp = 0;
+            resetSteadiness();
+            return null;
+        }
+        return sample;
+    }
+
+    /** Never let changing pose sources reuse a hold or a pre-transition camera candidate. */
+    private void setEstimatedPose(boolean estimated) {
+        if (currentPoseEstimated != estimated) resetSteadiness();
+        currentPoseEstimated = estimated;
+    }
+
+    /** Keeps dots live through blank surfaces, while capture remains bounded and explicit. */
+    private boolean publishInertialGuidance(Frame frame, Camera camera, float[] projection,
+        PanoramaSensorHistory.Sample sensor, boolean permitCapture, String blockedMessage) {
+        if (sensor == null) return false;
+        PanoramaPose estimate = rotationBridge.estimate(sensor.pose, currentAndroidCameraTimestamp);
+        PanoramaPose guidance = estimate != null ? estimate :
+            rotationBridge.guidance(sensor.pose, currentAndroidCameraTimestamp);
+        if (guidance == null) return false;
+        setEstimatedPose(true);
+        currentPose = guidance;
+        currentCalibrationAgeNanos = rotationBridge.ageNanos(currentAndroidCameraTimestamp);
+        cameraReady = estimate != null && permitCapture && sensor.motionQuiet;
+        inertialMessage = estimate == null
+            ? "Face a detailed area to refresh gyro guidance — your photos are saved"
+            : !permitCapture ? blockedMessage
+            : !sensor.motionQuiet ? "Keep the lens in one spot — steady the phone"
+            : "Plain surface — gyro assist";
+        updateGuidance(frame, camera, guidance, projection);
+        return true;
+    }
+
+    /** Replaces an unrecoverable/paused AR anchor without changing our sphere's coordinates. */
+    private boolean reanchorInCaptureCoordinates(float[] cameraToWorld, PanoramaPose desiredPose) {
+        try {
+            Anchor replacement = arSession.createAnchor(new com.google.ar.core.Pose(
+                new float[] { cameraToWorld[12], cameraToWorld[13], cameraToWorld[14] },
+                new float[] { 0, 0, 0, 1 }));
+            if (replacement.getTrackingState() != TrackingState.TRACKING) {
+                replacement.detach();
+                return false;
+            }
+            float[] replacementToWorld = new float[16];
+            replacement.getPose().toMatrix(replacementToWorld, 0);
+            PanoramaPose raw = PanoramaPose.relativeToAnchor(cameraToWorld, replacementToWorld);
+            PanoramaPose mapping = PanoramaPoseMapping.between(raw, desiredPose);
+            if (captureAnchor != null) captureAnchor.detach();
+            captureAnchor = replacement;
+            anchorToCapture = mapping;
+            resetSteadiness();
+            Log.i(TAG, "Recovered AR anchor in the existing capture coordinates");
+            return true;
+        } catch (NotTrackingException notReady) {
+            return false;
+        }
+    }
+
+    private void pauseForCaptureAnchor(float[] projection, String message) {
+        cameraReady = false;
+        captureGate.pauseTracking();
+        resetBestFrameWindow();
+        waitingForCameraImage = false;
+        recordCaptureDiagnostic("anchorPaused", null, -1, Float.NaN,
+            captureAnchor == null ? "INITIALIZING" : captureAnchor.getTrackingState().name());
+        publishTrackingMessage(projection, message);
     }
 
     /** Converts a terminal renderer failure into one Activity result on the UI thread. */
@@ -528,102 +801,79 @@ public final class PanoramaCaptureActivity extends AppCompatActivity implements 
         });
     }
 
-    /** Updates instantaneous and exponentially smoothed six-degree motion estimates. */
-    private boolean updateMotion(PanoramaPose pose, long timestampNanos) {
-        PanoramaPose previous = previousPose;
-        long previousTimestamp = previousFrameTimestampNanos;
-        previousPose = pose;
-        previousFrameTimestampNanos = timestampNanos;
-        if (previous == null || previousTimestamp == 0L) {
-            return false;
-        }
-
-        double elapsed = (timestampNanos - previousTimestamp) / 1_000_000_000.0;
-        if (elapsed <= 0.0001 || elapsed >= 0.25) {
-            smoothedAngularSpeed = Float.POSITIVE_INFINITY;
-            smoothedLinearSpeed = Float.POSITIVE_INFINITY;
-            return false;
-        }
-        double quaternionDot = Math.abs(
-            previous.quaternion[0] * pose.quaternion[0] +
-            previous.quaternion[1] * pose.quaternion[1] +
-            previous.quaternion[2] * pose.quaternion[2] +
-            previous.quaternion[3] * pose.quaternion[3]
-        );
-        quaternionDot = Math.max(0.0, Math.min(1.0, quaternionDot));
-        float angularSpeed = (float) (2.0 * Math.acos(quaternionDot) / elapsed);
-        double deltaX = pose.position[0] - previous.position[0];
-        double deltaY = pose.position[1] - previous.position[1];
-        double deltaZ = pose.position[2] - previous.position[2];
-        float linearSpeed = (float) (Math.sqrt(deltaX * deltaX + deltaY * deltaY + deltaZ * deltaZ) / elapsed);
-
-        if (Float.isFinite(smoothedAngularSpeed)) {
-            smoothedAngularSpeed = 0.78f * smoothedAngularSpeed + 0.22f * angularSpeed;
-            smoothedLinearSpeed = 0.78f * smoothedLinearSpeed + 0.22f * linearSpeed;
-        } else {
-            smoothedAngularSpeed = angularSpeed;
-            smoothedLinearSpeed = linearSpeed;
-        }
-        return PanoramaCapturePolicy.isMotionSteady(
-            angularSpeed,
-            linearSpeed,
-            smoothedAngularSpeed,
-            smoothedLinearSpeed
-        );
-    }
-
     /** Chooses the nearest target, advances its steady hold, and captures when eligible. */
-    private void updateGuidance(Frame frame, Camera camera, PanoramaPose pose, float[] projection, boolean steady) {
+    private void updateGuidance(Frame frame, Camera camera, PanoramaPose pose, float[] projection) {
         PanoramaTarget activeTarget = findNearestUncapturedTarget(pose);
         if (activeTarget == null) {
-            publishGuide(pose, projection, -1, 0.0f, false, true, captureInFlight, "Capture complete");
-            if (!captureInFlight && !frames.isEmpty()) {
+            resetBestFrameWindow();
+            publishGuide(pose, projection, -1, 0.0f, false, true, captureInFlight,
+                coverageComplete ? "Capture complete" : "Checking for small gaps…");
+            if (!captureInFlight && remainingTargetCount == 0) {
                 runOnUiThread(this::finishCaptureSuccessfully);
             }
             return;
         }
 
         float angularDistance = pose.angularDistanceDegrees(activeTarget);
-        boolean aligned = angularDistance <= options.alignmentDegrees;
-        if (activeTarget.index != alignedTargetIndex) {
-            alignedTargetIndex = activeTarget.index;
-            resetHoldWindow();
+        alignedTargetIndex = activeTarget.index;
+        boolean captureAllowed = cameraReady && !captureInFlight &&
+            SystemClock.uptimeMillis() - lastCaptureCompletedAtMillis >= CAPTURE_COOLDOWN_MILLIS;
+        PanoramaCaptureGate.Sample sample = captureGate.update(
+            pose, frame.getTimestamp(), activeTarget.index, angularDistance,
+            options.alignmentDegrees, options.steadyDurationMillis, captureAllowed
+        );
+        // Hysteresis keeps earned hold at the edge, but that is not capture eligibility.
+        // Showing "Hold still" there could wait forever at 100% without taking a photo.
+        boolean aligned = sample.withinCaptureZone;
+        boolean steady = sample.steady;
+        float holdProgress = sample.progress;
+        recordCaptureDiagnostic("tracking", sample, activeTarget.index, angularDistance, "");
+        long nowMillis = SystemClock.uptimeMillis();
+        if (sample.freshFrame || lastFreshCameraFrameAtMillis == 0L) {
+            lastFreshCameraFrameAtMillis = nowMillis;
         }
-
-        float holdProgress = 0.0f;
-        if (cameraReady && aligned && steady && !captureInFlight) {
-            if (alignedSinceNanos < 0L || holdStartPose == null) {
-                startHoldWindow(pose, frame.getTimestamp());
-            } else if (!PanoramaCapturePolicy.isWithinHoldDrift(
-                holdStartPose.angularDistanceDegrees(pose),
-                holdStartPose.linearDistanceMeters(pose)
-            )) {
-                startHoldWindow(pose, frame.getTimestamp());
+        if (sample.freshFrame && (!aligned || !steady)) {
+            waitingForCameraImage = false;
+        }
+        // A brief motion grace can retain UI progress, but must not retain an image
+        // from before that movement. Ranking starts only after this steady segment settles.
+        if (bestFrameTargetIndex != activeTarget.index || !captureAllowed ||
+            (sample.freshFrame && (!aligned || !steady || holdProgress < bestFramePreviousProgress))) {
+            resetBestFrameWindow();
+        }
+        if (sample.freshFrame && captureAllowed && aligned && steady) {
+            if (bestFrameTargetIndex < 0) {
+                bestFrameTargetIndex = activeTarget.index;
+                bestFrameWindowStartNanos = frame.getTimestamp();
             }
-            long heldMillis = Math.max(0L, (frame.getTimestamp() - alignedSinceNanos) / 1_000_000L);
-            holdProgress = Math.min(1.0f, heldMillis / (float) options.steadyDurationMillis);
-            if (
-                holdProgress >= 1.0f &&
-                SystemClock.uptimeMillis() - lastCaptureCompletedAtMillis >= CAPTURE_COOLDOWN_MILLIS
-            ) {
-                captureFrame(frame, camera, activeTarget, pose);
-                holdProgress = 0.0f;
+            bestFramePreviousProgress = holdProgress;
+            if (sample.readyToCapture || frame.getTimestamp() - bestFrameWindowStartNanos >= BEST_FRAME_SETTLE_NANOS) {
+                captureFrame(frame, camera, activeTarget, pose, sample.readyToCapture);
             }
-        } else {
-            resetHoldWindow();
+            if (captureInFlight) holdProgress = 0.0f;
         }
 
         String instruction;
         if (captureInFlight) {
-            instruction = "Capturing…";
+            instruction = "Saving photo…";
+        } else if (currentPoseEstimated && !cameraReady) {
+            instruction = inertialMessage;
+        } else if (!sample.freshFrame && nowMillis - lastFreshCameraFrameAtMillis >= 700L) {
+            instruction = "Camera paused — keep the dot centered while it catches up";
+        } else if (waitingForCameraImage) {
+            instruction = "Waiting for the camera — keep the dot centered";
         } else if (!aligned) {
-            instruction = PanoramaCapturePolicy.shouldShowCompletionChevron(remainingTargetCount)
+            instruction = sample.aligned && holdProgress > 0
+                ? "Center the dot — your hold is kept"
+                : PanoramaCapturePolicy.shouldShowCompletionChevron(remainingTargetCount)
                 ? "Follow the arrow to a remaining dot"
                 : "Move a dot into the circle";
+        } else if (holdProgress > 0.0f && steady) {
+            instruction = currentPoseEstimated ? "Plain surface — hold still" : "Hold still";
         } else if (holdProgress > 0.0f) {
-            instruction = "Hold still";
+            instruction = "Nearly there — steady the phone";
         } else {
-            instruction = "Steady your Android phone";
+            instruction = currentPoseEstimated ? "Gyro assist — steady the phone" : "Steady your Android phone";
         }
         publishGuide(
             pose,
@@ -642,14 +892,19 @@ public final class PanoramaCaptureActivity extends AppCompatActivity implements 
         String message;
         TrackingFailureReason reason = camera.getTrackingFailureReason();
         if (reason == TrackingFailureReason.INSUFFICIENT_LIGHT) {
-            message = "Move somewhere with more light";
+            message = "Tracking paused — more light will help. Your dots are saved.";
         } else if (reason == TrackingFailureReason.EXCESSIVE_MOTION) {
             message = "Move the phone more slowly";
         } else if (reason == TrackingFailureReason.INSUFFICIENT_FEATURES) {
-            message = "Point at a detailed part of the room";
+            message = "Tracking paused — briefly aim at an edge or detail, then return to this dot";
         } else {
-            message = "Move slowly while tracking starts";
+            message = currentPose == null ? "Move slowly while tracking starts" :
+                "Tracking paused — move slowly. Your dots are saved.";
         }
+        publishTrackingMessage(projection, message);
+    }
+
+    private void publishTrackingMessage(float[] projection, String message) {
         long now = SystemClock.elapsedRealtimeNanos();
         if (now - lastGuidancePublishedAtNanos < GUIDANCE_INTERVAL_NANOS) {
             return;
@@ -658,12 +913,15 @@ public final class PanoramaCaptureActivity extends AppCompatActivity implements 
         PanoramaPose pose = currentPose;
         float[] rotationCopy = (pose == null ? IDENTITY_ROTATION : pose.rotation).clone();
         float[] projectionCopy = projection.clone();
+        int pausedTargetIndex = alignedTargetIndex;
+        float pausedProgress = PanoramaCapturePolicy.displayedHoldProgress(captureGate.getProgress());
         runOnUiThread(() -> {
             if (finishingCapture) {
                 return;
             }
-            guideView.updatePose(rotationCopy, projectionCopy, -1, 0.0f, false, false, false);
-            instructionLabel.setText(message);
+            guideView.updatePose(rotationCopy, projectionCopy, pausedTargetIndex, pausedProgress,
+                false, false, captureInFlight, false);
+            instructionLabel.setText(coverageCheckInProgress ? "Checking for small gaps…" : message);
         });
     }
 
@@ -693,57 +951,98 @@ public final class PanoramaCaptureActivity extends AppCompatActivity implements 
                 rotationCopy,
                 projectionCopy,
                 targetIndex,
-                holdProgress,
+                PanoramaCapturePolicy.displayedHoldProgress(holdProgress),
                 aligned,
                 steady,
-                capturing
+                capturing,
+                true
             );
-            instructionLabel.setText(instruction);
+            instructionLabel.setText(coverageCheckInProgress ? "Checking for small gaps…"
+                : SystemClock.uptimeMillis() < retryMessageUntilMillis ? retryMessage
+                : SystemClock.uptimeMillis() < savedAcknowledgementUntilMillis
+                ? "Photo saved — " + frames.size() + " of " + targets.size()
+                : instruction);
         });
     }
 
-    /** Detaches one synchronized CPU image and queues encoding without blocking GL. */
-    private void captureFrame(Frame frame, Camera camera, PanoramaTarget target, PanoramaPose pose) {
+    /** Samples one synchronized image; only the unchanged capture gate may trigger saving. */
+    private void captureFrame(Frame frame, Camera camera, PanoramaTarget target, PanoramaPose pose, boolean captureNow) {
         if (captureInFlight || target.captured || finishingCapture) {
             return;
         }
-
-        final ArCapturedImage capturedImage;
-        try (Image image = frame.acquireCameraImage()) {
-            capturedImage = ArCapturedImage.copyOf(image);
-        } catch (NotYetAvailableException unavailable) {
-            // ARCore commonly needs another CPU-image cycle. Restarting the
-            // hold avoids retrying acquisition on every rendered frame.
-            resetHoldWindow();
-            return;
-        } catch (Exception error) {
-            Log.e(TAG, "Unable to copy synchronized AR camera frame", error);
-            resetHoldWindow();
-            publishCaptureRetry("Couldn't read that camera frame. Keep holding still.");
-            return;
+        long now = SystemClock.uptimeMillis();
+        if (now - lastImageAttemptAtMillis >= IMAGE_RETRY_INTERVAL_MILLIS) {
+            lastImageAttemptAtMillis = now;
+            imageAttempts++;
+            try (Image image = frame.acquireCameraImage()) {
+                imagesAcquired++;
+                lastCpuImageTimestamp = image.getTimestamp();
+                lastImageArTimestamp = frame.getTimestamp();
+                lastImageAndroidTimestamp = frame.getAndroidCameraTimestamp();
+                boolean clockReady = cameraImageClock.acceptFrame(lastCpuImageTimestamp,
+                    lastImageArTimestamp, lastImageAndroidTimestamp,
+                    SystemClock.elapsedRealtimeNanos(), cameraTimestampIsRealtime);
+                lastImageResult = cameraImageClock.lastDecision();
+                if (clockReady) {
+                    // acquireCameraImage pairs the pixels with this Frame. ARCore's pose
+                    // clock is refined during tracking and need not equal the image clock.
+                    ArCapturedImage capturedImage = ArCapturedImage.copyOf(image);
+                    CameraIntrinsics intrinsics = camera.getImageIntrinsics();
+                    double sharpness = capturedImage.lumaSharpnessScore();
+                    CaptureSnapshot candidate = new CaptureSnapshot(
+                        frames.size(), target, pose, capturedImage,
+                        intrinsics.getFocalLength(), intrinsics.getPrincipalPoint(), intrinsics.getImageDimensions(),
+                        frame.getTimestamp(), System.currentTimeMillis(), imageRotationDegrees, sharpness,
+                        currentPoseEstimated, lastImageAndroidTimestamp, currentCalibrationAgeNanos,
+                        lastCpuImageTimestamp
+                    );
+                    bestFrameSelector.consider(candidate, sharpness, frame.getTimestamp());
+                    imagesAccepted++;
+                }
+                // Even while a new image warms up, an earlier trusted, fresh candidate
+                // may be saved. Never return here before evaluating that candidate.
+            } catch (NotYetAvailableException unavailable) {
+                lastImageResult = "not_yet_available";
+                // An earlier fresh candidate may still be saved at a valid shutter;
+                // otherwise preserve hold progress and retry only on a fresh steady frame.
+                if (captureNow) waitingForCameraImage = true;
+            } catch (PanoramaYuv.UnsupportedColorSpaceException unsupported) {
+                lastImageResult = "unsupported_color_space";
+                // A permanent format mismatch must not become an endless hold/retry loop.
+                unsupportedColorReported = true;
+                cameraReady = false;
+                captureGate.reset();
+                resetBestFrameWindow();
+                waitingForCameraImage = false;
+                Log.e(TAG, "Unsupported AR camera data space: " + unsupported.dataSpace);
+                runOnUiThread(() -> {
+                    if (!finishingCapture) failCapture("CAMERA_COLOR_UNSUPPORTED",
+                        "360 capture cannot use this phone's camera color format. Your original photos are kept.");
+                });
+                return;
+            } catch (Exception error) {
+                lastImageResult = "pixel_copy_failed";
+                Log.e(TAG, "Unable to copy synchronized AR camera frame", error);
+                captureGate.reset();
+                resetBestFrameWindow();
+                waitingForCameraImage = false;
+                publishCaptureRetry("Couldn't read that camera frame. Keep holding still.");
+                return;
+            }
         }
-
-        CameraIntrinsics intrinsics = camera.getImageIntrinsics();
-        CaptureSnapshot snapshot = new CaptureSnapshot(
-            frames.size(),
-            target,
-            pose,
-            capturedImage,
-            intrinsics.getFocalLength(),
-            intrinsics.getPrincipalPoint(),
-            intrinsics.getImageDimensions(),
-            frame.getTimestamp(),
-            System.currentTimeMillis(),
-            imageRotationDegrees
-        );
-
+        CaptureSnapshot snapshot = bestFrameSelector.best(frame.getTimestamp());
+        waitingForCameraImage = captureNow && snapshot == null;
+        if (!captureNow || snapshot == null || snapshot.target != target) return;
         captureInFlight = true;
-        resetHoldWindow();
+        captureGate.reset();
+        resetBestFrameWindow();
+        waitingForCameraImage = false;
         try {
             imageExecutor.execute(() -> encodeCapturedFrame(snapshot));
         } catch (RejectedExecutionException error) {
             captureInFlight = false;
             Log.w(TAG, "Image encoding was rejected during activity shutdown", error);
+            publishCaptureRetry("The camera couldn't save yet. Keep this dot centered to retry.");
         }
     }
 
@@ -780,6 +1079,10 @@ public final class PanoramaCaptureActivity extends AppCompatActivity implements 
             snapshot.focalLength,
             snapshot.principalPoint,
             snapshot.intrinsicDimensions,
+            encoded.sourceImageWidth,
+            encoded.sourceImageHeight,
+            encoded.sourceCropLeft,
+            encoded.sourceCropTop,
             encoded.sourceWidth,
             encoded.sourceHeight,
             encoded.sourceRotationDegrees,
@@ -798,6 +1101,8 @@ public final class PanoramaCaptureActivity extends AppCompatActivity implements 
         frame.put("timestamp", snapshot.capturedAtMillis);
         frame.put("capturedAt", iso8601(snapshot.capturedAtMillis));
         frame.put("frameTimestamp", snapshot.frameTimestampNanos / 1_000_000_000.0);
+        frame.put("sharpnessScore", snapshot.sharpnessScore);
+        frame.put("frameSelection", "sharpestSynchronizedSteadyFrame");
         frame.put("yaw", pose.yawDegrees);
         frame.put("pitch", pose.pitchDegrees);
         frame.put("roll", pose.rollDegrees);
@@ -812,7 +1117,7 @@ public final class PanoramaCaptureActivity extends AppCompatActivity implements 
         frame.put("quaternion", quaternionJson(pose.quaternion));
         frame.put("transform", floatArrayToJson(pose.transform));
         frame.put("intrinsics", doubleArrayToJson(uprightIntrinsics));
-        frame.put("intrinsicsSource", "arcoreImageIntrinsics+uprightRotation");
+        frame.put("intrinsicsSource", "arcoreImageIntrinsics+crop+uprightRotation");
         frame.put(
             "horizontalFovDegrees",
             fieldOfViewDegrees(uprightIntrinsics[0], uprightIntrinsics[2], encoded.width)
@@ -823,108 +1128,49 @@ public final class PanoramaCaptureActivity extends AppCompatActivity implements 
         frame.put("sourceRotationDegrees", encoded.sourceRotationDegrees);
         frame.put("sourceWidth", encoded.sourceWidth);
         frame.put("sourceHeight", encoded.sourceHeight);
+        frame.put("sourceImageWidth", encoded.sourceImageWidth);
+        frame.put("sourceImageHeight", encoded.sourceImageHeight);
+        frame.put("sourceCropLeft", encoded.sourceCropLeft);
+        frame.put("sourceCropTop", encoded.sourceCropTop);
+        frame.put("sourceDataSpace", encoded.sourceDataSpace);
+        frame.put("yuvColorConversion", encoded.yuvColorConversion);
+        frame.put("jpegEncodingPasses", 1);
         frame.put("captureInterfaceOrientation", "portrait");
-        frame.put("trackingState", "normal");
-        frame.put("poseSource", "arcoreDisplayOrientedPose");
-        frame.put("translationAvailable", true);
-        frame.put("poseTimestamp", snapshot.frameTimestampNanos / 1_000_000_000.0);
+        frame.put("trackingState", snapshot.inertialPose ? "inertialEstimated" : "normal");
+        frame.put("poseSource", snapshot.inertialPose
+            ? "gameRotationVector+calibratedCaptureAnchor" : "arcoreDisplayOrientedPose+captureAnchor");
+        frame.put("coordinateFrameId", sessionId);
+        frame.put("translationAvailable", !snapshot.inertialPose);
+        frame.put("androidCameraTimestampNanos", snapshot.androidCameraTimestampNanos);
+        frame.put("cpuImageTimestampNanos", snapshot.cpuImageTimestampNanos);
+        frame.put("imageToAndroidClockOffsetNanos", snapshot.cpuImageTimestampNanos - snapshot.androidCameraTimestampNanos);
+        frame.put("imageFrameAssociation", "arcoreFrame.acquireCameraImage+coherentExposureClocks");
+        if (snapshot.inertialPose) frame.put("inertialCalibrationAgeMs", snapshot.calibrationAgeNanos / 1_000_000L);
+        frame.put("poseTimestamp", (snapshot.inertialPose
+            ? snapshot.androidCameraTimestampNanos : snapshot.frameTimestampNanos) / 1_000_000_000.0);
+        frame.put("poseTimestampClock", snapshot.inertialPose ? "androidCameraRealtime" : "arcoreFrame");
         return frame;
     }
 
-    /** Rotates and rescales ARCore intrinsics to match the saved upright JPEG. */
+    /** Backward-compatible whole-image calibration used by existing callers/tests. */
     static double[] adjustedIntrinsics(
-        float[] focalLength,
-        float[] principalPoint,
-        int[] intrinsicDimensions,
-        int sourceWidth,
-        int sourceHeight,
-        int rotationDegrees,
-        int outputWidth,
-        int outputHeight
+        float[] focalLength, float[] principalPoint, int[] intrinsicDimensions,
+        int sourceWidth, int sourceHeight, int rotationDegrees, int outputWidth, int outputHeight
     ) {
-        if (
-            focalLength == null ||
-            focalLength.length < 2 ||
-            principalPoint == null ||
-            principalPoint.length < 2 ||
-            intrinsicDimensions == null ||
-            intrinsicDimensions.length < 2 ||
-            !Float.isFinite(focalLength[0]) ||
-            !Float.isFinite(focalLength[1]) ||
-            !Float.isFinite(principalPoint[0]) ||
-            !Float.isFinite(principalPoint[1]) ||
-            focalLength[0] <= 0.0f ||
-            focalLength[1] <= 0.0f ||
-            intrinsicDimensions[0] <= 0 ||
-            intrinsicDimensions[1] <= 0 ||
-            sourceWidth <= 0 ||
-            sourceHeight <= 0 ||
-            outputWidth <= 0 ||
-            outputHeight <= 0
-        ) {
-            throw new IllegalArgumentException("Camera intrinsics and image dimensions must be valid.");
-        }
-        int normalizedRotation = ((rotationDegrees % 360) + 360) % 360;
-        if (normalizedRotation % 90 != 0) {
-            throw new IllegalArgumentException("Image rotation must be a multiple of 90 degrees.");
-        }
+        return adjustedIntrinsics(focalLength, principalPoint, intrinsicDimensions,
+            sourceWidth, sourceHeight, 0, 0, sourceWidth, sourceHeight,
+            rotationDegrees, outputWidth, outputHeight);
+    }
 
-        double referenceWidth = intrinsicDimensions[0];
-        double referenceHeight = intrinsicDimensions[1];
-        double rawFx = focalLength[0] * sourceWidth / referenceWidth;
-        double rawFy = focalLength[1] * sourceHeight / referenceHeight;
-        double rawCx = principalPoint[0] * sourceWidth / referenceWidth;
-        double rawCy = principalPoint[1] * sourceHeight / referenceHeight;
-        double fx;
-        double fy;
-        double cx;
-        double cy;
-        int uprightWidth;
-        int uprightHeight;
-
-        if (normalizedRotation == 90) {
-            fx = rawFy;
-            fy = rawFx;
-            cx = sourceHeight - 1.0 - rawCy;
-            cy = rawCx;
-            uprightWidth = sourceHeight;
-            uprightHeight = sourceWidth;
-        } else if (normalizedRotation == 180) {
-            fx = rawFx;
-            fy = rawFy;
-            cx = sourceWidth - 1.0 - rawCx;
-            cy = sourceHeight - 1.0 - rawCy;
-            uprightWidth = sourceWidth;
-            uprightHeight = sourceHeight;
-        } else if (normalizedRotation == 270) {
-            fx = rawFy;
-            fy = rawFx;
-            cx = rawCy;
-            cy = sourceWidth - 1.0 - rawCx;
-            uprightWidth = sourceHeight;
-            uprightHeight = sourceWidth;
-        } else {
-            fx = rawFx;
-            fy = rawFy;
-            cx = rawCx;
-            cy = rawCy;
-            uprightWidth = sourceWidth;
-            uprightHeight = sourceHeight;
-        }
-
-        double outputScaleX = outputWidth / (double) uprightWidth;
-        double outputScaleY = outputHeight / (double) uprightHeight;
-        return new double[] {
-            fx * outputScaleX,
-            0.0,
-            cx * outputScaleX,
-            0.0,
-            fy * outputScaleY,
-            cy * outputScaleY,
-            0.0,
-            0.0,
-            1.0,
-        };
+    /** Crop origin is removed before rotating/scaling into the upright JPEG. */
+    static double[] adjustedIntrinsics(
+        float[] focalLength, float[] principalPoint, int[] intrinsicDimensions,
+        int imageWidth, int imageHeight, int cropLeft, int cropTop, int cropWidth, int cropHeight,
+        int rotationDegrees, int outputWidth, int outputHeight
+    ) {
+        return PanoramaImageCalibration.adjustedIntrinsics(focalLength, principalPoint, intrinsicDimensions,
+            imageWidth, imageHeight, cropLeft, cropTop, cropWidth, cropHeight,
+            rotationDegrees, outputWidth, outputHeight);
     }
 
     /** Commits one encoded frame on UI and releases the cross-thread capture barrier last. */
@@ -939,20 +1185,39 @@ public final class PanoramaCaptureActivity extends AppCompatActivity implements 
             deleteFileQuietly(encodedImage);
             return;
         }
+        if (!encodedImage.isFile() || encodedImage.length() == 0L) {
+            recoverFromFrameFailure("The photo wasn't saved. Keep this dot centered to retry.");
+            return;
+        }
         target.captured = true;
         frames.add(metadata);
+        boolean previouslyUsedInertialFrames = usedInertialFrames;
+        usedInertialFrames |= !metadata.optBoolean("translationAvailable", true);
+        try {
+            writeMetadata(buildResultJson(), "inProgress");
+        } catch (IOException | JSONException error) {
+            // A dot is not completed until both its JPEG and recovery metadata are durable.
+            frames.remove(frames.size() - 1);
+            target.captured = false;
+            usedInertialFrames = previouslyUsedInertialFrames;
+            Log.e(TAG, "Cannot persist accepted frame metadata", error);
+            recoverFromFrameFailure("Storage couldn't save this dot. Free some space, then try again.");
+            return;
+        }
         remainingTargetCount = targets.size() - frames.size();
+        if (!metadata.optBoolean("translationAvailable", true)) referenceNeedsVerification = true;
         lastCaptureCompletedAtMillis = SystemClock.uptimeMillis();
-        alignedTargetIndex = -1;
         // Publish completion last; the GL thread treats this volatile flag as
         // the handoff barrier for the accepted frame and its cooldown state.
         captureInFlight = false;
         guideView.pulseCapture();
+        savedAcknowledgementUntilMillis = SystemClock.uptimeMillis() + SAVED_ACKNOWLEDGEMENT_MILLIS;
+        retryMessageUntilMillis = 0L;
         guideView.setContentDescription(
             String.format(Locale.US, "Guided panorama capture, %d of %d frames captured", frames.size(), targets.size())
         );
         updateProgressInterface();
-        writeMetadataSnapshot(frames.size() == targets.size() ? "complete" : "inProgress");
+        instructionLabel.setText("Photo saved — " + frames.size() + " of " + targets.size());
         if (frames.size() == targets.size()) {
             finishCaptureSuccessfully();
         }
@@ -962,9 +1227,52 @@ public final class PanoramaCaptureActivity extends AppCompatActivity implements 
     private void publishCaptureRetry(String message) {
         runOnUiThread(() -> {
             if (!finishingCapture) {
-                instructionLabel.setText(message);
+                showCaptureRetry(message);
             }
         });
+    }
+
+    /** Bounded, local-only telemetry makes a stuck hold diagnosable without recording video. */
+    private void recordCaptureDiagnostic(String state, PanoramaCaptureGate.Sample sample,
+                                         int target, float angle, String reason) {
+        long now = SystemClock.uptimeMillis();
+        if (now - lastDiagnosticAtMillis < 500) return;
+        lastDiagnosticAtMillis = now;
+        try {
+            JSONObject entry = new JSONObject().put("elapsedMs", now).put("state", state)
+                .put("target", target).put("trackingReason", reason)
+                .put("waitingForImage", waitingForCameraImage).put("captureInFlight", captureInFlight)
+                .put("inertialPose", currentPoseEstimated).put("captureAllowed", cameraReady)
+                .put("inertialCalibrationAgeMs", currentCalibrationAgeNanos / 1_000_000L)
+                .put("cameraTimestampIsRealtime", cameraTimestampIsRealtime)
+                .put("imageResult", lastImageResult).put("imageClockDecision", cameraImageClock.lastDecision())
+                .put("imageAttempts", imageAttempts).put("imagesAcquired", imagesAcquired)
+                .put("imagesAccepted", imagesAccepted)
+                .put("cpuImageTimestampNanos", lastCpuImageTimestamp)
+                .put("imageArTimestampNanos", lastImageArTimestamp)
+                .put("imageAndroidTimestampNanos", lastImageAndroidTimestamp);
+            if (Float.isFinite(angle)) entry.put("angleDegrees", angle);
+            if (sample != null) {
+                entry.put("freshFrame", sample.freshFrame).put("withinCaptureZone", sample.withinCaptureZone)
+                    .put("latchedAligned", sample.aligned).put("steady", sample.steady)
+                    .put("ready", sample.readyToCapture).put("progress", sample.progress);
+                if (Float.isFinite(sample.angularSpeed)) entry.put("angularSpeedRadians", sample.angularSpeed);
+                if (Float.isFinite(sample.linearSpeed)) entry.put("linearSpeedMeters", sample.linearSpeed);
+                if (Float.isFinite(sample.smoothedAngularSpeed)) entry.put("smoothedAngularSpeed", sample.smoothedAngularSpeed);
+                if (Float.isFinite(sample.smoothedLinearSpeed)) entry.put("smoothedLinearSpeed", sample.smoothedLinearSpeed);
+            }
+            synchronized (captureDiagnostics) {
+                if (captureDiagnostics.size() >= 120) captureDiagnostics.removeFirst();
+                captureDiagnostics.addLast(entry);
+            }
+        } catch (JSONException ignored) { /* Diagnostics must never prevent a photograph. */ }
+    }
+
+    /** Keeps camera errors readable instead of replacing them on the next preview frame. */
+    private void showCaptureRetry(String message) {
+        retryMessage = message;
+        retryMessageUntilMillis = SystemClock.uptimeMillis() + 1500L;
+        instructionLabel.setText(message);
     }
 
     /** Resets target hold state after encoding fails so the same direction can be retried. */
@@ -972,9 +1280,9 @@ public final class PanoramaCaptureActivity extends AppCompatActivity implements 
         if (finishingCapture || isFinishing()) {
             return;
         }
-        alignedTargetIndex = -1;
-        resetHoldWindow();
-        instructionLabel.setText(message);
+        // The gate belongs to GL; request its reset before releasing the worker barrier.
+        gateResetRequested = true;
+        showCaptureRetry(message);
         captureInFlight = false;
     }
 
@@ -997,6 +1305,10 @@ public final class PanoramaCaptureActivity extends AppCompatActivity implements 
                 continue;
             }
             float distance = pose.angularDistanceDegrees(target);
+            // Latch the dot the user is working on through a small edge tremor.
+            if (target.index == alignedTargetIndex && distance <= options.alignmentDegrees + 1.5f) {
+                return target;
+            }
             if (distance < nearestDistance) {
                 nearest = target;
                 nearestDistance = distance;
@@ -1005,31 +1317,30 @@ public final class PanoramaCaptureActivity extends AppCompatActivity implements 
         return nearest;
     }
 
-    /** Begins a steady-hold window from an immutable pose and ARCore timestamp. */
-    private void startHoldWindow(PanoramaPose pose, long timestampNanos) {
-        holdStartPose = pose;
-        alignedSinceNanos = timestampNanos;
-    }
-
-    /** Clears only the active target's hold progress. */
-    private void resetHoldWindow() {
-        holdStartPose = null;
-        alignedSinceNanos = -1L;
-    }
-
     /** Resets motion history whenever tracking or rendering continuity is lost. */
     private void resetSteadiness() {
-        previousPose = null;
-        previousFrameTimestampNanos = 0L;
-        smoothedAngularSpeed = Float.POSITIVE_INFINITY;
-        smoothedLinearSpeed = Float.POSITIVE_INFINITY;
-        resetHoldWindow();
+        captureGate.reset();
+        resetBestFrameWindow();
+        waitingForCameraImage = false;
+        lastImageAttemptAtMillis = 0L;
+        lastFreshCameraFrameAtMillis = 0L;
         alignedTargetIndex = -1;
+    }
+
+    private void resetBestFrameWindow() {
+        bestFrameSelector.reset();
+        bestFrameTargetIndex = -1;
+        bestFrameWindowStartNanos = 0L;
+        bestFramePreviousProgress = 0.0f;
     }
 
     /** Atomically writes final metadata and returns the completed session to Capacitor. */
     private void finishCaptureSuccessfully() {
         if (finishingCapture || frames.size() != targets.size() || captureInFlight) {
+            return;
+        }
+        if (!coverageComplete) {
+            checkCapturedCoverage();
             return;
         }
         finishingCapture = true;
@@ -1047,13 +1358,101 @@ public final class PanoramaCaptureActivity extends AppCompatActivity implements 
         }
     }
 
+    /** Checks accepted camera footprints, not intended dot positions, without blocking preview. */
+    private void checkCapturedCoverage() {
+        if (coverageCheckInProgress || finishingCapture) return;
+        final ArrayList<PanoramaCoveragePlanner.Frame> accepted = new ArrayList<>();
+        try {
+            for (JSONObject frame : frames) {
+                JSONArray calibration = frame.getJSONArray("intrinsics");
+                JSONArray pose = frame.getJSONArray("transform");
+                double[] intrinsics = new double[9];
+                float[] transform = new float[16];
+                for (int i = 0; i < intrinsics.length; i++) intrinsics[i] = calibration.getDouble(i);
+                for (int i = 0; i < transform.length; i++) transform[i] = (float) pose.getDouble(i);
+                accepted.add(new PanoramaCoveragePlanner.Frame(frame.getInt("width"), frame.getInt("height"),
+                    intrinsics, transform));
+            }
+        } catch (Exception error) {
+            Log.e(TAG, "Cannot inspect accepted camera coverage", error);
+            failCapture("COVERAGE_CHECK_FAILED", "Your original photos are kept, but camera coverage could not be checked. Please start a new scan.");
+            return;
+        }
+        coverageCheckInProgress = true;
+        captureInFlight = true;
+        instructionLabel.setText("Checking for small gaps…");
+        try {
+            imageExecutor.execute(() -> {
+                try {
+                    PanoramaCoveragePlanner.Plan plan = PanoramaCoveragePlanner.plan(accepted,
+                        PanoramaCoveragePlanner.MAX_EXTRA_TARGETS,
+                        () -> finishingCapture || Thread.currentThread().isInterrupted());
+                    runOnUiThread(() -> acceptCoveragePlan(plan));
+                } catch (Exception | OutOfMemoryError error) {
+                    Log.e(TAG, "Cannot plan remaining camera coverage", error);
+                    runOnUiThread(() -> {
+                        if (!finishingCapture) failCapture("COVERAGE_CHECK_FAILED",
+                            "Your original photos are kept. The phone could not finish checking this scan; please try again.");
+                    });
+                }
+            });
+        } catch (RejectedExecutionException error) {
+            coverageCheckInProgress = false;
+            captureInFlight = false;
+            failCapture("COVERAGE_CHECK_FAILED", "Your original photos are kept. Reopen the camera to try again.");
+        }
+    }
+
+    /** Publishes fill targets atomically so GL never iterates a mutating target list. */
+    private void acceptCoveragePlan(PanoramaCoveragePlanner.Plan plan) {
+        if (finishingCapture || isFinishing()) return;
+        coverageCheckInProgress = false;
+        if (plan.cancelled) {
+            failCapture("COVERAGE_CHECK_FAILED", "The coverage check was interrupted. Your original photos are kept.");
+            return;
+        }
+        observedCoverage = plan.initialCoverage;
+        if (plan.extraTargets.isEmpty()) {
+            coverageComplete = plan.pixelGapFraction == 0;
+            captureInFlight = false;
+            if (coverageComplete) finishCaptureSuccessfully();
+            else failCapture("COVERAGE_INCOMPLETE", "Some directions are still missing. Your originals are kept. Start a new scan, keeping the camera in one spot as you turn.");
+            return;
+        }
+        ArrayList<PanoramaTarget> expanded = new ArrayList<>(targets);
+        for (PanoramaCoveragePlanner.Target target : plan.extraTargets) {
+            addTarget(expanded, target.yawDegrees, target.pitchDegrees);
+        }
+        targets = expanded;
+        remainingTargetCount = targets.size() - frames.size();
+        try {
+            writeMetadata(buildResultJson(), "inProgress");
+        } catch (IOException | JSONException error) {
+            failCapture("CAPTURE_FAILED", "The extra capture directions could not be saved. Your original photos are kept.");
+            return;
+        }
+        guideView.setTargets(targets);
+        updateProgressInterface();
+        savedAcknowledgementUntilMillis = 0;
+        retryMessage = "Fill " + remainingTargetCount + " small gaps — follow the arrows, keeping the phone upright";
+        retryMessageUntilMillis = SystemClock.uptimeMillis() + 4500;
+        instructionLabel.setText(retryMessage);
+        gateResetRequested = true;
+        captureInFlight = false;
+    }
+
     /** Builds the bridge result from accepted frames without reading in-flight work. */
     private JSONObject buildResultJson() throws JSONException {
         JSONObject result = new JSONObject();
         result.put("sessionId", sessionId);
+        result.put("ownerKey", captureOwnerKey);
+        result.put("createdAt", captureCreatedAt);
         result.put("mode", options.mode);
         result.put("directoryUrl", Uri.fromFile(sessionDirectory).toString());
         result.put("targetCount", targets.size());
+        result.put("initialTargetCount", initialTargetCount);
+        result.put("coverageComplete", coverageComplete);
+        result.put("observedCoverage", observedCoverage);
         result.put("capturedCount", frames.size());
         result.put("requiresStitching", true);
         JSONArray frameArray = new JSONArray();
@@ -1082,12 +1481,19 @@ public final class PanoramaCaptureActivity extends AppCompatActivity implements 
         manifest.put("state", state);
         manifest.put("captureType", "sourceFrames");
         manifest.put("stitchingPerformed", false);
-        manifest.put("poseSource", "arcoreDisplayOrientedPose");
-        manifest.put("translationAvailable", true);
+        manifest.put("poseSource", usedInertialFrames
+            ? "arcore+calibratedInertialFallback" : "arcoreDisplayOrientedPose+captureAnchor");
+        manifest.put("coordinateFrameId", sessionId);
+        manifest.put("translationAvailable", !usedInertialFrames);
         manifest.put("outputWidth", options.outputWidth);
         manifest.put("jpegQuality", options.jpegQuality);
         manifest.put("alignmentDegrees", options.alignmentDegrees);
         manifest.put("steadyDurationMs", options.steadyDurationMillis);
+        JSONArray diagnostics = new JSONArray();
+        synchronized (captureDiagnostics) {
+            for (JSONObject entry : captureDiagnostics) diagnostics.put(entry);
+        }
+        manifest.put("recentCaptureDiagnostics", diagnostics);
 
         JSONArray targetArray = new JSONArray();
         for (PanoramaTarget target : targets) {
@@ -1100,27 +1506,16 @@ public final class PanoramaCaptureActivity extends AppCompatActivity implements 
         }
         manifest.put("targets", targetArray);
 
-        File temporary = new File(sessionDirectory, ".metadata.json.tmp");
-        File destination = new File(sessionDirectory, "metadata.json");
-        try (FileOutputStream output = new FileOutputStream(temporary)) {
-            output.write(manifest.toString(2).getBytes(StandardCharsets.UTF_8));
-        }
-        if (destination.exists() && !destination.delete()) {
-            throw new IOException("The previous panorama metadata file could not be replaced.");
-        }
-        if (!temporary.renameTo(destination)) {
-            copyFile(temporary, destination);
-            deleteFileQuietly(temporary);
-        }
+        PanoramaCaptureStore.writeJson(new File(sessionDirectory, "metadata.json"), manifest);
     }
 
-    /** Returns an explicit cancellation result after deleting the partial private session. */
+    /** Returns cancellation without discarding photographs already accepted by the camera. */
     private void cancelCapture() {
         if (finishingCapture) {
             return;
         }
         finishingCapture = true;
-        cleanupCancelledSession();
+        writeMetadataSnapshot("interrupted");
         Intent data = new Intent();
         data.putExtra(EXTRA_ERROR_CODE, "CAPTURE_CANCELLED");
         data.putExtra(EXTRA_ERROR_MESSAGE, "Panorama capture was cancelled.");
@@ -1128,13 +1523,13 @@ public final class PanoramaCaptureActivity extends AppCompatActivity implements 
         finish();
     }
 
-    /** Returns one terminal native error after deleting the unusable partial session. */
+    /** Returns a terminal camera error while retaining all accepted original photos. */
     private void failCapture(String code, String message) {
         if (finishingCapture && isFinishing()) {
             return;
         }
         finishingCapture = true;
-        cleanupCancelledSession();
+        writeMetadataSnapshot("interrupted");
         Intent data = new Intent();
         data.putExtra(EXTRA_ERROR_CODE, code);
         data.putExtra(EXTRA_ERROR_MESSAGE, message);
@@ -1153,9 +1548,15 @@ public final class PanoramaCaptureActivity extends AppCompatActivity implements 
     @Override
     protected void onDestroy() {
         if (!finishingCapture) {
-            // An external finish cannot return a usable result, so retain no
-            // partial frames that JavaScript would have no URI to discard.
-            cleanupCancelledSession();
+            // The recovery list can find this manifest after activity/process restart.
+            writeMetadataSnapshot("interrupted");
+        }
+        // Destruction without finish() (for example OS recreation) must also invalidate
+        // queued encode/coverage callbacks before they can publish into this old Activity.
+        finishingCapture = true;
+        if (captureAnchor != null) {
+            captureAnchor.detach();
+            captureAnchor = null;
         }
         if (arSession != null) {
             arSession.close();
@@ -1330,6 +1731,11 @@ public final class PanoramaCaptureActivity extends AppCompatActivity implements 
         final long frameTimestampNanos;
         final long capturedAtMillis;
         final int rotationDegrees;
+        final double sharpnessScore;
+        final boolean inertialPose;
+        final long androidCameraTimestampNanos;
+        final long calibrationAgeNanos;
+        final long cpuImageTimestampNanos;
 
         /** Defensively copies mutable ARCore calibration arrays before leaving the GL frame. */
         CaptureSnapshot(
@@ -1342,7 +1748,12 @@ public final class PanoramaCaptureActivity extends AppCompatActivity implements 
             int[] intrinsicDimensions,
             long frameTimestampNanos,
             long capturedAtMillis,
-            int rotationDegrees
+            int rotationDegrees,
+            double sharpnessScore,
+            boolean inertialPose,
+            long androidCameraTimestampNanos,
+            long calibrationAgeNanos,
+            long cpuImageTimestampNanos
         ) {
             this.frameIndex = frameIndex;
             this.target = target;
@@ -1354,6 +1765,11 @@ public final class PanoramaCaptureActivity extends AppCompatActivity implements 
             this.frameTimestampNanos = frameTimestampNanos;
             this.capturedAtMillis = capturedAtMillis;
             this.rotationDegrees = rotationDegrees;
+            this.sharpnessScore = sharpnessScore;
+            this.inertialPose = inertialPose;
+            this.androidCameraTimestampNanos = androidCameraTimestampNanos;
+            this.calibrationAgeNanos = calibrationAgeNanos;
+            this.cpuImageTimestampNanos = cpuImageTimestampNanos;
         }
     }
 

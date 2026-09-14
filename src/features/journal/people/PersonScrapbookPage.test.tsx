@@ -86,6 +86,27 @@ describe('PersonScrapbookPage', () => {
     expect(screen.getByText('1 little moment, gathered together.')).toBeInTheDocument()
   })
 
+  it('uses a neutral fallback label instead of guaranteeing a recognized identity', () => {
+    render(<PersonScrapbookPage person={maya} photos={[timelinePhoto('uncaptioned', '')]} cacheNamespace="neutral-description" />)
+    expect(screen.getByRole('img', { name: 'A photo in Maya’s scrapbook' })).toBeInTheDocument()
+    expect(screen.queryByText('A family photo with Maya')).not.toBeInTheDocument()
+  })
+
+  it('renders optional per-photo corrections without turning the photo into a navigation or removal target', () => {
+    const photos = [timelinePhoto('first', 'First photo'), timelinePhoto('second', 'Second photo')]
+    const correct = vi.fn()
+    render(<PersonScrapbookPage person={maya} photos={photos} cacheNamespace="per-photo-actions"
+      renderPhotoActions={(photo) => photo.key === 'photo:first'
+        ? <button type="button" onClick={() => correct(photo.key)}>Not Maya?</button> : null} />)
+    const firstCard = screen.getByRole('img', { name: 'First photo' }).closest('figure')!
+    const secondCard = screen.getByRole('img', { name: 'Second photo' }).closest('figure')!
+    expect(within(secondCard).queryByRole('button')).not.toBeInTheDocument()
+    fireEvent.click(within(firstCard).getByRole('button', { name: 'Not Maya?' }))
+    expect(correct).toHaveBeenCalledExactlyOnceWith('photo:first')
+    expect(screen.getAllByRole('img')).toHaveLength(2)
+    expect(screen.queryByRole('link')).not.toBeInTheDocument()
+  })
+
   it('keeps the complete caption, date and uploader in separate flowing rows', () => {
     const caption = 'Our wonderfully long afternoon together at the family reunion'
     const contributorName = 'Alexandra-Christina LongFamilyNameWithoutSpaces'

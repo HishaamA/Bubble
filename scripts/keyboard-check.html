@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Bubble keyboard layout check</title>
+<style>
+  body { margin: 24px; font: 16px system-ui; background: #181823; color: white; }
+  button { padding: 12px; margin: 8px 8px 16px 0; }
+  iframe { display: block; border: 0; width: 390px; height: 720px; }
+  #keyboard { display: none; box-sizing: border-box; width: 390px; height: 260px; padding: 30px; background: #313139; color: #ddd; }
+</style>
+<h1>Keyboard layout check</h1>
+<p>Local synthetic form. No app data is read or saved. The grey panel simulates space occupied by the keyboard.</p>
+<button id="show">Show keyboard & focus last field</button><button id="hide">Hide keyboard</button>
+<output id="result">Ready</output>
+<iframe title="Phone form" src="./keyboard-check-frame.html"></iframe>
+<div id="keyboard">Simulated keyboard area<br><br>Q W E R T Y U I O P<br><br>A S D F G H J K L</div>
+<script type="module">
+  const frame = document.querySelector('iframe')
+  const panel = document.querySelector('#keyboard')
+  const report = () => {
+    const doc = frame.contentDocument
+    const field = doc.querySelector('#last-field')
+    const rect = field.getBoundingClientRect()
+    document.querySelector('#result').textContent = `Keyboard detected: ${doc.documentElement.dataset.keyboardOpen}. Field: ${Math.round(rect.top)}–${Math.round(rect.bottom)}px; visible height: ${frame.clientHeight}px. Scroll padding: ${doc.querySelector('.ks-feature').style.paddingBottom || 'restored'}.`
+  }
+  document.querySelector('#show').onclick = () => {
+    frame.contentDocument.querySelector('#last-field').focus({ preventScroll: true })
+    frame.style.height = '360px'
+    panel.style.display = 'block'
+    setTimeout(report, 950)
+  }
+  document.querySelector('#hide').onclick = () => {
+    frame.style.height = '720px'
+    panel.style.display = 'none'
+    setTimeout(report, 950)
+  }
+</script>
+</html>

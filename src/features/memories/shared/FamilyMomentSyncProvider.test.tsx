@@ -11,6 +11,7 @@ import type {
 } from './types'
 import { useFamilyMomentSync } from './useFamilyMomentSync'
 import { useSharedMoments } from './useSharedMoments'
+import { AI_PANORAMA_DISCLOSURE, type AiPanoramaProvenance } from '../../../services/media/panoramaProvenance'
 
 const familyService = vi.hoisted(() => ({
   deleteFamilyMoment: vi.fn(),
@@ -70,7 +71,12 @@ function createSilentNotifier(): MomentChangeNotifier {
   }
 }
 
-function SyncHarness() {
+const aiProvenance: AiPanoramaProvenance = {
+  kind: 'ai-reconstruction', provider: 'local', model: 'local-panorama-v1',
+  referenceCount: 3, generatedAt: '2026-09-09T12:00:00.000Z',
+}
+
+function SyncHarness({ provenance }: { provenance?: AiPanoramaProvenance } = {}) {
   const { moments } = useSharedMoments()
   const {
     deleteMoment,
@@ -97,6 +103,7 @@ function SyncHarness() {
             height: 2000,
             createdAt: new Date('2026-08-26T10:00:00.000Z'),
             annotations,
+            provenance,
           })
         }
       >
@@ -133,6 +140,62 @@ describe('FamilyMomentSyncProvider', () => {
       ready: Promise.resolve(),
       unsubscribe: vi.fn(),
     })
+  })
+
+  it.each(['local', 'family'] as const)('preserves AI disclosure and provenance on the %s share branch', async (delivery) => {
+    const user = userEvent.setup()
+    const store = createMemoryMomentStore()
+    const save = vi.spyOn(store, 'save')
+    if (delivery === 'family') {
+      familyService.getFamilyMomentConnection.mockResolvedValue({
+        circleId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+        userId: '10000000-0000-4000-8000-000000000001',
+      })
+      familyService.publishFamilyMoment.mockResolvedValue({
+        viewer: new Blob(['derivative'], { type: 'image/jpeg' }),
+        viewerWidth: 4096, viewerHeight: 2048,
+      })
+    }
+    render(
+      <SharedMomentsProvider store={store} notifierFactory={createSilentNotifier}>
+        <FamilyMomentSyncProvider><SyncHarness provenance={aiProvenance} /></FamilyMomentSyncProvider>
+      </SharedMomentsProvider>,
+    )
+    await screen.findByText(`Sync: ${delivery === 'family' ? 'connected' : 'local'}`)
+    await user.click(screen.getByRole('button', { name: 'Share moment' }))
+    await screen.findByText('1 shared moments')
+    await expect(store.list()).resolves.toEqual([expect.objectContaining({
+      provenance: aiProvenance, caption: `Family balcony\n\n${AI_PANORAMA_DISCLOSURE}`,
+    })])
+    if (delivery === 'family') {
+      expect(familyService.publishFamilyMoment).toHaveBeenCalledWith(expect.any(Object), expect.objectContaining({
+        provenance: aiProvenance, caption: `Family balcony\n\n${AI_PANORAMA_DISCLOSURE}`,
+      }))
+    }
+    await user.click(screen.getByRole('button', { name: 'Update first points' }))
+    await waitFor(() => expect(save).toHaveBeenCalledTimes(2))
+    expect(save).toHaveBeenLastCalledWith(expect.objectContaining({ provenance: aiProvenance }))
+  })
+
+  it('retains local AI provenance and cached voice when caption-only backend metadata refreshes', async () => {
+    const store = createMemoryMomentStore([{ ...syncedOwnedMoment, provenance: aiProvenance, annotations }])
+    familyService.getFamilyMomentConnection.mockResolvedValue({
+      circleId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+      userId: '10000000-0000-4000-8000-000000000001',
+    })
+    familyService.fetchFamilyMoments.mockResolvedValue([{
+      ...syncedOwnedMoment, caption: 'Updated room',
+      annotations: annotations.map(({ audioBlob: _audioBlob, ...annotation }) => annotation),
+    }])
+    render(
+      <SharedMomentsProvider store={store} notifierFactory={createSilentNotifier}>
+        <FamilyMomentSyncProvider><SyncHarness /></FamilyMomentSyncProvider>
+      </SharedMomentsProvider>,
+    )
+    await waitFor(async () => expect((await store.list())[0].caption).toBe(`Updated room\n\n${AI_PANORAMA_DISCLOSURE}`))
+    const [restored] = await store.list()
+    expect(restored.provenance).toEqual(aiProvenance)
+    expect(restored.annotations?.[1].audioBlob).toBe(voiceBlob)
   })
 
   it('falls back to the local memory path when no family backend is configured', async () => {

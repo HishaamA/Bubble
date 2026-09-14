@@ -4,6 +4,19 @@
 
 <h1 align="center">Bubble</h1>
 
+**Phone-only 360 capture:** the default guided camera now uses the same shared
+panorama compositor on Android and iOS. No computer, model download, or paid API
+is needed. Android captures one final JPEG and selects a fresh, sharp frame during
+each steady hold. Keep Capture open during assembly and review the result before
+sharing. Existing originals and saved Moments are preserved. See
+[capture parity and limits](docs/phone-panorama-parity.md).
+
+**Other creation options** keeps the stricter DISK + LightGlue/OpenCV Android
+assembler and the optional AI scene creator available. The latter accepts one
+to four ordinary photos and invents a panorama on your own NVIDIA-equipped
+computer; it is not a phone-only scan. See [advanced Android testing](docs/android-offline-stitching.md)
+and [free local generation setup](services/generation/README.md).
+
 <p align="center">
   <strong>Big days. Little moments. Never missed.</strong>
 </p>
@@ -188,7 +201,7 @@ between 10:00 and 18:30 in the family owner's time zone. Each approved member
 can contribute once during that scheduled window. Manual capture or import is
 available at any time and does not consume the scheduled contribution.
 
-Bubble supports two panorama paths:
+Bubble supports three panorama paths:
 
 1. **Installed-app guided capture.** A native full-screen guide places targets
    in horizontal rings plus the ceiling and floor. A view is taken
@@ -197,14 +210,19 @@ Bubble supports two panorama paths:
 2. **Finished-panorama import.** Web and native builds can accept a compatible
    JPEG captured elsewhere. The browser also provides an interactive preview
    of the guide, but it does not pretend to perform native pose-linked capture.
+3. **AI assembly from source photos.** A configured local worker matches original
+   overlapping JPEGs with DISK + LightGlue, refines alignment, finds graph-cut
+   seams, and blends them into a 4K sphere. The same worker accepts native guide
+   frames with their camera calibration. [Setup and limits](services/stitcher/README.md).
 
 The installed capture plugins use **ARKit** on iOS and **ARCore** on Android.
-They return pose-tagged temporary frames and camera data to a shared TypeScript
-compositor. The compositor projects perspective frames onto a sphere,
-normalizes exposure, feathers overlaps, verifies coverage, and produces an
-exact 2:1 equirectangular derivative. Session frames live only in app-owned
-temporary storage and are removed after cancellation, failure, or successful
-composition.
+They return pose-tagged temporary frames and camera data. When an AI worker is
+configured and ready, it receives source copies for alignment and reconstruction.
+Otherwise a shared TypeScript compositor provides on-device projection, exposure
+normalization and overlap feathering. Both paths produce exact 2:1 derivatives.
+Native frames are retained for retry after quality rejection or a failed save,
+and cleaned after the assembled panorama is saved. Worker source copies are
+temporary; browser-selected originals remain on the user's device.
 
 Imported images are bounded before decoding and sharing:
 
@@ -403,7 +421,7 @@ as a blanket promise.
 
 | Data | Device | Family backend | Offline behavior |
 | --- | --- | --- | --- |
-| 360° source frames/original | temporary or selected local input | never uploaded | removed after composition/cancellation; original stays local |
+| 360° source frames/original | durable Android private capture files or selected local input | Android assembly stays on-device; web/iOS may send copies to the configured stitching worker, not family Storage | Android originals survive save, navigation and process restart until explicitly removed; worker copies expire; selected originals stay local |
 | Shared 360° derivative | local preview/cache | private Storage + Moment row when connected | a disconnected share stays local and is not yet auto-uploaded |
 | Capsule and Journal derivatives | account/family-scoped IndexedDB | queued/retried to private Storage | resumes after reopen, foreground, or reconnect; no transfer continues after OS termination |
 | Face descriptors and match state | IndexedDB only | never uploaded | local scans and corrections remain available on that device |
@@ -962,10 +980,11 @@ See [`docs/testing.md`](./docs/testing.md) for the complete release gates.
 
 The implementation is substantial, but the following distinctions matter:
 
-- **Guided capture quality:** the current pose-based compositor is useful for a
-  prototype, but difficult interiors can still show seams or parallax. Native
-  feature alignment, seam finding, and multiband blending remain production
-  hardening.
+- **Guided capture quality:** the optional local worker now performs learned
+  feature alignment, seam finding and multiband blending. Difficult interiors
+  with translation, blur or moving subjects still need physical-device tuning;
+  a perfect scanned-room result is not guaranteed. Native builds without a
+  configured worker retain the pose-based compositor.
 - **Trusted image verification:** clients create fresh derivatives and backend
   finalizers validate object/path metadata, but a trusted worker does not yet
   decode every image, regenerate thumbnails, or clean every abandoned staged

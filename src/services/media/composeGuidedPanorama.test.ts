@@ -1,6 +1,7 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import {
   calculateAdaptiveSeamMix,
+  composeGuidedPanorama,
   calculateRobustFrameLuma,
   createCameraBasis,
   directionToEquirectangular,
@@ -12,6 +13,50 @@ import {
 } from './composeGuidedPanorama'
 
 describe('guided panorama geometry', () => {
+  it('stops a cancelled assembly before decoding or allocating canvases', async () => {
+    const controller = new AbortController()
+    controller.abort()
+    await expect(composeGuidedPanorama({ frames: [], targetCount: 34, capturedCount: 0 }, undefined, 2048, controller.signal))
+      .rejects.toMatchObject({ name: 'AbortError' })
+  })
+
+  it('cancels a pending image decode and releases its source', async () => {
+    const controller = new AbortController()
+    const decodedImages: PendingImage[] = []
+    class PendingImage {
+      src = ''
+      decoding = ''
+      constructor() { decodedImages.push(this) }
+      decode() { return new Promise<void>(() => {}) }
+    }
+    const getContext = vi.spyOn(HTMLCanvasElement.prototype, 'getContext')
+      .mockImplementation(
+        ((contextId: string) => contextId === '2d'
+          ? {} as CanvasRenderingContext2D
+          : null) as HTMLCanvasElement['getContext'],
+      )
+    const removeListener = vi.spyOn(controller.signal, 'removeEventListener')
+    vi.stubGlobal('Image', PendingImage)
+    try {
+      const frames = Array.from({ length: 8 }, (_, index) => ({
+        uri: `file:///local/frame-${index}.jpg`, width: 16, height: 16,
+        yawDegrees: index * 45, pitchDegrees: 0,
+      }))
+      const assembly = composeGuidedPanorama({ frames, targetCount: 8, capturedCount: 8 },
+        undefined, 1024, controller.signal)
+      expect(decodedImages).toHaveLength(1)
+      expect(decodedImages[0].src).not.toBe('')
+      controller.abort()
+      await expect(assembly).rejects.toMatchObject({ name: 'AbortError' })
+      expect(decodedImages[0].src).toBe('')
+      expect(removeListener).toHaveBeenCalledWith('abort', expect.any(Function))
+    } finally {
+      getContext.mockRestore()
+      removeListener.mockRestore()
+      vi.unstubAllGlobals()
+    }
+  })
+
   it('maps the initial forward direction to the panorama centre', () => {
     expect(directionToEquirectangular([0, 0, 1], 2048, 1024)).toEqual({
       x: 1024,

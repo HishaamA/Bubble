@@ -19,6 +19,7 @@ import type {
 import { PeopleTimeline } from './people'
 import { ALL_PHOTOS_PERSON_ID } from './people/types'
 import { TimelinePhotoPreviewScope } from './people/TimelinePhotoImage'
+import { PhoneGalleryPanel, type PhoneGalleryConnection } from './PhoneGalleryPanel'
 import './JournalPage.css'
 
 const journalSections = [
@@ -52,6 +53,7 @@ type JournalLocationState = {
 }
 
 type JournalPageProps = {
+  galleryConnection?: PhoneGalleryConnection
   now?: Date
   capsules?: FamilyCapsule[]
   capsuleNow?: Date
@@ -74,6 +76,7 @@ function readJournalSection(value: unknown): JournalSection | null {
 
 /** Combines family photos, revealed Capsules, people, and plans in one journal. */
 export function JournalPage({
+  galleryConnection,
   now,
   capsules = [],
   capsuleNow,
@@ -238,7 +241,9 @@ export function JournalPage({
       >
         {personScrapbookOpen || activeSection === 'people' ? (
           <TimelinePhotoPreviewScope namespace={capsuleCacheNamespace}>
+          {!personScrapbookOpen && galleryConnection ? <PhoneGalleryPanel gallery={galleryConnection} /> : null}
           <PeopleTimeline
+            galleryIndexReady={!galleryConnection || (galleryConnection.ready && !galleryConnection.progress && !galleryConnection.error)}
             photos={photos}
             journalPhotos={journalPhotos}
             cacheNamespace={capsuleCacheNamespace}

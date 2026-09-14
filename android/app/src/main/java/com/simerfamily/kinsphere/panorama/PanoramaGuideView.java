@@ -3,6 +3,7 @@ package com.simerfamily.kinsphere.panorama;
 import android.content.Context;
 import android.graphics.Canvas;
 import android.graphics.Color;
+import android.graphics.DashPathEffect;
 import android.graphics.LinearGradient;
 import android.graphics.Paint;
 import android.graphics.Path;
@@ -19,6 +20,7 @@ import java.util.List;
 final class PanoramaGuideView extends View {
 
     private static final long FLASH_DURATION_MILLIS = 180L;
+    private static final long CAPTURE_ACKNOWLEDGEMENT_MILLIS = 450L;
     private static final float[] IDENTITY_ROTATION = {
         1.0f, 0.0f, 0.0f,
         0.0f, 1.0f, 0.0f,
@@ -29,8 +31,10 @@ final class PanoramaGuideView extends View {
     private final Paint scrimPaint = new Paint();
     private final RectF progressBounds = new RectF();
     private final Path chevronPath = new Path();
+    private final Path checkmarkPath = new Path();
     private final float[] deviceDirection = new float[3];
     private final float density;
+    private final DashPathEffect pausedTargetOutline;
     private List<PanoramaTarget> targets = Collections.emptyList();
     private final float[] cameraRotation = IDENTITY_ROTATION.clone();
     private float[] projection = identityProjection();
@@ -39,6 +43,7 @@ final class PanoramaGuideView extends View {
     private boolean aligned;
     private boolean steady;
     private boolean capturing;
+    private boolean trackingReady;
     private long flashStartedAtMillis;
     private LinearGradient topScrim;
     private LinearGradient bottomScrim;
@@ -52,6 +57,7 @@ final class PanoramaGuideView extends View {
     PanoramaGuideView(Context context, @Nullable AttributeSet attrs) {
         super(context, attrs);
         density = getResources().getDisplayMetrics().density;
+        pausedTargetOutline = new DashPathEffect(new float[] { dp(3.0f), dp(3.0f) }, 0.0f);
         // Software rendering is required for the deliberately soft target and
         // reticle shadows drawn above the hardware-accelerated camera surface.
         setLayerType(View.LAYER_TYPE_SOFTWARE, null);
@@ -73,7 +79,8 @@ final class PanoramaGuideView extends View {
         float holdProgress,
         boolean aligned,
         boolean steady,
-        boolean capturing
+        boolean capturing,
+        boolean trackingReady
     ) {
         System.arraycopy(cameraRotation, 0, this.cameraRotation, 0, 9);
         if (projection != null && projection.length == 16) {
@@ -84,6 +91,7 @@ final class PanoramaGuideView extends View {
         this.aligned = aligned;
         this.steady = steady;
         this.capturing = capturing;
+        this.trackingReady = trackingReady;
         postInvalidateOnAnimation();
     }
 
@@ -118,7 +126,7 @@ final class PanoramaGuideView extends View {
         );
     }
 
-    /** Draws uncaptured targets, off-screen navigation, reticle progress, and flash. */
+    /** Draws uncaptured targets, navigation, hold progress, and capture acknowledgement. */
     @Override
     protected void onDraw(Canvas canvas) {
         super.onDraw(canvas);
@@ -140,7 +148,7 @@ final class PanoramaGuideView extends View {
 
         boolean showCompletionChevron =
             PanoramaCapturePolicy.shouldShowCompletionChevron(remainingTargetCount);
-        if (!activeWasDrawn || showCompletionChevron) {
+        if (trackingReady && (!activeWasDrawn || showCompletionChevron)) {
             drawActiveEdgeMarker(
                 canvas,
                 activeTarget,
@@ -148,7 +156,7 @@ final class PanoramaGuideView extends View {
             );
         }
         drawCenterReticle(canvas);
-        drawCaptureFlash(canvas);
+        drawCaptureFeedback(canvas);
     }
 
     /** Preserves guide readability over bright camera content near system controls. */
@@ -205,7 +213,7 @@ final class PanoramaGuideView extends View {
         paint.setStyle(Paint.Style.FILL);
         paint.setStrokeWidth(dp(1.0f));
         paint.setColor(Color.WHITE);
-        paint.setAlpha(active ? 255 : 178);
+        paint.setAlpha(trackingReady ? (active ? 255 : 178) : (active ? 210 : 135));
         paint.setShadowLayer(dp(active ? 5.0f : 3.0f), 0.0f, dp(1.0f), 0x8A000000);
         canvas.drawCircle(x, y, radius, paint);
         paint.clearShadowLayer();
@@ -214,7 +222,9 @@ final class PanoramaGuideView extends View {
             paint.setStyle(Paint.Style.STROKE);
             paint.setStrokeWidth(dp(1.5f));
             paint.setAlpha(190);
+            paint.setPathEffect(trackingReady ? null : pausedTargetOutline);
             canvas.drawCircle(x, y, dp(15.0f), paint);
+            paint.setPathEffect(null);
         }
         paint.setAlpha(255);
         return true;
@@ -338,20 +348,20 @@ final class PanoramaGuideView extends View {
         float radius = dp(24.0f);
 
         paint.setStyle(Paint.Style.STROKE);
-        paint.setStrokeWidth(dp(aligned ? 2.5f : 1.5f));
+        paint.setStrokeWidth(dp(trackingReady && aligned ? 2.5f : 1.5f));
         paint.setColor(Color.WHITE);
-        paint.setAlpha(capturing ? 255 : (aligned ? 230 : 150));
+        paint.setAlpha(trackingReady ? (capturing ? 255 : (aligned ? 230 : 150)) : 120);
         paint.setShadowLayer(dp(5.0f), 0.0f, dp(1.0f), 0xA0000000);
         canvas.drawCircle(centerX, centerY, radius, paint);
         paint.clearShadowLayer();
 
-        if (aligned) {
+        if (trackingReady && aligned) {
             paint.setStyle(Paint.Style.FILL);
             paint.setAlpha(steady ? 235 : 145);
             canvas.drawCircle(centerX, centerY, dp(3.5f), paint);
         }
 
-        if (holdProgress > 0.0f && !capturing) {
+        if (trackingReady && holdProgress > 0.0f && !capturing) {
             float progressRadius = dp(31.0f);
             progressBounds.set(
                 centerX - progressRadius,
@@ -362,31 +372,53 @@ final class PanoramaGuideView extends View {
             paint.setStyle(Paint.Style.STROKE);
             paint.setStrokeCap(Paint.Cap.ROUND);
             paint.setStrokeWidth(dp(3.0f));
-            paint.setAlpha(255);
+            paint.setAlpha(aligned ? 255 : 125);
             canvas.drawArc(progressBounds, -90.0f, 360.0f * holdProgress, false, paint);
             paint.setStrokeCap(Paint.Cap.BUTT);
         }
         paint.setAlpha(255);
     }
 
-    /** Fades the accepted-frame flash over a fixed monotonic duration. */
-    private void drawCaptureFlash(Canvas canvas) {
+    /** Confirms an accepted frame with a brief flash and a longer centered checkmark. */
+    private void drawCaptureFeedback(Canvas canvas) {
         if (flashStartedAtMillis == 0L) {
             return;
         }
 
         long elapsed = SystemClock.uptimeMillis() - flashStartedAtMillis;
-        if (elapsed >= FLASH_DURATION_MILLIS) {
+        if (elapsed >= CAPTURE_ACKNOWLEDGEMENT_MILLIS) {
             flashStartedAtMillis = 0L;
             return;
         }
 
-        float fraction = 1.0f - elapsed / (float) FLASH_DURATION_MILLIS;
+        if (elapsed < FLASH_DURATION_MILLIS) {
+            float fraction = 1.0f - elapsed / (float) FLASH_DURATION_MILLIS;
+            paint.setStyle(Paint.Style.FILL);
+            paint.setColor(Color.WHITE);
+            paint.setAlpha((int) (115.0f * fraction));
+            canvas.drawRect(0.0f, 0.0f, getWidth(), getHeight(), paint);
+        }
+
+        float centerX = getWidth() * 0.5f;
+        float centerY = getHeight() * 0.5f;
         paint.setStyle(Paint.Style.FILL);
+        paint.setColor(Color.BLACK);
+        paint.setAlpha(220);
+        canvas.drawCircle(centerX, centerY, dp(21.0f), paint);
+
+        checkmarkPath.reset();
+        checkmarkPath.moveTo(centerX - dp(8.0f), centerY);
+        checkmarkPath.lineTo(centerX - dp(2.0f), centerY + dp(6.0f));
+        checkmarkPath.lineTo(centerX + dp(9.0f), centerY - dp(7.0f));
+        paint.setStyle(Paint.Style.STROKE);
+        paint.setStrokeWidth(dp(3.0f));
+        paint.setStrokeCap(Paint.Cap.ROUND);
+        paint.setStrokeJoin(Paint.Join.ROUND);
         paint.setColor(Color.WHITE);
-        paint.setAlpha((int) (115.0f * fraction));
-        canvas.drawRect(0.0f, 0.0f, getWidth(), getHeight(), paint);
         paint.setAlpha(255);
+        canvas.drawPath(checkmarkPath, paint);
+        paint.setStrokeCap(Paint.Cap.BUTT);
+        paint.setStrokeJoin(Paint.Join.MITER);
         postInvalidateOnAnimation();
     }
 

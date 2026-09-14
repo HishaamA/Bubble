@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { Capture360Submission } from '../../features/capture'
 import type { StoredPanoramaAnnotation } from '../../features/memories/shared'
+import { AI_PANORAMA_DISCLOSURE, type AiPanoramaProvenance } from './panoramaProvenance'
 
 const mocks = vi.hoisted(() => {
   const momentQuery = {
@@ -126,6 +127,27 @@ beforeEach(() => {
 })
 
 describe('family moment annotation sync', () => {
+  it('publishes AI disclosure through the existing caption field without a schema migration', async () => {
+    const provenance: AiPanoramaProvenance = {
+      kind: 'ai-reconstruction', provider: 'local', model: 'local-panorama-v1',
+      referenceCount: 2, generatedAt: '2026-09-09T12:00:00.000Z',
+    }
+    mocks.processPanoramaForSharing.mockResolvedValue({
+      viewer: new Blob(['panorama'], { type: 'image/jpeg' }),
+      thumbnail: new Blob(['thumbnail'], { type: 'image/jpeg' }),
+      viewerWidth: 4096, viewerHeight: 2048, thumbnailWidth: 640, thumbnailHeight: 320,
+    })
+    await publishFamilyMoment(connection, {
+      id: momentId, file: new File(['generated'], 'room.jpg', { type: 'image/jpeg' }),
+      caption: `Our room\n\n${AI_PANORAMA_DISCLOSURE}`, provenance,
+      source: 'manual', width: 4096, height: 2048, createdAt: new Date(), annotations: [],
+    })
+    expect(mocks.client.rpc).toHaveBeenCalledWith('finalize_360_moment_with_annotations', expect.objectContaining({
+      p_caption: `Our room\n\n${AI_PANORAMA_DISCLOSURE}`,
+    }))
+    expect(mocks.client.rpc.mock.calls[0][1]).not.toHaveProperty('provenance')
+  })
+
   it('replaces annotations with immutable versioned voice objects and removes stale audio', async () => {
     const voice = new Blob(['new voice'], { type: 'audio/mp4' })
     const stalePath = `${circleId}/voice/${userId}/${momentId}-${voiceId}-00000000000000000000000000000000.m4a`

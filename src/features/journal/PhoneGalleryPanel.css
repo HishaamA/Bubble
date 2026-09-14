@@ -1,0 +1,23 @@
+.phone-gallery {
+  margin: 16px 0 22px;
+  padding: 16px;
+  border: 1px solid color-mix(in srgb, var(--theme-line, #e6b5c4) 50%, transparent);
+  border-radius: 16px;
+  background: var(--theme-surface, #3a102b);
+  color: var(--theme-on-canvas, #fff1d2);
+  font-family: var(--font-body, sans-serif);
+}
+.phone-gallery__heading { display: flex; gap: 12px; align-items: flex-start; }
+.phone-gallery__heading svg { flex: 0 0 24px; width: 24px; height: 24px; fill: none; stroke: currentColor; stroke-width: 1.5; margin-top: 2px; }
+.phone-gallery .phone-gallery__heading h2 { margin: 0; font: 600 15px/1.4 var(--font-body, sans-serif); color: inherit; }
+.phone-gallery__heading p, .phone-gallery__detail, .phone-gallery__status { margin: 5px 0 0; font-size: 12px; line-height: 1.6; color: var(--theme-on-canvas-muted, #e0bec7); }
+.phone-gallery__detail { margin-top: 12px; }
+.phone-gallery__actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
+.phone-gallery__actions button { min-height: 44px; padding: 9px 14px; border: 1px solid transparent; border-radius: 10px; background: var(--theme-action, #e6b5c4); color: var(--theme-action-ink, #301027); font: 600 13px/1.35 var(--font-body, sans-serif); box-shadow: none; }
+.phone-gallery__actions .phone-gallery__quiet { background: transparent; border-color: var(--theme-line, #e6b5c4); color: inherit; }
+.phone-gallery__actions button:active { transform: translateY(1px); opacity: .85; }
+.phone-gallery__actions button:focus-visible { outline: 2px solid var(--theme-paper, #fff1d2); outline-offset: 3px; }
+.phone-gallery__actions button:disabled { opacity: .5; cursor: progress; }
+.phone-gallery__status { margin-top: 10px; }
+.phone-gallery__hint { margin: 12px 0 0; color: var(--theme-on-canvas-muted, #e0bec7); font: 400 11px/1.6 var(--font-body, sans-serif); }
+.phone-gallery--settings { margin: 0; }

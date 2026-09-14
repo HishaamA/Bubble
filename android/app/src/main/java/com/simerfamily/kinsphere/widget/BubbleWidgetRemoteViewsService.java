@@ -130,7 +130,9 @@ public final class BubbleWidgetRemoteViewsService extends RemoteViewsService {
                 context,
                 page,
                 pageThumbnails.get(page.id),
-                options
+                options,
+                position,
+                pages.size()
             );
         }
 

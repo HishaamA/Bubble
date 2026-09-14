@@ -1,6 +1,8 @@
 import { createContext, useContext, useEffect, useRef, useState, type PropsWithChildren } from 'react'
 import type { CapsuleImageSource } from '../../capsules/types'
 import { acquireTimelinePhotoPreview, peekTimelinePhotoPreview } from './timelinePhotoPreviewCache'
+import { GalleryPhotoImage } from '../GalleryPhotoImage'
+import { isGalleryPhotoSource } from '../gallery/phoneGallery'
 
 const PreviewNamespace = createContext<string | null>(null)
 
@@ -117,6 +119,8 @@ export function TimelinePhotoImage({
   height,
   lazy = false,
 }: TimelinePhotoImageProps) {
+  if (isGalleryPhotoSource(source)) return <GalleryPhotoImage key={source} source={source} alt={alt}
+    width={width} height={height} lazy={lazy} className="people-timeline__photo-image" />
   return typeof source === 'string'
     ? <StringPhoto source={source} alt={alt} width={width} height={height} lazy={lazy} />
     : <BlobPhoto source={source} alt={alt} width={width} height={height} lazy={lazy} />

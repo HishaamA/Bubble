@@ -53,6 +53,8 @@ export type StoredFaceDetection = {
   detectorScore: number
   descriptorScore: number
   quality: number
+  /** Actual minimum face-box edge in processed-image pixels; absent on legacy scans. */
+  minFacePixels?: number
 }
 
 export type StoredPhotoFaceScan = {
@@ -88,6 +90,7 @@ export type PeopleTimelinePhoto = {
   capsuleId: string
   memoryId: string
   canScanFaces: boolean
+  origin?: 'device-gallery'
   legacyKeys?: string[]
 }
 
@@ -111,6 +114,8 @@ export type FaceSuggestion = {
 }
 
 export type PeopleTimelineProps = {
+  /** False until the connected device index is verified; an empty loading list is not a revocation. */
+  galleryIndexReady?: boolean
   photos: readonly UnlockedCapsulePhoto[]
   journalPhotos?: readonly JournalPhoto[]
   cacheNamespace: string

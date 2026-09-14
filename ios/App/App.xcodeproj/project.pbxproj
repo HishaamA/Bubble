@@ -7,6 +7,8 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		A40000000000000000000001 /* AppIconPlugin.swift in Sources */ = {isa = PBXBuildFile; fileRef = A40000000000000000000011 /* AppIconPlugin.swift */; };
+		A40000000000000000000002 /* PhoneGalleryPlugin.swift in Sources */ = {isa = PBXBuildFile; fileRef = A40000000000000000000012 /* PhoneGalleryPlugin.swift */; };
 		2FAD9763203C412B000D30F8 /* config.xml in Resources */ = {isa = PBXBuildFile; fileRef = 2FAD9762203C412B000D30F8 /* config.xml */; };
 		4D22ABE92AF431CB00220026 /* CapApp-SPM in Frameworks */ = {isa = PBXBuildFile; productRef = 4D22ABE82AF431CB00220026 /* CapApp-SPM */; };
 		50379B232058CBB4000EE86E /* capacitor.config.json in Resources */ = {isa = PBXBuildFile; fileRef = 50379B222058CBB4000EE86E /* capacitor.config.json */; };
@@ -64,6 +66,8 @@
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
+		A40000000000000000000011 /* AppIconPlugin.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppIconPlugin.swift; sourceTree = "<group>"; };
+		A40000000000000000000012 /* PhoneGalleryPlugin.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhoneGalleryPlugin.swift; sourceTree = "<group>"; };
 		2FAD9762203C412B000D30F8 /* config.xml */ = {isa = PBXFileReference; lastKnownFileType = text.xml; path = config.xml; sourceTree = "<group>"; };
 		50379B222058CBB4000EE86E /* capacitor.config.json */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text.json; path = capacitor.config.json; sourceTree = "<group>"; };
 		504EC3041FED79650016851F /* App.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = App.app; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -166,6 +170,8 @@
 				A10000000000000000000017 /* CardboardPanoramaViewController.swift */,
 				A10000000000000000000014 /* CapsuleRecapPlugin.swift */,
 				A10000000000000000000015 /* NativeWebAuthPlugin.swift */,
+				A40000000000000000000011 /* AppIconPlugin.swift */,
+				A40000000000000000000012 /* PhoneGalleryPlugin.swift */,
 				A10000000000000000000011 /* PanoramaCapturePlugin.swift */,
 				A10000000000000000000012 /* PanoramaCaptureViewController.swift */,
 				B30000000000000000000031 /* Widget */,
@@ -327,6 +333,8 @@
 				A10000000000000000000007 /* CardboardPanoramaViewController.swift in Sources */,
 				A10000000000000000000004 /* CapsuleRecapPlugin.swift in Sources */,
 				A10000000000000000000005 /* NativeWebAuthPlugin.swift in Sources */,
+				A40000000000000000000001 /* AppIconPlugin.swift in Sources */,
+				A40000000000000000000002 /* PhoneGalleryPlugin.swift in Sources */,
 				A10000000000000000000001 /* PanoramaCapturePlugin.swift in Sources */,
 				A10000000000000000000002 /* PanoramaCaptureViewController.swift in Sources */,
 			);
@@ -485,6 +493,7 @@
 			baseConfigurationReference = 958DCC722DB07C7200EA8C5F /* debug.xcconfig */;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_ALTERNATE_APPICON_NAMES = "AppIconForest AppIconMidnight";
 				CODE_SIGN_ENTITLEMENTS = App/App.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
@@ -516,6 +525,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_ALTERNATE_APPICON_NAMES = "AppIconForest AppIconMidnight";
 				CODE_SIGN_ENTITLEMENTS = App/App.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;

@@ -34,6 +34,33 @@ final class PanoramaPose {
 
     /** Validates a 4x4 camera transform and derives orientation, position, and quaternion. */
     static PanoramaPose fromCameraTransform(float[] transform) {
+        requireFiniteTransform(transform);
+        float[] copy = Arrays.copyOf(transform, transform.length);
+        return fromValidatedTransform(copy);
+    }
+
+    /** Removes same-frame AR world corrections using the current shared anchor pose. */
+    static PanoramaPose relativeToAnchor(float[] cameraToWorld, float[] anchorToWorld) {
+        requireFiniteTransform(cameraToWorld);
+        requireFiniteTransform(anchorToWorld);
+        float[] relative = new float[16];
+        // Rigid inverse: R_anchor^T * R_camera and R_anchor^T * (t_camera - t_anchor).
+        // Both transforms must come from the same ARCore update, not a cached inverse.
+        for (int row = 0; row < 3; row++) {
+            for (int column = 0; column < 3; column++) {
+                for (int k = 0; k < 3; k++) {
+                    relative[column * 4 + row] += anchorToWorld[row * 4 + k] * cameraToWorld[column * 4 + k];
+                }
+            }
+            for (int k = 0; k < 3; k++) {
+                relative[12 + row] += anchorToWorld[row * 4 + k] * (cameraToWorld[12 + k] - anchorToWorld[12 + k]);
+            }
+        }
+        relative[15] = 1;
+        return fromCameraTransform(relative);
+    }
+
+    private static void requireFiniteTransform(float[] transform) {
         if (transform == null || transform.length != 16) {
             throw new IllegalArgumentException("Camera transform must contain 16 finite values.");
         }
@@ -42,7 +69,9 @@ final class PanoramaPose {
                 throw new IllegalArgumentException("Camera transform must contain 16 finite values.");
             }
         }
-        float[] copy = Arrays.copyOf(transform, transform.length);
+    }
+
+    private static PanoramaPose fromValidatedTransform(float[] copy) {
         float[] rotation = new float[] {
             copy[0], copy[4], copy[8],
             copy[1], copy[5], copy[9],

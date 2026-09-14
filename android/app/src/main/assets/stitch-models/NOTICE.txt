@@ -1,0 +1,24 @@
+Offline panorama matching models
+
+DISK: Learning local features with policy gradient.
+Copyright 2020 Michal Tyszkiewicz, Pascal Fua, Eduard Trulls.
+Official depth checkpoint: https://github.com/cvlab-epfl/disk
+License: Apache-2.0 (LICENSE-DISK.txt).
+
+LightGlue: Local Feature Matching at Light Speed.
+Copyright 2023 ETH Zurich.
+Authors: Philipp Lindenberger, Paul-Edouard Sarlin, Marc Pollefeys.
+Official DISK-LightGlue checkpoint: https://github.com/cvg/LightGlue
+Source revision: eb42fee2d71449efb0aa5c10549752b5d75384d8.
+License: Apache-2.0 (LICENSE-LightGlue.txt).
+
+Models modified for Bubble by conversion to portable float32 ONNX, opset 17.
+Learned weights are unchanged. Export uses fixed-capacity masked feature
+selection and algebraically equivalent attention reshapes. LightGlue retains
+all nine trained layers and uses exact upstream token-confidence early stopping
+(depth confidence 0.95) in standard ONNX If branches. Point pruning is disabled.
+Input dimensions and matcher feature counts are dynamic. Invalid detector
+padding is removed before matching. No network access is used at inference.
+
+Model fingerprints and CPU parity measurements are in model-report.json.
+Reproduction: scripts/export-mobile-stitch-models.py at the project root.

@@ -4,6 +4,7 @@ import type {
   StoredPanoramaAnnotation,
   StoredPanoramaMoment,
 } from './types'
+import { copyAiPanoramaProvenance, withAiPanoramaDisclosure } from '../../../services/media/panoramaProvenance'
 
 const DATABASE_PREFIX = 'kinsphere-family-moments'
 const DATABASE_VERSION = 1
@@ -26,8 +27,11 @@ function cloneAnnotation(
 
 /** Returns an isolated moment record, including nested annotation copies. */
 function cloneMoment(moment: StoredPanoramaMoment): StoredPanoramaMoment {
+  const provenance = copyAiPanoramaProvenance(moment.provenance)
   return {
     ...moment,
+    ...(provenance ? { provenance } : {}),
+    caption: withAiPanoramaDisclosure(moment.caption, provenance),
     annotations: (moment.annotations ?? []).map(cloneAnnotation),
   }
 }
@@ -77,13 +81,16 @@ export function preparePanoramaMoment(
   input: SavePanoramaMomentInput,
 ): StoredPanoramaMoment {
   const label = input.label?.trim() || 'Family panorama'
+  const provenance = copyAiPanoramaProvenance(input.provenance)
 
   return {
     id: input.id?.trim() || createMomentId(),
     blob: input.blob,
     label,
-    caption: input.caption?.trim() ?? '',
+    caption: withAiPanoramaDisclosure(input.caption?.trim(), provenance),
+    ...(provenance ? { provenance } : {}),
     createdAt: normalizeCreatedAt(input.createdAt),
+    ...(input.captureSessionId?.trim() ? { captureSessionId: input.captureSessionId.trim() } : {}),
     width: positiveDimension(input.width, 'width'),
     height: positiveDimension(input.height, 'height'),
     source: input.source,

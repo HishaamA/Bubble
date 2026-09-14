@@ -15,6 +15,17 @@ yarn-debug.log*
 yarn-error.log*
 pnpm-debug.log*
 
+# Local AI stitching runtime, model weights, and private job files
+.venv/
+.models/
+.stitch-jobs/
+.native-deps/
+android/app/.cxx/
+android/app/.externalNativeBuild/
+__pycache__/
+*.pyc
+.pytest_cache/
+
 # Local environment and credentials
 .env
 .env.*
