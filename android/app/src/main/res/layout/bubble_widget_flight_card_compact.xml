@@ -1,0 +1,75 @@
+<?xml version="1.0" encoding="utf-8"?>
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/bubble_widget_root"
+    android:layout_width="match_parent" android:layout_height="match_parent">
+    <FrameLayout android:id="@+id/bubble_widget_card"
+        android:layout_width="match_parent" android:layout_height="match_parent"
+        android:background="@drawable/bubble_widget_card_plum" android:clipToOutline="true">
+        <LinearLayout android:id="@+id/bubble_widget_text_content"
+            android:layout_width="match_parent" android:layout_height="match_parent"
+            android:orientation="vertical" android:padding="12dp">
+            <TextView android:id="@+id/bubble_widget_width_driver"
+                android:layout_width="wrap_content" android:layout_height="0dp"
+                android:importantForAccessibility="no" android:visibility="invisible" />
+            <LinearLayout android:id="@+id/bubble_widget_flight_heading"
+                android:layout_width="match_parent" android:layout_height="wrap_content"
+                android:orientation="horizontal" android:gravity="center_vertical">
+                <TextView android:id="@+id/bubble_widget_eyebrow"
+                    android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1"
+                    android:fontFamily="sans-serif-medium" android:textSize="10sp"
+                    android:letterSpacing="0.04" android:includeFontPadding="false"
+                    android:maxLines="1" android:ellipsize="end" />
+                <TextView android:id="@+id/bubble_widget_flight_status" android:layout_width="wrap_content" android:layout_height="wrap_content"
+                    android:layout_marginStart="8dp" android:maxWidth="96dp" android:fontFamily="sans-serif-medium"
+                    android:textSize="9sp" android:includeFontPadding="false" android:maxLines="1" android:ellipsize="end"
+                    android:paddingStart="8dp" android:paddingEnd="8dp" android:paddingTop="4dp" android:paddingBottom="4dp"
+                    android:background="@drawable/bubble_widget_flight_status_plum" />
+            </LinearLayout>
+            <LinearLayout android:id="@+id/bubble_widget_flight_route" android:layout_width="match_parent" android:layout_height="wrap_content"
+                android:layout_marginTop="9dp" android:gravity="center_vertical" android:orientation="horizontal">
+                <TextView android:id="@+id/bubble_widget_flight_origin" android:layout_width="wrap_content" android:layout_height="wrap_content"
+                    android:fontFamily="serif" android:textSize="34sp" android:includeFontPadding="false" android:maxLines="1" />
+                <FrameLayout android:layout_width="0dp" android:layout_height="24dp" android:layout_weight="1"
+                    android:layout_marginStart="14dp" android:layout_marginEnd="14dp">
+                    <ImageView android:id="@+id/bubble_widget_flight_route_line" android:layout_width="match_parent" android:layout_height="1dp"
+                        android:layout_gravity="center" android:src="@drawable/bubble_widget_flight_route_line" android:importantForAccessibility="no" />
+                    <ImageView android:id="@+id/bubble_widget_flight_icon" android:layout_width="16dp" android:layout_height="16dp"
+                        android:layout_gravity="center" android:rotation="90" android:src="@drawable/bubble_widget_flight" android:importantForAccessibility="no" />
+                </FrameLayout>
+                <TextView android:id="@+id/bubble_widget_flight_destination" android:layout_width="wrap_content" android:layout_height="wrap_content"
+                    android:fontFamily="serif" android:textSize="34sp" android:includeFontPadding="false" android:maxLines="1" />
+            </LinearLayout>
+            <TextView android:id="@+id/bubble_widget_title"
+                android:layout_width="match_parent" android:layout_height="wrap_content"
+                android:layout_marginTop="4dp" android:fontFamily="serif"
+                android:textSize="22sp" android:includeFontPadding="false"
+                android:maxLines="1" android:ellipsize="end" android:visibility="gone" />
+            <LinearLayout android:id="@+id/bubble_widget_flight_details" android:layout_width="match_parent" android:layout_height="0dp"
+                android:layout_weight="1" android:layout_marginTop="6dp" android:orientation="horizontal" android:gravity="center_vertical">
+                <LinearLayout android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1"
+                    android:orientation="vertical" android:layout_marginEnd="10dp">
+                    <TextView android:id="@+id/bubble_widget_time" android:layout_width="match_parent" android:layout_height="wrap_content"
+                        android:fontFamily="sans-serif-medium" android:textSize="11sp" android:includeFontPadding="false"
+                        android:maxLines="2" android:ellipsize="end" />
+                    <TextView android:id="@+id/bubble_widget_subtitle" android:layout_width="match_parent" android:layout_height="wrap_content"
+                        android:layout_marginTop="4dp" android:fontFamily="sans-serif" android:textSize="9sp" android:includeFontPadding="false"
+                        android:maxLines="1" android:ellipsize="end" android:visibility="gone" />
+                    <TextView android:id="@+id/bubble_widget_flight_estimate" android:layout_width="match_parent" android:layout_height="wrap_content"
+                        android:layout_marginTop="6dp" android:fontFamily="sans-serif" android:textSize="9sp" android:includeFontPadding="false"
+                        android:maxLines="2" android:ellipsize="end" android:visibility="gone" />
+                </LinearLayout>
+                <ImageView android:id="@+id/bubble_widget_flight_map" android:layout_width="0dp" android:layout_height="match_parent"
+                    android:layout_weight="1.45" android:scaleType="fitCenter" android:visibility="gone" />
+            </LinearLayout>
+        </LinearLayout>
+        <!-- Shared renderer targets stay present; flights do not use these decorations. -->
+        <TextView android:id="@+id/bubble_widget_doodle"
+            android:layout_width="0dp" android:layout_height="0dp" android:visibility="gone" />
+        <TextView android:id="@+id/bubble_widget_badge"
+            android:layout_width="0dp" android:layout_height="0dp" android:visibility="gone" />
+        <TextView android:id="@+id/bubble_widget_orbit"
+            android:layout_width="0dp" android:layout_height="0dp" android:visibility="gone" />
+        <TextView android:id="@+id/bubble_widget_page_position"
+            android:layout_width="0dp" android:layout_height="0dp" android:visibility="gone" />
+    </FrameLayout>
+</FrameLayout>

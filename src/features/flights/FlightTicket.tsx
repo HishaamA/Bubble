@@ -17,6 +17,7 @@ import {
   qualityLabel,
 } from './flightPresentation'
 import { BellIcon, CloseIcon, FlightRouteMark, PlaneIcon, RefreshIcon } from './FlightArtwork'
+import { flightLandPath } from './flightMapGeography'
 
 type FlightTicketProps = {
   flight: TrackedFlight
@@ -89,10 +90,10 @@ function FlightRouteMap({ flight, now }: { flight: TrackedFlight; now: Date }) {
         aria-labelledby={`flight-map-title-${flight.id}`}
       >
         <title id={`flight-map-title-${flight.id}`}>
-          {flight.flightNumber} route from {snapshot.origin.code} to {snapshot.destination.code}
+          {flight.flightNumber} route from {snapshot.origin.code} to {snapshot.destination.code} (schematic map)
         </title>
         <g className="flight-map__land" aria-hidden="true">
-          <path d="M8 55 22 41l22-8 23 7 13 17-8 15-20 4-12 22-18 5-9-20Zm73 68 16 8 9 24-5 18-10-19-12-12Zm61-82 22-17 29-5 18 9 28-4 24 10 17 18-7 12-25-5-16 12-20-6-15 15-17-7-10-21-22 2Zm89 65 15-14 24 5 19 24-12 26-18 8-13-19-19-7Zm68-43 19-14 24 3 10 13-9 10-26-1Z" />
+          <path d={flightLandPath} />
         </g>
         {shifts.map((shift) => (
           <path

@@ -1,9 +1,10 @@
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
+import { useState } from 'react'
 import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { UnlockedCapsulePhoto } from '../capsuleJournalArchive'
-import type { JournalPhoto } from '../journalPhotoTypes'
+import type { JournalPhoto, JournalPhotoImportResult } from '../journalPhotoTypes'
 import { clearMemberSessionCaches } from '../../../app/memberSessionCache'
 import { photoVisibilityKey, setContentHidden } from '../contentVisibility'
 import { scanReferencePortrait, scanTimelineFaces } from './faceRecognition'
@@ -1138,6 +1139,148 @@ describe('PeopleTimeline', () => {
       .toContainEqual(expect.objectContaining({ photoKey: 'photo:routed', personId: 'maya' })))
     expect((storedStates.get(namespace) as PeopleTimelineState).faceScans['photo:routed']).toBeDefined()
     expect(original.image).toBe('/photos/routed.jpg')
+  })
+
+  it('adds a partial batch directly to the open scrapbook without any recognized face', async () => {
+    const namespace = 'targeted-scrapbook'
+    storedStates.set(namespace, stateWith({ people: [{ id: 'maya', name: 'Maya', createdAt: '2026-01-01' }] }))
+    const user = userEvent.setup()
+    function UploadHarness() {
+      const [photos, setPhotos] = useState<JournalPhoto[]>([])
+      return <MemoryRouter><PeopleTimeline photos={[]} journalPhotos={photos}
+        cacheNamespace={namespace} initialPersonId="maya" personAlbumOpen
+        onUploadPhotos={async () => {
+          setPhotos([journalPhoto('saved-only')])
+          return { added: 1, failed: 1, photoIds: ['saved-only'] }
+        }} /></MemoryRouter>
+    }
+    render(<UploadHarness />)
+    await user.click(await screen.findByRole('button', { name: 'Add photos to Maya’s scrapbook' }))
+    await user.upload(screen.getByTestId('family-photo-input'), [
+      new File(['yes'], 'yes.jpg', { type: 'image/jpeg' }),
+      new File(['bad'], 'bad.heic', { type: 'image/heic' }),
+    ])
+    expect(await screen.findByRole('img', { name: 'Direct family upload' })).toBeInTheDocument()
+    expect(await screen.findByText('1 photo added to Maya’s scrapbook · 1 could not be added.')).toHaveAttribute('data-error', 'true')
+    const saved = storedStates.get(namespace) as PeopleTimelineState
+    expect(saved.assignments).toEqual([expect.objectContaining({ photoKey: 'journal-photo:saved-only', personId: 'maya', source: 'manual' })])
+    expect(saved.assignments[0]?.faceId).toBeUndefined()
+    expect(saved.faceProfiles).toEqual({})
+    expect(scanReferencePortrait).not.toHaveBeenCalled()
+  })
+
+  it('distinguishes actual scrapbook uploads in the person manager from private face samples', async () => {
+    const namespace = 'targeted-manager'
+    storedStates.set(namespace, stateWith({ people: [{ id: 'maya', name: 'Maya', createdAt: '2026-01-01' }] }))
+    const user = userEvent.setup()
+    const upload = vi.fn(async () => ({ added: 0, failed: 0, photoIds: ['already-saved'] }))
+    render(<MemoryRouter><PeopleTimeline photos={[]} journalPhotos={[journalPhoto('already-saved')]}
+      cacheNamespace={namespace} initialPersonId="maya" onUploadPhotos={upload} /></MemoryRouter>)
+    await user.click(await screen.findByRole('button', { name: 'Rename or remove Maya' }))
+    const manager = screen.getByRole('region', { name: 'Manage Maya' })
+    expect(within(manager).getByText(/Face samples are scanned, never stored or added/)).toBeInTheDocument()
+    await user.click(within(manager).getByRole('button', { name: 'Add scrapbook photos' }))
+    await user.upload(screen.getByTestId('family-photo-input'), new File(['photo'], 'existing.jpg', { type: 'image/jpeg' }))
+    expect(await within(manager).findByText('1 photo added to Maya’s scrapbook.')).toBeInTheDocument()
+    expect(upload).toHaveBeenCalledOnce()
+    expect(scanReferencePortrait).not.toHaveBeenCalled()
+    expect(timelineChip('All photos')).toHaveAttribute('aria-pressed', 'false')
+    expect((storedStates.get(namespace) as PeopleTimelineState).assignments).toHaveLength(1)
+  })
+
+  it('shows a targeted upload failure and releases the picker without adding phantom membership', async () => {
+    const namespace = 'targeted-failure'
+    storedStates.set(namespace, stateWith({ people: [{ id: 'maya', name: 'Maya', createdAt: '2026-01-01' }] }))
+    const user = userEvent.setup()
+    render(<MemoryRouter><PeopleTimeline photos={[]} cacheNamespace={namespace} initialPersonId="maya" personAlbumOpen
+      onUploadPhotos={vi.fn().mockRejectedValue(new Error('storage full'))} /></MemoryRouter>)
+    const button = await screen.findByRole('button', { name: 'Add photos to Maya’s scrapbook' })
+    await user.click(button)
+    await user.upload(screen.getByTestId('family-photo-input'), new File(['photo'], 'photo.jpg', { type: 'image/jpeg' }))
+    expect(await screen.findByText(/Those photos could not be saved/)).toHaveAttribute('data-error', 'true')
+    expect(button).toBeEnabled()
+    expect((storedStates.get(namespace) as PeopleTimelineState).assignments).toEqual([])
+  })
+
+  it('finishes a captured scrapbook upload after leaving the tab and displays it on return', async () => {
+    const namespace = 'targeted-tab-return'
+    storedStates.set(namespace, stateWith({ people: [{ id: 'maya', name: 'Maya', createdAt: '2026-01-01' }] }))
+    const pending = deferred<JournalPhotoImportResult>()
+    const user = userEvent.setup()
+    const first = render(<MemoryRouter><PeopleTimeline photos={[]} cacheNamespace={namespace} initialPersonId="maya" personAlbumOpen
+      onUploadPhotos={() => pending.promise} /></MemoryRouter>)
+    await user.click(await screen.findByRole('button', { name: 'Add photos to Maya’s scrapbook' }))
+    await user.upload(screen.getByTestId('family-photo-input'), new File(['photo'], 'photo.jpg', { type: 'image/jpeg' }))
+    first.unmount()
+    await act(async () => { pending.resolve({ added: 1, failed: 0, photoIds: ['finished-later'] }) })
+    await waitFor(() => expect((storedStates.get(namespace) as PeopleTimelineState).assignments)
+      .toContainEqual(expect.objectContaining({ photoKey: 'journal-photo:finished-later', personId: 'maya' })))
+    render(<MemoryRouter><PeopleTimeline photos={[]} journalPhotos={[journalPhoto('finished-later')]}
+      cacheNamespace={namespace} initialPersonId="maya" personAlbumOpen /></MemoryRouter>)
+    expect(await screen.findByRole('img', { name: 'Direct family upload' })).toBeInTheDocument()
+  })
+
+  it('does not finish membership after its private account session was cleared', async () => {
+    const namespace = 'targeted-disposed-account'
+    storedStates.set(namespace, stateWith({ people: [{ id: 'maya', name: 'Maya', createdAt: '2026-01-01' }] }))
+    const pending = deferred<JournalPhotoImportResult>()
+    const user = userEvent.setup()
+    const first = render(<MemoryRouter><PeopleTimeline photos={[]} cacheNamespace={namespace} initialPersonId="maya" personAlbumOpen
+      onUploadPhotos={() => pending.promise} /></MemoryRouter>)
+    await user.click(await screen.findByRole('button', { name: 'Add photos to Maya’s scrapbook' }))
+    await user.upload(screen.getByTestId('family-photo-input'), new File(['photo'], 'photo.jpg', { type: 'image/jpeg' }))
+    first.unmount()
+    clearMemberSessionCaches(namespace)
+    await act(async () => { pending.resolve({ added: 1, failed: 0, photoIds: ['old-private'] }) })
+    expect((storedStates.get(namespace) as PeopleTimelineState).assignments).toEqual([])
+  })
+
+  it('rejects an OS picker result that returns after the account changes', async () => {
+    const one = 'picker-account-one'
+    const two = 'picker-account-two'
+    for (const namespace of [one, two]) storedStates.set(namespace, stateWith({ people: [{ id: 'maya', name: 'Maya', createdAt: '2026-01-01' }] }))
+    const user = userEvent.setup()
+    const upload = vi.fn(async () => ({ added: 1, failed: 0, photoIds: ['private'] }))
+    const view = (namespace: string) => <MemoryRouter><PeopleTimeline photos={[]} cacheNamespace={namespace}
+      initialPersonId="maya" personAlbumOpen onUploadPhotos={upload} /></MemoryRouter>
+    const { rerender } = render(view(one))
+    await user.click(await screen.findByRole('button', { name: 'Add photos to Maya’s scrapbook' }))
+    rerender(view(two))
+    await screen.findByRole('button', { name: 'Add photos to Maya’s scrapbook' })
+    await user.upload(screen.getByTestId('family-photo-input'), new File(['private'], 'private.jpg', { type: 'image/jpeg' }))
+    expect(upload).not.toHaveBeenCalled()
+    expect((storedStates.get(two) as PeopleTimelineState).assignments).toEqual([])
+  })
+
+  it('keeps the person captured by the picker if another scrapbook opens while importing', async () => {
+    const namespace = 'targeted-other-person'
+    storedStates.set(namespace, stateWith({ people: [
+      { id: 'maya', name: 'Maya', createdAt: '2026-01-01' },
+      { id: 'leena', name: 'Leena', createdAt: '2026-01-01' },
+    ] }))
+    const pending = deferred<JournalPhotoImportResult>()
+    const user = userEvent.setup()
+    const view = (personId: string) => <MemoryRouter><PeopleTimeline photos={[]} cacheNamespace={namespace}
+      initialPersonId={personId} personAlbumOpen onUploadPhotos={() => pending.promise} /></MemoryRouter>
+    const { rerender } = render(view('maya'))
+    await user.click(await screen.findByRole('button', { name: 'Add photos to Maya’s scrapbook' }))
+    await user.upload(screen.getByTestId('family-photo-input'), new File(['photo'], 'photo.jpg', { type: 'image/jpeg' }))
+    rerender(view('leena'))
+    await act(async () => { pending.resolve({ added: 1, failed: 0, photoIds: ['maya-photo'] }) })
+    await waitFor(() => expect((storedStates.get(namespace) as PeopleTimelineState).assignments)
+      .toEqual([expect.objectContaining({ photoKey: 'journal-photo:maya-photo', personId: 'maya' })]))
+  })
+
+  it('reports saved but unlinked photos honestly when an upload adapter omits its successful IDs', async () => {
+    const namespace = 'targeted-missing-ids'
+    storedStates.set(namespace, stateWith({ people: [{ id: 'maya', name: 'Maya', createdAt: '2026-01-01' }] }))
+    const user = userEvent.setup()
+    render(<MemoryRouter><PeopleTimeline photos={[]} cacheNamespace={namespace} initialPersonId="maya" personAlbumOpen
+      onUploadPhotos={async () => ({ added: 1, failed: 0 })} /></MemoryRouter>)
+    await user.click(await screen.findByRole('button', { name: 'Add photos to Maya’s scrapbook' }))
+    await user.upload(screen.getByTestId('family-photo-input'), new File(['photo'], 'photo.jpg', { type: 'image/jpeg' }))
+    expect(await screen.findByText(/The photos are saved in All photos, but could not be linked/)).toHaveAttribute('data-error', 'true')
+    expect((storedStates.get(namespace) as PeopleTimelineState).assignments).toEqual([])
   })
 
   it('accepts a batch of ordinary photos and opens All photos', async () => {

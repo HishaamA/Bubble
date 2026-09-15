@@ -42,4 +42,6 @@ export type JournalPhotoImportProgress = {
 export type JournalPhotoImportResult = {
   added: number
   failed: number
+  /** Exact successfully saved/reused library rows; lets a person picker label only its own batch. */
+  photoIds?: readonly string[]
 }

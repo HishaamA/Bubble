@@ -73,6 +73,7 @@ function Harness({ store }: { store: JournalPhotoStore }) {
         {result ? `${result.added}/${result.failed}` : 'none'}|
         pending:{library.photos.filter(({ syncStatus }) => syncStatus === 'pending').length}
       </output>
+      <output aria-label="Imported photo IDs">{result?.photoIds?.join(',')}</output>
     </>
   )
 }
@@ -129,6 +130,8 @@ describe('useJournalPhotoLibrary', () => {
     ])
     const saved = await store.list()
     expect(saved).toHaveLength(2)
+    expect(screen.getByLabelText('Imported photo IDs').textContent?.split(',').sort())
+      .toEqual(saved.map(({ id }) => id).sort())
     expect(saved.map(({ caption }) => caption).sort()).toEqual([
       'new photo',
       'old photo',

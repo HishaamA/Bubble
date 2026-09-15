@@ -6,6 +6,11 @@ function link(route: string) {
 }
 
 describe('parseBubbleWidgetDeepLink', () => {
+  it('opens the actual Flights tab from a flight widget', () => {
+    expect(parseBubbleWidgetDeepLink(link('/journal?section=flights'))).toEqual({
+      to: '/journal', state: { journalContext: { section: 'flights' } },
+    })
+  })
   it('maps the plan widget into Journal state under HashRouter', () => {
     expect(parseBubbleWidgetDeepLink(link('/journal?section=plans'))).toEqual({
       to: '/journal',

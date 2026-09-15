@@ -1,3 +1,38 @@
+.person-scrapbook__photo-import {
+  display: grid;
+  justify-items: start;
+  gap: 0.6rem;
+  margin-block: 0 1.5rem;
+}
+
+.person-scrapbook .person-scrapbook__photo-import > button,
+.journal-page .person-scrapbook .person-scrapbook__photo-import > button {
+  min-height: 44px;
+  padding: 0.65rem 1rem;
+  border: 1px solid var(--scrapbook-sun);
+  border-radius: 12px;
+  background: var(--scrapbook-paper);
+  color: var(--scrapbook-paper-ink);
+  font: inherit;
+  font-weight: 650;
+}
+
+.person-scrapbook .person-scrapbook__photo-import > button:disabled {
+  cursor: wait;
+  opacity: 0.7;
+}
+
+.person-scrapbook .person-scrapbook__photo-import > button:not(:disabled):active {
+  transform: translateY(1px);
+}
+
+.person-scrapbook__photo-import > p {
+  margin: 0;
+  color: var(--scrapbook-muted);
+  font-size: 0.88rem;
+  line-height: 1.5;
+}
+
 .person-scrapbook {
   --scrapbook-paper: var(--journal-paper, var(--paper, #fbf2d9));
   --scrapbook-paper-deep: var(--journal-paper-deep, var(--paper-deep, #f3dfb8));

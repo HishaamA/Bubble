@@ -47,9 +47,6 @@ final class BubbleWidgetRenderer {
         BubbleWidgetSnapshot source = entry.snapshot;
         BubbleWidgetSnapshot display = source == null
             ? BubbleWidgetSnapshot.fallback("plum") : source.forDisplay(now);
-        if (source != null && !source.isCurrentLocalDay(now)) {
-            display = BubbleWidgetSnapshot.fallback(source.theme);
-        }
         List<BubbleWidgetSnapshot.Page> pages = BubbleWidgetPhotoRotation.pagesForDisplay(display, now);
         int count = Math.max(1, pages.size());
         int selected = Math.floorMod(position, count);
@@ -80,8 +77,9 @@ final class BubbleWidgetRenderer {
         views.setTextColor(R.id.bubble_widget_navigation_position, Palette.forTheme(card.theme).muted);
         int width = widgetWidth(context, options);
         views.setViewVisibility(R.id.bubble_widget_navigation_position, width >= 150 ? View.VISIBLE : View.GONE);
+        views.setViewVisibility(R.id.bubble_widget_navigation_brand, width >= 220 ? View.VISIBLE : View.GONE);
         float density = context.getResources().getDisplayMetrics().density;
-        int side = Math.round((width < 150 ? 4 : 12) * density);
+        int side = Math.round((width < 150 ? 4 : 16) * density);
         views.setViewPadding(R.id.bubble_widget_navigation, side, 0, side, Math.round(8 * density));
         return views;
     }
@@ -163,8 +161,7 @@ final class BubbleWidgetRenderer {
         int position, int pageCount
     ) {
         boolean mediaLayout = thumbnail != null;
-        int layout = mediaLayout ? R.layout.bubble_widget_media : R.layout.bubble_widget_text;
-        RemoteViews views = new RemoteViews(context.getPackageName(), layout);
+        boolean flightCard = "flight".equals(display.kind);
         boolean landscape = context.getResources().getConfiguration().orientation
             == Configuration.ORIENTATION_LANDSCAPE;
         int width = widgetWidth(context, options);
@@ -172,6 +169,11 @@ final class BubbleWidgetRenderer {
             landscape ? AppWidgetManager.OPTION_APPWIDGET_MIN_HEIGHT
                 : AppWidgetManager.OPTION_APPWIDGET_MAX_HEIGHT,
             AppWidgetManager.OPTION_APPWIDGET_MIN_HEIGHT, DEFAULT_HEIGHT_DP);
+        boolean flightTicketCompact = flightCard && height < 280;
+        int layout = mediaLayout ? R.layout.bubble_widget_media : flightCard
+            ? R.layout.bubble_widget_flight_card
+            : R.layout.bubble_widget_text;
+        RemoteViews views = new RemoteViews(context.getPackageName(), layout);
 
         // Also support launcher hosts that measure RemoteViews with AT_MOST.
         // Size every background/content layer, not only the outer wrapper.
@@ -196,10 +198,12 @@ final class BubbleWidgetRenderer {
         boolean compact = width < 150 || height < 150;
         boolean browsing = pageCount > 1;
         boolean shortCard = browsing && height < 150;
+        float fontScale = context.getResources().getConfiguration().fontScale;
+        boolean largeText = fontScale > 1.2f;
         int content = mediaLayout ? R.id.bubble_widget_media_scrim : R.id.bubble_widget_text_content;
-        int padding = Math.round((compact ? 8 : 16) * density);
+        int padding = Math.round((compact ? 8 : width < 220 ? 14 : 18) * density);
         views.setViewPadding(content, padding, padding, padding,
-            browsing ? Math.round((compact ? 56 : 72) * density) : padding);
+            browsing ? Math.round((compact ? 56 : 64) * density) : padding);
 
         Palette palette = Palette.forTheme(display.theme);
         views.setInt(R.id.bubble_widget_card, "setBackgroundResource", palette.cardBackground);
@@ -221,23 +225,34 @@ final class BubbleWidgetRenderer {
             time = separator >= 0 ? subtitle.substring(0, separator) : subtitle;
             subtitle = separator >= 0 ? subtitle.substring(separator + 3) : null;
         }
+        if (!mediaLayout && flightCard && subtitle != null) {
+            int separator = subtitle.indexOf(" · ");
+            time = separator >= 0 ? subtitle.substring(0, separator) : subtitle;
+            subtitle = separator >= 0 ? subtitle.substring(separator + 3) : null;
+        }
+        if (flightCard && time == null) time = display.badge;
         views.setTextViewText(R.id.bubble_widget_subtitle, subtitle == null ? "" : subtitle);
 
         float titleSize = mediaLayout
-            ? (compact ? 12f : 15f)
-            : (tiny ? 13f : compact ? 14f : 24f);
+            ? (compact ? 12f : height < 200 ? 16f : height < 260 ? 20f : 24f)
+            : (tiny ? 13f : compact ? 16f : flightCard ? height < 260 ? 18f : 24f
+                : width < 220 ? 23f : height < 260 ? 26f : 32f);
+        titleSize = flightTextSize(context, titleSize, height < 250);
         views.setTextViewTextSize(R.id.bubble_widget_title, TypedValue.COMPLEX_UNIT_SP, titleSize);
         views.setInt(R.id.bubble_widget_title, "setMaxLines",
-            compact || (browsing && height < 210) ? 1 : browsing || mediaLayout ? 2 : 3);
+            compact || (browsing && (height < 210 || (largeText && height < 260))) ? 1
+                : browsing || mediaLayout || height < 230 ? 2 : 3);
         views.setInt(
             R.id.bubble_widget_subtitle,
             "setMaxLines",
-            mediaLayout || compact ? 1 : 2
+            mediaLayout || compact || width < 220 || (browsing && height < 260) || (largeText && height < 230)
+                || (flightCard && browsing && height < 280) ? 1 : 2
         );
 
         boolean showSubtitle = subtitle != null
             && !(browsing && compact)
             && !(browsing && height < 190)
+            && !(largeText && browsing && height < 240)
             && (!mediaLayout || height >= 150);
         views.setViewVisibility(
             R.id.bubble_widget_subtitle,
@@ -251,7 +266,7 @@ final class BubbleWidgetRenderer {
             View.GONE);
 
         if (mediaLayout) {
-            int captionPadding = Math.round((compact ? 4 : 8) * density);
+            int captionPadding = Math.round((compact ? 4 : width < 220 ? 8 : 12) * density);
             views.setViewPadding(R.id.bubble_widget_photo_caption,
                 captionPadding, captionPadding, captionPadding, captionPadding);
             views.setImageViewBitmap(R.id.bubble_widget_thumbnail, thumbnail);
@@ -260,7 +275,16 @@ final class BubbleWidgetRenderer {
             views.setInt(R.id.bubble_widget_play, "setBackgroundResource", palette.playBackground);
             views.setTextColor(R.id.bubble_widget_play, palette.playInk);
         } else {
+            if (!flightCard) {
+                views.setViewVisibility(R.id.bubble_widget_text_heading, shortCard ? View.GONE : View.VISIBLE);
+                views.setTextViewTextSize(R.id.bubble_widget_time, TypedValue.COMPLEX_UNIT_SP,
+                    flightTextSize(context, height < 200 ? 12f : 14f, height < 250));
+                views.setTextViewTextSize(R.id.bubble_widget_subtitle, TypedValue.COMPLEX_UNIT_SP,
+                    flightTextSize(context, 12f, height < 250));
+            }
             views.setTextColor(R.id.bubble_widget_time, palette.eyebrow);
+            if (flightCard) views.setTextViewTextSize(R.id.bubble_widget_time, TypedValue.COMPLEX_UNIT_SP,
+                height < 260 ? 11f : 13f);
             views.setTextViewText(R.id.bubble_widget_time, time == null ? "" : time);
             views.setViewVisibility(R.id.bubble_widget_time,
                 time != null && !shortCard ? View.VISIBLE : View.GONE);
@@ -268,20 +292,113 @@ final class BubbleWidgetRenderer {
             views.setInt(R.id.bubble_widget_doodle, "setBackgroundResource", palette.playBackground);
             views.setTextViewText(R.id.bubble_widget_doodle, doodleFor(display.kind));
             views.setViewVisibility(R.id.bubble_widget_doodle, View.GONE);
+            views.setViewVisibility(R.id.bubble_widget_flight_icon,
+                flightCard && !shortCard ? View.VISIBLE : View.GONE);
+            // Keep old snapshot geometry compatible, but maps belong inside the app.
+            views.setViewVisibility(R.id.bubble_widget_flight_map, View.GONE);
+            views.setViewVisibility(R.id.bubble_widget_flight_estimate, View.GONE);
             views.setTextColor(R.id.bubble_widget_badge, palette.badgeInk);
             views.setInt(R.id.bubble_widget_badge, "setBackgroundResource", palette.badgeBackground);
             views.setTextViewText(R.id.bubble_widget_badge, display.badge == null ? "" : display.badge);
             views.setViewVisibility(R.id.bubble_widget_badge,
-                !compact && !browsing && display.badge != null ? View.VISIBLE : View.GONE);
+                !flightCard && !compact && !browsing && height >= (largeText ? 250 : 210)
+                    && display.badge != null ? View.VISIBLE : View.GONE);
             views.setInt(R.id.bubble_widget_orbit, "setBackgroundResource", palette.orbitBackground);
             views.setViewVisibility(R.id.bubble_widget_orbit, View.GONE);
         }
         String description = display.subtitle == null
             ? display.title
             : display.title + ". " + display.subtitle;
+        if (flightCard && !mediaLayout) {
+            styleFlightTicket(context, views, display, palette, width, height,
+                shortCard, flightTicketCompact);
+            description = display.eyebrow + ". " + description
+                + (display.badge == null ? "" : ". " + display.badge);
+        }
         views.setContentDescription(R.id.bubble_widget_root,
             browsing ? description + ". Card " + (position + 1) + " of " + pageCount : description);
         return views;
+    }
+
+    /** Ticket typography sits on the existing dark palette, not a paper-colored overlay. */
+    private static void styleFlightTicket(Context context, RemoteViews views, CardData display,
+        Palette palette, int width, int height, boolean shortCard, boolean compactTicket) {
+        String[] codes = flightRouteCodes(display.title);
+        boolean showCodes = codes != null && width >= 150 && height >= 150;
+        views.setViewVisibility(R.id.bubble_widget_flight_route, showCodes ? View.VISIBLE : View.GONE);
+        views.setViewVisibility(R.id.bubble_widget_title, showCodes ? View.GONE : View.VISIBLE);
+        views.setViewVisibility(R.id.bubble_widget_flight_heading, shortCard ? View.GONE : View.VISIBLE);
+        views.setTextViewText(R.id.bubble_widget_eyebrow, display.eyebrow);
+        views.setTextColor(R.id.bubble_widget_eyebrow, palette.muted);
+        views.setTextViewTextSize(R.id.bubble_widget_eyebrow, TypedValue.COMPLEX_UNIT_SP,
+            flightTextSize(context, 10f, compactTicket));
+        views.setTextViewText(R.id.bubble_widget_flight_status, display.badge == null ? "" : display.badge);
+        views.setTextColor(R.id.bubble_widget_flight_status, palette.ink);
+        views.setTextViewTextSize(R.id.bubble_widget_flight_status, TypedValue.COMPLEX_UNIT_SP,
+            flightTextSize(context, 9f, compactTicket));
+        views.setInt(R.id.bubble_widget_flight_status, "setBackgroundResource",
+            "forest".equals(display.theme) ? R.drawable.bubble_widget_flight_status_forest
+                : "midnight".equals(display.theme) ? R.drawable.bubble_widget_flight_status_midnight
+                : R.drawable.bubble_widget_flight_status_plum);
+        views.setViewVisibility(R.id.bubble_widget_flight_status,
+            width >= 240 && display.badge != null && !shortCard ? View.VISIBLE : View.GONE);
+        if (showCodes) {
+            float scale = Math.max(1f, context.getResources().getConfiguration().fontScale);
+            float size = flightTextSize(context, height < 200 ? 24f : width < 220 ? 28f : height < 260 ? 36f : 44f, compactTicket);
+            // Four-character airports and large system fonts must keep both columns visible.
+            float maximum = (width - (width < 220 ? 28 : 36) - 44)
+                / ((codes[0].length() + codes[1].length()) * 0.78f * scale);
+            size = Math.max(10f, Math.min(size, maximum));
+            for (int id : new int[]{R.id.bubble_widget_flight_origin, R.id.bubble_widget_flight_destination}) {
+                views.setTextColor(id, palette.ink);
+                views.setTextViewTextSize(id, TypedValue.COMPLEX_UNIT_SP, size);
+            }
+            views.setTextViewText(R.id.bubble_widget_flight_origin, codes[0]);
+            views.setTextViewText(R.id.bubble_widget_flight_destination, codes[1]);
+        }
+        boolean cancelled = display.flightMap != null && "cancelled".equals(display.flightMap.mode);
+        boolean showLabels = showCodes && height >= 210
+            && !(height < 260 && context.getResources().getConfiguration().fontScale > 1.2f);
+        views.setViewVisibility(R.id.bubble_widget_flight_from_label, showLabels ? View.VISIBLE : View.GONE);
+        views.setViewVisibility(R.id.bubble_widget_flight_to_label, showLabels ? View.VISIBLE : View.GONE);
+        views.setTextColor(R.id.bubble_widget_flight_from_label, palette.muted);
+        views.setTextColor(R.id.bubble_widget_flight_to_label, palette.muted);
+        views.setViewVisibility(R.id.bubble_widget_flight_perforation, shortCard ? View.GONE : View.VISIBLE);
+        views.setViewVisibility(R.id.bubble_widget_flight_icon,
+            showCodes && !cancelled ? View.VISIBLE : View.GONE);
+        views.setTextViewTextSize(R.id.bubble_widget_time, TypedValue.COMPLEX_UNIT_SP,
+            flightTextSize(context, height < 200 ? 11f : height < 260 ? 13f : 16f, compactTicket));
+        views.setTextColor(R.id.bubble_widget_time, palette.ink);
+        views.setInt(R.id.bubble_widget_time, "setMaxLines", 1);
+        views.setTextViewTextSize(R.id.bubble_widget_subtitle, TypedValue.COMPLEX_UNIT_SP,
+            flightTextSize(context, height < 260 ? 9f : 10f, compactTicket));
+        views.setInt(R.id.bubble_widget_subtitle, "setMaxLines", 1);
+        views.setViewVisibility(R.id.bubble_widget_subtitle,
+            height >= 210 && display.subtitle != null ? View.VISIBLE : View.GONE);
+    }
+
+    static String[] flightRouteCodes(String title) {
+        if (title == null) return null;
+        java.util.regex.Matcher match = java.util.regex.Pattern
+            .compile("^([A-Z0-9]{3,4})\\s*→\\s*([A-Z0-9]{3,4})$").matcher(title.trim());
+        return match.matches() ? new String[]{match.group(1), match.group(2)} : null;
+    }
+
+    static String compactMapLabel(String mode) {
+        switch (mode) {
+            case "live": return "Last reported";
+            case "arrived": return "Arrived at destination";
+            case "cancelled": return "Cancelled · route only";
+            case "unavailable": return "Location unavailable";
+            case "scheduled": return "Scheduled route";
+            default: return "Estimated route";
+        }
+    }
+
+    private static float flightTextSize(Context context, float size, boolean compact) {
+        // Constrain only the finite widget surface; complete text remains in accessibility.
+        float scale = context.getResources().getConfiguration().fontScale;
+        return size / Math.max(1f, scale / (compact ? 1.3f : 1.5f));
     }
 
     private static int widgetWidth(Context context, Bundle options) {
@@ -377,6 +494,8 @@ final class BubbleWidgetRenderer {
         final String title;
         final String subtitle;
         final String badge;
+        final BubbleWidgetSnapshot.Flight flight;
+        final BubbleWidgetFlightMap flightMap;
 
         private CardData(
             String kind,
@@ -384,7 +503,9 @@ final class BubbleWidgetRenderer {
             String eyebrow,
             String title,
             String subtitle,
-            String badge
+            String badge,
+            BubbleWidgetSnapshot.Flight flight,
+            BubbleWidgetFlightMap flightMap
         ) {
             this.kind = kind;
             this.theme = theme;
@@ -392,19 +513,21 @@ final class BubbleWidgetRenderer {
             this.title = title;
             this.subtitle = subtitle;
             this.badge = badge;
+            this.flight = flight;
+            this.flightMap = flightMap;
         }
 
         static CardData from(BubbleWidgetSnapshot snapshot) {
             return new CardData(
                 snapshot.kind, snapshot.theme, snapshot.eyebrow,
-                snapshot.title, snapshot.subtitle, snapshot.badge
+                snapshot.title, snapshot.subtitle, snapshot.badge, snapshot.flight, snapshot.flightMap
             );
         }
 
         static CardData from(BubbleWidgetSnapshot.Page page) {
             return new CardData(
                 page.kind, page.theme, page.eyebrow,
-                page.title, page.subtitle, page.badge
+                page.title, page.subtitle, page.badge, page.flight, page.flightMap
             );
         }
     }

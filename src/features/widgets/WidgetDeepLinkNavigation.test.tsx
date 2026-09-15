@@ -47,6 +47,17 @@ function NavigationProbe({ storageSubject = 'member:family' }: {
 }
 
 describe('widget navigation lifecycle', () => {
+  it('opens Flights once and allows normal tab navigation afterward', async () => {
+    const user = userEvent.setup()
+    nativeApp.getLaunchUrl.mockResolvedValue({ url: widgetLink('/journal?section=flights') })
+    render(<MemoryRouter><NavigationProbe /></MemoryRouter>)
+    await waitFor(() => expect(screen.getByLabelText('Page context')).toHaveTextContent('"section":"flights"'))
+    await user.click(screen.getByRole('button', { name: 'Capsule tab' }))
+    expect(screen.getByLabelText('Current page')).toHaveTextContent(/^\/capsule$/)
+    await user.click(screen.getByRole('button', { name: 'Moments tab' }))
+    expect(screen.getByLabelText('Current page')).toHaveTextContent(/^\/$/)
+    expect(nativeApp.getLaunchUrl).toHaveBeenCalledTimes(1)
+  })
   beforeEach(() => {
     vi.clearAllMocks()
     nativeApp.onOpen = null

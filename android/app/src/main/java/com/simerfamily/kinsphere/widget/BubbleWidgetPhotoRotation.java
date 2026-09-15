@@ -21,11 +21,12 @@ final class BubbleWidgetPhotoRotation {
     ) {
         if (
             snapshot == null ||
-            !"full".equals(snapshot.privacy) ||
-            !snapshot.isCurrentLocalDay(nowMillis)
+            !"full".equals(snapshot.privacy)
         ) {
             return Collections.emptyList();
         }
+        snapshot = snapshot.forDisplay(nowMillis);
+        if (!"full".equals(snapshot.privacy)) return Collections.emptyList();
         List<Integer> photoSlots = photoSlots(snapshot);
         if (photoSlots.size() < 2) {
             return snapshot.pages;

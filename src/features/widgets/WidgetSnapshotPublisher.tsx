@@ -3,6 +3,7 @@ import { useAppTheme } from '../../theme/AppTheme'
 import { isNativeBubbleWidgetAvailable } from './nativeBubbleWidget'
 import { useNativeWidgetPublication } from './useNativeWidgetPublication'
 import { useWidgetFamilyData } from './useWidgetFamilyData'
+import { useWidgetFlights } from './useWidgetFlights'
 import { projectWidgetEvents } from './widgetEventProjection'
 import { selectBubbleWidgetTimeline } from './widgetSnapshot'
 import {
@@ -19,10 +20,13 @@ import {
 export function WidgetSnapshotPublisher({ storageSubject }: { storageSubject: string }) {
   const { theme } = useAppTheme()
   const data = useWidgetFamilyData(storageSubject)
+  const flights = useWidgetFlights(storageSubject)
   const selection = useMemo(() => selectBubbleWidgetTimeline({
-    now: data.refreshedAt,
+    // Flights can update after the photo/plan requests; do not reuse their old clock.
+    now: new Date(),
     theme,
     privacy: readWidgetPrivacy(storageSubject),
+    trackedFlights: flights,
     events: projectWidgetEvents({
       remoteEvents: data.events,
       localEvents: readWidgetLocalEvents(storageSubject),
@@ -34,7 +38,7 @@ export function WidgetSnapshotPublisher({ storageSubject }: { storageSubject: st
     authorizedJournalPhotos: data.journalPhotos,
     viewedRecapIds: readViewedWidgetRecaps(storageSubject),
     contributionPromptsEnabled: true,
-  }), [data, storageSubject, theme])
+  }), [data, flights, storageSubject, theme])
 
   useNativeWidgetPublication(storageSubject, selection)
 

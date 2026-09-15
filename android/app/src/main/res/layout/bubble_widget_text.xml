@@ -11,6 +11,12 @@
         android:background="@drawable/bubble_widget_card_plum"
         android:clipToOutline="true">
 
+        <ImageView android:id="@+id/bubble_widget_signature"
+            android:layout_width="160dp" android:layout_height="160dp"
+            android:layout_gravity="top|end" android:layout_marginEnd="-35dp"
+            android:layout_marginTop="-25dp" android:alpha="0.04"
+            android:src="@drawable/bubble_widget_signature" android:importantForAccessibility="no" />
+
         <TextView
             android:id="@+id/bubble_widget_orbit"
             android:layout_width="48dp"
@@ -40,6 +46,7 @@
                 android:visibility="invisible" />
 
             <LinearLayout
+                android:id="@+id/bubble_widget_text_heading"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:gravity="center_vertical"
@@ -61,6 +68,15 @@
                     android:textSize="10sp"
                     android:visibility="gone" />
 
+                <ImageView
+                    android:id="@+id/bubble_widget_flight_icon"
+                    android:layout_width="16dp"
+                    android:layout_height="16dp"
+                    android:layout_marginEnd="8dp"
+                    android:src="@drawable/bubble_widget_flight"
+                    android:importantForAccessibility="no"
+                    android:visibility="gone" />
+
                 <TextView
                     android:id="@+id/bubble_widget_eyebrow"
                     android:layout_width="0dp"
@@ -69,7 +85,7 @@
                     android:ellipsize="end"
                     android:fontFamily="sans-serif-medium"
                     android:includeFontPadding="false"
-                    android:letterSpacing="0.08"
+                    android:letterSpacing="0.16"
                     android:maxLines="1"
                     android:text="THIS WEEK"
                     android:textAllCaps="true"
@@ -77,18 +93,26 @@
                     android:textSize="10sp" />
             </LinearLayout>
 
+            <LinearLayout
+                android:id="@+id/bubble_widget_text_body"
+                android:layout_width="match_parent"
+                android:layout_height="0dp"
+                android:layout_weight="1"
+                android:gravity="center_vertical"
+                android:orientation="vertical">
+
             <TextView
                 android:id="@+id/bubble_widget_title"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:layout_marginTop="16dp"
+                android:layout_marginTop="10dp"
                 android:ellipsize="end"
-                android:fontFamily="sans-serif-medium"
+                android:fontFamily="serif"
                 android:includeFontPadding="false"
                 android:maxLines="3"
                 android:text="A little moment?"
                 android:textColor="#FFF1D2"
-                android:textSize="24sp" />
+                android:textSize="28sp" />
 
             <TextView
                 android:id="@+id/bubble_widget_time"
@@ -117,6 +141,8 @@
                 android:textColor="#E0BEC7"
                 android:textSize="12sp" />
 
+            </LinearLayout>
+
             <TextView
                 android:id="@+id/bubble_widget_badge"
                 android:layout_width="wrap_content"
@@ -128,6 +154,7 @@
                 android:includeFontPadding="false"
                 android:maxLines="1"
                 android:minHeight="21dp"
+                android:layout_marginTop="8dp"
                 android:paddingStart="8dp"
                 android:paddingTop="3dp"
                 android:paddingEnd="8dp"
@@ -136,6 +163,27 @@
                 android:textColor="#351127"
                 android:textSize="8sp"
                 android:textStyle="bold"
+                android:visibility="gone" />
+
+            <ImageView
+                android:id="@+id/bubble_widget_flight_map"
+                android:layout_width="match_parent"
+                android:layout_height="0dp"
+                android:layout_weight="1"
+                android:layout_marginTop="8dp"
+                android:scaleType="fitCenter"
+                android:visibility="gone" />
+
+            <TextView
+                android:id="@+id/bubble_widget_flight_estimate"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="6dp"
+                android:fontFamily="sans-serif"
+                android:includeFontPadding="false"
+                android:ellipsize="end"
+                android:maxLines="1"
+                android:textSize="10sp"
                 android:visibility="gone" />
         </LinearLayout>
 

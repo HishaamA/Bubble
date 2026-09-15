@@ -16,8 +16,16 @@ import android.content.res.Configuration;
 import android.graphics.Bitmap;
 import android.graphics.Canvas;
 import android.graphics.Color;
+import android.graphics.LinearGradient;
+import android.graphics.Paint;
+import android.graphics.Path;
 import android.graphics.Rect;
+import android.graphics.Shader;
+import android.graphics.drawable.GradientDrawable;
+import android.os.Build;
 import android.os.Bundle;
+import android.os.Handler;
+import android.os.Looper;
 import android.view.View;
 import android.view.ViewGroup;
 import android.widget.AdapterViewAnimator;
@@ -26,7 +34,6 @@ import android.widget.RemoteViews;
 import android.widget.TextView;
 import androidx.test.core.app.ApplicationProvider;
 import androidx.test.ext.junit.runners.AndroidJUnit4;
-import androidx.test.platform.app.InstrumentationRegistry;
 import com.simerfamily.kinsphere.MainActivity;
 import com.simerfamily.kinsphere.R;
 import java.io.File;
@@ -39,7 +46,13 @@ import java.util.LinkedHashSet;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.FutureTask;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
+import org.junit.Rule;
 import org.junit.Test;
+import org.junit.rules.Timeout;
 import org.junit.runner.RunWith;
 
 /**
@@ -54,9 +67,18 @@ import org.junit.runner.RunWith;
  */
 @RunWith(AndroidJUnit4.class)
 public final class BubbleWidgetLayoutInstrumentedTest {
+    @Rule public final Timeout testTimeout = Timeout.seconds(120);
+
     private static final int TEST_WIDGET_ID = 900001;
     private static final int[][] HOST_SIZES_DP = {
         {110, 110}, {320, 220}, {160, 360}, {420, 140}
+    };
+    private static final String[] THEMES = {"plum", "forest", "midnight"};
+    private static final int[][] PREVIEW_SIZES_DP = {
+        {320, 220}, {320, 300}, {180, 180}
+    };
+    private static final String[] PREVIEW_KINDS = {
+        "task", "capture", "empty", "memory", "unlock", "flight"
     };
 
     @Test
@@ -67,6 +89,112 @@ public final class BubbleWidgetLayoutInstrumentedTest {
     @Test
     public void taskWidgetsFillTheWholeHostAtEverySupportedShape() {
         assertSizes(false, Configuration.ORIENTATION_PORTRAIT);
+    }
+
+    @Test
+    public void flightTicketsKeepFullSizeAndNavigationWithoutAMap() {
+        for (int[] size : new int[][] {{110, 110}, {320, 220}, {320, 240}, {160, 360}, {420, 140}, {320, 300}}) {
+            Fixture fixture = new Fixture(Configuration.ORIENTATION_PORTRAIT);
+            try {
+                onMain(() -> {
+                    fixture.create(size[0], size[1]);
+                    long now = fixture.now;
+                    fixture.pages[1] = new BubbleWidgetSnapshot.Page("flight-qa", "flights", "flight",
+                        "midnight", "EK202 · FAMILY", "JFK → DXB",
+                        "ETA 7:30 PM GST · Estimated · Updated 7:05 PM", "En route",
+                        "/journal?section=flights", "full", now + 6 * 3_600_000L,
+                        new BubbleWidgetSnapshot.Flight(now - 2 * 3_600_000L,
+                            now + 6 * 3_600_000L, now - 60_000L), true,
+                        new BubbleWidgetFlightMap(new BubbleWidgetFlightMap.Point(106.222,51.115),
+                            new BubbleWidgetFlightMap.Point(235.364,65.833), new BubbleWidgetFlightMap.Point(170.793,27.869),
+                            new BubbleWidgetFlightMap.Point(138.5075,43.3174), -6.8,
+                            "estimated",25.0,true));
+                    fixture.snapshot = deck(now, "full", fixture.pages);
+                    fixture.render(1);
+                });
+                settle(fixture);
+                onMain(() -> {
+                    fixture.assertFillsHost();
+                    fixture.assertFooter();
+                    assertEquals("JFK → DXB", fixture.text(R.id.bubble_widget_title));
+                    if (size[0] >= 150 && size[1] >= 150) {
+                        assertEquals("JFK",fixture.text(R.id.bubble_widget_flight_origin));
+                        assertEquals("DXB",fixture.text(R.id.bubble_widget_flight_destination));
+                    }
+                    assertNull(fixture.host.findViewById(R.id.bubble_widget_thumbnail));
+                    assertEquals(View.GONE,
+                        fixture.view(R.id.bubble_widget_flight_map).getVisibility());
+                    assertEquals(View.GONE, fixture.view(R.id.bubble_widget_flight_estimate).getVisibility());
+                    assertNull(((ImageView)fixture.view(R.id.bubble_widget_flight_map)).getDrawable());
+                    if (size[0] == 320 && size[1] == 300) fixture.savePreview("flight-midnight-320x300.png");
+                    if (size[0] == 320 && size[1] == 220) fixture.savePreview("flight-midnight-320x220.png");
+                });
+            } finally { onMain(fixture::close); }
+        }
+    }
+
+    @Test
+    public void flightTicketsKeepTheDarkPaletteAndExportEveryThemeAtCompactAndTallSizes() {
+        for (String theme : new String[]{"plum","forest","midnight"}) {
+            for (int height : new int[]{220,240,300}) {
+                assertFlightTicket(theme,height,1f,false);
+            }
+        }
+    }
+
+    @Test
+    public void flightTicketsHandleLongNamesStatusesAndLargeSystemFonts() {
+        for (String theme : new String[]{"plum","forest","midnight"}) {
+            for (int height : new int[]{220,300}) assertFlightTicket(theme,height,1.4f,true);
+        }
+    }
+
+    private static void assertFlightTicket(String theme, int height, float fontScale, boolean longText) {
+        Fixture fixture = new Fixture(Configuration.ORIENTATION_PORTRAIT,fontScale);
+        try {
+            onMain(() -> {
+                fixture.create(320,height);
+                long now = fixture.now;
+                fixture.pages[1] = new BubbleWidgetSnapshot.Page("flight-ticket-qa","flights","flight",theme,
+                    longText ? "EK202 · Christopher Alexander Richardson" : "EK202 · Mum",
+                    "JFK → DXB","ETA 7:30 PM GST · Sep 15 · Updated 7:05 PM",
+                    longText ? "Departure delayed · awaiting update" : "En route",
+                    "/journal?section=flights","full",0,
+                    new BubbleWidgetSnapshot.Flight(now-2*3_600_000L,now+6*3_600_000L,now-60_000L),true,
+                    new BubbleWidgetFlightMap(new BubbleWidgetFlightMap.Point(106.222,51.115),
+                        new BubbleWidgetFlightMap.Point(235.364,65.833),new BubbleWidgetFlightMap.Point(170.793,27.869),
+                        new BubbleWidgetFlightMap.Point(138.5075,43.3174),-6.8,"estimated",25.0,false));
+                fixture.snapshot=deck(now,"full",fixture.pages);
+                fixture.render(1);
+            });
+            settle(fixture);
+            onMain(() -> {
+                fixture.assertFillsHost(); fixture.assertFooter();
+                assertEquals("JFK",fixture.text(R.id.bubble_widget_flight_origin));
+                assertEquals("DXB",fixture.text(R.id.bubble_widget_flight_destination));
+                assertEquals("ETA 7:30 PM GST",fixture.text(R.id.bubble_widget_time));
+                assertEquals(View.GONE,fixture.view(R.id.bubble_widget_flight_map).getVisibility());
+                assertNull(((ImageView)fixture.view(R.id.bubble_widget_flight_map)).getDrawable());
+                assertEquals(View.VISIBLE,fixture.view(R.id.bubble_widget_flight_status).getVisibility());
+                assertFalse("Header and status pill must have separate space",Rect.intersects(
+                    fixture.bounds(fixture.view(R.id.bubble_widget_eyebrow)),
+                    fixture.bounds(fixture.view(R.id.bubble_widget_flight_status))));
+                assertTrue("Airport columns must not crowd the central route",
+                    fixture.bounds(fixture.view(R.id.bubble_widget_flight_origin)).right
+                    < fixture.bounds(fixture.view(R.id.bubble_widget_flight_destination)).left);
+                Rect footer=fixture.bounds(fixture.view(R.id.bubble_widget_navigation));
+                for (int id : new int[]{R.id.bubble_widget_flight_route,R.id.bubble_widget_time,
+                    R.id.bubble_widget_subtitle}) {
+                    Rect content=fixture.bounds(fixture.view(id));
+                    assertTrue("Flight content must end above the controls: "+id,content.bottom<=footer.top);
+                }
+                fixture.assertDarkGradient(theme);
+                fixture.assertVisibleContentAboveFooter();
+                GradientDrawable pill=(GradientDrawable)fixture.view(R.id.bubble_widget_flight_status).getBackground();
+                assertTrue("Status pill should remain a soft tint, not cream paper",Color.alpha(pill.getColor().getDefaultColor())<=40);
+                fixture.savePreview("flight-ticket-"+theme+"-320x"+height+(longText?"-large-text":"")+".png");
+            });
+        } finally { onMain(fixture::close); }
     }
 
     @Test
@@ -283,6 +411,284 @@ public final class BubbleWidgetLayoutInstrumentedTest {
         }
     }
 
+    @Test
+    public void savesRepresentativeCardsAtEveryThemeAndSize() {
+        for (String theme : THEMES) {
+            for (int[] size : PREVIEW_SIZES_DP) {
+                for (String kind : PREVIEW_KINDS) {
+                    assertRepresentativeCard(theme, kind, size[0], size[1], 1f);
+                }
+            }
+        }
+    }
+
+    @Test
+    public void representativeCardsKeepVisibleTextInsideContentAtLargeSystemFonts() {
+        for (String theme : THEMES) {
+            for (String kind : new String[] {"task", "capture", "empty", "memory", "unlock"}) {
+                assertRepresentativeCard(theme, kind, 320, 220, 1.4f);
+                assertRepresentativeCard(theme, kind, 180, 180, 1.4f);
+            }
+        }
+    }
+
+    @Test
+    public void singleCaptureAndPrivateFallbackFitAtLargeSystemFonts() {
+        for (String theme : THEMES) {
+            for (boolean privateFallback : new boolean[] {false, true}) {
+                Fixture fixture = new Fixture(Configuration.ORIENTATION_PORTRAIT, 1.4f);
+                String variant = privateFallback ? "private-fallback" : "single-capture";
+                try {
+                    onMain(() -> {
+                        fixture.create(180, 180);
+                        BubbleWidgetSnapshot.Page capture = representativePage(theme, "capture", fixture.now);
+                        fixture.snapshot = privateFallback ? BubbleWidgetSnapshot.fallback(theme)
+                            : new BubbleWidgetSnapshot(fixture.now, 0L, capture.kind, theme,
+                                capture.eyebrow, capture.title, capture.subtitle, capture.badge,
+                                capture.route, "full", Collections.emptyList(), Collections.emptyList());
+                        fixture.render(0);
+                    });
+                    settle(fixture);
+                    onMain(() -> {
+                        fixture.savePreview(variant + "-" + theme + "-180x180-large-text.png");
+                        fixture.assertFillsHost();
+                        fixture.assertDarkGradient(theme);
+                        fixture.assertVisibleContentAboveFooter();
+                        assertEquals(View.GONE, fixture.view(R.id.bubble_widget_navigation).getVisibility());
+                        assertEquals(View.GONE, fixture.view(R.id.bubble_widget_badge).getVisibility());
+                        assertEquals(View.VISIBLE, fixture.view(R.id.bubble_widget_title).getVisibility());
+                        assertEquals(View.VISIBLE, fixture.view(R.id.bubble_widget_subtitle).getVisibility());
+                        assertEquals(fixture.snapshot.title, fixture.text(R.id.bubble_widget_title));
+                        assertEquals(fixture.snapshot.subtitle, fixture.text(R.id.bubble_widget_subtitle));
+                        assertNull("Capture and private fallback must reject the retained fixture bitmap",
+                            fixture.host.findViewById(R.id.bubble_widget_thumbnail));
+                    });
+                } catch (AssertionError error) {
+                    throw new AssertionError(variant + " / " + theme + " at 180x180dp, fontScale=1.4", error);
+                } finally {
+                    onMain(fixture::close);
+                }
+            }
+        }
+    }
+
+    @Test
+    public void longTaskAndPlanNamesFitAboveNavigationAtCompactHeight() {
+        final String title = "Pack the camping gear and supplies for our weekend away";
+        final String plan = "Annual family camping weekend in the mountains near the lake";
+        for (String theme : THEMES) {
+            for (float fontScale : new float[] {1f, 1.4f}) {
+                Fixture fixture = new Fixture(Configuration.ORIENTATION_PORTRAIT, fontScale);
+                try {
+                    onMain(() -> {
+                        fixture.create(320, 220);
+                        fixture.pages[1] = new BubbleWidgetSnapshot.Page("qa-long-task", "tasks", "today",
+                            theme, "TODAY'S TASK", title, "4:53 PM · " + plan, null,
+                            "/journal?plan=qa-long-trip&task=gear", "full");
+                        fixture.snapshot = deck(fixture.now, "full", fixture.pages);
+                        fixture.render(1);
+                    });
+                    settle(fixture);
+                    onMain(() -> {
+                        fixture.savePreview("long-task-" + theme + "-320x220"
+                            + (fontScale > 1f ? "-large-text" : "") + ".png");
+                        fixture.assertFillsHost();
+                        fixture.assertFooter();
+                        fixture.assertDarkGradient(theme);
+                        fixture.assertVisibleContentAboveFooter();
+                        assertEquals("2 / 3", fixture.text(R.id.bubble_widget_navigation_position));
+                        assertEquals(title, fixture.text(R.id.bubble_widget_title));
+                        assertEquals("4:53 PM", fixture.text(R.id.bubble_widget_time));
+                        assertEquals(plan, fixture.text(R.id.bubble_widget_subtitle));
+                        assertEquals(View.VISIBLE, fixture.view(R.id.bubble_widget_title).getVisibility());
+                        assertEquals(View.VISIBLE, fixture.view(R.id.bubble_widget_time).getVisibility());
+                        if (fontScale == 1f) {
+                            assertEquals(View.VISIBLE, fixture.view(R.id.bubble_widget_subtitle).getVisibility());
+                            assertTrue("The regression fixture must exercise a multiline title",
+                                ((TextView) fixture.view(R.id.bubble_widget_title)).getLayout().getLineCount() > 1);
+                        }
+                    });
+                } catch (AssertionError error) {
+                    throw new AssertionError("Long task / " + theme + " at 320x220dp, fontScale=" + fontScale, error);
+                } finally {
+                    onMain(fixture::close);
+                }
+            }
+        }
+    }
+
+    private static void assertRepresentativeCard(
+        String theme, String kind, int width, int height, float fontScale
+    ) {
+        Fixture fixture = new Fixture(Configuration.ORIENTATION_PORTRAIT, fontScale);
+        try {
+            onMain(() -> {
+                fixture.create(width, height);
+                if ("empty".equals(kind)) {
+                    fixture.snapshot = new BubbleWidgetSnapshot(fixture.now, 0L, "empty", theme,
+                        "A LITTLE BREATHING ROOM", "Room for something lovely.",
+                        "Your family plans will appear here.", null, "/journal?tab=plans",
+                        "full", Collections.emptyList(), Collections.emptyList());
+                    fixture.render(0);
+                } else {
+                    fixture.pages[1] = representativePage(theme, kind, fixture.now);
+                    fixture.snapshot = deck(fixture.now, "full", fixture.pages);
+                    fixture.render(1);
+                }
+            });
+            settle(fixture);
+            onMain(() -> {
+                fixture.savePreview("representative-" + kind + "-" + theme + "-" + width + "x" + height
+                    + (fontScale > 1f ? "-large-text" : "") + ".png");
+                fixture.assertFillsHost();
+                fixture.assertFooter();
+                fixture.assertDarkGradient(theme);
+                fixture.assertVisibleContentAboveFooter();
+                assertEquals("empty".equals(kind) ? View.GONE : View.VISIBLE,
+                    fixture.view(R.id.bubble_widget_navigation).getVisibility());
+                if (!"empty".equals(kind)) {
+                    assertEquals("2 / 3", fixture.text(R.id.bubble_widget_navigation_position));
+                    assertEquals(fixture.pages[1].title, fixture.text(R.id.bubble_widget_title));
+                }
+                boolean imageCard = "memory".equals(kind) || "unlock".equals(kind);
+                assertEquals("Only memories and unlocked recaps may display the synthetic image",
+                    imageCard, fixture.host.findViewById(R.id.bubble_widget_thumbnail) != null);
+                if (imageCard) {
+                    assertNotNull(((ImageView) fixture.view(R.id.bubble_widget_thumbnail)).getDrawable());
+                    assertEquals("unlock".equals(kind) ? View.VISIBLE : View.GONE,
+                        fixture.view(R.id.bubble_widget_play).getVisibility());
+                }
+                if ("flight".equals(kind)) {
+                    assertEquals("JFK", fixture.text(R.id.bubble_widget_flight_origin));
+                    assertEquals("DXB", fixture.text(R.id.bubble_widget_flight_destination));
+                    assertEquals(View.GONE, fixture.view(R.id.bubble_widget_flight_map).getVisibility());
+                    assertEquals(View.GONE, fixture.view(R.id.bubble_widget_flight_estimate).getVisibility());
+                    assertNull(((ImageView) fixture.view(R.id.bubble_widget_flight_map)).getDrawable());
+                }
+            });
+        } catch (AssertionError error) {
+            throw new AssertionError("Synthetic " + kind + " / " + theme + " at " + width + "x" + height
+                + "dp, fontScale=" + fontScale, error);
+        } finally {
+            onMain(fixture::close);
+        }
+    }
+
+    private static BubbleWidgetSnapshot.Page representativePage(String theme, String kind, long now) {
+        switch (kind) {
+            case "task":
+                return new BubbleWidgetSnapshot.Page("qa-editorial-task", "tasks", "today", theme,
+                    "TODAY'S TASK", "Bring camping gear", "4:53 PM · Road trip", null,
+                    "/journal?plan=qa-trip&task=gear", "full");
+            case "capture":
+                return new BubbleWidgetSnapshot.Page("qa-editorial-capture", "capture", "capture", theme,
+                    "THIS WEEK", "A little moment?", "Save a glimpse of today for your family.",
+                    "Open camera", "/journal?section=capsule", "full");
+            case "memory":
+                return new BubbleWidgetSnapshot.Page("qa-editorial-memory", "photos", "memory", theme,
+                    "FROM YOUR JOURNAL", "Our quiet corner", "A weekend to remember", null,
+                    "/journal?photo=qa-cottage", "full");
+            case "unlock":
+                return new BubbleWidgetSnapshot.Page("qa-editorial-unlock", "recap", "unlock", theme,
+                    "YOUR FAMILY CAPSULE", "Last week, together", "Your little moments are ready.",
+                    "Watch recap", "/journal?section=capsule", "full");
+            case "flight":
+                return new BubbleWidgetSnapshot.Page("qa-editorial-flight", "flights", "flight", theme,
+                    "EK202 · Mum", "JFK → DXB", "ETA 7:30 PM GST · Sep 15 · Updated 7:05 PM",
+                    "En route", "/journal?section=flights", "full", 0L,
+                    new BubbleWidgetSnapshot.Flight(now - 2 * 3_600_000L,
+                        now + 6 * 3_600_000L, now - 60_000L), true,
+                    new BubbleWidgetFlightMap(new BubbleWidgetFlightMap.Point(106.222, 51.115),
+                        new BubbleWidgetFlightMap.Point(235.364, 65.833),
+                        new BubbleWidgetFlightMap.Point(170.793, 27.869),
+                        new BubbleWidgetFlightMap.Point(138.5075, 43.3174),
+                        -6.8, "estimated", 25.0, false));
+            default:
+                throw new AssertionError("Unknown synthetic card kind: " + kind);
+        }
+    }
+
+    /** A fully synthetic landscape, with a warm cottage window as the focal point. */
+    private static Bitmap syntheticPhoto() {
+        Bitmap bitmap = Bitmap.createBitmap(640, 400, Bitmap.Config.ARGB_8888);
+        Canvas canvas = new Canvas(bitmap);
+        Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
+        paint.setShader(new LinearGradient(0, 0, 0, 400,
+            new int[] {Color.rgb(173, 197, 202), Color.rgb(231, 210, 167), Color.rgb(94, 124, 102)},
+            null, Shader.TileMode.CLAMP));
+        canvas.drawRect(0, 0, 640, 400, paint);
+        paint.setShader(null);
+        paint.setColor(Color.rgb(249, 227, 171));
+        canvas.drawCircle(458, 85, 35, paint);
+
+        Path farHills = new Path();
+        farHills.moveTo(0, 231);
+        farHills.cubicTo(106, 121, 160, 147, 271, 211);
+        farHills.cubicTo(404, 107, 482, 150, 640, 220);
+        farHills.lineTo(640, 400);
+        farHills.lineTo(0, 400);
+        farHills.close();
+        paint.setColor(Color.rgb(104, 136, 124));
+        canvas.drawPath(farHills, paint);
+
+        Path nearHills = new Path();
+        nearHills.moveTo(0, 284);
+        nearHills.cubicTo(122, 224, 255, 259, 384, 295);
+        nearHills.cubicTo(466, 317, 557, 211, 640, 251);
+        nearHills.lineTo(640, 400);
+        nearHills.lineTo(0, 400);
+        nearHills.close();
+        paint.setColor(Color.rgb(62, 101, 85));
+        canvas.drawPath(nearHills, paint);
+
+        paint.setColor(Color.rgb(220, 195, 148));
+        canvas.drawRoundRect(215, 211, 371, 317, 3, 3, paint);
+        Path roof = new Path();
+        roof.moveTo(199, 219);
+        roof.lineTo(292, 150);
+        roof.lineTo(386, 219);
+        roof.close();
+        paint.setColor(Color.rgb(109, 68, 54));
+        canvas.drawPath(roof, paint);
+        paint.setColor(Color.rgb(235, 215, 177));
+        canvas.drawRect(327, 158, 343, 188, paint);
+        paint.setColor(Color.rgb(71, 88, 79));
+        canvas.drawRoundRect(278, 250, 310, 317, 3, 3, paint);
+        paint.setColor(Color.rgb(248, 213, 131));
+        canvas.drawRoundRect(231, 239, 262, 272, 2, 2, paint);
+        canvas.drawRoundRect(326, 239, 357, 272, 2, 2, paint);
+        paint.setColor(Color.rgb(103, 88, 65));
+        paint.setStrokeWidth(3);
+        for (int left : new int[] {231, 326}) {
+            canvas.drawLine(left + 15, 239, left + 15, 272, paint);
+            canvas.drawLine(left, 255, left + 31, 255, paint);
+        }
+
+        Path path = new Path();
+        path.moveTo(282, 317);
+        path.cubicTo(289, 344, 366, 356, 388, 400);
+        path.lineTo(449, 400);
+        path.cubicTo(402, 352, 310, 337, 308, 317);
+        path.close();
+        paint.setColor(Color.rgb(185, 168, 126));
+        canvas.drawPath(path, paint);
+        paint.setColor(Color.rgb(49, 74, 61));
+        canvas.drawRoundRect(489, 219, 501, 338, 4, 4, paint);
+        paint.setColor(Color.rgb(44, 86, 67));
+        canvas.drawOval(443, 160, 549, 270, paint);
+        canvas.drawOval(473, 128, 546, 233, paint);
+        paint.setColor(Color.rgb(79, 119, 81));
+        canvas.drawOval(432, 311, 506, 352, paint);
+        canvas.drawOval(146, 301, 227, 344, paint);
+        paint.setColor(Color.argb(110, 211, 202, 144));
+        paint.setStrokeWidth(2);
+        for (int x = 28; x < 625; x += 37) {
+            int y = 351 + (x % 5) * 7;
+            canvas.drawLine(x, y, x + 3, y - 10, paint);
+        }
+        return bitmap;
+    }
+
     private static void assertSizes(boolean photo, int orientation) {
         for (int[] dimensions : HOST_SIZES_DP) {
             Fixture fixture = new Fixture(orientation);
@@ -334,12 +740,37 @@ public final class BubbleWidgetLayoutInstrumentedTest {
     }
 
     private static void settle(Fixture fixture) {
-        InstrumentationRegistry.getInstrumentation().waitForIdleSync();
+        // The detached host has no async executor: RemoteViews apply synchronously.
+        // Measure it directly instead of waiting for unrelated app work to become idle.
         onMain(fixture::layout);
     }
 
     private static void onMain(Runnable action) {
-        InstrumentationRegistry.getInstrumentation().runOnMainSync(action);
+        if (Looper.myLooper() == Looper.getMainLooper()) {
+            action.run();
+            return;
+        }
+        FutureTask<Void> task = new FutureTask<>(() -> {
+            action.run();
+            return null;
+        });
+        assertTrue("The main looper must accept the detached widget action",
+            new Handler(Looper.getMainLooper()).post(task));
+        try {
+            task.get(10, TimeUnit.SECONDS);
+        } catch (TimeoutException error) {
+            task.cancel(false);
+            throw new AssertionError("Detached widget action exceeded 10 seconds on the main looper", error);
+        } catch (InterruptedException error) {
+            task.cancel(false);
+            Thread.currentThread().interrupt();
+            throw new AssertionError("Interrupted while applying the detached widget", error);
+        } catch (ExecutionException error) {
+            Throwable cause = error.getCause();
+            if (cause instanceof Error) throw (Error) cause;
+            if (cause instanceof RuntimeException) throw (RuntimeException) cause;
+            throw new AssertionError("Detached widget action failed", cause);
+        }
     }
 
     private static final class Fixture {
@@ -357,9 +788,14 @@ public final class BubbleWidgetLayoutInstrumentedTest {
         int selected;
 
         Fixture(int orientation) {
+            this(orientation,1f);
+        }
+
+        Fixture(int orientation,float fontScale) {
             Context app = ApplicationProvider.getApplicationContext();
             Configuration config = new Configuration(app.getResources().getConfiguration());
             config.orientation = orientation;
+            config.fontScale=fontScale;
             this.context = app.createConfigurationContext(config);
             this.orientation = orientation;
             this.density = context.getResources().getDisplayMetrics().density;
@@ -369,16 +805,10 @@ public final class BubbleWidgetLayoutInstrumentedTest {
             widthDp = width;
             heightDp = height;
             options = optionsFor(width, height);
-            thumbnail = Bitmap.createBitmap(96, 64, Bitmap.Config.ARGB_8888);
-            for (int y = 0; y < thumbnail.getHeight(); y++) {
-                for (int x = 0; x < thumbnail.getWidth(); x++) {
-                    boolean tile = ((x / 16) + (y / 16)) % 2 == 0;
-                    thumbnail.setPixel(x, y, Color.rgb(40 + x,
-                        85 + y + (tile ? 25 : 0), 150 + y));
-                }
-            }
+            thumbnail = syntheticPhoto();
             snapshot = deck(now, "full", pages);
             host = new AppWidgetHostView(context);
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) host.setExecutor(null);
             host.setPadding(0, 0, 0, 0);
             render(0);
         }
@@ -517,6 +947,65 @@ public final class BubbleWidgetLayoutInstrumentedTest {
             View title = view(R.id.bubble_widget_title);
             assertTrue("Title must never overlap navigation",
                 bounds(title).bottom <= bounds(footer).top);
+        }
+
+        void assertDarkGradient(String theme) {
+            GradientDrawable background = (GradientDrawable) view(R.id.bubble_widget_card).getBackground();
+            int[] colors = background.getColors();
+            assertNotNull("The card should use a gradient background", colors);
+            assertTrue("The gradient needs at least two color stops", colors.length >= 2);
+            int expected = "forest".equals(theme) ? Color.rgb(11, 61, 51)
+                : "midnight".equals(theme) ? Color.rgb(8, 22, 53) : Color.rgb(45, 10, 33);
+            boolean containsBase = false;
+            boolean containsDifferentTone = false;
+            for (int color : colors) {
+                containsBase |= color == expected;
+                containsDifferentTone |= color != colors[0];
+            }
+            assertTrue("The gradient must preserve the existing dark " + theme + " base", containsBase);
+            assertTrue("The gradient should include distinct tones", containsDifferentTone);
+        }
+
+        void assertVisibleContentAboveFooter() {
+            View footer = view(R.id.bubble_widget_navigation);
+            Rect cardBounds = bounds(view(R.id.bubble_widget_card));
+            int contentBottom = footer.getVisibility() == View.VISIBLE
+                ? bounds(footer).top : cardBounds.bottom;
+            for (int id : new int[] {R.id.bubble_widget_eyebrow, R.id.bubble_widget_title,
+                R.id.bubble_widget_time, R.id.bubble_widget_subtitle, R.id.bubble_widget_badge,
+                R.id.bubble_widget_flight_route, R.id.bubble_widget_flight_origin,
+                R.id.bubble_widget_flight_destination, R.id.bubble_widget_flight_status}) {
+                View content = host.findViewById(id);
+                if (content == null || !hasVisibleAncestors(content)) continue;
+                String label = widthDp + "x" + heightDp + "dp, view=" + id;
+                Rect contentBounds = bounds(content);
+                assertTrue(label + ": visible content must have width", content.getWidth() > 0);
+                assertTrue(label + ": visible content must have height", content.getHeight() > 0);
+                assertTrue(label + ": visible content must stay inside the card",
+                    cardBounds.contains(contentBounds));
+                assertTrue(label + ": visible content must stay above navigation",
+                    contentBounds.bottom <= contentBottom);
+                if (content instanceof TextView) {
+                    TextView text = (TextView) content;
+                    assertNotNull(label + ": visible text must have a layout", text.getLayout());
+                    assertTrue(label + ": text lines must not be vertically clipped",
+                        text.getLayout().getHeight() <= text.getHeight()
+                            - text.getCompoundPaddingTop() - text.getCompoundPaddingBottom());
+                    View parent = (View) text.getParent();
+                    assertTrue(label + ": text must fit vertically within its parent",
+                        contentBounds.top >= bounds(parent).top + parent.getPaddingTop()
+                            && contentBounds.bottom <= bounds(parent).bottom - parent.getPaddingBottom());
+                }
+            }
+        }
+
+        boolean hasVisibleAncestors(View view) {
+            View current = view;
+            while (true) {
+                if (current.getVisibility() != View.VISIBLE) return false;
+                if (!(current.getParent() instanceof View)) return true;
+                current = (View) current.getParent();
+            }
         }
 
         void savePreview(String filename) {

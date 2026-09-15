@@ -125,7 +125,7 @@ final class BubbleWidgetNavigation {
         BubbleWidgetSnapshot sourceSnapshot,
         long nowMillis
     ) {
-        if (sourceSnapshot == null || !sourceSnapshot.isCurrentLocalDay(nowMillis)) {
+        if (sourceSnapshot == null) {
             return Collections.emptyList();
         }
         BubbleWidgetSnapshot display = sourceSnapshot.forDisplay(nowMillis);

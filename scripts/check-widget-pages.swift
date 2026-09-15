@@ -98,7 +98,163 @@ enum CheckWidgetPages {
                "A hidden scheduled transition prevents all future photo rotation")
         expect(photoSelection.resolvedID(in: hiddenLater, lane: .photos, at: hourLater, calendar: calendar) == nil,
                "Manual selection cannot bypass a later hidden transition")
-        print("Native widget paging checks passed (30 scenarios).")
+        let flightDeparture = tomorrow.addingTimeInterval(-3_600)
+        let flightArrival = tomorrow.addingTimeInterval(5 * 3_600)
+        let flightExpiry = flightArrival.addingTimeInterval(2 * 3_600)
+        let flightMetadata = BubbleWidgetFlight(
+            departureAt: BubbleWidgetDateCodec.string(from: flightDeparture),
+            arrivalAt: BubbleWidgetDateCodec.string(from: flightArrival),
+            updatedAt: BubbleWidgetDateCodec.string(from: morning)
+        )
+        var flightPage = page("flight:1", group: .flights, kind: .flight)
+        flightPage.expiresAt = BubbleWidgetDateCodec.string(from: flightExpiry)
+        flightPage.flight = flightMetadata
+        let flightDeck = makeSnapshot(at: morning, pages: [task, photo, flightPage])
+        expect(flightDeck.availablePages(for: .automatic, at: afternoon, calendar: calendar).count == 3,
+               "Automatic deck includes active flights alongside existing cards")
+        expect(flightDeck.availablePages(for: .flights, at: afternoon, calendar: calendar).map(\.id) == [flightPage.id],
+               "Dedicated flight lane includes only flights")
+        expect(flightDeck.availablePages(for: .automatic, at: tomorrow, calendar: calendar).map(\.id) == [flightPage.id],
+               "Only a bounded, full-privacy flight survives local midnight")
+        expect(flightDeck.availablePages(for: .photos, at: tomorrow, calendar: calendar).isEmpty,
+               "An overnight flight cannot extend photo visibility")
+        expect(flightDeck.availablePages(for: .tasks, at: tomorrow, calendar: calendar).isEmpty,
+               "An overnight flight cannot extend task visibility")
+        expect(flightDeck.resolvedForDisplay(at: tomorrow, calendar: calendar).snapshot.kind == .flight,
+               "Overnight automatic card resolves to the independently valid flight")
+        expect(!flightDeck.resolvedForDisplay(at: tomorrow, calendar: calendar).mayUseCurrentThumbnail,
+               "A flight cannot inherit a previous primary photo")
+        expect(flightDeck.availablePages(for: .flights, at: flightExpiry, calendar: calendar).isEmpty,
+               "Exact expiry removes a flight without waiting for the app")
+        expect(flightDeck.resolvedForDisplay(at: flightExpiry, calendar: calendar).snapshot.privacy == .hidden,
+               "Last flight expiry returns a private fallback")
+        let flightSelection = BubbleWidgetPageSelection(pageID: flightPage.id, selectedAt: afternoon)
+        expect(flightSelection.resolvedID(in: flightDeck, lane: .automatic, at: tomorrow, calendar: calendar) == flightPage.id,
+               "The selected overnight flight remains selected until its expiry")
+        expect(flightSelection.resolvedID(in: flightDeck, lane: .automatic, at: flightExpiry, calendar: calendar) == nil,
+               "A selected flight cannot bypass expiration")
+
+        var unbounded = flightPage
+        unbounded.expiresAt = nil
+        expect(makeSnapshot(at: morning, pages: [unbounded]).availablePages(for: .flights, at: tomorrow, calendar: calendar).isEmpty,
+               "Legacy flight without explicit expiry cannot survive midnight")
+        unbounded.expiresAt = BubbleWidgetDateCodec.string(from: morning.addingTimeInterval(36 * 3_600 + 1))
+        expect(makeSnapshot(at: morning, pages: [unbounded]).availablePages(for: .flights, at: afternoon, calendar: calendar).isEmpty,
+               "An expiration beyond the 36-hour bound fails closed even the same day")
+        unbounded.expiresAt = "not-a-date"
+        expect(makeSnapshot(at: morning, pages: [unbounded]).availablePages(for: .flights, at: afternoon, calendar: calendar).isEmpty,
+               "Malformed expiry fails closed")
+        expect(makeSnapshot(at: morning, pages: [flightPage], privacy: .hidden).availablePages(for: .flights, at: tomorrow, calendar: calendar).isEmpty,
+               "Hidden privacy cannot expose overnight route or provider data")
+        expect(makeSnapshot(at: morning, pages: [flightPage], privacy: .hidden).resolvedForDisplay(at: afternoon, calendar: calendar).snapshot.flight == nil,
+               "Hidden native display removes flight timestamps")
+        let hiddenFlightDeck = makeSnapshot(at: morning, pages: [flightPage], schedule: hiddenLater.schedule)
+        expect(hiddenFlightDeck.availablePages(for: .flights, at: tomorrow, calendar: calendar).isEmpty,
+               "A hidden transition still blocks flights after midnight")
+
+        expect(flightMetadata.isValid && flightMetadata.estimatedProgress(at: flightDeparture.addingTimeInterval(-1)) == 0,
+               "Estimated progress is zero before departure")
+        expect(abs(flightMetadata.estimatedProgress(at: flightDeparture.addingTimeInterval(3 * 3_600)) - 0.5) < 0.0001,
+               "Plane position reflects elapsed time, not fabricated aircraft coordinates")
+        expect(flightMetadata.estimatedProgress(at: flightArrival.addingTimeInterval(1)) == 1,
+               "Estimated progress clamps at arrival without inventing a provider status")
+        let invalidFlight = BubbleWidgetFlight(departureAt: flightMetadata.arrivalAt,
+                                               arrivalAt: flightMetadata.departureAt, updatedAt: flightMetadata.updatedAt)
+        expect(!invalidFlight.isValid && invalidFlight.estimatedProgress(at: tomorrow) == 0,
+               "Inverted timestamps cannot render invalid progress")
+        let flightDates = flightDeck.flightTimelineDates(after: afternoon, calendar: calendar)
+        expect(flightDates.contains(flightArrival) && flightDates.contains(flightExpiry),
+               "Arrival and exact expiry are precomputed timeline boundaries")
+        expect(flightDates.allSatisfy { $0 > afternoon && $0 <= flightExpiry } && flightDates.count < 160,
+               "Native estimated progress has a bounded timeline, not a background network poll")
+        expect(flightDeck.emptySnapshot(for: .flights).route == "/journal?section=flights",
+               "An empty flight widget opens the Flight tab")
+        let flattened = flightPage.snapshot(in: flightDeck)
+        expect(flattened.expiresAt == flightPage.expiresAt && flattened.flight?.arrivalAt == flightMetadata.arrivalAt,
+               "Flattening an active page preserves expiry and cached provider timestamps")
+        let roundTrip = try! JSONDecoder().decode(BubbleWidgetSnapshot.self, from: JSONEncoder().encode(flattened))
+        expect(roundTrip.version == 1 && roundTrip.kind == .flight && roundTrip.flight?.updatedAt == flightMetadata.updatedAt,
+               "Flight fields round-trip through the additive version-one native Codable contract")
+        let legacy = try! JSONDecoder().decode(BubbleWidgetSnapshot.self, from: JSONEncoder().encode(snapshot))
+        expect(legacy.flight == nil && legacy.expiresAt == nil && legacy.pages?.count == 3,
+               "Existing saved snapshots decode without flight fields")
+        let muchLater = morning.addingTimeInterval(30 * 24 * 3_600)
+        var retained = flightPage
+        retained.retainedFlight = true
+        retained.flightMap = map(mode: .estimated, progress: 25, advanceWithTime: true)
+        let retainedDeck = makeSnapshot(at: morning, pages: [retained, task, photo, recap])
+        expect(retainedDeck.availablePages(for: .automatic, at: muchLater, calendar: calendar).map(\.id) == [retained.id],
+               "An explicitly retained tracker flight survives old expiry, midnight, and staleness")
+        expect(retainedDeck.resolvedForDisplay(at: muchLater, calendar: calendar).snapshot.kind == .flight,
+               "Automatic widget can continue displaying an old tracked flight")
+        expect(flightSelection.resolvedID(in: retainedDeck, lane: .flights, at: muchLater, calendar: calendar) == retained.id,
+               "A selected retained flight stays selected across days")
+        expect(makeSnapshot(at: muchLater, pages: [task]).availablePages(for: .flights, at: muchLater, calendar: calendar).isEmpty,
+               "Removing the flight from the next app snapshot removes its widget page")
+        expect(BubbleWidgetSnapshot.privateFallback(theme: .plum).availablePages(for: .flights, at: muchLater, calendar: calendar).isEmpty,
+               "Account clearing removes retained flights")
+        expect(makeSnapshot(at: morning, pages: [retained], privacy: .hidden).resolvedForDisplay(at: muchLater, calendar: calendar).snapshot.flightMap == nil,
+               "Hidden privacy strips retained map coordinates")
+        var retainedTask = task
+        retainedTask.retainedFlight = true
+        expect(makeSnapshot(at: morning, pages: [retainedTask]).availablePages(for: .tasks, at: muchLater, calendar: calendar).isEmpty,
+               "A retained-flight flag cannot extend unrelated task visibility")
+        let terminalModes: [BubbleWidgetFlightMapMode] = [.arrived, .cancelled, .unavailable]
+        for mode in terminalModes {
+            var card = page("flight:\(mode.rawValue)", group: .flights, kind: .flight)
+            card.retainedFlight = true
+            card.flightMap = map(mode: mode, progress: mode == .arrived ? 100 : nil)
+            let terminalDeck = makeSnapshot(at: morning, pages: [card])
+            expect(terminalDeck.availablePages(for: .flights, at: muchLater, calendar: calendar).count == 1,
+                   "Arrived, cancelled, and missing-timetable flights remain in the tracker deck")
+            expect(terminalDeck.flightTimelineDates(after: muchLater, calendar: calendar).isEmpty,
+                   "Completed or unavailable cards do not schedule fake progress updates")
+        }
+        let manyFlights = (0..<100).map { index -> BubbleWidgetPage in
+            var card = page("flight:\(index)", group: .flights, kind: .flight)
+            card.retainedFlight = true
+            card.flightMap = map(mode: .scheduled, progress: 0)
+            return card
+        }
+        let largeDeck = makeSnapshot(at: morning, pages: manyFlights + (0..<12).map { page("photo:\($0)", group: .photos, kind: .memory) })
+        expect(largeDeck.availablePages(for: .automatic, at: afternoon, calendar: calendar).count == 112,
+               "One hundred tracked flights coexist with the original twelve-card allowance")
+        expect(largeDeck.availablePages(for: .flights, at: muchLater, calendar: calendar).count == 100,
+               "Every retained flight remains browsable without preserving stale photo metadata")
+        expect(largeDeck.adjacentPageID(for: .flights, currentPageID: "flight:99", direction: 1, at: muchLater, calendar: calendar) == "flight:0",
+               "Native arrows wrap around all one hundred flight cards")
+        var excessFlight = page("flight:100", group: .flights, kind: .flight)
+        excessFlight.retainedFlight = true
+        expect(makeSnapshot(at: morning, pages: manyFlights + [excessFlight]).availablePages(for: .flights, at: afternoon, calendar: calendar).isEmpty,
+               "More than one hundred flight pages fails closed")
+        let arrivedMap = map(mode: .arrived, progress: 100)
+        expect(arrivedMap.displayedMarker(at: morning, flight: flightMetadata)?.point == arrivedMap.end,
+               "Arrived aircraft is drawn at its destination")
+        expect(map(mode: .cancelled, progress: nil).displayedMarker(at: morning, flight: flightMetadata) == nil,
+               "Cancelled flight has no aircraft marker")
+        expect(map(mode: .unavailable, progress: nil).displayedMarker(at: morning, flight: nil) == nil,
+               "Unavailable position does not invent an aircraft marker")
+        let cachedLive = map(mode: .live, progress: 25, advanceWithTime: true)
+        expect(cachedLive.displayedMarker(at: muchLater, flight: flightMetadata)?.point == cachedLive.marker,
+               "Cached last-reported position never advances with the clock")
+        let providerProgress = map(mode: .estimated, progress: 25)
+        expect(providerProgress.displayedMarker(at: muchLater, flight: flightMetadata)?.point == providerProgress.marker,
+               "Provider progress stays at exactly the app's supplied marker")
+        let timedMap = map(mode: .estimated, progress: 25, advanceWithTime: true)
+        expect(timedMap.displayedMarker(at: flightDeparture.addingTimeInterval(3 * 3_600), flight: flightMetadata)?.point == BubbleWidgetMapPoint(x: 167.5, y: 40),
+               "Opted-in estimates follow the same quadratic route as the app")
+        expect(timedMap.displayedMarker(at: muchLater, flight: nil)?.point == timedMap.marker,
+               "Missing timetable keeps supplied route geometry instead of guessing")
+        expect(!map(mode: .estimated, progress: 101).isValid && !map(mode: .cancelled, progress: 1).isValid,
+               "Progress bounds and cancelled semantics are validated")
+        expect(!BubbleWidgetMapPoint(x: .nan, y: 2).isValid && !BubbleWidgetMapPoint(x: 721, y: 2).isValid,
+               "Nonfinite or unbounded coordinates are rejected")
+        expect(BubbleWidgetFlightMapGeometry.land.count == 5 && BubbleWidgetFlightMapGeometry.land.reduce(0, { $0 + $1.count }) == 45,
+               "The native map uses the app's same five minimal land polygons")
+        let retainedRoundTrip = try! JSONDecoder().decode(BubbleWidgetSnapshot.self, from: JSONEncoder().encode(retained.snapshot(in: retainedDeck)))
+        expect(retainedRoundTrip.retainedFlight == true && retainedRoundTrip.flightMap?.mode == .estimated && retainedRoundTrip.flightMap?.advanceWithTime == true,
+               "Retention and map metadata round-trip through the additive native Codable contract")
+        print("Native widget paging and flight-map checks passed.")
     }
 
     static func page(_ id: String, group: BubbleWidgetPageGroup, kind: BubbleWidgetKind) -> BubbleWidgetPage {
@@ -113,6 +269,14 @@ enum CheckWidgetPages {
         BubbleWidgetSnapshot(version: 1, generatedAt: BubbleWidgetDateCodec.string(from: date), nextRefreshAt: nil,
                              kind: .today, theme: .plum, eyebrow: "Today", title: "A family plan", subtitle: nil,
                              badge: nil, route: "/journal?section=plans", privacy: privacy, schedule: schedule, pages: pages)
+    }
+
+    static func map(mode: BubbleWidgetFlightMapMode, progress: Double?, advanceWithTime: Bool? = nil) -> BubbleWidgetFlightMap {
+        BubbleWidgetFlightMap(start: BubbleWidgetMapPoint(x: 100, y: 50),
+                              end: BubbleWidgetMapPoint(x: 230, y: 70),
+                              control: BubbleWidgetMapPoint(x: 170, y: 20),
+                              marker: BubbleWidgetMapPoint(x: 110, y: 60),
+                              rotation: 10, mode: mode, progress: progress, advanceWithTime: advanceWithTime)
     }
 
     static func expect(_ condition: @autoclosure () -> Bool, _ message: String) {

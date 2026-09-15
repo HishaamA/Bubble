@@ -21,16 +21,17 @@ import org.json.JSONObject;
 final class BubbleWidgetSnapshot {
 
     static final int CONTRACT_VERSION = 1;
-    static final int MAX_SNAPSHOT_BYTES = 64 * 1024;
+    static final int MAX_SNAPSHOT_BYTES = 256 * 1024;
     private static final int MAX_SCHEDULE_ENTRIES = 12;
-    private static final int MAX_PAGES = 12;
+    private static final int MAX_PAGES = 112;
+    static final long MAX_FLIGHT_AGE_MILLIS = 36L * 60L * 60L * 1000L;
 
     private static final String[] KINDS = {
-        "urgent", "unlock", "today", "capture", "memory", "empty"
+        "urgent", "unlock", "today", "capture", "memory", "empty", "flight"
     };
     private static final String[] THEMES = { "plum", "forest", "midnight" };
     private static final String[] PRIVACY_VALUES = { "full", "hidden" };
-    private static final String[] PAGE_GROUPS = { "tasks", "photos", "recap", "capture" };
+    private static final String[] PAGE_GROUPS = { "tasks", "photos", "recap", "capture", "flights" };
     private static final String[] ISO_PATTERNS = {
         "yyyy-MM-dd'T'HH:mm:ss.SSSXXX",
         "yyyy-MM-dd'T'HH:mm:ssXXX",
@@ -47,6 +48,10 @@ final class BubbleWidgetSnapshot {
     final String badge;
     final String route;
     final String privacy;
+    final long expiresAtMillis;
+    final Flight flight;
+    final boolean retainedFlight;
+    final BubbleWidgetFlightMap flightMap;
     final List<ScheduledCard> schedule;
     final List<Page> pages;
 
@@ -93,6 +98,26 @@ final class BubbleWidgetSnapshot {
         List<ScheduledCard> schedule,
         List<Page> pages
     ) {
+        this(generatedAtMillis, nextRefreshAtMillis, kind, theme, eyebrow, title,
+            subtitle, badge, route, privacy, schedule, pages, 0L, null);
+    }
+
+    BubbleWidgetSnapshot(
+        long generatedAtMillis, long nextRefreshAtMillis, String kind, String theme,
+        String eyebrow, String title, String subtitle, String badge, String route,
+        String privacy, List<ScheduledCard> schedule, List<Page> pages,
+        long expiresAtMillis, Flight flight
+    ) {
+        this(generatedAtMillis, nextRefreshAtMillis, kind, theme, eyebrow, title, subtitle,
+            badge, route, privacy, schedule, pages, expiresAtMillis, flight, false, null);
+    }
+
+    BubbleWidgetSnapshot(
+        long generatedAtMillis, long nextRefreshAtMillis, String kind, String theme,
+        String eyebrow, String title, String subtitle, String badge, String route,
+        String privacy, List<ScheduledCard> schedule, List<Page> pages,
+        long expiresAtMillis, Flight flight, boolean retainedFlight, BubbleWidgetFlightMap flightMap
+    ) {
         this.generatedAtMillis = generatedAtMillis;
         this.nextRefreshAtMillis = nextRefreshAtMillis;
         this.kind = kind;
@@ -103,6 +128,10 @@ final class BubbleWidgetSnapshot {
         this.badge = badge;
         this.route = route;
         this.privacy = privacy;
+        this.expiresAtMillis = "full".equals(privacy) ? expiresAtMillis : 0L;
+        this.flight = "full".equals(privacy) && "flight".equals(kind) ? flight : null;
+        this.retainedFlight = "full".equals(privacy) && "flight".equals(kind) && retainedFlight;
+        this.flightMap = "full".equals(privacy) && "flight".equals(kind) ? flightMap : null;
         this.schedule = Collections.unmodifiableList(new ArrayList<>(schedule));
         this.pages = Collections.unmodifiableList(new ArrayList<>(pages));
     }
@@ -154,7 +183,7 @@ final class BubbleWidgetSnapshot {
             theme,
             privacy
         );
-        List<Page> pages = parsePages(json, privacy);
+        List<Page> pages = parsePages(json, privacy, generatedAt);
 
         return new BubbleWidgetSnapshot(
             generatedAt,
@@ -168,7 +197,11 @@ final class BubbleWidgetSnapshot {
             route,
             privacy,
             schedule,
-            pages
+            pages,
+            parseExpiry(json, privacy, generatedAt),
+            parseFlight(json, kind, privacy),
+            parseRetainedFlight(json, kind, privacy),
+            parseFlightMap(json, kind, privacy)
         );
     }
 
@@ -193,16 +226,7 @@ final class BubbleWidgetSnapshot {
 
     /** Keeps useful same-day content, but fails private once its local day ends. */
     BubbleWidgetSnapshot forDisplay(long nowMillis) {
-        Calendar generated = Calendar.getInstance();
-        generated.setTimeInMillis(generatedAtMillis);
-        Calendar now = Calendar.getInstance();
-        now.setTimeInMillis(nowMillis);
-        boolean sameLocalDay = generated.get(Calendar.ERA) == now.get(Calendar.ERA)
-            && generated.get(Calendar.YEAR) == now.get(Calendar.YEAR)
-            && generated.get(Calendar.DAY_OF_YEAR) == now.get(Calendar.DAY_OF_YEAR);
-        if (!sameLocalDay) {
-            return fallback(theme);
-        }
+        boolean sameLocalDay = isSameLocalDay(generatedAtMillis, nowMillis);
         ScheduledCard active = null;
         for (ScheduledCard scheduled : schedule) {
             if (scheduled.effectiveAtMillis > nowMillis) {
@@ -210,8 +234,16 @@ final class BubbleWidgetSnapshot {
             }
             active = scheduled;
         }
+        String activePrivacy = active == null ? privacy : active.privacy;
+        List<Page> visible = new ArrayList<>();
+        if ("full".equals(privacy) && "full".equals(activePrivacy)) {
+            for (Page page : pages) {
+                if (page.isVisible(generatedAtMillis, nowMillis)) visible.add(page);
+            }
+        }
         if (active != null) {
-            return new BubbleWidgetSnapshot(
+            if (cardIsVisible(active.kind, active.privacy, active.expiresAtMillis, active.retainedFlight,
+                generatedAtMillis, nowMillis)) return new BubbleWidgetSnapshot(
                 generatedAtMillis,
                 nextRefreshAtMillis,
                 active.kind,
@@ -223,26 +255,70 @@ final class BubbleWidgetSnapshot {
                 active.route,
                 active.privacy,
                 Collections.emptyList(),
-                pages
+                visible, active.expiresAtMillis, active.flight, active.retainedFlight, active.flightMap
             );
+        } else if (cardIsVisible(kind, privacy, expiresAtMillis, retainedFlight, generatedAtMillis, nowMillis)) {
+            if (sameLocalDay && visible.equals(pages)) return this;
+            return new BubbleWidgetSnapshot(generatedAtMillis, nextRefreshAtMillis, kind,
+                theme, eyebrow, title, subtitle, badge, route, privacy,
+                Collections.emptyList(), visible, expiresAtMillis, flight, retainedFlight, flightMap);
         }
-        return this;
+        if (retainedFlight && "full".equals(activePrivacy)) {
+            return new BubbleWidgetSnapshot(generatedAtMillis, nextRefreshAtMillis, kind,
+                theme, eyebrow, title, subtitle, badge, route, privacy,
+                Collections.emptyList(), visible, expiresAtMillis, flight, true, flightMap);
+        }
+        if (!visible.isEmpty()) {
+            Page first = visible.get(0);
+            return new BubbleWidgetSnapshot(generatedAtMillis, nextRefreshAtMillis, first.kind,
+                first.theme, first.eyebrow, first.title, first.subtitle, first.badge,
+                first.route, first.privacy, Collections.emptyList(), visible,
+                first.expiresAtMillis, first.flight, first.retainedFlight, first.flightMap);
+        }
+        return fallback(theme);
     }
 
     /** Earliest future redraw boundary represented by this stored payload. */
     long nextTransitionAtMillis(long nowMillis) {
-        if (!isSameLocalDay(generatedAtMillis, nowMillis)) {
-            return 0L;
-        }
-        long next = nextRefreshAtMillis > nowMillis ? nextRefreshAtMillis : 0L;
+        boolean sameDay = isSameLocalDay(generatedAtMillis, nowMillis);
+        long next = sameDay && nextRefreshAtMillis > nowMillis ? nextRefreshAtMillis : 0L;
         for (ScheduledCard scheduled : schedule) {
-            if (scheduled.effectiveAtMillis > nowMillis) {
-                return next == 0L
-                    ? scheduled.effectiveAtMillis
-                    : Math.min(next, scheduled.effectiveAtMillis);
-            }
+            if (sameDay && scheduled.effectiveAtMillis > nowMillis)
+                next = earlierFuture(next, scheduled.effectiveAtMillis, nowMillis);
+        }
+        BubbleWidgetSnapshot display = forDisplay(nowMillis);
+        next = flightTransition(next, display.kind, display.privacy, display.expiresAtMillis,
+            display.flight, display.retainedFlight, display.flightMap, nowMillis);
+        for (Page page : display.pages)
+            next = flightTransition(next, page.kind, page.privacy, page.expiresAtMillis,
+                page.flight, page.retainedFlight, page.flightMap, nowMillis);
+        return next;
+    }
+
+    private static long earlierFuture(long previous, long candidate, long now) {
+        return candidate <= now ? previous : previous == 0L ? candidate : Math.min(previous, candidate);
+    }
+
+    private static long flightTransition(long next, String kind, String privacy, long expiry,
+        Flight flight, boolean retained, BubbleWidgetFlightMap map, long now) {
+        if (!"flight".equals(kind) || !"full".equals(privacy)) return next;
+        if (!retained) next = earlierFuture(next, expiry, now);
+        if (flight != null && now < flight.arrivalAtMillis && (map == null || map.mayAdvance())) {
+            // A local estimate only. Alarm delivery is best-effort and never fetches a provider.
+            long boundary = now < flight.departureAtMillis ? flight.departureAtMillis
+                : (Math.floorDiv(now, 60_000L) + 1L) * 60_000L;
+            next = earlierFuture(next, boundary, now);
         }
         return next;
+    }
+
+    private static boolean cardIsVisible(String kind, String privacy, long expiry, boolean retained,
+        long generated, long now) {
+        if ("flight".equals(kind) && "full".equals(privacy) && retained) return true;
+        if (expiry > 0L && now >= expiry) return false;
+        if (isSameLocalDay(generated, now)) return true;
+        return "flight".equals(kind) && "full".equals(privacy) && expiry > now
+            && now >= generated && now - generated < MAX_FLIGHT_AGE_MILLIS;
     }
 
     boolean mayShowThumbnail() {
@@ -285,6 +361,7 @@ final class BubbleWidgetSnapshot {
             }
             json.put("route", route);
             json.put("privacy", privacy);
+            putFlightFields(json, expiresAtMillis, flight, retainedFlight, flightMap);
             if (!schedule.isEmpty()) {
                 JSONArray scheduled = new JSONArray();
                 for (ScheduledCard card : schedule) {
@@ -305,7 +382,7 @@ final class BubbleWidgetSnapshot {
         }
     }
 
-    private static List<Page> parsePages(JSONObject json, String parentPrivacy) {
+    private static List<Page> parsePages(JSONObject json, String parentPrivacy, long generatedAt) {
         if (!json.has("pages") || json.isNull("pages")) {
             return Collections.emptyList();
         }
@@ -323,10 +400,12 @@ final class BubbleWidgetSnapshot {
 
         String[] allowedKeys = {
             "id", "group", "kind", "theme", "eyebrow", "title",
-            "subtitle", "badge", "route", "privacy"
+            "subtitle", "badge", "route", "privacy", "expiresAt", "flight", "retainedFlight", "flightMap"
         };
         List<Page> result = new ArrayList<>();
         Set<String> ids = new HashSet<>();
+        int flightPages = 0;
+        int otherPages = 0;
         for (int index = 0; index < values.length(); index += 1) {
             Object rawPage = values.opt(index);
             if (!(rawPage instanceof JSONObject)) {
@@ -343,6 +422,9 @@ final class BubbleWidgetSnapshot {
             if (!isSupportedPageKind(group, kind)) {
                 throw new IllegalArgumentException("page group does not match its kind.");
             }
+            if ("flights".equals(group)) flightPages += 1; else otherPages += 1;
+            if (flightPages > 100 || otherPages > 12)
+                throw new IllegalArgumentException("pages exceed the flight or family card limit.");
             String theme = requireEnum(page, "theme", THEMES);
             String eyebrow = requireText(page, "eyebrow", 40);
             String title = requireText(page, "title", 260);
@@ -363,7 +445,11 @@ final class BubbleWidgetSnapshot {
                 subtitle,
                 badge,
                 route,
-                privacy
+                privacy,
+                parseExpiry(page, privacy, generatedAt),
+                parseFlight(page, kind, privacy),
+                parseRetainedFlight(page, kind, privacy),
+                parseFlightMap(page, kind, privacy)
             ));
         }
         return result;
@@ -371,6 +457,8 @@ final class BubbleWidgetSnapshot {
 
     private static String kindForGroup(String group) {
         switch (group) {
+            case "flights":
+                return "flight";
             case "tasks":
                 return "today";
             case "photos":
@@ -410,7 +498,7 @@ final class BubbleWidgetSnapshot {
         long nextMidnight = nextLocalMidnight(generatedAtMillis);
         String[] allowedKeys = {
             "effectiveAt", "kind", "theme", "eyebrow", "title",
-            "subtitle", "badge", "route", "privacy"
+            "subtitle", "badge", "route", "privacy", "expiresAt", "flight", "retainedFlight", "flightMap"
         };
         for (int index = 0; index < values.length(); index += 1) {
             Object rawEntry = values.opt(index);
@@ -453,11 +541,86 @@ final class BubbleWidgetSnapshot {
                 subtitle,
                 badge,
                 route,
-                privacy
+                privacy,
+                parseExpiry(entry, privacy, generatedAtMillis),
+                parseFlight(entry, kind, privacy),
+                parseRetainedFlight(entry, kind, privacy),
+                parseFlightMap(entry, kind, privacy)
             ));
             previous = effectiveAt;
         }
         return result;
+    }
+
+    private static long parseExpiry(JSONObject json, String privacy, long generatedAt) {
+        if (!"full".equals(privacy)) return 0L;
+        long expiry = optionalTimestamp(json, "expiresAt");
+        if (expiry > 0L && (expiry <= generatedAt || expiry - generatedAt > MAX_FLIGHT_AGE_MILLIS))
+            throw new IllegalArgumentException("expiresAt must be within 36 hours of generation.");
+        return expiry;
+    }
+
+    private static Flight parseFlight(JSONObject json, String kind, String privacy) {
+        if (!"full".equals(privacy) || !json.has("flight") || json.isNull("flight")) return null;
+        if (!"flight".equals(kind) || !(json.opt("flight") instanceof JSONObject))
+            throw new IllegalArgumentException("flight metadata requires a flight card.");
+        JSONObject value = json.optJSONObject("flight");
+        requireOnlyKeys(value, new String[] { "departureAt", "arrivalAt", "updatedAt" }, "flight");
+        long departure = requireTimestamp(value, "departureAt");
+        long arrival = requireTimestamp(value, "arrivalAt");
+        long updated = requireTimestamp(value, "updatedAt");
+        if (arrival <= departure || arrival - departure > MAX_FLIGHT_AGE_MILLIS)
+            throw new IllegalArgumentException("flight duration must be positive and at most 36 hours.");
+        return new Flight(departure, arrival, updated);
+    }
+
+    private static boolean parseRetainedFlight(JSONObject json, String kind, String privacy) {
+        if (!"full".equals(privacy) || !json.has("retainedFlight") || json.isNull("retainedFlight")) return false;
+        if (!"flight".equals(kind) || !Boolean.TRUE.equals(json.opt("retainedFlight")))
+            throw new IllegalArgumentException("retainedFlight must be true on a full flight card.");
+        return true;
+    }
+
+    private static BubbleWidgetFlightMap parseFlightMap(JSONObject json, String kind, String privacy) {
+        if (!"full".equals(privacy) || !json.has("flightMap") || json.isNull("flightMap")) return null;
+        if (!"flight".equals(kind) || !(json.opt("flightMap") instanceof JSONObject))
+            throw new IllegalArgumentException("flightMap requires a full flight card.");
+        return BubbleWidgetFlightMap.parse(json.optJSONObject("flightMap"));
+    }
+
+    private static void putFlightFields(JSONObject json, long expiry, Flight flight,
+        boolean retainedFlight, BubbleWidgetFlightMap map) throws JSONException {
+        if (expiry > 0L) json.put("expiresAt", formatTimestamp(expiry));
+        if (retainedFlight) json.put("retainedFlight", true);
+        if (map != null) json.put("flightMap", map.toJson());
+        if (flight != null) {
+            JSONObject value = new JSONObject();
+            value.put("departureAt", formatTimestamp(flight.departureAtMillis));
+            value.put("arrivalAt", formatTimestamp(flight.arrivalAtMillis));
+            value.put("updatedAt", formatTimestamp(flight.updatedAtMillis));
+            json.put("flight", value);
+        }
+    }
+
+    static final class Flight {
+        final long departureAtMillis;
+        final long arrivalAtMillis;
+        final long updatedAtMillis;
+
+        Flight(long departureAtMillis, long arrivalAtMillis, long updatedAtMillis) {
+            if (departureAtMillis <= 0L || updatedAtMillis <= 0L || arrivalAtMillis <= departureAtMillis
+                || arrivalAtMillis - departureAtMillis > MAX_FLIGHT_AGE_MILLIS)
+                throw new IllegalArgumentException("Invalid flight timeline.");
+            this.departureAtMillis = departureAtMillis;
+            this.arrivalAtMillis = arrivalAtMillis;
+            this.updatedAtMillis = updatedAtMillis;
+        }
+
+        int progressPercent(long nowMillis) {
+            if (arrivalAtMillis <= departureAtMillis) return 0;
+            return (int) Math.max(0, Math.min(100,
+                Math.round(100.0 * (nowMillis - departureAtMillis) / (arrivalAtMillis - departureAtMillis))));
+        }
     }
 
     private static long requireTimestamp(JSONObject json, String key) {
@@ -604,6 +767,10 @@ final class BubbleWidgetSnapshot {
         final String badge;
         final String route;
         final String privacy;
+        final long expiresAtMillis;
+        final Flight flight;
+        final boolean retainedFlight;
+        final BubbleWidgetFlightMap flightMap;
 
         Page(
             String id,
@@ -617,6 +784,19 @@ final class BubbleWidgetSnapshot {
             String route,
             String privacy
         ) {
+            this(id, group, kind, theme, eyebrow, title, subtitle, badge, route, privacy, 0L, null);
+        }
+
+        Page(String id, String group, String kind, String theme, String eyebrow,
+            String title, String subtitle, String badge, String route, String privacy,
+            long expiresAtMillis, Flight flight) {
+            this(id, group, kind, theme, eyebrow, title, subtitle, badge, route, privacy,
+                expiresAtMillis, flight, false, null);
+        }
+
+        Page(String id, String group, String kind, String theme, String eyebrow,
+            String title, String subtitle, String badge, String route, String privacy,
+            long expiresAtMillis, Flight flight, boolean retainedFlight, BubbleWidgetFlightMap flightMap) {
             this.id = id;
             this.group = group;
             this.kind = kind;
@@ -627,6 +807,14 @@ final class BubbleWidgetSnapshot {
             this.badge = badge;
             this.route = route;
             this.privacy = privacy;
+            this.expiresAtMillis = "full".equals(privacy) ? expiresAtMillis : 0L;
+            this.flight = "full".equals(privacy) && "flight".equals(kind) ? flight : null;
+            this.retainedFlight = "full".equals(privacy) && "flight".equals(kind) && retainedFlight;
+            this.flightMap = "full".equals(privacy) && "flight".equals(kind) ? flightMap : null;
+        }
+
+        boolean isVisible(long generatedAt, long now) {
+            return cardIsVisible(kind, privacy, expiresAtMillis, retainedFlight, generatedAt, now);
         }
 
         boolean mayShowThumbnail() {
@@ -650,6 +838,7 @@ final class BubbleWidgetSnapshot {
             }
             json.put("route", route);
             json.put("privacy", privacy);
+            putFlightFields(json, expiresAtMillis, flight, retainedFlight, flightMap);
             return json;
         }
     }
@@ -664,6 +853,10 @@ final class BubbleWidgetSnapshot {
         final String badge;
         final String route;
         final String privacy;
+        final long expiresAtMillis;
+        final Flight flight;
+        final boolean retainedFlight;
+        final BubbleWidgetFlightMap flightMap;
 
         ScheduledCard(
             long effectiveAtMillis,
@@ -676,6 +869,20 @@ final class BubbleWidgetSnapshot {
             String route,
             String privacy
         ) {
+            this(effectiveAtMillis, kind, theme, eyebrow, title, subtitle, badge,
+                route, privacy, 0L, null);
+        }
+
+        ScheduledCard(long effectiveAtMillis, String kind, String theme, String eyebrow,
+            String title, String subtitle, String badge, String route, String privacy,
+            long expiresAtMillis, Flight flight) {
+            this(effectiveAtMillis, kind, theme, eyebrow, title, subtitle, badge, route, privacy,
+                expiresAtMillis, flight, false, null);
+        }
+
+        ScheduledCard(long effectiveAtMillis, String kind, String theme, String eyebrow,
+            String title, String subtitle, String badge, String route, String privacy,
+            long expiresAtMillis, Flight flight, boolean retainedFlight, BubbleWidgetFlightMap flightMap) {
             this.effectiveAtMillis = effectiveAtMillis;
             this.kind = kind;
             this.theme = theme;
@@ -685,6 +892,10 @@ final class BubbleWidgetSnapshot {
             this.badge = badge;
             this.route = route;
             this.privacy = privacy;
+            this.expiresAtMillis = "full".equals(privacy) ? expiresAtMillis : 0L;
+            this.flight = "full".equals(privacy) && "flight".equals(kind) ? flight : null;
+            this.retainedFlight = "full".equals(privacy) && "flight".equals(kind) && retainedFlight;
+            this.flightMap = "full".equals(privacy) && "flight".equals(kind) ? flightMap : null;
         }
 
         JSONObject toJson() throws JSONException {
@@ -702,6 +913,7 @@ final class BubbleWidgetSnapshot {
             }
             json.put("route", route);
             json.put("privacy", privacy);
+            putFlightFields(json, expiresAtMillis, flight, retainedFlight, flightMap);
             return json;
         }
     }

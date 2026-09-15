@@ -529,17 +529,18 @@ export function useJournalPhotoLibrary({
   const importPhotos = useCallback((
     files: readonly File[],
   ): Promise<JournalPhotoImportResult> => {
-    if (files.length === 0) return Promise.resolve({ added: 0, failed: 0 })
+    if (files.length === 0) return Promise.resolve({ added: 0, failed: 0, photoIds: [] })
     const generation = generationRef.current
     const request = importQueueRef.current
       .catch(() => undefined)
       .then(async () => {
         if (generationRef.current !== generation) {
-          return { added: 0, failed: files.length }
+          return { added: 0, failed: files.length, photoIds: [] }
         }
         setImportProgress({ importing: true, completed: 0, total: files.length })
         let added = 0
         let failed = 0
+        const photoIds: string[] = []
 
         for (let index = 0; index < files.length; index += 1) {
           const file = files[index]
@@ -570,6 +571,7 @@ export function useJournalPhotoLibrary({
             }
             await store.save(photo)
             added += 1
+            photoIds.push(photo.id)
             if (generationRef.current !== generation) {
               failed += files.length - index - 1
               break
@@ -595,7 +597,7 @@ export function useJournalPhotoLibrary({
           })
           void syncPending()
         }
-        return { added, failed }
+        return { added, failed, photoIds }
       })
     importQueueRef.current = request.then(() => undefined)
     return request

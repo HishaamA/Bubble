@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   familyFlightStorageSubject,
   flightStorageKey,
@@ -9,6 +9,7 @@ import {
   readTrackedFlights,
   writeActiveFlightStorageSubject,
   writeTrackedFlights,
+  FLIGHT_STORAGE_CHANGED_EVENT,
 } from './flightStorage'
 import type { TrackedFlight } from './types'
 
@@ -43,6 +44,22 @@ const flight: TrackedFlight = {
 afterEach(() => localStorage.clear())
 
 describe('flight storage', () => {
+  it('notifies consumers after the write, scoped to the subject without exposing flight data', async () => {
+    const listener = vi.fn()
+    window.addEventListener(FLIGHT_STORAGE_CHANGED_EVENT, listener)
+    try {
+      writeTrackedFlights('user_deferred:family:a', [flight])
+      expect(listener).not.toHaveBeenCalled()
+      expect(readTrackedFlights('user_deferred:family:a')).toEqual([flight])
+      await Promise.resolve()
+      expect(listener).toHaveBeenCalledTimes(1)
+      expect((listener.mock.calls[0][0] as CustomEvent).detail)
+        .toEqual({ subject: 'user_deferred:family:a' })
+    } finally {
+      window.removeEventListener(FLIGHT_STORAGE_CHANGED_EVENT, listener)
+    }
+  })
+
   it('keeps flights isolated by account and family', () => {
     const familyA = familyFlightStorageSubject('user_A', 'family_A')
     const familyB = familyFlightStorageSubject('user_A', 'family_B')

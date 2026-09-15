@@ -187,3 +187,55 @@ lint, diff-check, Vite build, Capacitor sync and Android assemble. The internal
 cache preserves scores and rounding; public descriptor validation remains
 unchanged. Family under-recognition still needs a known missed photo with
 user-supplied identities to establish and test the remaining failure.
+
+## Flight map alignment and active flight widgets
+
+The airport positions were already geographic, but the decorative land shapes
+were not drawn in the same coordinate system. Replaced only that land geometry
+with simplified, public-domain Natural Earth coastlines and a shared projection.
+No ticket styles, provider requests, route wrapping, or live/estimated semantics
+changed. Source attribution is in `flightLandCoordinates.ts`.
+
+Existing widgets now include up to four tracked, nonterminal flights alongside
+tasks/photos/recaps. Departures within 24 hours and ongoing journeys are eligible;
+arrival/cancellation removes them. Native flight pages show airport codes,
+traveler/flight number, destination-local ETA, last-update information and a
+clearly estimated elapsed-time progress indicator where space permits. Taps
+open the Flights tab once, without replaying the navigation when changing tabs.
+Cached flight cards expire at the earlier of arrival plus two hours and the
+provider snapshot's 24-hour freshness boundary. Native validity is additionally
+bounded to 36 hours; only explicit full-privacy flight cards may survive midnight.
+No provider key, raw live coordinates, or ticket number is sent to widgets.
+
+The publisher receives account/family-scoped cache changes and authenticated
+family-row updates even when another member tab is open. It does not poll paid
+flight providers in the background. Native widgets can advance the labelled
+estimate from saved timetable values, but fresh status/ETA requires an updated
+app/family snapshot. OS widget refresh scheduling is best effort. Hidden previews
+omit travel metadata; old-account reads and stale deletion responses are ignored.
+
+Validation:
+
+- 21 focused web test files / 277 tests passed, including flight presentation,
+  projection, storage, widget selection, privacy, publication and navigation.
+  The publisher integration suite separately passed all 12 tests.
+- All 226 Android JVM tests passed. Five synthetic on-device instrumentation
+  tests passed: real JSON contract/privacy plus RemoteViews layout at five sizes.
+  The 320 x 300 layout screenshot was inspected; no real photos or flight rows
+  were inserted or changed for testing.
+- Visual browser QA inspected the real ticket at 390px in Plum/Forest/Midnight
+  and 320px in Midnight, with no horizontal overflow and aligned JFK/DXB markers.
+- Typecheck, lint, production Vite build, Android assembly, and Capacitor sync
+  for both platforms passed. Windows-generated SwiftPM path separators were
+  restored to forward slashes. Swift/Xcode is unavailable here: the expanded
+  57-scenario Swift fixture and iOS native build remain unexecuted.
+
+Installed in place on the connected OnePlus 8T at `2026-09-14 20:57:00`.
+Installed and built APK SHA-256:
+`37580ee5ae039a77e11b3499061e5275fc3e66831ce42b2724b29b122616fd51`.
+All 69 packaged web assets match `dist`, the signing certificate is unchanged,
+auth bypass remains false, and no development-server URL is configured.
+ForestLauncher resolved to MainActivity and launched successfully. Original
+installation time is still `2026-08-28 22:07:34`; all 85 capture files have
+identical before/after hashes. No uninstall, data clear, backend deployment,
+commit or push was performed for these changes.

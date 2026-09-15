@@ -20,6 +20,9 @@ export type PersonScrapbookPageProps = {
   dateOverrides?: Record<string, TimelineDateOverride>
   onBack?: () => void
   onManage?: () => void
+  onAddPhotos?: () => void
+  addingPhotos?: boolean
+  photoImportStatus?: ReactNode
   renderPhotoActions?: (photo: PeopleTimelinePhoto) => ReactNode
 }
 
@@ -60,6 +63,9 @@ function PersonScrapbookContent({
   dateOverrides,
   onBack,
   onManage,
+  onAddPhotos,
+  addingPhotos,
+  photoImportStatus,
   renderPhotoActions,
 }: PersonScrapbookPageProps) {
   const titleId = useId()
@@ -135,6 +141,15 @@ function PersonScrapbookContent({
           </div>
           <span aria-hidden="true">♥</span>
         </div>
+
+        {onAddPhotos ? <div className="person-scrapbook__photo-import">
+          <button type="button" onClick={onAddPhotos} disabled={addingPhotos}
+            aria-label={`Add photos to ${person.name}’s scrapbook`}>
+            <span aria-hidden="true">＋</span> {addingPhotos ? 'Adding photos…' : 'Add scrapbook photos'}
+          </button>
+          <p>Choose photos of {person.name}. They appear here without waiting for face matching.</p>
+          {photoImportStatus}
+        </div> : null}
 
         {photos.length ? (
           <div className="person-scrapbook__collage">

@@ -767,6 +767,36 @@
   border-top-color: rgba(53, 17, 41, 0.2);
 }
 
+.people-timeline__scrapbook-import {
+  display: grid;
+  justify-items: start;
+  gap: 0.65rem;
+  padding-block: 1rem;
+  border-top: 1px solid rgba(53, 17, 41, 0.2);
+}
+
+.people-timeline__scrapbook-import > p {
+  margin: 0;
+  font-size: 0.9rem;
+  line-height: 1.5;
+}
+
+.people-timeline__manage-panel .people-timeline__scrapbook-import > button,
+.journal-page .people-timeline__manage-panel .people-timeline__scrapbook-import > button {
+  min-height: 44px;
+  padding: 0.65rem 1rem;
+  border: 1px solid rgba(53, 17, 41, 0.28);
+  border-radius: 12px;
+  color: var(--journal-paper-ink, #351129);
+  background: var(--journal-accent, #f3ba43);
+  font: inherit;
+  font-weight: 650;
+}
+
+.journal-page .people-timeline__manage-panel .people-timeline__scrapbook-import > p {
+  color: var(--journal-paper-ink, #351129);
+}
+
 .journal-page .people-timeline__manage-panel .people-timeline__face-picker {
   border-color: var(--theme-field-border, rgba(53, 17, 41, 0.48));
   color: #67485c;

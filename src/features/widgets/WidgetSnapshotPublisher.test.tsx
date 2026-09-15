@@ -3,12 +3,15 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { WidgetSnapshotPublisher } from './WidgetSnapshotPublisher'
 import { BUBBLE_WIDGET_DATA_CHANGED_EVENT } from './widgetStorage'
 import type { BubbleWidgetSnapshot } from './widgetSnapshot'
+import { flightStorageKey, writeTrackedFlights } from '../flights/flightStorage'
+import type { TrackedFlight } from '../flights/types'
 
 const mocks = vi.hoisted(() => ({
   privacy: 'full' as 'full' | 'hidden',
   fetchEvents: vi.fn(),
   fetchCapsules: vi.fn(),
   fetchJournalPhotos: vi.fn(),
+  fetchFlights: vi.fn<() => Promise<TrackedFlight[]>>(),
   subscribeJournalPhotos: vi.fn(async (_onChange: () => void, _subject: string): Promise<() => void> => () => undefined),
   update: vi.fn<(snapshot: BubbleWidgetSnapshot, thumbnail?: string, pages?: Readonly<Record<string, string>>) => Promise<boolean>>(async () => true),
   clear: vi.fn(async () => true),
@@ -32,6 +35,11 @@ vi.mock('../capsules/capsuleService', () => ({
 vi.mock('../journal/journalPhotoService', () => ({
   fetchFamilyJournalPhotos: mocks.fetchJournalPhotos,
   subscribeToFamilyJournalPhotos: mocks.subscribeJournalPhotos,
+}))
+
+vi.mock('../flights/flightStatusService', () => ({
+  fetchFamilyFlights: mocks.fetchFlights,
+  subscribeToFamilyFlights: async () => () => undefined,
 }))
 
 vi.mock('./nativeBubbleWidget', () => ({
@@ -59,6 +67,8 @@ vi.mock('./widgetStorage', async (importOriginal) => {
 
 beforeEach(() => {
   mocks.fetchJournalPhotos.mockReset().mockResolvedValue([])
+  mocks.fetchFlights.mockReset().mockResolvedValue([])
+  mocks.update.mockReset().mockResolvedValue(true)
 })
 
 afterEach(() => {
@@ -99,7 +109,253 @@ async function allowPublish() {
   await act(async () => { await new Promise((resolve) => setTimeout(resolve, 260)) })
 }
 
+function activeWidgetFlight(): TrackedFlight {
+  const now = Date.now()
+  const departure = new Date(now - 60 * 60_000).toISOString()
+  const arrival = new Date(now + 2 * 60 * 60_000).toISOString()
+  return {
+    id: 'publisher-flight', travelerName: 'Private traveler', flightNumber: 'EK202',
+    travelDate: departure.slice(0, 10), createdAt: departure,
+    notificationEnabled: false, synced: true,
+    snapshot: {
+      provider: 'aerodatabox', providerFlightId: 'provider-private-id', flightNumber: 'EK202',
+      status: 'In flight', dataQuality: 'estimated',
+      origin: { code: 'JFK', name: null, city: 'New York', latitude: 40.64, longitude: -73.77, timeZone: 'America/New_York' },
+      destination: { code: 'DXB', name: null, city: 'Dubai', latitude: 25.25, longitude: 55.36, timeZone: 'Asia/Dubai' },
+      scheduledDeparture: departure, estimatedDeparture: null, actualDeparture: departure,
+      scheduledArrival: arrival, estimatedArrival: arrival, actualArrival: null,
+      progressPercent: 33, position: null, updatedAt: new Date(now).toISOString(),
+    },
+  }
+}
+
 describe('WidgetSnapshotPublisher', () => {
+  it('publishes a flight map before a hanging page thumbnail, then supplements the same pages', async () => {
+    const subject = 'flight-fast-publish:family:a'
+    const image = deferred<string | undefined>()
+    const flight = activeWidgetFlight()
+    localStorage.setItem(flightStorageKey(subject), JSON.stringify([flight]))
+    mocks.fetchFlights.mockImplementation(() => new Promise(() => undefined))
+    mocks.fetchEvents.mockResolvedValue([])
+    mocks.fetchCapsules.mockResolvedValue([])
+    mocks.fetchJournalPhotos.mockResolvedValue([familyMemory().photos[0]])
+    mocks.thumbnail.mockReturnValue(image.promise)
+    const view = render(<WidgetSnapshotPublisher storageSubject={subject} />)
+    try {
+      await waitFor(() => expect(mocks.thumbnail).toHaveBeenCalledTimes(1))
+      expect(mocks.update).toHaveBeenLastCalledWith(
+        expect.objectContaining({ kind: 'flight', flight: expect.any(Object) }), undefined,
+      )
+      const pageIds = mocks.update.mock.calls.at(-1)?.[0].pages?.map((page) => page.id)
+      await act(async () => image.resolve('data:image/jpeg;base64,READY_PAGE'))
+      await waitFor(() => expect(mocks.update).toHaveBeenLastCalledWith(
+        expect.objectContaining({ kind: 'flight' }), undefined,
+        expect.objectContaining(Object.fromEntries([
+          [mocks.update.mock.calls.at(-1)?.[0].pages?.find((page) => page.group === 'photos')?.id ?? '',
+            'data:image/jpeg;base64,READY_PAGE'],
+        ])),
+      ))
+      expect(mocks.update.mock.calls.at(-1)?.[0].pages?.map((page) => page.id)).toEqual(pageIds)
+      const count = mocks.update.mock.calls.length
+      act(() => window.dispatchEvent(new Event(BUBBLE_WIDGET_DATA_CHANGED_EVENT)))
+      await allowPublish()
+      expect(mocks.update).toHaveBeenCalledTimes(count)
+      expect(mocks.thumbnail).toHaveBeenCalledTimes(1)
+    } finally {
+      view.unmount()
+      localStorage.removeItem(flightStorageKey(subject))
+    }
+  })
+
+  it('clears flight cards before replacement photos finish and ignores a removed flight’s late image', async () => {
+    const subject = 'flight-fast-removal:family:a'
+    const oldImage = deferred<string | undefined>()
+    const replacementImage = deferred<string | undefined>()
+    const flight = activeWidgetFlight()
+    localStorage.setItem(flightStorageKey(subject), JSON.stringify([flight]))
+    mocks.fetchFlights.mockImplementation(() => new Promise(() => undefined))
+    mocks.fetchEvents.mockResolvedValue([])
+    mocks.fetchCapsules.mockResolvedValue([])
+    mocks.fetchJournalPhotos.mockResolvedValue([familyMemory().photos[0]])
+    mocks.thumbnail.mockReturnValueOnce(oldImage.promise).mockReturnValue(replacementImage.promise)
+    const view = render(<WidgetSnapshotPublisher storageSubject={subject} />)
+    try {
+      await waitFor(() => expect(mocks.thumbnail).toHaveBeenCalledTimes(1))
+      expect(mocks.update.mock.calls.at(-1)?.[0].kind).toBe('flight')
+      const oldSignal = mocks.thumbnail.mock.calls[0][1]
+      await act(async () => { writeTrackedFlights(subject, []) })
+      // Intervening refresh renders must not lose the pending-removal priority.
+      act(() => window.dispatchEvent(new Event(BUBBLE_WIDGET_DATA_CHANGED_EVENT)))
+      await waitFor(() => expect(mocks.update).toHaveBeenLastCalledWith(
+        expect.objectContaining({ kind: 'memory' }), undefined,
+      ))
+      expect(mocks.update.mock.calls.at(-1)?.[0].flight).toBeUndefined()
+      expect(oldSignal?.aborted).toBe(true)
+      const removedAt = mocks.update.mock.calls.length
+      await act(async () => oldImage.resolve('data:image/jpeg;base64,REMOVED_FLIGHT_IMAGE'))
+      await allowPublish()
+      expect(mocks.update.mock.calls.slice(removedAt).every(([snapshot]) => (
+        snapshot.kind !== 'flight' && !snapshot.pages?.some((page) => page.kind === 'flight')
+      ))).toBe(true)
+      expect(JSON.stringify(mocks.update.mock.calls)).not.toContain('REMOVED_FLIGHT_IMAGE')
+      await act(async () => replacementImage.resolve('data:image/jpeg;base64,REPLACEMENT'))
+      await waitFor(() => expect(mocks.update.mock.calls.at(-1)?.[1]).toBe('data:image/jpeg;base64,REPLACEMENT'))
+      expect(mocks.update.mock.calls.at(-1)?.[0].kind).toBe('memory')
+      expect(mocks.update.mock.calls.at(-1)?.[0].pages?.some((page) => page.kind === 'flight')).toBe(false)
+    } finally {
+      view.unmount()
+      localStorage.removeItem(flightStorageKey(subject))
+    }
+  })
+
+  it('does not republish an earlier account’s fast flight card when its photo finishes late', async () => {
+    const subject = 'flight-fast-account:family:alice'
+    const nextSubject = 'flight-fast-account:family:bob'
+    const image = deferred<string | undefined>()
+    localStorage.setItem(flightStorageKey(subject), JSON.stringify([activeWidgetFlight()]))
+    mocks.fetchFlights.mockImplementation(() => new Promise(() => undefined))
+    mocks.fetchEvents.mockResolvedValue([])
+    mocks.fetchCapsules.mockResolvedValue([])
+    mocks.fetchJournalPhotos.mockResolvedValueOnce([familyMemory('Alice').photos[0]]).mockResolvedValue([])
+    mocks.thumbnail.mockReturnValue(image.promise)
+    const view = render(<WidgetSnapshotPublisher storageSubject={subject} />)
+    try {
+      await waitFor(() => expect(mocks.thumbnail).toHaveBeenCalledTimes(1))
+      expect(mocks.update.mock.calls.at(-1)?.[0].kind).toBe('flight')
+      const boundary = mocks.update.mock.calls.length
+      const signal = mocks.thumbnail.mock.calls[0][1]
+      view.rerender(<WidgetSnapshotPublisher storageSubject={nextSubject} />)
+      await waitFor(() => expect(mocks.update).toHaveBeenLastCalledWith(
+        expect.objectContaining({ kind: 'empty' }), undefined,
+      ))
+      expect(signal?.aborted).toBe(true)
+      await act(async () => image.resolve('data:image/jpeg;base64,ALICE_FLIGHT_PAGE'))
+      await allowPublish()
+      expect(JSON.stringify(mocks.update.mock.calls.slice(boundary)))
+        .not.toMatch(/ALICE_FLIGHT_PAGE|Alice Memory|Private traveler|EK202|JFK|DXB|departureAt/)
+      expect(mocks.clear).toHaveBeenCalledTimes(1)
+    } finally {
+      view.unmount()
+      localStorage.removeItem(flightStorageKey(subject))
+      localStorage.removeItem(flightStorageKey(nextSubject))
+    }
+  })
+
+  it('serializes a pending fast native flight write ahead of its removal without starting photo work', async () => {
+    const subject = 'flight-fast-queue:family:a'
+    const nativeWrite = deferred<boolean>()
+    localStorage.setItem(flightStorageKey(subject), JSON.stringify([activeWidgetFlight()]))
+    mocks.fetchFlights.mockImplementation(() => new Promise(() => undefined))
+    mocks.fetchEvents.mockResolvedValue([])
+    mocks.fetchCapsules.mockResolvedValue([])
+    mocks.fetchJournalPhotos.mockResolvedValue([familyMemory().photos[0]])
+    mocks.thumbnail.mockImplementation(() => new Promise(() => undefined))
+    mocks.update.mockReturnValueOnce(nativeWrite.promise)
+    const view = render(<WidgetSnapshotPublisher storageSubject={subject} />)
+    try {
+      await waitFor(() => expect(mocks.update).toHaveBeenCalledTimes(1))
+      await act(async () => { writeTrackedFlights(subject, []) })
+      await allowPublish()
+      expect(mocks.update).toHaveBeenCalledTimes(1)
+      expect(mocks.thumbnail).not.toHaveBeenCalled()
+      await act(async () => nativeWrite.resolve(true))
+      await waitFor(() => expect(mocks.update).toHaveBeenCalledTimes(2))
+      expect(mocks.update.mock.calls[0][0].kind).toBe('flight')
+      expect(mocks.update.mock.calls[1][0].kind).toBe('memory')
+      expect(mocks.update.mock.calls[1][0].pages?.some((page) => page.kind === 'flight')).toBe(false)
+    } finally {
+      view.unmount()
+      localStorage.removeItem(flightStorageKey(subject))
+    }
+  })
+
+  it('publishes and removes a locally tracked flight without the Flights tab or waiting for Journal photos', async () => {
+    const subject = 'flight-publisher:family:local'
+    mocks.fetchEvents.mockResolvedValue([])
+    mocks.fetchCapsules.mockResolvedValue([])
+    mocks.fetchJournalPhotos.mockImplementation(() => new Promise(() => undefined))
+    const pendingFlights = deferred<TrackedFlight[]>()
+    mocks.fetchFlights.mockReturnValue(pendingFlights.promise)
+    const view = render(<WidgetSnapshotPublisher storageSubject={subject} />)
+    const flight = activeWidgetFlight()
+    try {
+      await act(async () => { writeTrackedFlights(subject, [flight]) })
+      await waitFor(() => expect(mocks.update).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          kind: 'flight', title: 'JFK → DXB', route: '/journal?section=flights',
+          flight: expect.objectContaining({
+            departureAt: flight.snapshot.actualDeparture,
+            arrivalAt: flight.snapshot.estimatedArrival,
+            updatedAt: flight.snapshot.updatedAt,
+          }),
+          retainedFlight: true,
+          flightMap: expect.objectContaining({
+            mode: 'estimated', start: expect.any(Object), end: expect.any(Object), marker: expect.any(Object),
+          }),
+          pages: [expect.objectContaining({
+            kind: 'flight', group: 'flights', title: 'JFK → DXB', flight: expect.any(Object),
+          })],
+        }), undefined,
+      ))
+      expect(mocks.thumbnail).not.toHaveBeenCalled()
+      expect(JSON.stringify(mocks.update.mock.calls)).not.toContain('provider-private-id')
+      await act(async () => { writeTrackedFlights(subject, []) })
+      // A slower original family DB response must not restore the removed card.
+      await act(async () => { pendingFlights.resolve([flight]) })
+      await waitFor(() => expect(mocks.update).toHaveBeenLastCalledWith(
+        expect.objectContaining({ kind: 'empty', title: 'Nothing pressing today' }), undefined,
+      ))
+      const last = mocks.update.mock.calls.at(-1)?.[0]
+      expect(last?.flight).toBeUndefined()
+      expect(last?.pages?.some((page) => page.kind === 'flight')).toBe(false)
+    } finally {
+      view.unmount()
+      localStorage.removeItem(flightStorageKey(subject))
+    }
+  })
+
+  it('removes flight details on privacy opt-out and never carries them into the next account', async () => {
+    const subject = 'flight-publisher:family:private'
+    const nextSubject = 'flight-publisher-bob:family:other'
+    const flight = activeWidgetFlight()
+    localStorage.setItem(flightStorageKey(subject), JSON.stringify([flight]))
+    mocks.fetchEvents.mockResolvedValue([])
+    mocks.fetchCapsules.mockResolvedValue([])
+    mocks.fetchFlights.mockImplementation(() => new Promise(() => undefined))
+    const view = render(<WidgetSnapshotPublisher storageSubject={subject} />)
+    try {
+      await waitFor(() => expect(mocks.update).toHaveBeenLastCalledWith(
+        expect.objectContaining({ kind: 'flight', privacy: 'full', flight: expect.any(Object) }), undefined,
+      ))
+      mocks.privacy = 'hidden'
+      act(() => window.dispatchEvent(new Event(BUBBLE_WIDGET_DATA_CHANGED_EVENT)))
+      await waitFor(() => expect(mocks.update).toHaveBeenLastCalledWith(
+        expect.objectContaining({ kind: 'flight', privacy: 'hidden', title: 'A journey is coming up' }), undefined,
+      ))
+      const hidden = mocks.update.mock.calls.at(-1)?.[0]
+      expect(hidden?.flight).toBeUndefined()
+      expect(hidden?.flightMap).toBeUndefined()
+      expect(hidden?.retainedFlight).toBeUndefined()
+      expect(hidden?.expiresAt).toBeUndefined()
+      expect(hidden?.pages).toBeUndefined()
+      expect(JSON.stringify(hidden)).not.toMatch(/Private traveler|EK202|JFK|DXB|departureAt|arrivalAt/)
+
+      mocks.privacy = 'full'
+      const boundary = mocks.update.mock.calls.length
+      view.rerender(<WidgetSnapshotPublisher storageSubject={nextSubject} />)
+      await act(async () => { writeTrackedFlights(subject, [flight]) })
+      await waitFor(() => expect(mocks.update).toHaveBeenLastCalledWith(
+        expect.objectContaining({ kind: 'empty', privacy: 'full' }), undefined,
+      ))
+      expect(JSON.stringify(mocks.update.mock.calls.slice(boundary))).not.toMatch(/Private traveler|EK202|JFK|DXB|departureAt|arrivalAt/)
+      expect(mocks.clear).toHaveBeenCalledTimes(1)
+    } finally {
+      view.unmount()
+      localStorage.removeItem(flightStorageKey(subject))
+      localStorage.removeItem(flightStorageKey(nextSubject))
+    }
+  })
+
   it('sources all uploaded Journal photos using the current member namespace', async () => {
     mocks.fetchEvents.mockResolvedValue([])
     mocks.fetchCapsules.mockResolvedValue([])

@@ -151,7 +151,7 @@ public final class BubbleWidgetRemoteViewsService extends RemoteViewsService {
 
         @Override
         public int getViewTypeCount() {
-            return 2;
+            return 4;
         }
 
         @Override
@@ -178,18 +178,13 @@ public final class BubbleWidgetRemoteViewsService extends RemoteViewsService {
 
         /** A delayed alarm must not let a newly requested row reveal yesterday's deck. */
         private void expireIfNeeded() {
-            if (
-                sourceSnapshot == null ||
-                sourceSnapshot.isCurrentLocalDay(System.currentTimeMillis())
-            ) {
-                return;
-            }
-            String theme = sourceSnapshot.theme;
-            recycleCurrent();
-            sourceSnapshot = null;
-            displaySnapshot = BubbleWidgetSnapshot.fallback(theme);
-            pages = Collections.emptyList();
-            rotatedPages = Collections.emptyList();
+            if (sourceSnapshot == null) return;
+            long now = System.currentTimeMillis();
+            displaySnapshot = sourceSnapshot.forDisplay(now);
+            rotatedPages = BubbleWidgetPhotoRotation.pagesForDisplay(displaySnapshot, now);
+            pages = rotatedPages.isEmpty() ? Collections.emptyList() : displaySnapshot.pages;
+            if (!"full".equals(displaySnapshot.privacy) || !sourceSnapshot.isCurrentLocalDay(now))
+                recycleCurrent();
         }
 
         private static void recycle(Bitmap bitmap) {

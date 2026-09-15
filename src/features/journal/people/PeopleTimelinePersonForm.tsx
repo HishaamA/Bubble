@@ -1,4 +1,4 @@
-import type { FormEventHandler, Ref } from 'react'
+import type { FormEventHandler, ReactNode, Ref } from 'react'
 
 type PeopleTimelinePersonFormProps = {
   formRef: Ref<HTMLFormElement>
@@ -82,6 +82,9 @@ type PeopleTimelinePersonManagerProps = {
   onDelete: () => void
   onConfirmDelete: (confirming: boolean) => void
   onDone: () => void
+  onAddPhotos?: () => void
+  addingPhotos?: boolean
+  photoImportStatus?: ReactNode
 }
 
 /** Presentation only: async scans, validation, and deletion stay in the owner. */
@@ -101,6 +104,9 @@ export function PeopleTimelinePersonManager({
   onDelete,
   onConfirmDelete,
   onDone,
+  onAddPhotos,
+  addingPhotos,
+  photoImportStatus,
 }: PeopleTimelinePersonManagerProps) {
   return (
     <section className="people-timeline__manage-panel" aria-label={`Manage ${personName}`}>
@@ -135,6 +141,15 @@ export function PeopleTimelinePersonManager({
           <button type="submit" disabled={scanning}>Save name</button>
         </div>
       </form>
+      {onAddPhotos ? (
+        <div className="people-timeline__scrapbook-import">
+          <button type="button" onClick={onAddPhotos} disabled={addingPhotos}>
+            {addingPhotos ? 'Adding photos…' : 'Add scrapbook photos'}
+          </button>
+          <p>Choose photos of {personName} to add to their scrapbook. These use the usual family photo sharing.</p>
+          {photoImportStatus}
+        </div>
+      ) : null}
       <form
         className="people-timeline__reference-form"
         aria-label={`Add face photos for ${personName}`}
@@ -151,6 +166,7 @@ export function PeopleTimelinePersonManager({
               ? 'Add a different age or angle to improve difficult matches.'
               : `Add one clear portrait to organize ${personName}’s photos automatically.`}
           </span>
+          <span>For matching only. Face samples are scanned, never stored or added to the scrapbook.</span>
         </div>
         <div className="people-timeline__reference-controls">
           <label

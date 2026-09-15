@@ -6,6 +6,8 @@ import type {
 } from '../capsules/types'
 import type { AppTheme } from '../../theme/AppTheme'
 import type { JournalPhoto } from '../journal/journalPhotoTypes'
+import type { TrackedFlight } from '../flights/types'
+import { selectWidgetFlights, widgetFlightTransitionTimes } from './widgetFlights'
 import {
   journalWidgetPhotoRoute,
   journalWidgetPhotoKey,
@@ -18,6 +20,7 @@ const maxScheduledTransitions = 12
 const maxScheduledBytes = 24 * 1_024
 
 export type BubbleWidgetKind =
+  | 'flight'
   | 'urgent'
   | 'unlock'
   | 'today'
@@ -26,6 +29,17 @@ export type BubbleWidgetKind =
   | 'empty'
 
 export type BubbleWidgetPrivacy = 'full' | 'hidden'
+
+export type BubbleWidgetFlightMap = {
+  start: { x: number; y: number }
+  end: { x: number; y: number }
+  control: { x: number; y: number }
+  marker: { x: number; y: number }
+  rotation: number
+  mode: 'live' | 'estimated' | 'scheduled' | 'arrived' | 'cancelled' | 'unavailable'
+  progress: number | null
+  advanceWithTime?: boolean
+}
 
 export type BubbleWidgetCard = {
   kind: BubbleWidgetKind
@@ -36,6 +50,13 @@ export type BubbleWidgetCard = {
   badge?: string
   route: string
   privacy: BubbleWidgetPrivacy
+  /** Bound the lifetime of a cached flight even when the app is suspended. */
+  expiresAt?: string
+  flight?: { departureAt: string; arrivalAt: string; updatedAt: string }
+  /** Flight membership lasts until removal/account clear, not the next midnight. */
+  retainedFlight?: true
+  /** Exactly the app's projected route and last known aircraft position. */
+  flightMap?: BubbleWidgetFlightMap
 }
 
 export type BubbleWidgetScheduleEntry = BubbleWidgetCard & {
@@ -44,7 +65,7 @@ export type BubbleWidgetScheduleEntry = BubbleWidgetCard & {
 
 export type BubbleWidgetPage = BubbleWidgetCard & {
   id: string
-  group: 'tasks' | 'photos' | 'recap' | 'capture'
+  group: 'tasks' | 'photos' | 'recap' | 'capture' | 'flights'
 }
 
 export type BubbleWidgetSnapshot = BubbleWidgetCard & {
@@ -81,6 +102,8 @@ export type SelectBubbleWidgetInput = {
   theme: AppTheme
   privacy?: BubbleWidgetPrivacy
   events: readonly WidgetEvent[]
+  /** Existing tracked flights for this exact signed-in account/family only. */
+  trackedFlights?: readonly TrackedFlight[]
   /** Capsules fetched from the authenticated family service, never local cache. */
   authorizedCapsules: readonly FamilyCapsule[]
   /** All library uploads fetched from the authenticated, account-scoped service. */
@@ -121,7 +144,7 @@ export function selectBubbleWidget(
   const authorizedCapsules = input.authorizedCapsules
     .filter(isServiceAuthorizedCapsule)
   const journalPhotos = selectJournalWidgetPhotos(input.authorizedJournalPhotos ?? [], authorizedCapsules, now)
-  const nextRefreshAt = calculateNextRefreshAt(now, events, authorizedCapsules, journalPhotos.length > 1)
+  const nextRefreshAt = calculateNextRefreshAt(now, events, authorizedCapsules, journalPhotos.length > 1, input.trackedFlights ?? [])
   const common = {
     version: 1 as const,
     generatedAt: now.toISOString(),
@@ -144,6 +167,11 @@ export function selectBubbleWidget(
         route: '/journal?section=plans',
       },
     })
+  }
+
+  const activeFlight = selectWidgetFlights(input.trackedFlights ?? [], now)[0]
+  if (activeFlight) {
+    return protectSelection({ snapshot: { ...common, ...activeFlight.card } })
   }
 
   const newlyOpened = authorizedCapsules
@@ -298,12 +326,18 @@ function selectCurrentPages(input: SelectBubbleWidgetInput, current: BubbleWidge
   const thumbnails: Record<string, CapsuleImageSource> = {}
   const common = { theme: input.theme, privacy: 'full' as const }
   const add = (page: BubbleWidgetPage, thumbnail?: CapsuleImageSource) => {
-    if (pages.length >= 12 || pages.some((existing) => existing.id === page.id)) return
+    if (pages.length >= 112 || pages.some((existing) => existing.id === page.id)) return
     pages.push(page)
     if (thumbnail) thumbnails[page.id] = thumbnail
   }
   const todayActions = flattenActions(validFutureEvents(input.events, input.now)
     .filter((event) => isSameLocalDay(new Date(event.startsAt), input.now)))
+  selectWidgetFlights(input.trackedFlights ?? [], input.now).slice(0, 100).forEach((flight) => add({
+    ...common,
+    ...flight.card,
+    id: pageId('flights', flight.id),
+    group: 'flights',
+  }))
   todayActions.slice(0, 4).forEach((action) => add({
     ...common,
     id: pageId('tasks', action.event.id, action.taskId ?? ''),
@@ -381,6 +415,7 @@ function protectSelection(selection: BubbleWidgetSelection): BubbleWidgetSelecti
   if (selection.snapshot.privacy === 'full') return selection
 
   const hiddenCopy: Record<BubbleWidgetKind, { eyebrow: string; title: string }> = {
+    flight: { eyebrow: 'Bubble', title: 'A journey is coming up' },
     urgent: { eyebrow: 'Bubble', title: 'Something is coming up' },
     unlock: { eyebrow: 'Bubble', title: 'A Capsule is ready' },
     today: { eyebrow: 'Bubble', title: 'You have something today' },
@@ -396,6 +431,10 @@ function protectSelection(selection: BubbleWidgetSelection): BubbleWidgetSelecti
     subtitle: 'Open Bubble to see details',
   }
   delete snapshot.badge
+  delete snapshot.expiresAt
+  delete snapshot.flight
+  delete snapshot.retainedFlight
+  delete snapshot.flightMap
   return {
     snapshot,
   }
@@ -482,6 +521,7 @@ function calculateNextRefreshAt(
   events: readonly WidgetEvent[],
   capsules: readonly FamilyCapsule[],
   rotatePhotos: boolean,
+  flights: readonly TrackedFlight[],
 ) {
   const nowMs = now.getTime()
   const nextDay = new Date(
@@ -502,6 +542,15 @@ function calculateNextRefreshAt(
     21,
   ).getTime()
   const candidates = [nextDay]
+  if (selectWidgetFlights(flights, now).some(({ card }) => (
+    card.flightMap?.advanceWithTime
+    && card.flight
+    && dateMs(card.flight.departureAt) <= nowMs
+    && dateMs(card.flight.arrivalAt) > nowMs
+  ))) {
+    candidates.push((Math.floor(nowMs / 60_000) + 1) * 60_000)
+  }
+  candidates.push(...widgetFlightTransitionTimes(flights).filter((time) => time > nowMs))
   if (rotatePhotos) {
     candidates.push((Math.floor(nowMs / journalWidgetRotationMs) + 1) * journalWidgetRotationMs)
   }
@@ -546,6 +595,7 @@ function sameDayTransitionTimes(input: SelectBubbleWidgetInput) {
       21,
     ).getTime(),
   ])
+  widgetFlightTransitionTimes(input.trackedFlights ?? []).forEach((time) => candidates.add(time))
 
   validFutureEvents(input.events, input.now).forEach((event) => {
     const startsAt = dateMs(event.startsAt)
@@ -578,6 +628,10 @@ function widgetCard(snapshot: BubbleWidgetSnapshot): BubbleWidgetCard {
     ...(snapshot.badge ? { badge: snapshot.badge } : {}),
     route: snapshot.route,
     privacy: snapshot.privacy,
+    ...(snapshot.expiresAt ? { expiresAt: snapshot.expiresAt } : {}),
+    ...(snapshot.flight ? { flight: snapshot.flight } : {}),
+    ...(snapshot.retainedFlight ? { retainedFlight: true as const } : {}),
+    ...(snapshot.flightMap ? { flightMap: snapshot.flightMap } : {}),
   }
 }
 
@@ -590,6 +644,10 @@ function sameWidgetCard(left: BubbleWidgetCard, right: BubbleWidgetCard) {
     && left.badge === right.badge
     && left.route === right.route
     && left.privacy === right.privacy
+    && left.expiresAt === right.expiresAt
+    && JSON.stringify(left.flight) === JSON.stringify(right.flight)
+    && left.retainedFlight === right.retainedFlight
+    && JSON.stringify(left.flightMap) === JSON.stringify(right.flightMap)
 }
 
 function nextLocalMidnight(now: Date) {

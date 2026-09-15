@@ -405,7 +405,7 @@ describe('trusted flight status requests', () => {
     )).rejects.toThrow(/different flight identity/i)
   })
 
-  it('prunes fetched rows from yesterday in the device calendar', async () => {
+  it('retains old tracked flights instead of pruning them at a calendar boundary', async () => {
     const circleQuery = {
       select: vi.fn().mockReturnThis(),
       eq: vi.fn().mockReturnThis(),
@@ -430,14 +430,11 @@ describe('trusted flight status requests', () => {
         ? circleQuery
         : flightQuery),
     }
-    const now = new Date('2026-01-02T00:30:00Z')
-    vi.spyOn(now, 'getFullYear').mockReturnValue(2026)
-    vi.spyOn(now, 'getMonth').mockReturnValue(0)
-    vi.spyOn(now, 'getDate').mockReturnValue(1)
+    await fetchFamilyFlights()
 
-    await fetchFamilyFlights(now)
-
-    expect(flightQuery.gte).toHaveBeenCalledWith('travel_date', '2025-12-31')
+    expect(flightQuery.gte).not.toHaveBeenCalled()
+    expect(flightQuery.eq).toHaveBeenCalledWith('circle_id', 'family_test')
+    expect(flightQuery.limit).toHaveBeenCalledWith(100)
   })
 
   it('bounds and aborts a family-flight delete request', async () => {

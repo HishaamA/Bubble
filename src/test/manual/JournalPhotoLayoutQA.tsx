@@ -4,6 +4,7 @@ import { createRoot } from 'react-dom/client'
 import { PeopleTimelineDateEditor } from '../../features/journal/people/PeopleTimelinePhotoDetails'
 import { JournalPhotoDeleteControl } from '../../features/journal/JournalPhotoDeleteControl'
 import { PersonScrapbookPage } from '../../features/journal/people/PersonScrapbookPage'
+import { PeopleTimelinePersonManager } from '../../features/journal/people/PeopleTimelinePersonForm'
 import type { PeopleTimelinePhoto, TimelineDateOverride } from '../../features/journal/people/types'
 import '../../features/journal/people/PeopleTimeline.css'
 import '../../features/journal/JournalPage.css'
@@ -32,14 +33,17 @@ const photos: PeopleTimelinePhoto[] = [
 })
 
 export function JournalPhotoLayoutQA() {
-  const [page, setPage] = useState<'date' | 'scrapbook'>('date')
+  const [page, setPage] = useState<'date' | 'scrapbook' | 'manager'>('date')
   const [draft, setDraft] = useState<TimelineDateOverride>({ precision: 'day', value: '2026-09-03' })
   const [status, setStatus] = useState('')
+  const [addingPhotos, setAddingPhotos] = useState(false)
+  const [scrapbookPhotos, setScrapbookPhotos] = useState(photos)
   return <>
     <aside className="qa-controls" aria-label="Journal photo layout test controls">
       <strong>Isolated test · {document.documentElement.dataset.bubbleTheme}</strong>
       <button type="button" onClick={() => setPage('date')}>Date editor</button>
       <button type="button" onClick={() => setPage('scrapbook')}>Scrapbook</button>
+      <button type="button" onClick={() => setPage('manager')}>Person manager</button>
       <span role="status">{status}</span>
     </aside>
     <div className="app-viewport app-viewport--native qa-viewport" data-app-shell="native">
@@ -59,9 +63,33 @@ export function JournalPhotoLayoutQA() {
               setStatus('Simulated deletion · no real photo')
               return Promise.resolve()
             }} />
+          </div> : page === 'manager' ? <div className="people-timeline">
+            <PeopleTimelinePersonManager personName="Test family member" name="Test family member"
+              referenceCount={2} selectedPortraitCount={0} scanning={false} referenceDisabled={false}
+              error="" confirmingDelete={false} onNameChange={() => undefined}
+              onPortraitsChange={() => setStatus('No face processing in this synthetic fixture')}
+              onRename={(event) => event.preventDefault()} onSavePortraits={(event) => event.preventDefault()}
+              onDelete={() => undefined} onConfirmDelete={() => undefined} onDone={() => setPage('scrapbook')}
+              onAddPhotos={() => setStatus('Scrapbook upload action selected · no actual photos uploaded')}
+              photoImportStatus={<p role="status">{status}</p>} />
           </div> : <PersonScrapbookPage
             person={{ id: 'qa-person', name: 'Test family member', createdAt: '2026-01-01T00:00:00.000Z' }}
-            photos={photos} cacheNamespace="qa-journal-photo-layout:no-account"
+            photos={scrapbookPhotos} cacheNamespace="qa-journal-photo-layout:no-account"
+            addingPhotos={addingPhotos}
+            onManage={() => setPage('manager')}
+            onAddPhotos={() => {
+              setAddingPhotos(true)
+              setStatus('Adding a synthetic photo to this scrapbook…')
+              window.setTimeout(() => {
+                setScrapbookPhotos((current) => [...current, {
+                  ...photos[0], key: `qa-added-${current.length}`, id: `qa-added-${current.length}`,
+                  caption: 'Added directly to this scrapbook',
+                }])
+                setAddingPhotos(false)
+                setStatus('Synthetic photo added to this scrapbook. No real gallery was accessed.')
+              }, 400)
+            }}
+            photoImportStatus={<p role="status">{status}</p>}
           />}
         </section>
       </main>

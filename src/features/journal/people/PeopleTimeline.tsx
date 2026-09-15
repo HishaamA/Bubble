@@ -40,6 +40,7 @@ import {
   type FaceReviewPreview,
 } from './peopleTimelineSelectors'
 import { usePeopleTimelineSession } from './peopleTimelineSession'
+import { attachImportedPhotosToPerson } from './personPhotoImport'
 import { removePersonScrapbookProfile } from './personScrapbookStore'
 import {
   FACE_SCAN_REVISION,
@@ -229,6 +230,7 @@ export function PeopleTimeline({
   const [scanError, setScanError] = useState(false)
   const [photoImportMessage, setPhotoImportMessage] = useState('')
   const [photoImportError, setPhotoImportError] = useState(false)
+  const [localImportingPhotos, setLocalImportingPhotos] = useState(false)
   const [postponedFaceReviews, setPostponedFaceReviews] = useState<string[]>([])
   const [showAllFaceMatchedAlbums, setShowAllFaceMatchedAlbums] = useState(false)
   const faceMatchedAlbumsId = useId()
@@ -251,10 +253,14 @@ export function PeopleTimeline({
   const addPersonScanInFlight = useRef(false)
   const referenceScanInFlight = useRef(false)
   const photoInputRef = useRef<HTMLInputElement>(null)
+  const photoPickerTargetRef = useRef<{ personId: string | null; namespace: string } | null>(null)
+  const photoUploadInFlightRef = useRef(false)
+  const photoUploadGenerationRef = useRef(0)
+  const photoUploadNamespaceRef = useRef(cacheNamespace)
   const addPersonFormRef = useRef<HTMLFormElement>(null)
   const addPersonOpenerRef = useRef<HTMLButtonElement | null>(null)
   const addPersonFocusFrameRef = useRef<number | null>(null)
-  const importingPhotos = photoImportProgress?.importing ?? false
+  const importingPhotos = Boolean(photoImportProgress?.importing || localImportingPhotos)
   const requestedPersonId = initialPersonId ?? FAMILY_PERSON_ID
   const personRequestSignature = `${cacheNamespace}\u0000${focusRequestKey ?? ''}\u0000${requestedPersonId}`
   const focusRequestSignature = `${personRequestSignature}\u0000${focusPhotoKey ?? focusMemoryId ?? ''}`
@@ -264,6 +270,7 @@ export function PeopleTimeline({
     referenceBusy ||
     faceDataClearing
   // Library matching must never lock the entry point for enrolling another person.
+  const photoUploadBusy = !cacheReady || importingPhotos || addingPersonBusy || referenceBusy || faceDataClearing
   const personEditorBusy = !cacheReady || importingPhotos || addingPersonBusy || referenceBusy || faceDataClearing
 
   const timelinePhotos = useMemo(
@@ -425,6 +432,13 @@ export function PeopleTimeline({
     scanController.current = null
     // oxlint-disable-next-line react/set-state-in-effect -- Reset transient scan UI at the account namespace boundary; private state belongs to the scoped session.
     setScanProgress(null)
+    setLocalImportingPhotos(false)
+    setPhotoImportMessage('')
+    setPhotoImportError(false)
+    photoUploadNamespaceRef.current = cacheNamespace
+    photoUploadGenerationRef.current += 1
+    photoUploadInFlightRef.current = false
+    // Keep an open OS picker's old namespace until its result is rejected.
     setSelectedPersonId(initialTimelineSelection.current)
     setActivePhotoKey(null)
     setPostponedFaceReviews([])
@@ -434,6 +448,7 @@ export function PeopleTimeline({
     restoredLinkFocusSignature.current = ''
     manageAfterRouteClosePersonId.current = ''
     lastAutomaticScanSignature.current = ''
+    return () => { photoUploadGenerationRef.current += 1 }
   }, [cacheNamespace])
 
   useEffect(() => {
@@ -673,7 +688,12 @@ export function PeopleTimeline({
 
   /** Forwards the styled upload action to the hidden native file input. */
   function openPhotoPicker() {
-    if (photoPickerBusy) return
+    if (photoUploadBusy || photoUploadInFlightRef.current) return
+    interruptScanForEditor('choose photos')
+    photoPickerTargetRef.current = {
+      personId: (personAlbumOpen ? scrapbookPerson?.id : selectedPerson?.id) ?? null,
+      namespace: cacheNamespace,
+    }
     photoInputRef.current?.click()
   }
 
@@ -682,15 +702,49 @@ export function PeopleTimeline({
     const input = event.currentTarget
     const files = Array.from(input.files ?? [])
     input.value = ''
-    if (!files.length || !onUploadPhotos || photoPickerBusy) return
+    const pickerTarget = photoPickerTargetRef.current
+    photoPickerTargetRef.current = null
+    if (!files.length || !onUploadPhotos || photoUploadBusy || photoUploadInFlightRef.current
+      || (pickerTarget && pickerTarget.namespace !== cacheNamespace)) return
+    const targetPersonId = pickerTarget ? pickerTarget.personId
+      : (personAlbumOpen ? scrapbookPerson?.id : selectedPerson?.id) ?? null
+    const targetPerson = timelineState.people.find(({ id }) => id === targetPersonId)
+    const generation = photoUploadGenerationRef.current
+    photoUploadInFlightRef.current = true
+    setLocalImportingPhotos(true)
+    interruptScanForEditor('add photos')
 
-    choosePerson(REVIEW_PERSON_ID)
+    if (!targetPerson) choosePerson(REVIEW_PERSON_ID)
     setPhotoImportError(false)
     setPhotoImportMessage(
       `Adding ${files.length} ${files.length === 1 ? 'photo' : 'photos'}…`,
     )
     try {
       const result = await onUploadPhotos(files)
+      // The library survives tab navigation. Finish photo membership in its
+      // captured private session even if this view unmounted, but never after
+      // an account switch/disposal. Only mounted views receive UI updates.
+      if (photoUploadNamespaceRef.current !== cacheNamespace) return
+      if (targetPerson && (result.added > 0 || result.photoIds?.length)) {
+        const photoIds = [...new Set(result.photoIds ?? [])]
+        if (!photoIds.length || !getTimelineSnapshot().state.people.some(({ id }) => id === targetPerson.id)) {
+          if (generation !== photoUploadGenerationRef.current) return
+          setPhotoImportError(true)
+          setPhotoImportMessage('The photos are saved in All photos, but could not be linked to this person. Open All photos to label them; do not upload them again.')
+          return
+        }
+        const next = attachImportedPhotosToPerson(getTimelineSnapshot().state, targetPerson.id, photoIds)
+        if (!setTimelineState(next)) return
+        const saved = await queueTimelineStateSave(next, () => photoUploadNamespaceRef.current === cacheNamespace)
+        if (generation !== photoUploadGenerationRef.current) return
+        setActivePhotoKey(`journal-photo:${photoIds[0]}`)
+        setPhotoImportError(result.failed > 0 || !saved)
+        setPhotoImportMessage(saved
+          ? `${photoIds.length} ${photoIds.length === 1 ? 'photo added' : 'photos added'} to ${targetPerson.name}’s scrapbook${result.failed ? ` · ${result.failed} could not be added` : ''}.`
+          : 'Photos are saved, but the person labels could not be saved on this device. Keep Journal open and try again from All photos.')
+        return
+      }
+      if (generation !== photoUploadGenerationRef.current) return
       const addedLabel = `${result.added} ${result.added === 1 ? 'photo' : 'photos'} added`
       const failedLabel = result.failed > 0
         ? ` · ${result.failed} could not be added`
@@ -712,10 +766,16 @@ export function PeopleTimeline({
         )
       }
     } catch {
+      if (generation !== photoUploadGenerationRef.current) return
       setPhotoImportError(true)
       setPhotoImportMessage(
         'Those photos could not be saved on this device. Check free storage and try again.',
       )
+    } finally {
+      if (generation === photoUploadGenerationRef.current) {
+        photoUploadInFlightRef.current = false
+        setLocalImportingPhotos(false)
+      }
     }
   }
 
@@ -1208,14 +1268,14 @@ export function PeopleTimeline({
     setScanMessage(stoppedScanMessage(savedPhotoCount))
   }
 
-  /** Enrollment takes priority; the serialized model finishes/aborts its current image safely. */
-  function interruptScanForEditor() {
+  /** Editing takes priority; the serialized model finishes/aborts its current image safely. */
+  function interruptScanForEditor(activity = 'add a face') {
     if (!scanController.current) return
     scanController.current.abort()
     scanController.current = null
     lastAutomaticScanSignature.current = ''
     setScanProgress(null)
-    setScanMessage('Photo checking is paused while you add a face. Saved results are kept.')
+    setScanMessage(`Photo checking is paused while you ${activity}. Saved results are kept.`)
   }
 
   /** Clears all private face vectors while preserving manual people and dates. */
@@ -1283,6 +1343,19 @@ export function PeopleTimeline({
   const rootClassName = ['people-timeline', className].filter(Boolean).join(' ')
   const isNamedPersonAlbum = Boolean(selectedPerson)
   const isFaceReview = selectedPersonId === FACE_REVIEW_PERSON_ID
+  const photoInput = onUploadPhotos ? <input ref={photoInputRef} hidden tabIndex={-1} aria-hidden="true"
+    data-testid="family-photo-input" type="file" accept="image/*" multiple disabled={photoUploadBusy}
+    onChange={(event) => void addJournalPhotos(event)} /> : null
+  const photoImportStatus = photoImportProgress?.importing ? (
+    <div className="people-timeline__import-progress" role="progressbar" aria-label="Adding family photos"
+      aria-valuemin={0} aria-valuemax={photoImportProgress.total} aria-valuenow={photoImportProgress.completed}>
+      <span>Adding {Math.min(photoImportProgress.completed + 1, photoImportProgress.total)} of {photoImportProgress.total}…</span>
+      <i aria-hidden="true"><b style={{ width: `${photoImportProgress.total > 0
+        ? (photoImportProgress.completed / photoImportProgress.total) * 100 : 0}%` }} /></i>
+    </div>
+  ) : photoImportMessage ? (
+    <p className="people-timeline__import-status" role="status" data-error={photoImportError ? 'true' : 'false'}>{photoImportMessage}</p>
+  ) : null
 
   if (personAlbumOpen) {
     if (!cacheReady) {
@@ -1312,12 +1385,16 @@ export function PeopleTimeline({
     return (
       <>
       <GalleryScanStatus scan={galleryScan} />
+      {photoInput}
       <PersonScrapbookPage
         person={scrapbookPerson}
         photos={scrapbookPhotos}
         cacheNamespace={cacheNamespace}
         dateOverrides={timelineState.dateOverrides}
         onBack={onClosePersonAlbum}
+        onAddPhotos={onUploadPhotos ? openPhotoPicker : undefined}
+        addingPhotos={photoUploadBusy}
+        photoImportStatus={photoImportStatus}
         onManage={onClosePersonAlbum
           ? () => managePersonFromScrapbook(scrapbookPerson.id)
           : undefined}
@@ -1334,20 +1411,7 @@ export function PeopleTimeline({
         <h2 id="people-timeline-title">People</h2>
       </header>
 
-      {onUploadPhotos ? (
-        <input
-          ref={photoInputRef}
-          hidden
-          tabIndex={-1}
-          aria-hidden="true"
-          data-testid="family-photo-input"
-          type="file"
-          accept="image/*"
-          multiple
-          disabled={photoPickerBusy}
-          onChange={(event) => void addJournalPhotos(event)}
-        />
-      ) : null}
+      {photoInput}
 
       {cacheReady ? (
         <PeopleTimelinePeople
@@ -1395,7 +1459,7 @@ export function PeopleTimeline({
           <button
             type="button"
             className="people-timeline__upload-button"
-            disabled={photoPickerBusy}
+            disabled={photoUploadBusy}
             onClick={openPhotoPicker}
           >
             <span aria-hidden="true">＋</span>
@@ -1427,29 +1491,7 @@ export function PeopleTimeline({
         />
       ) : null}
 
-      {importingPhotos && photoImportProgress ? (
-        <div
-          className="people-timeline__import-progress"
-          role="progressbar"
-          aria-label="Adding family photos"
-          aria-valuemin={0}
-          aria-valuemax={photoImportProgress.total}
-          aria-valuenow={photoImportProgress.completed}
-        >
-          <span>
-            Adding {Math.min(photoImportProgress.completed + 1, photoImportProgress.total)} of {photoImportProgress.total}…
-          </span>
-          <i aria-hidden="true">
-            <b style={{ width: `${photoImportProgress.total > 0
-              ? (photoImportProgress.completed / photoImportProgress.total) * 100
-              : 0}%` }} />
-          </i>
-        </div>
-      ) : photoImportMessage ? (
-        <p className="people-timeline__import-status" role="status" data-error={photoImportError ? 'true' : 'false'}>
-          {photoImportMessage}
-        </p>
-      ) : null}
+      {!managingPerson ? photoImportStatus : null}
 
       {addingPerson ? (
         <PeopleTimelinePersonForm
@@ -1494,6 +1536,9 @@ export function PeopleTimeline({
           onDelete={deleteSelectedPerson}
           onConfirmDelete={setConfirmingDelete}
           onDone={() => setManagingPerson(false)}
+          onAddPhotos={onUploadPhotos ? openPhotoPicker : undefined}
+          addingPhotos={photoUploadBusy}
+          photoImportStatus={photoImportStatus}
         />
       ) : null}
 
@@ -1631,7 +1676,7 @@ export function PeopleTimeline({
               : 'A clear portrait lets Bubble recognize this person locally. The portrait itself is never stored.'}
           </p>
           {timelineState.faceProfiles[selectedPerson.id]?.references.length && onUploadPhotos ? (
-            <button type="button" disabled={photoPickerBusy} onClick={openPhotoPicker}>
+            <button type="button" disabled={photoUploadBusy} onClick={openPhotoPicker}>
               {importingPhotos ? 'Adding…' : 'Add photos'}
             </button>
           ) : (
@@ -1656,7 +1701,7 @@ export function PeopleTimeline({
           <p className="people-timeline__empty-title">Add your family photos</p>
           <p>Choose one photo or a whole batch. They will be saved here immediately and organized automatically after you add family faces.</p>
           {onUploadPhotos ? (
-            <button type="button" disabled={photoPickerBusy} onClick={openPhotoPicker}>
+            <button type="button" disabled={photoUploadBusy} onClick={openPhotoPicker}>
               {importingPhotos ? 'Adding…' : 'Add photos'}
             </button>
           ) : null}
@@ -1670,7 +1715,7 @@ export function PeopleTimeline({
               : 'Photos with any two or more family members appear here, matched automatically or confirmed by you.'}
           </p>
           {onUploadPhotos && timelinePhotos.length === 0 ? (
-            <button type="button" disabled={photoPickerBusy} onClick={openPhotoPicker}>
+            <button type="button" disabled={photoUploadBusy} onClick={openPhotoPicker}>
               {importingPhotos ? 'Adding…' : 'Add photos'}
             </button>
           ) : timelinePhotos.length ? (

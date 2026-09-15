@@ -9,7 +9,6 @@ import { isFlightStatusSnapshot, isTrackedFlight } from './flightStorage'
 import {
   looksLikeTicketNumber,
   normalizeFlightNumber,
-  shiftLocalCalendarDate,
 } from './flightValidation'
 import type { TrackedFlight } from './types'
 
@@ -459,14 +458,15 @@ function rowToTrackedFlight(row: FamilyFlightRow): TrackedFlight | null {
 }
 
 /** Fetches and validates every tracked flight visible to the active family. */
-export async function fetchFamilyFlights(now = new Date()): Promise<TrackedFlight[]> {
+export async function fetchFamilyFlights(): Promise<TrackedFlight[]> {
   const context = await familyContext()
   if (!context) return []
   const { data, error } = await context.client
     .from('family_flights')
     .select('id,traveler_name,flight_number,travel_date,status_snapshot,created_at')
     .eq('circle_id', context.circleId)
-    .gte('travel_date', shiftLocalCalendarDate(now, -1))
+    // A tracked row remains a member's choice until explicitly removed. Do not
+    // make an old/completed flight disappear at the device's date boundary.
     .order('travel_date', { ascending: true })
     .limit(100)
   if (error) throw error

@@ -69,10 +69,10 @@ export function parseBubbleWidgetDeepLink(
       ) return null
       return journalPhotoDestination(collectionId, photoId)
     }
-    return section === 'plans'
+    return section === 'plans' || section === 'flights'
       ? {
           to: '/journal',
-          state: { journalContext: { section: 'plans' } },
+          state: { journalContext: { section } },
         }
       : { to: '/journal' }
   }

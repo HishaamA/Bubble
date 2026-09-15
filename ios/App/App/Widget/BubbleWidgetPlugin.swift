@@ -1,5 +1,6 @@
 import Capacitor
 import Foundation
+import CoreFoundation
 import ImageIO
 import UIKit
 import WidgetKit
@@ -51,7 +52,7 @@ public final class BubbleWidgetPlugin: CAPPlugin, CAPBridgedPlugin {
         qos: .utility
     )
 
-    private let maximumSnapshotBytes = 64 * 1_024
+    private let maximumSnapshotBytes = 256 * 1_024
     private let maximumScheduleEntries = 12
     private let maximumThumbnailCharacters = 8 * 1_024 * 1_024
     private let maximumThumbnailBytes = 5 * 1_024 * 1_024
@@ -115,7 +116,7 @@ public final class BubbleWidgetPlugin: CAPPlugin, CAPBridgedPlugin {
         let allowedKeys: Set<String> = [
             "version", "generatedAt", "nextRefreshAt", "kind", "theme",
             "eyebrow", "title", "subtitle", "badge", "route", "privacy",
-            "schedule", "pages"
+            "schedule", "pages", "expiresAt", "flight", "retainedFlight", "flightMap"
         ]
         guard Set(dictionary.keys).isSubset(of: allowedKeys) else {
             throw BubbleWidgetPluginError.invalidSnapshot
@@ -169,7 +170,8 @@ public final class BubbleWidgetPlugin: CAPPlugin, CAPBridgedPlugin {
             expectedTheme: theme,
             expectedPrivacy: privacy
         )
-        let pages = try validatedPages(dictionary["pages"], theme: theme, privacy: privacy)
+        let pages = try validatedPages(dictionary["pages"], theme: theme, privacy: privacy, generatedDate: generatedDate)
+        let flightFields = try validatedFlightFields(dictionary, kind: kind, privacy: privacy, generatedDate: generatedDate)
 
         return BubbleWidgetSnapshot(
             version: version,
@@ -184,22 +186,29 @@ public final class BubbleWidgetPlugin: CAPPlugin, CAPBridgedPlugin {
             route: route,
             privacy: privacy,
             schedule: schedule,
-            pages: pages
+            pages: pages,
+            expiresAt: flightFields.expiresAt,
+            flight: flightFields.flight,
+            retainedFlight: flightFields.retainedFlight,
+            flightMap: flightFields.flightMap
         )
     }
 
     private func validatedPages(
         _ rawValue: Any?,
         theme: BubbleWidgetTheme,
-        privacy: BubbleWidgetPrivacy
+        privacy: BubbleWidgetPrivacy,
+        generatedDate: Date
     ) throws -> [BubbleWidgetPage]? {
         guard let rawValue, !(rawValue is NSNull) else { return nil }
-        guard let values = rawValue as? [[String: Any]], values.count <= 12,
+        guard let values = rawValue as? [[String: Any]], values.count <= 112,
+              values.filter({ $0["kind"] as? String == "flight" }).count <= 100,
+              values.filter({ $0["kind"] as? String != "flight" }).count <= 12,
               privacy == .full || values.isEmpty else {
             throw BubbleWidgetPluginError.invalidField("pages")
         }
         let keys: Set<String> = [
-            "id", "group", "kind", "theme", "eyebrow", "title", "subtitle", "badge", "route", "privacy"
+            "id", "group", "kind", "theme", "eyebrow", "title", "subtitle", "badge", "route", "privacy", "expiresAt", "flight", "retainedFlight", "flightMap"
         ]
         var ids: Set<String> = []
         return try values.map { value in
@@ -217,7 +226,7 @@ public final class BubbleWidgetPlugin: CAPPlugin, CAPBridgedPlugin {
             }
             switch (group, kind) {
             case (.tasks, .today), (.tasks, .urgent), (.photos, .memory), (.recap, .unlock),
-                 (.capture, .capture), (.capture, .empty): break
+                 (.capture, .capture), (.capture, .empty), (.flights, .flight): break
             default: throw BubbleWidgetPluginError.invalidField("pages.group")
             }
             let route = try requiredString(value, key: "route", maximumBytes: 512)
@@ -226,13 +235,16 @@ public final class BubbleWidgetPlugin: CAPPlugin, CAPBridgedPlugin {
                   route.unicodeScalars.allSatisfy({ !CharacterSet.controlCharacters.contains($0) }) else {
                 throw BubbleWidgetPluginError.invalidField("pages.route")
             }
+            let flightFields = try validatedFlightFields(value, kind: kind, privacy: privacy, generatedDate: generatedDate)
             return BubbleWidgetPage(
                 id: id, group: group, kind: kind, theme: theme,
                 eyebrow: try requiredString(value, key: "eyebrow", maximumBytes: 64),
                 title: try requiredString(value, key: "title", maximumBytes: 1_040),
                 subtitle: try optionalString(value, key: "subtitle", maximumBytes: 1_280),
                 badge: try optionalString(value, key: "badge", maximumBytes: 64),
-                route: route, privacy: privacy
+                route: route, privacy: privacy,
+                expiresAt: flightFields.expiresAt, flight: flightFields.flight,
+                retainedFlight: flightFields.retainedFlight, flightMap: flightFields.flightMap
             )
         }
     }
@@ -279,7 +291,7 @@ public final class BubbleWidgetPlugin: CAPPlugin, CAPBridgedPlugin {
         ) ?? startOfGeneratedDay.addingTimeInterval(24 * 60 * 60)
         let allowedKeys: Set<String> = [
             "effectiveAt", "kind", "theme", "eyebrow", "title",
-            "subtitle", "badge", "route", "privacy"
+            "subtitle", "badge", "route", "privacy", "expiresAt", "flight", "retainedFlight", "flightMap"
         ]
         var previousDate = generatedDate
         var entries: [BubbleWidgetScheduleEntry] = []
@@ -327,6 +339,11 @@ public final class BubbleWidgetPlugin: CAPPlugin, CAPBridgedPlugin {
                 throw BubbleWidgetPluginError.invalidField("schedule.route")
             }
 
+            let flightFields = try validatedFlightFields(dictionary, kind: kind, privacy: privacy, generatedDate: generatedDate)
+            if let expiry = flightFields.expiresAt,
+               (BubbleWidgetDateCodec.date(from: expiry) ?? .distantPast) <= effectiveDate {
+                throw BubbleWidgetPluginError.invalidField("schedule.expiresAt")
+            }
             entries.append(BubbleWidgetScheduleEntry(
                 effectiveAt: effectiveAt,
                 kind: kind,
@@ -336,11 +353,93 @@ public final class BubbleWidgetPlugin: CAPPlugin, CAPBridgedPlugin {
                 subtitle: subtitle,
                 badge: badge,
                 route: route,
-                privacy: privacy
+                privacy: privacy,
+                expiresAt: flightFields.expiresAt,
+                flight: flightFields.flight,
+                retainedFlight: flightFields.retainedFlight,
+                flightMap: flightFields.flightMap
             ))
             previousDate = effectiveDate
         }
         return entries
+    }
+
+    private func validatedFlightFields(
+        _ dictionary: [String: Any], kind: BubbleWidgetKind,
+        privacy: BubbleWidgetPrivacy, generatedDate: Date
+    ) throws -> (expiresAt: String?, flight: BubbleWidgetFlight?, retainedFlight: Bool?, flightMap: BubbleWidgetFlightMap?) {
+        let retained = try optionalBoolean(dictionary, key: "retainedFlight")
+        if let retained {
+            guard retained, kind == .flight, privacy == .full else {
+                throw BubbleWidgetPluginError.invalidField("retainedFlight")
+            }
+        }
+        let expiresAt = try optionalString(dictionary, key: "expiresAt", maximumBytes: 64)
+        if let expiresAt {
+            guard privacy == .full,
+                  BubbleWidgetFlightValidity.expiration(expiresAt, generatedAt: generatedDate) != nil else {
+                throw BubbleWidgetPluginError.invalidField("expiresAt")
+            }
+        }
+        var flight: BubbleWidgetFlight?
+        if let raw = dictionary["flight"], !(raw is NSNull) {
+            guard kind == .flight, privacy == .full,
+                  let values = raw as? [String: Any],
+                  Set(values.keys) == Set(["departureAt", "arrivalAt", "updatedAt"]) else {
+                throw BubbleWidgetPluginError.invalidField("flight")
+            }
+            let metadata = BubbleWidgetFlight(
+                departureAt: try requiredString(values, key: "departureAt", maximumBytes: 64),
+                arrivalAt: try requiredString(values, key: "arrivalAt", maximumBytes: 64),
+                updatedAt: try requiredString(values, key: "updatedAt", maximumBytes: 64)
+            )
+            guard metadata.isValid else { throw BubbleWidgetPluginError.invalidField("flight") }
+            flight = metadata
+        }
+        var map: BubbleWidgetFlightMap?
+        if let raw = dictionary["flightMap"], !(raw is NSNull) {
+            guard kind == .flight, privacy == .full, let values = raw as? [String: Any],
+                  Set(values.keys).subtracting(["advanceWithTime"]) == Set(["start", "end", "control", "marker", "rotation", "mode", "progress"]),
+                  let mode = BubbleWidgetFlightMapMode(rawValue: try requiredString(values, key: "mode", maximumBytes: 16)) else {
+                throw BubbleWidgetPluginError.invalidField("flightMap")
+            }
+            var progress: Double?
+            if !(values["progress"] is NSNull) { progress = try finiteNumber(values, key: "progress") }
+            let model = BubbleWidgetFlightMap(
+                start: try mapPoint(values["start"]), end: try mapPoint(values["end"]),
+                control: try mapPoint(values["control"]), marker: try mapPoint(values["marker"]),
+                rotation: try finiteNumber(values, key: "rotation"), mode: mode, progress: progress,
+                advanceWithTime: try optionalBoolean(values, key: "advanceWithTime")
+            )
+            guard model.isValid else { throw BubbleWidgetPluginError.invalidField("flightMap") }
+            map = model
+        }
+        return (expiresAt, flight, retained, map)
+    }
+
+    private func optionalBoolean(_ values: [String: Any], key: String) throws -> Bool? {
+        guard let raw = values[key], !(raw is NSNull) else { return nil }
+        guard let number = raw as? NSNumber, CFGetTypeID(number) == CFBooleanGetTypeID() else {
+            throw BubbleWidgetPluginError.invalidField(key)
+        }
+        return number.boolValue
+    }
+
+    private func finiteNumber(_ values: [String: Any], key: String) throws -> Double {
+        guard let number = values[key] as? NSNumber,
+              CFGetTypeID(number) != CFBooleanGetTypeID(), number.doubleValue.isFinite else {
+            throw BubbleWidgetPluginError.invalidField(key)
+        }
+        return number.doubleValue
+    }
+
+    private func mapPoint(_ raw: Any?) throws -> BubbleWidgetMapPoint {
+        guard let values = raw as? [String: Any], Set(values.keys) == Set(["x", "y"]) else {
+            throw BubbleWidgetPluginError.invalidField("flightMap.point")
+        }
+        let point = BubbleWidgetMapPoint(x: try finiteNumber(values, key: "x"), y: try finiteNumber(values, key: "y"))
+        guard point.isValid else { throw BubbleWidgetPluginError.invalidField("flightMap.point") }
+        return point
     }
 
     private func requiredString(

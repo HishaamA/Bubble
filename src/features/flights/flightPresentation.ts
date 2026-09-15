@@ -6,7 +6,8 @@ import {
   isFlightCancelled,
 } from './flightValidation'
 import type { FlightLookupChoice } from './flightStatusService'
-import type { FlightCoordinates, FlightStatusSnapshot, TrackedFlight } from './types'
+import type { FlightStatusSnapshot, TrackedFlight } from './types'
+import { projectFlightCoordinates as project } from './flightMapProjection'
 
 /** Maps provider quality codes to compact card labels. */
 export function qualityLabel(quality: FlightStatusSnapshot['dataQuality']) {
@@ -79,14 +80,6 @@ export function createFlightTicketPresentation(flight: TrackedFlight, now: Date)
   const cancelled = isFlightCancelled(flight.snapshot)
   const duration = formatDuration(departure, arrival)
   return { departure, arrival, quality, cancelled, duration }
-}
-
-/** Projects latitude/longitude into the lightweight 360×176 route map. */
-function project({ latitude, longitude }: FlightCoordinates) {
-  return {
-    x: (longitude + 180) / 360 * 360,
-    y: (90 - latitude) / 180 * 172 + 4,
-  }
 }
 
 /** Evaluates the route's quadratic Bézier at a normalized progress value. */

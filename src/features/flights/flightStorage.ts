@@ -12,6 +12,9 @@ const memoryStorage = new Map<string, TrackedFlight[]>()
 const pendingCreateMemoryStorage = new Map<string, PendingFlightCreateIntent[]>()
 const pendingCreateLifetimeMs = 7 * 24 * 60 * 60 * 1000
 
+export const FLIGHT_STORAGE_CHANGED_EVENT = 'bubble:flight-storage-changed'
+export type FlightStorageChangedDetail = { subject: string }
+
 export type PendingFlightCreateIdentity = {
   travelerName: string
   flightNumber: string
@@ -316,6 +319,17 @@ export function writeTrackedFlights(
     memoryStorage.delete(key)
   } catch {
     memoryStorage.set(key, safeFlights)
+  }
+  // A tracker may persist from a React state updater. Notify other mounted
+  // consumers after that render finishes, and never include flight data in
+  // the event: each consumer rereads only its own account/family partition.
+  if (typeof window !== 'undefined') {
+    queueMicrotask(() => {
+      window.dispatchEvent(new CustomEvent<FlightStorageChangedDetail>(
+        FLIGHT_STORAGE_CHANGED_EVENT,
+        { detail: { subject: accountId.trim() || 'signed-out' } },
+      ))
+    })
   }
   return safeFlights
 }
